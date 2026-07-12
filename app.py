@@ -278,20 +278,53 @@ def log_usage_event(action: str):
     )
 
 
-def save_survey_response(perception_change: str, feedback_text: str):
-    """Insert one anonymous survey submission into the survey_responses table."""
-    conn = get_supabase_connection()
-    execute_query(
-        conn.table("survey_responses").insert(
-            [{
-                "timestamp": datetime.now().isoformat(),
-                "perception_change": perception_change,
-                "feedback_text": feedback_text,
-            }],
-            count="None",
-        ),
-        ttl=0,
-    )
+def save_survey_response(
+    perception_change: str,
+    feedback_text: str,
+    selected_major: str,
+    loan_amount: float,
+    interest_rate: float,
+    repayment_strategy: str,
+    starting_salary: float,
+    dti_ratio,
+) -> bool:
+    """Insert one anonymous survey submission, tagged with the simulation
+    context (major/loan/rate/strategy/DTI) active at the moment of
+    submission, into the survey_responses table.
+
+    The caller reads major/loan_amount/interest_rate/repayment_strategy
+    straight from the sidebar widget variables, which Streamlit re-evaluates
+    to their current value on every rerun -- including the rerun triggered
+    by clicking "Submit Feedback" -- so this always captures the exact
+    slider/dropdown state at click-time, never a stale value from an
+    earlier run.
+
+    Returns True on success, False on any failure (network, bad
+    credentials, schema mismatch) so the caller can tell the user their
+    submission didn't save instead of silently losing it.
+    """
+    try:
+        conn = get_supabase_connection()
+        execute_query(
+            conn.table("survey_responses").insert(
+                [{
+                    "timestamp": datetime.now().isoformat(),
+                    "perception_change": perception_change,
+                    "feedback_text": feedback_text,
+                    "selected_major": selected_major,
+                    "loan_amount": loan_amount,
+                    "interest_rate": interest_rate,
+                    "repayment_strategy": repayment_strategy,
+                    "starting_salary": starting_salary,
+                    "dti_ratio": dti_ratio,
+                }],
+                count="None",
+            ),
+            ttl=0,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
@@ -625,6 +658,27 @@ def build_survey_pie_chart(survey_df: pd.DataFrame):
     return fig
 
 
+def build_perception_by_major_chart(survey_df: pd.DataFrame):
+    """Grouped bar chart: perception_change counts broken down by
+    selected_major, for spotting whether some majors are more "elastic"
+    (more likely to report a changed perception) than others. Rows saved
+    before this field existed have a null selected_major and are excluded
+    here (they still count in the overall pie chart/metrics above)."""
+    plottable = survey_df.dropna(subset=["selected_major", "perception_change"])
+    cross_tab = (
+        plottable.groupby(["selected_major", "perception_change"])
+        .size()
+        .reset_index(name="Count")
+    )
+    fig = px.bar(
+        cross_tab, x="selected_major", y="Count", color="perception_change",
+        title="Impact of the Tool by Selected Major",
+        labels={"selected_major": "Selected Major", "perception_change": "Response", "Count": "Responses"},
+        barmode="group",
+    )
+    return fig
+
+
 # ============================================================
 # 3. PAGE CONFIG & SESSION STATE
 # ============================================================
@@ -693,16 +747,41 @@ if admin_enabled:
     st.subheader("📊 Admin Analytics Dashboard")
 
     usage_df = load_table_safe("usage_logs", columns=["timestamp", "action"])
-    survey_df = load_table_safe("survey_responses", columns=["timestamp", "perception_change", "feedback_text"])
+    survey_df = load_table_safe("survey_responses", columns=[
+        "timestamp", "perception_change", "feedback_text", "selected_major",
+        "loan_amount", "interest_rate", "repayment_strategy", "starting_salary", "dti_ratio",
+    ])
 
     col1, col2 = st.columns(2)
     col1.metric("Total App Interactions", len(usage_df))
     col2.metric("Total Survey Responses", len(survey_df))
 
     if not survey_df.empty:
+        # Research metrics: skip NaN automatically (rows saved before these
+        # fields existed just don't count toward the average), and check
+        # there's at least one real value before displaying anything.
+        research_col1, research_col2 = st.columns(2)
+        if survey_df["loan_amount"].notna().any():
+            research_col1.metric("Average Loan Amount Simulated", fmt_money(survey_df["loan_amount"].mean()))
+        else:
+            research_col1.metric("Average Loan Amount Simulated", "N/A")
+        if survey_df["dti_ratio"].notna().any():
+            research_col2.metric("Average Debt-to-Income Ratio", f"{survey_df['dti_ratio'].mean():.2f}")
+        else:
+            research_col2.metric("Average Debt-to-Income Ratio", "N/A")
+
         chart_col, table_col = st.columns(2)
         chart_col.plotly_chart(build_survey_pie_chart(survey_df), use_container_width=True)
-        table_col.dataframe(survey_df[["timestamp", "feedback_text"]], use_container_width=True, height=380)
+        table_col.dataframe(
+            survey_df[[
+                "timestamp", "selected_major", "loan_amount", "interest_rate",
+                "repayment_strategy", "starting_salary", "dti_ratio", "feedback_text",
+            ]],
+            use_container_width=True, height=380,
+        )
+
+        if survey_df["selected_major"].notna().any():
+            st.plotly_chart(build_perception_by_major_chart(survey_df), use_container_width=True)
     else:
         st.info("No survey responses recorded yet.")
 
@@ -847,9 +926,28 @@ if not st.session_state.survey_submitted:
         submitted = st.form_submit_button("Submit Feedback")
 
         if submitted:
-            save_survey_response(perception_change, feedback_text)
-            st.session_state.survey_submitted = True
-            st.rerun()
+            # Baseline starting_salary is read straight from MAJOR_DATA (not
+            # get_annual_salary_for_year), matching the requested "baseline"
+            # framing -- it's the occupation's raw entry-level wage, not the
+            # training-delay-adjusted figure Medicine/Law/Athletic Training
+            # use elsewhere in the app.
+            starting_salary = MAJOR_DATA[major]["starting_salary"]
+            # DTI here is the literal loan slider divided by starting salary,
+            # per the requested formula -- it intentionally does NOT use
+            # get_effective_principal(), so Medicine/Law's additional
+            # training debt is not included in this particular ratio.
+            dti_ratio = round(loan_amount / starting_salary, 4) if starting_salary else None
+
+            saved = save_survey_response(
+                perception_change, feedback_text,
+                major, loan_amount, interest_rate, repayment_strategy,
+                starting_salary, dti_ratio,
+            )
+            if saved:
+                st.session_state.survey_submitted = True
+                st.rerun()
+            else:
+                st.error("Something went wrong saving your response -- please try again.")
 else:
     st.success("Thank you! Your feedback has been recorded anonymously.")
 
@@ -980,6 +1078,17 @@ full institution file is processed and swapped in. Median completer debt
 has no equivalent in that dataset and is still fetched live, so it works
 for any school. Both figures are shown as contextual information only and
 are not used in the calculator's math.
+
+**Survey data** — Each anonymous survey submission is tagged with the
+simulation inputs active at the moment of submission (major, loan amount,
+interest rate, repayment strategy) plus two derived research fields:
+`starting_salary` (the major's baseline entry-level wage from `MAJOR_DATA`,
+*not* the training-delay-adjusted figure Medicine/Law/Athletic Training use
+elsewhere) and `dti_ratio` (loan amount ÷ starting salary -- the literal
+slider value, not the effective principal that includes additional
+training debt). This lets the admin view break survey responses down by
+what the respondent was actually simulating, for the companion behavioral-
+economics research paper.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
