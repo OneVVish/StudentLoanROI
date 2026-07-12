@@ -1,0 +1,6 @@
+INSTNM,CONTROL,control_type,in_state_coa,out_of_state_coa,COSTT4_A,COSTT4_P,TUITIONFEE_IN,TUITIONFEE_OUT
+University of Michigan-Ann Arbor,1,Public,34654.0,77864.0,34654.0,,17736.0,60946.0
+Stanford University,2,Private Non-Profit,87833.0,87833.0,87833.0,,65910.0,65910.0
+University of Phoenix-Arizona,3,Private For-Profit,19909.0,19909.0,19909.0,,9552.0,9552.0
+Slippery Rock University of Pennsylvania,1,Public,25537.0,29645.0,25537.0,,10568.0,14676.0
+Paul Mitchell the School-Dallas,3,Private For-Profit,37871.0,37871.0,,37871.0,,

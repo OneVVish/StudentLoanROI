@@ -305,22 +305,56 @@ def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
 
-# ---- 2c. External Data: College Scorecard API ---------------------------
+# ---- 2c. School Data: Local COA Dataset + College Scorecard API ---------
+# Hybrid design: in_state_coa/out_of_state_coa come from a pre-cleaned local
+# dataset (see clean_college_scorecard.py) instead of a live API call, since
+# that script already derives them correctly (including the public-school
+# in-state/out-of-state tuition swap) and doesn't cost an API request per
+# lookup. median_debt has no equivalent in that dataset, so it's still
+# fetched live -- this works for any school, not just ones in the local
+# dataset's current (small sample) coverage.
+
+COA_DATASET_PATH = "data/college_coa_clean.csv"
+
+
+@st.cache_data(show_spinner=False)
+def load_coa_dataset() -> pd.DataFrame:
+    """Load the pre-cleaned local COA dataset, tolerating a missing file
+    (e.g. before it's been generated) by returning an empty frame."""
+    try:
+        return pd.read_csv(COA_DATASET_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=["INSTNM", "control_type", "in_state_coa", "out_of_state_coa"])
+
+
+def find_school_coa(school_name: str, coa_df: pd.DataFrame):
+    """Case-insensitive lookup by institution name: exact match first, then
+    falls back to a substring match so e.g. "Michigan" still finds
+    "University of Michigan-Ann Arbor". Returns None if nothing matches --
+    expected while the local dataset only covers a small sample of schools."""
+    if not school_name or coa_df.empty:
+        return None
+    names_lower = coa_df["INSTNM"].str.lower()
+    query_lower = school_name.strip().lower()
+    exact = coa_df[names_lower == query_lower]
+    if not exact.empty:
+        return exact.iloc[0]
+    partial = coa_df[names_lower.str.contains(query_lower, regex=False)]
+    return partial.iloc[0] if not partial.empty else None
+
 
 @st.cache_data(show_spinner=False, ttl=3600)
-def fetch_school_financials(school_name: str, api_key: str):
+def fetch_median_debt(school_name: str, api_key: str):
     """
-    Look up real tuition/debt figures for a school via the College Scorecard
-    API. Returns None (rather than raising) on any failure so a missing key,
-    bad network, or unmatched school name never breaks the calculator.
+    Look up median completer debt for a school via the College Scorecard
+    API. Returns None (rather than raising) on any failure so a missing
+    key, bad network, or unmatched school name never breaks the calculator.
     """
     if not school_name or not api_key:
         return None
     params = {
         "school.name": school_name,
-        "fields": "school.name,latest.cost.tuition.in_state,"
-                  "latest.cost.tuition.out_of_state,"
-                  "latest.aid.median_debt.completers.overall",
+        "fields": "school.name,latest.aid.median_debt.completers.overall",
         "api_key": api_key,
     }
     try:
@@ -332,8 +366,6 @@ def fetch_school_financials(school_name: str, api_key: str):
         top = results[0]
         return {
             "name": top.get("school.name"),
-            "tuition_in_state": top.get("latest.cost.tuition.in_state"),
-            "tuition_out_of_state": top.get("latest.cost.tuition.out_of_state"),
             "median_debt": top.get("latest.aid.median_debt.completers.overall"),
         }
     except (requests.exceptions.RequestException, ValueError, KeyError):
@@ -676,21 +708,39 @@ if admin_enabled:
 
     st.divider()
 
-# ---- 5b. School Data Lookup (College Scorecard API) ----------------------
+# ---- 5b. School Data Lookup (local COA dataset + College Scorecard API) --
+# Cost of Attendance (in/out-of-state) comes from the local dataset built by
+# clean_college_scorecard.py -- currently a small real-data sample (see
+# data/college_scorecard_sample_raw.csv), so only a handful of schools will
+# match until the full College Scorecard institution file is run through
+# that script and swapped in at data/college_coa_clean.csv. Median debt is
+# still fetched live, which works for any school regardless of local
+# dataset coverage.
 
 if school_name:
-    school_data = fetch_school_financials(school_name, scorecard_api_key)
-    if school_data:
-        # Escape "$" -- st.info renders markdown, and a *pair* of literal "$"
-        # (two fmt_money() calls in one string) gets parsed as inline LaTeX
-        # math, silently mangling the text between them.
-        info_text = (
-            f"**{school_data['name']}** — In-state tuition: "
-            f"{fmt_money(school_data['tuition_in_state']) if school_data['tuition_in_state'] else 'N/A'} | "
-            f"Median completer debt: "
-            f"{fmt_money(school_data['median_debt']) if school_data['median_debt'] else 'N/A'}"
+    coa_match = find_school_coa(school_name, load_coa_dataset())
+    debt_data = fetch_median_debt(school_name, scorecard_api_key)
+
+    if coa_match is not None:
+        coa_text = (
+            f"**{coa_match['INSTNM']}** ({coa_match['control_type']}) — "
+            f"In-state Cost of Attendance: {fmt_money(coa_match['in_state_coa'])} | "
+            f"Out-of-state Cost of Attendance: {fmt_money(coa_match['out_of_state_coa'])}"
         ).replace("$", r"\$")
-        st.info(info_text)
+        st.info(coa_text)
+    else:
+        st.caption(
+            "No Cost of Attendance match in the local dataset yet "
+            "(currently only a small sample of schools -- see data/college_coa_clean.csv)."
+        )
+
+    if debt_data and debt_data.get("median_debt"):
+        # Escape "$" -- st.caption renders markdown, and a pair of literal
+        # "$" gets parsed as inline LaTeX math, mangling the text between them.
+        st.caption(
+            f"Median completer debt for {debt_data['name']}: {fmt_money(debt_data['median_debt'])}"
+            .replace("$", r"\$")
+        )
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
@@ -919,10 +969,17 @@ double-count growth and produce a nonsensical payoff schedule — the toggle
 is a window into one point on the same real trajectory, not an alternate
 starting condition.
 
-**School tuition & debt lookup** — U.S. Department of Education College
-Scorecard API ([collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)),
-queried live by school name; shown as contextual information only and not
-used in the calculator's math.
+**School Cost of Attendance & debt lookup** — U.S. Department of Education
+College Scorecard ([collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)).
+In-state/out-of-state Cost of Attendance comes from a locally pre-cleaned
+dataset (see `clean_college_scorecard.py`, which derives it from
+`COSTT4_A`/`COSTT4_P` and the public-school in-state/out-of-state tuition
+swap) rather than a live call per lookup; that dataset currently covers only
+a small real-data sample, so most schools won't have a match yet until the
+full institution file is processed and swapped in. Median completer debt
+has no equivalent in that dataset and is still fetched live, so it works
+for any school. Both figures are shown as contextual information only and
+are not used in the calculator's math.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
