@@ -278,26 +278,20 @@ def log_usage_event(action: str):
     )
 
 
-def save_survey_response(
-    perception_change: str,
-    feedback_text: str,
-    selected_major: str,
-    loan_amount: float,
-    interest_rate: float,
-    repayment_strategy: str,
-    starting_salary: float,
-    dti_ratio,
-) -> bool:
-    """Insert one anonymous survey submission, tagged with the simulation
-    context (major/loan/rate/strategy/DTI) active at the moment of
-    submission, into the survey_responses table.
+def save_survey_response(perception_change: str, feedback_text: str, context: dict) -> bool:
+    """Insert one anonymous survey submission into the survey_responses
+    table. `context` is a flat {column_name: value} dict carrying every
+    simulation-context field: school name, Scenario A's inputs/outputs, and
+    -- when Compare Mode is on at submission time -- Scenario B's
+    inputs/outputs plus the ROI delta between them. A dict (rather than a
+    long, ever-growing list of named params) lets the row shape keep
+    growing without this function's signature growing with it.
 
-    The caller reads major/loan_amount/interest_rate/repayment_strategy
-    straight from the sidebar widget variables, which Streamlit re-evaluates
-    to their current value on every rerun -- including the rerun triggered
-    by clicking "Submit Feedback" -- so this always captures the exact
-    slider/dropdown state at click-time, never a stale value from an
-    earlier run.
+    The caller reads every context value straight from the sidebar/Compare
+    Mode widget variables, which Streamlit re-evaluates to their current
+    value on every rerun -- including the rerun triggered by clicking
+    "Submit Feedback" -- so this always captures the exact slider/dropdown
+    state at click-time, never a stale value from an earlier run.
 
     Returns True on success, False on any failure (network, bad
     credentials, schema mismatch) so the caller can tell the user their
@@ -305,21 +299,14 @@ def save_survey_response(
     """
     try:
         conn = get_supabase_connection()
+        row = {
+            "timestamp": datetime.now().isoformat(),
+            "perception_change": perception_change,
+            "feedback_text": feedback_text,
+            **context,
+        }
         execute_query(
-            conn.table("survey_responses").insert(
-                [{
-                    "timestamp": datetime.now().isoformat(),
-                    "perception_change": perception_change,
-                    "feedback_text": feedback_text,
-                    "selected_major": selected_major,
-                    "loan_amount": loan_amount,
-                    "interest_rate": interest_rate,
-                    "repayment_strategy": repayment_strategy,
-                    "starting_salary": starting_salary,
-                    "dti_ratio": dti_ratio,
-                }],
-                count="None",
-            ),
+            conn.table("survey_responses").insert([row], count="None"),
             ttl=0,
         )
         return True
@@ -540,6 +527,29 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     }
 
 
+def compute_scenario_results(major_name: str, loan_amount: float,
+                              interest_rate: float, repayment_strategy: str) -> dict:
+    """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
+    the single-scenario view and Compare Mode (and the survey's context
+    capture) so every caller runs the exact same calculation code -- no
+    duplicated orchestration to drift out of sync."""
+    effective_principal = get_effective_principal(major_name, loan_amount)
+    if repayment_strategy == "Standard 10-Year":
+        repayment_result = calculate_standard_repayment(effective_principal, interest_rate)
+        strategy_label = "Standard 10-Year"
+    else:
+        repayment_result = calculate_idr_repayment(effective_principal, interest_rate, major_name)
+        strategy_label = "Income-Driven Repayment"
+    roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"], effective_principal)
+    return {
+        "major": major_name,
+        "strategy_label": strategy_label,
+        "effective_principal": effective_principal,
+        "repayment_result": repayment_result,
+        "roi_result": roi_result,
+    }
+
+
 # ---- 2h. Taxes & Take-Home Pay --------------------------------------------
 
 def _apply_marginal_brackets(taxable_income: float, brackets: list) -> float:
@@ -638,6 +648,41 @@ def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major
     return fig
 
 
+def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
+                                    schedule_b: pd.DataFrame, label_b: str):
+    """Overlay both scenarios' loan balance curves on one chart for direct
+    side-by-side comparison, instead of two separate charts."""
+    combined = pd.concat([
+        schedule_a.assign(Scenario=label_a),
+        schedule_b.assign(Scenario=label_b),
+    ])
+    fig = px.line(
+        combined, x="year", y="balance", color="Scenario",
+        title="Loan Balance Over Time: Scenario A vs. Scenario B",
+        labels={"year": "Years", "balance": "Remaining Balance ($)"},
+    )
+    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified")
+    return fig
+
+
+def build_scenario_comparison_roi_chart(hs_net_position: float,
+                                         net_a: float, label_a: str,
+                                         net_b: float, label_b: str):
+    """3-bar version of build_roi_bar_chart: HS-grad baseline plus both
+    scenarios, for comparing net financial position directly."""
+    comparison_df = pd.DataFrame({
+        "Group": ["High School Graduate", label_a, label_b],
+        "10-Year Net Position ($)": [hs_net_position, net_a, net_b],
+    })
+    fig = px.bar(
+        comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
+        title="10-Year Net Financial Position: Scenario Comparison",
+        text_auto=".2s",
+    )
+    fig.update_layout(yaxis_tickprefix="$", showlegend=False)
+    return fig
+
+
 def build_takehome_breakdown_chart(take_home: dict):
     """A waterfall (gross salary subtracting away to take-home pay) needs
     plotly.graph_objects -- express has no waterfall trace type."""
@@ -660,20 +705,20 @@ def build_survey_pie_chart(survey_df: pd.DataFrame):
 
 def build_perception_by_major_chart(survey_df: pd.DataFrame):
     """Grouped bar chart: perception_change counts broken down by
-    selected_major, for spotting whether some majors are more "elastic"
+    scenario_a_major, for spotting whether some majors are more "elastic"
     (more likely to report a changed perception) than others. Rows saved
-    before this field existed have a null selected_major and are excluded
+    before this field existed have a null scenario_a_major and are excluded
     here (they still count in the overall pie chart/metrics above)."""
-    plottable = survey_df.dropna(subset=["selected_major", "perception_change"])
+    plottable = survey_df.dropna(subset=["scenario_a_major", "perception_change"])
     cross_tab = (
-        plottable.groupby(["selected_major", "perception_change"])
+        plottable.groupby(["scenario_a_major", "perception_change"])
         .size()
         .reset_index(name="Count")
     )
     fig = px.bar(
-        cross_tab, x="selected_major", y="Count", color="perception_change",
+        cross_tab, x="scenario_a_major", y="Count", color="perception_change",
         title="Impact of the Tool by Selected Major",
-        labels={"selected_major": "Selected Major", "perception_change": "Response", "Count": "Responses"},
+        labels={"scenario_a_major": "Selected Major", "perception_change": "Response", "Count": "Responses"},
         barmode="group",
     )
     return fig
@@ -695,6 +740,9 @@ if "pageview_logged" not in st.session_state:
 if "has_calculated" not in st.session_state:
     st.session_state.has_calculated = False
 
+if "has_compared" not in st.session_state:
+    st.session_state.has_compared = False
+
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
 
@@ -715,6 +763,27 @@ repayment_strategy = st.sidebar.selectbox(
     "Repayment Strategy",
     ["Standard 10-Year", "Income-Driven Repayment (IDR)"],
 )
+
+# Compare Mode adds a second scenario (Scenario B) rather than hiding the
+# widgets above -- those always represent Scenario A, in both modes. This
+# means toggling Compare Mode on/off never loses a tuned value (there's
+# only ever one copy of Scenario A's inputs) and the survey section below
+# never needs to guess which scenario's context to save.
+compare_mode = st.sidebar.checkbox("🔀 Compare Two Scenarios")
+
+if compare_mode:
+    with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
+        major_b = st.selectbox("Target Major", list(MAJOR_DATA.keys()), key="major_b")
+        loan_amount_b = st.number_input("Total Student Loan Amount ($)", min_value=0, max_value=300000,
+                                         value=30000, step=500, key="loan_amount_b")
+        interest_rate_b = st.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
+                                           value=5.5, step=0.1, key="interest_rate_b")
+        repayment_strategy_b = st.selectbox(
+            "Repayment Strategy",
+            ["Standard 10-Year", "Income-Driven Repayment (IDR)"],
+            key="repayment_strategy_b",
+        )
+
 city = st.sidebar.selectbox("City / Metro Area", list(CITY_DATA.keys()))
 career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
@@ -726,10 +795,15 @@ with st.sidebar.expander("College Scorecard Lookup (optional)"):
 st.sidebar.divider()
 admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View")
 
-calculate_clicked = st.sidebar.button("🚀 Calculate My Payoff Plan & ROI", use_container_width=True)
-if calculate_clicked:
-    log_usage_event("calculation")
-    st.session_state.has_calculated = True
+button_label = "⚖️ Compare Scenarios" if compare_mode else "🚀 Calculate My Payoff Plan & ROI"
+action_clicked = st.sidebar.button(button_label, use_container_width=True)
+if action_clicked:
+    if compare_mode:
+        log_usage_event("comparison")
+        st.session_state.has_compared = True
+    else:
+        log_usage_event("calculation")
+        st.session_state.has_calculated = True
 
 
 # ============================================================
@@ -748,8 +822,15 @@ if admin_enabled:
 
     usage_df = load_table_safe("usage_logs", columns=["timestamp", "action"])
     survey_df = load_table_safe("survey_responses", columns=[
-        "timestamp", "perception_change", "feedback_text", "selected_major",
-        "loan_amount", "interest_rate", "repayment_strategy", "starting_salary", "dti_ratio",
+        "timestamp", "perception_change", "feedback_text", "school_name",
+        "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
+        "scenario_a_repayment_strategy", "scenario_a_starting_salary", "scenario_a_dti_ratio",
+        "scenario_a_monthly_payment", "scenario_a_payoff_years", "scenario_a_total_interest",
+        "scenario_a_earnings_premium", "scenario_a_roi_pct",
+        "scenario_b_major", "scenario_b_loan_amount", "scenario_b_interest_rate",
+        "scenario_b_repayment_strategy", "scenario_b_starting_salary", "scenario_b_dti_ratio",
+        "scenario_b_monthly_payment", "scenario_b_payoff_years", "scenario_b_total_interest",
+        "scenario_b_earnings_premium", "scenario_b_roi_pct", "roi_pct_delta",
     ])
 
     col1, col2 = st.columns(2)
@@ -758,15 +839,16 @@ if admin_enabled:
 
     if not survey_df.empty:
         # Research metrics: skip NaN automatically (rows saved before these
-        # fields existed just don't count toward the average), and check
-        # there's at least one real value before displaying anything.
+        # fields existed, or saved with Compare Mode off for the B/delta
+        # ones, just don't count toward the average), and check there's at
+        # least one real value before displaying anything.
         research_col1, research_col2 = st.columns(2)
-        if survey_df["loan_amount"].notna().any():
-            research_col1.metric("Average Loan Amount Simulated", fmt_money(survey_df["loan_amount"].mean()))
+        if survey_df["scenario_a_loan_amount"].notna().any():
+            research_col1.metric("Average Loan Amount Simulated", fmt_money(survey_df["scenario_a_loan_amount"].mean()))
         else:
             research_col1.metric("Average Loan Amount Simulated", "N/A")
-        if survey_df["dti_ratio"].notna().any():
-            research_col2.metric("Average Debt-to-Income Ratio", f"{survey_df['dti_ratio'].mean():.2f}")
+        if survey_df["scenario_a_dti_ratio"].notna().any():
+            research_col2.metric("Average Debt-to-Income Ratio", f"{survey_df['scenario_a_dti_ratio'].mean():.2f}")
         else:
             research_col2.metric("Average Debt-to-Income Ratio", "N/A")
 
@@ -774,13 +856,16 @@ if admin_enabled:
         chart_col.plotly_chart(build_survey_pie_chart(survey_df), use_container_width=True)
         table_col.dataframe(
             survey_df[[
-                "timestamp", "selected_major", "loan_amount", "interest_rate",
-                "repayment_strategy", "starting_salary", "dti_ratio", "feedback_text",
+                "timestamp", "school_name",
+                "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
+                "scenario_a_repayment_strategy", "scenario_a_roi_pct",
+                "scenario_b_major", "scenario_b_loan_amount", "scenario_b_roi_pct",
+                "roi_pct_delta", "feedback_text",
             ]],
             use_container_width=True, height=380,
         )
 
-        if survey_df["selected_major"].notna().any():
+        if survey_df["scenario_a_major"].notna().any():
             st.plotly_chart(build_perception_by_major_chart(survey_df), use_container_width=True)
     else:
         st.info("No survey responses recorded yet.")
@@ -823,19 +908,75 @@ if school_name:
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
-if st.session_state.has_calculated:
-    effective_principal = get_effective_principal(major, loan_amount)
+def render_scenario_panel(column, scenario: dict, label: str):
+    """Render one scenario's metric cards (+ effective-principal caption and
+    forgiveness warning) into a layout column. Used twice by Compare Mode
+    (Scenario A / Scenario B) so their markup can't drift apart from being
+    hand-copied -- this is the same card layout section 5c uses for the
+    single-scenario view, just parameterized and column-scoped."""
+    with column:
+        st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']}**")
 
-    if repayment_strategy == "Standard 10-Year":
-        repayment_result = calculate_standard_repayment(effective_principal, interest_rate)
-        strategy_label = "Standard 10-Year"
+        additional_debt = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+        if additional_debt > 0:
+            caption_text = (
+                f"Includes {fmt_money(additional_debt)} est. professional-school debt: "
+                f"**{fmt_money(scenario['effective_principal'])}** total"
+            ).replace("$", r"\$")
+            st.caption(caption_text)
+
+        repayment_result = scenario["repayment_result"]
+        roi_result = scenario["roi_result"]
+        st.metric(
+            "Monthly Payment",
+            fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+        )
+        st.metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
+        st.metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
+        st.metric(
+            "10-Year Earnings Premium",
+            fmt_money(roi_result["earnings_premium"]),
+            delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
+        )
+        if repayment_result["forgiven_amount"] > 0:
+            st.warning(
+                f"{fmt_money(repayment_result['forgiven_amount'])} forgiven after {IDR_MAX_TERM_YEARS} years."
+            )
+
+
+if compare_mode:
+    st.subheader("⚖️ Scenario Comparison")
+    if st.session_state.has_compared:
+        scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy)
+        scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b)
+
+        col_a, col_b = st.columns(2)
+        render_scenario_panel(col_a, scenario_a, "A")
+        render_scenario_panel(col_b, scenario_b, "B")
+
+        st.plotly_chart(
+            build_comparison_balance_chart(
+                scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
+                scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
+            ),
+            use_container_width=True,
+        )
+        st.plotly_chart(
+            build_scenario_comparison_roi_chart(
+                scenario_a["roi_result"]["hs_net_position"],
+                scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
+                scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+            ),
+            use_container_width=True,
+        )
     else:
-        repayment_result = calculate_idr_repayment(effective_principal, interest_rate, major)
-        strategy_label = "Income-Driven Repayment"
-
-    roi_result = calculate_roi(
-        major, repayment_result["total_paid_in_roi_window"], effective_principal,
-    )
+        st.info("Configure Scenario B in the sidebar, then click **Compare Scenarios**.")
+elif st.session_state.has_calculated:
+    scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy)
+    effective_principal = scenario["effective_principal"]
+    repayment_result = scenario["repayment_result"]
+    strategy_label = scenario["strategy_label"]
+    roi_result = scenario["roi_result"]
 
     st.subheader(f"📈 Results for {major} — {strategy_label}")
 
@@ -937,12 +1078,52 @@ if not st.session_state.survey_submitted:
             # get_effective_principal(), so Medicine/Law's additional
             # training debt is not included in this particular ratio.
             dti_ratio = round(loan_amount / starting_salary, 4) if starting_salary else None
+            # Recomputed fresh (cheap, pure functions, no API calls) rather
+            # than reused from st.session_state, so the survey reflects
+            # exact click-time state even if the user never pressed
+            # Calculate/Compare before submitting.
+            scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy)
 
-            saved = save_survey_response(
-                perception_change, feedback_text,
-                major, loan_amount, interest_rate, repayment_strategy,
-                starting_salary, dti_ratio,
-            )
+            context = {
+                "school_name": school_name or None,
+                "scenario_a_major": major,
+                "scenario_a_loan_amount": loan_amount,
+                "scenario_a_interest_rate": interest_rate,
+                "scenario_a_repayment_strategy": repayment_strategy,
+                "scenario_a_starting_salary": starting_salary,
+                "scenario_a_dti_ratio": dti_ratio,
+                "scenario_a_monthly_payment": scenario_a["repayment_result"].get("monthly_payment"),
+                "scenario_a_payoff_years": scenario_a["repayment_result"]["payoff_years"],
+                "scenario_a_total_interest": scenario_a["repayment_result"]["total_interest"],
+                "scenario_a_earnings_premium": scenario_a["roi_result"]["earnings_premium"],
+                "scenario_a_roi_pct": scenario_a["roi_result"]["roi_pct"],
+            }
+
+            # Scenario B / roi_pct_delta only exist when Compare Mode is on
+            # at the moment of submission -- they stay absent (NULL in the
+            # database) otherwise, since there's no Scenario B to report.
+            if compare_mode:
+                starting_salary_b = MAJOR_DATA[major_b]["starting_salary"]
+                dti_ratio_b = round(loan_amount_b / starting_salary_b, 4) if starting_salary_b else None
+                scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b)
+                context.update({
+                    "scenario_b_major": major_b,
+                    "scenario_b_loan_amount": loan_amount_b,
+                    "scenario_b_interest_rate": interest_rate_b,
+                    "scenario_b_repayment_strategy": repayment_strategy_b,
+                    "scenario_b_starting_salary": starting_salary_b,
+                    "scenario_b_dti_ratio": dti_ratio_b,
+                    "scenario_b_monthly_payment": scenario_b["repayment_result"].get("monthly_payment"),
+                    "scenario_b_payoff_years": scenario_b["repayment_result"]["payoff_years"],
+                    "scenario_b_total_interest": scenario_b["repayment_result"]["total_interest"],
+                    "scenario_b_earnings_premium": scenario_b["roi_result"]["earnings_premium"],
+                    "scenario_b_roi_pct": scenario_b["roi_result"]["roi_pct"],
+                })
+                roi_a = scenario_a["roi_result"]["roi_pct"]
+                roi_b = scenario_b["roi_result"]["roi_pct"]
+                context["roi_pct_delta"] = round(abs(roi_a - roi_b), 2) if roi_a is not None and roi_b is not None else None
+
+            saved = save_survey_response(perception_change, feedback_text, context)
             if saved:
                 st.session_state.survey_submitted = True
                 st.rerun()
@@ -1067,6 +1248,15 @@ double-count growth and produce a nonsensical payoff schedule — the toggle
 is a window into one point on the same real trajectory, not an alternate
 starting condition.
 
+**Compare Two Scenarios** — Runs the exact same `compute_scenario_results`
+calculation path as the single-scenario view above, once per scenario — no
+separate or duplicated math. v1 only compares loan payoff and 10-year ROI;
+it does not (yet) compare take-home pay or cost of living between the two
+scenarios, since each scenario would need its own city/career-stage
+selection to do that meaningfully. Scenario A is always the sidebar's main
+inputs; enabling Compare Mode adds Scenario B alongside it rather than
+replacing anything, so switching the mode off never loses a tuned value.
+
 **School Cost of Attendance & debt lookup** — U.S. Department of Education
 College Scorecard ([collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)).
 In-state/out-of-state Cost of Attendance comes from a locally pre-cleaned
@@ -1080,15 +1270,21 @@ for any school. Both figures are shown as contextual information only and
 are not used in the calculator's math.
 
 **Survey data** — Each anonymous survey submission is tagged with the
-simulation inputs active at the moment of submission (major, loan amount,
-interest rate, repayment strategy) plus two derived research fields:
-`starting_salary` (the major's baseline entry-level wage from `MAJOR_DATA`,
-*not* the training-delay-adjusted figure Medicine/Law/Athletic Training use
-elsewhere) and `dti_ratio` (loan amount ÷ starting salary -- the literal
-slider value, not the effective principal that includes additional
-training debt). This lets the admin view break survey responses down by
-what the respondent was actually simulating, for the companion behavioral-
-economics research paper.
+school name and Scenario A's full inputs and outputs, active at the exact
+moment of submission: major, loan amount, interest rate, repayment
+strategy, `starting_salary` (the major's baseline entry-level wage from
+`MAJOR_DATA`, *not* the training-delay-adjusted figure Medicine/Law/
+Athletic Training use elsewhere), `dti_ratio` (loan amount ÷ starting
+salary -- the literal slider value, not the effective principal that
+includes additional training debt), monthly payment (null for IDR, since
+its payment varies month to month), payoff timeline, total interest, 10-
+year earnings premium, and ROI%. When Compare Mode is on at submission
+time, the same fields for Scenario B are captured too, plus `roi_pct_delta`
+(the absolute difference between the two scenarios' ROI%) -- otherwise
+those fields are left null, since there's no Scenario B to report. This
+lets the admin view and any exported CSV break survey responses down by
+exactly what the respondent was simulating and comparing, for the
+companion behavioral-economics research paper.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
