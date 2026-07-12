@@ -20,7 +20,6 @@ from datetime import datetime
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import requests
 import streamlit as st
 from st_supabase_connection import SupabaseConnection, execute_query
@@ -904,16 +903,17 @@ def build_scenario_comparison_roi_chart(hs_net_position: float,
     return fig
 
 
-def build_takehome_breakdown_chart(take_home: dict):
-    """A waterfall (gross salary subtracting away to take-home pay) needs
-    plotly.graph_objects -- express has no waterfall trace type."""
-    fig = go.Figure(go.Waterfall(
-        x=["Gross", "Federal Tax", "State + Local Tax", "FICA", "Take-Home"],
-        y=[take_home["gross"], -take_home["federal_tax"], -take_home["state_tax"],
-           -take_home["fica_tax"], take_home["net_take_home"]],
-        measure=["absolute", "relative", "relative", "relative", "total"],
-    ))
-    fig.update_layout(title="Where Your Salary Actually Goes", yaxis_tickprefix="$", showlegend=False)
+def build_takehome_pie_chart(take_home: dict):
+    """Pie chart of how gross salary splits between take-home pay and each
+    tax category -- "slices of a whole" is a more intuitive framing for a
+    high-school audience than a waterfall's running subtraction."""
+    fig = px.pie(
+        names=["Take-Home Pay", "Federal Tax", "State + Local Tax", "FICA (Social Security/Medicare)"],
+        values=[take_home["net_take_home"], take_home["federal_tax"],
+                 take_home["state_tax"], take_home["fica_tax"]],
+        title="Where Your Salary Actually Goes",
+    )
+    fig.update_traces(textinfo="percent+label")
     return fig
 
 
@@ -1260,30 +1260,37 @@ else:
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
-def get_investment_captions(scenario: dict) -> list:
-    """Captions explaining what feeds the loan principal vs. the ROI%
-    denominator, when either differs from the raw loan slider. Two
-    separate captions on purpose -- "effective loan principal" (what the
-    repayment simulation above actually amortizes) and "total investment"
-    (the ROI% denominator) are different figures once personal_contribution
-    is nonzero, and conflating them into one sentence would blur that.
-    Returns an empty list if there's nothing extra to explain (no training
-    debt, no personal contribution)."""
+def get_loan_principal_caption(scenario: dict) -> str:
+    """Explains what actually feeds the loan repayment simulation, when it
+    differs from the raw loan slider (professional-school debt on top of
+    it). Returns None if there's nothing extra to explain."""
     additional_debt = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    if additional_debt <= 0:
+        return None
+    return (
+        f"Effective loan principal including {fmt_money(additional_debt)} "
+        f"est. average professional-school debt: **{fmt_money(scenario['effective_principal'])}**"
+    ).replace("$", r"\$")
+
+
+def get_total_investment_caption(scenario: dict) -> str:
+    """Explains the ROI% denominator, when it differs from the effective
+    loan principal alone (personal_contribution is nonzero). Returns None
+    if there's nothing extra to explain."""
     personal_contribution = scenario["personal_contribution"]
-    captions = []
-    if additional_debt > 0:
-        captions.append((
-            f"Effective loan principal including {fmt_money(additional_debt)} "
-            f"est. average professional-school debt: **{fmt_money(scenario['effective_principal'])}**"
-        ).replace("$", r"\$"))
-    if personal_contribution > 0:
-        captions.append((
-            f"ROI is measured against a total investment of **{fmt_money(scenario['total_investment'])}** "
-            f"({fmt_money(scenario['effective_principal'])} effective loan principal + "
-            f"{fmt_money(personal_contribution)} personal contribution), not the loan alone"
-        ).replace("$", r"\$"))
-    return captions
+    if personal_contribution <= 0:
+        return None
+    return (
+        f"ROI is measured against a total investment of **{fmt_money(scenario['total_investment'])}** "
+        f"({fmt_money(scenario['effective_principal'])} effective loan principal + "
+        f"{fmt_money(personal_contribution)} personal contribution), not the loan alone"
+    ).replace("$", r"\$")
+
+
+def get_investment_captions(scenario: dict) -> list:
+    """Both captions above together, for callers (Compare Mode) that show
+    them as one adjacent pair rather than split across sections."""
+    return [c for c in (get_loan_principal_caption(scenario), get_total_investment_caption(scenario)) if c]
 
 
 def render_scenario_panel(column, scenario: dict, label: str):
@@ -1354,23 +1361,21 @@ elif st.session_state.has_calculated:
     strategy_label = scenario["strategy_label"]
     roi_result = scenario["roi_result"]
 
-    st.subheader(f"📈 Results for {major} — {strategy_label}")
+    # ---- 5c-1. Loan Information --------------------------------------------
 
-    for caption in get_investment_captions(scenario):
-        st.caption(caption)
+    st.subheader(f"💳 Loan Information — {strategy_label}")
 
-    metric_cols = st.columns(4)
-    metric_cols[0].metric(
+    loan_caption = get_loan_principal_caption(scenario)
+    if loan_caption:
+        st.caption(loan_caption)
+
+    loan_metric_cols = st.columns(3)
+    loan_metric_cols[0].metric(
         "Monthly Payment",
         fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
     )
-    metric_cols[1].metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
-    metric_cols[2].metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
-    metric_cols[3].metric(
-        "10-Year Earnings Premium (COL-Adjusted)",
-        fmt_money(roi_result["earnings_premium"]),
-        delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
-    )
+    loan_metric_cols[1].metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
+    loan_metric_cols[2].metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
 
     if repayment_result["forgiven_amount"] > 0:
         st.warning(
@@ -1378,9 +1383,7 @@ elif st.session_state.has_calculated:
             f"unpaid after {IDR_MAX_TERM_YEARS} years and is forgiven."
         )
 
-    chart_col1, chart_col2 = st.columns(2)
-    chart_col1.plotly_chart(build_balance_chart(repayment_result["schedule"], strategy_label), use_container_width=True)
-    chart_col2.plotly_chart(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major), use_container_width=True)
+    st.plotly_chart(build_balance_chart(repayment_result["schedule"], strategy_label), use_container_width=True)
 
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
 
@@ -1415,7 +1418,33 @@ elif st.session_state.has_calculated:
         st.warning("At this salary, city, and loan combination, disposable income is negative.")
 
     if gross > 0:
-        st.plotly_chart(build_takehome_breakdown_chart(take_home), use_container_width=True)
+        st.plotly_chart(build_takehome_pie_chart(take_home), use_container_width=True)
+
+    # ---- 5e. 10-Year Financial Position -------------------------------------
+
+    st.subheader("📊 10-Year Financial Position")
+    st.caption((
+        f"This compares two paths over your first 10 years after high school: going into "
+        f"**{major}** (paying off the loan above along the way) vs. skipping college and "
+        f"working right away as a high school graduate. Both numbers are adjusted for the "
+        f"cost of living in **{city}**, so it's a fair, apples-to-apples comparison of real "
+        f"spending power -- not just which raw number is bigger."
+    ).replace("$", r"\$"))
+
+    investment_caption = get_total_investment_caption(scenario)
+    if investment_caption:
+        st.caption(investment_caption)
+
+    position_cols = st.columns(3)
+    position_cols[0].metric("High School Grad — 10-Yr Net Position", fmt_money(roi_result["hs_net_position"]))
+    position_cols[1].metric(f"{major} — 10-Yr Net Position", fmt_money(roi_result["major_net_position"]))
+    position_cols[2].metric(
+        "Earnings Premium (COL-Adjusted)",
+        fmt_money(roi_result["earnings_premium"]),
+        delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
+    )
+
+    st.plotly_chart(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major), use_container_width=True)
 else:
     st.info("Set your profile in the sidebar, then click **Calculate My Payoff Plan & ROI** to see results.")
 
