@@ -521,14 +521,19 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
 # ---- 2f. 10-Year ROI ------------------------------------------------------
 
 def calculate_roi(major_name: str, total_loan_payments_in_window: float,
-                   effective_principal: float, years: int = ROI_WINDOW_YEARS) -> dict:
+                   total_investment: float, years: int = ROI_WINDOW_YEARS) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window) compared against a debt-free high school graduate's
-    cumulative earnings over the same window. `effective_principal` (not the
-    raw loan slider) is the ROI% denominator, since majors with additional
-    training debt (e.g. Medicine's median med school debt) took on more than
-    the slider value to reach this earning power -- see get_effective_principal.
+    cumulative earnings over the same window. `total_investment` is the ROI%
+    denominator -- not just the loan principal: it's effective_principal
+    (loan slider + any additional training debt, see get_effective_principal)
+    plus any personal_contribution the caller adds on top (money put toward
+    the degree that wasn't borrowed, e.g. savings/scholarships/family
+    contribution). This is deliberately a different figure from the
+    principal actually fed into the loan repayment simulation -- you don't
+    pay interest on money you never borrowed, but it's still part of what
+    you "invested" for ROI purposes.
     """
     major_cumulative_earnings = sum(
         get_annual_salary_for_year(major_name, y) for y in range(years)
@@ -540,7 +545,7 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     major_net_position = major_cumulative_earnings - total_loan_payments_in_window
     hs_net_position = hs_cumulative_earnings
     earnings_premium = major_net_position - hs_net_position
-    roi_pct = (earnings_premium / effective_principal * 100) if effective_principal > 0 else None
+    roi_pct = (earnings_premium / total_investment * 100) if total_investment > 0 else None
 
     return {
         "major_cumulative_earnings": major_cumulative_earnings,
@@ -553,23 +558,35 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
 
 
 def compute_scenario_results(major_name: str, loan_amount: float,
-                              interest_rate: float, repayment_strategy: str) -> dict:
+                              interest_rate: float, repayment_strategy: str,
+                              personal_contribution: float = 0.0) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
-    duplicated orchestration to drift out of sync."""
+    duplicated orchestration to drift out of sync.
+
+    personal_contribution (savings/scholarships/family money that wasn't
+    borrowed) only affects the ROI% denominator (total_investment below) --
+    it's never added to the loan principal fed into the repayment
+    simulation, since you don't pay interest on money you never borrowed.
+    Defaults to 0.0 so every existing call site is unaffected until it
+    explicitly opts in.
+    """
     effective_principal = get_effective_principal(major_name, loan_amount)
+    total_investment = effective_principal + personal_contribution
     if repayment_strategy == "Standard 10-Year":
         repayment_result = calculate_standard_repayment(effective_principal, interest_rate)
         strategy_label = "Standard 10-Year"
     else:
         repayment_result = calculate_idr_repayment(effective_principal, interest_rate, major_name)
         strategy_label = "Income-Driven Repayment"
-    roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"], effective_principal)
+    roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"], total_investment)
     return {
         "major": major_name,
         "strategy_label": strategy_label,
         "effective_principal": effective_principal,
+        "personal_contribution": personal_contribution,
+        "total_investment": total_investment,
         "repayment_result": repayment_result,
         "roi_result": roi_result,
     }
@@ -785,6 +802,13 @@ school_name_a = st.sidebar.text_input(
 )
 loan_amount = st.sidebar.number_input("Total Student Loan Amount ($)", min_value=0, max_value=300000,
                                        value=30000, step=500, key="loan_amount")
+personal_contribution = st.sidebar.number_input(
+    "Personal Contribution ($)", min_value=0, max_value=300000, value=0, step=500,
+    key="personal_contribution",
+    help="Savings, scholarships, or family money toward your degree that you "
+         "did NOT borrow. Counted in the ROI% denominator, but not added to "
+         "the loan you're actually repaying (no interest accrues on it).",
+)
 interest_rate = st.sidebar.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
                                          value=5.5, step=0.1)
 repayment_strategy = st.sidebar.selectbox(
@@ -808,6 +832,12 @@ if compare_mode:
         )
         loan_amount_b = st.number_input("Total Student Loan Amount ($)", min_value=0, max_value=300000,
                                          value=30000, step=500, key="loan_amount_b")
+        personal_contribution_b = st.number_input(
+            "Personal Contribution ($)", min_value=0, max_value=300000, value=0, step=500,
+            key="personal_contribution_b",
+            help="Savings, scholarships, or family money toward this degree that "
+                 "wasn't borrowed. Counted in the ROI% denominator only.",
+        )
         interest_rate_b = st.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
                                            value=5.5, step=0.1, key="interest_rate_b")
         repayment_strategy_b = st.selectbox(
@@ -858,11 +888,11 @@ if admin_enabled:
         "scenario_a_school_name", "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
         "scenario_a_repayment_strategy", "scenario_a_starting_salary", "scenario_a_dti_ratio",
         "scenario_a_monthly_payment", "scenario_a_payoff_years", "scenario_a_total_interest",
-        "scenario_a_earnings_premium", "scenario_a_roi_pct",
+        "scenario_a_earnings_premium", "scenario_a_roi_pct", "scenario_a_personal_contribution",
         "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount", "scenario_b_interest_rate",
         "scenario_b_repayment_strategy", "scenario_b_starting_salary", "scenario_b_dti_ratio",
         "scenario_b_monthly_payment", "scenario_b_payoff_years", "scenario_b_total_interest",
-        "scenario_b_earnings_premium", "scenario_b_roi_pct", "roi_pct_delta",
+        "scenario_b_earnings_premium", "scenario_b_roi_pct", "scenario_b_personal_contribution", "roi_pct_delta",
     ])
 
     col1, col2 = st.columns(2)
@@ -889,9 +919,10 @@ if admin_enabled:
         table_col.dataframe(
             survey_df[[
                 "timestamp", "scenario_a_school_name",
-                "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
-                "scenario_a_repayment_strategy", "scenario_a_roi_pct",
-                "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount", "scenario_b_roi_pct",
+                "scenario_a_major", "scenario_a_loan_amount", "scenario_a_personal_contribution",
+                "scenario_a_interest_rate", "scenario_a_repayment_strategy", "scenario_a_roi_pct",
+                "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount",
+                "scenario_b_personal_contribution", "scenario_b_roi_pct",
                 "roi_pct_delta", "feedback_text",
             ]],
             use_container_width=True, height=380,
@@ -956,6 +987,32 @@ else:
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
+def get_investment_captions(scenario: dict) -> list:
+    """Captions explaining what feeds the loan principal vs. the ROI%
+    denominator, when either differs from the raw loan slider. Two
+    separate captions on purpose -- "effective loan principal" (what the
+    repayment simulation above actually amortizes) and "total investment"
+    (the ROI% denominator) are different figures once personal_contribution
+    is nonzero, and conflating them into one sentence would blur that.
+    Returns an empty list if there's nothing extra to explain (no training
+    debt, no personal contribution)."""
+    additional_debt = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    personal_contribution = scenario["personal_contribution"]
+    captions = []
+    if additional_debt > 0:
+        captions.append((
+            f"Effective loan principal including {fmt_money(additional_debt)} "
+            f"est. average professional-school debt: **{fmt_money(scenario['effective_principal'])}**"
+        ).replace("$", r"\$"))
+    if personal_contribution > 0:
+        captions.append((
+            f"ROI is measured against a total investment of **{fmt_money(scenario['total_investment'])}** "
+            f"({fmt_money(scenario['effective_principal'])} effective loan principal + "
+            f"{fmt_money(personal_contribution)} personal contribution), not the loan alone"
+        ).replace("$", r"\$"))
+    return captions
+
+
 def render_scenario_panel(column, scenario: dict, label: str):
     """Render one scenario's metric cards (+ effective-principal caption and
     forgiveness warning) into a layout column. Used twice by Compare Mode
@@ -965,13 +1022,8 @@ def render_scenario_panel(column, scenario: dict, label: str):
     with column:
         st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']}**")
 
-        additional_debt = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
-        if additional_debt > 0:
-            caption_text = (
-                f"Includes {fmt_money(additional_debt)} est. professional-school debt: "
-                f"**{fmt_money(scenario['effective_principal'])}** total"
-            ).replace("$", r"\$")
-            st.caption(caption_text)
+        for caption in get_investment_captions(scenario):
+            st.caption(caption)
 
         repayment_result = scenario["repayment_result"]
         roi_result = scenario["roi_result"]
@@ -995,8 +1047,8 @@ def render_scenario_panel(column, scenario: dict, label: str):
 if compare_mode:
     st.subheader("⚖️ Scenario Comparison")
     if st.session_state.has_compared:
-        scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy)
-        scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b)
+        scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy, personal_contribution)
+        scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b, personal_contribution_b)
 
         col_a, col_b = st.columns(2)
         render_scenario_panel(col_a, scenario_a, "A")
@@ -1020,7 +1072,7 @@ if compare_mode:
     else:
         st.info("Configure Scenario B in the sidebar, then click **Compare Scenarios**.")
 elif st.session_state.has_calculated:
-    scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy)
+    scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy, personal_contribution)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -1028,16 +1080,8 @@ elif st.session_state.has_calculated:
 
     st.subheader(f"📈 Results for {major} — {strategy_label}")
 
-    additional_training_debt = MAJOR_DATA[major].get("additional_training_debt", 0)
-    if additional_training_debt > 0:
-        # Escape "$" -- st.caption renders markdown, and a *pair* of literal "$"
-        # (two fmt_money() calls in one string) gets parsed as inline LaTeX math,
-        # silently mangling the text between them.
-        caption_text = (
-            f"Effective loan principal including {fmt_money(additional_training_debt)} "
-            f"est. average professional-school debt: **{fmt_money(effective_principal)}**"
-        ).replace("$", r"\$")
-        st.caption(caption_text)
+    for caption in get_investment_captions(scenario):
+        st.caption(caption)
 
     metric_cols = st.columns(4)
     metric_cols[0].metric(
@@ -1130,7 +1174,7 @@ if not st.session_state.survey_submitted:
             # than reused from st.session_state, so the survey reflects
             # exact click-time state even if the user never pressed
             # Calculate/Compare before submitting.
-            scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy)
+            scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy, personal_contribution)
 
             context = {
                 "scenario_a_school_name": school_name_a or None,
@@ -1145,6 +1189,7 @@ if not st.session_state.survey_submitted:
                 "scenario_a_total_interest": scenario_a["repayment_result"]["total_interest"],
                 "scenario_a_earnings_premium": scenario_a["roi_result"]["earnings_premium"],
                 "scenario_a_roi_pct": scenario_a["roi_result"]["roi_pct"],
+                "scenario_a_personal_contribution": personal_contribution,
             }
 
             # Scenario B / roi_pct_delta only exist when Compare Mode is on
@@ -1153,7 +1198,7 @@ if not st.session_state.survey_submitted:
             if compare_mode:
                 starting_salary_b = MAJOR_DATA[major_b]["starting_salary"]
                 dti_ratio_b = round(loan_amount_b / starting_salary_b, 4) if starting_salary_b else None
-                scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b)
+                scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b, personal_contribution_b)
                 context.update({
                     "scenario_b_school_name": school_name_b or None,
                     "scenario_b_major": major_b,
@@ -1167,6 +1212,7 @@ if not st.session_state.survey_submitted:
                     "scenario_b_total_interest": scenario_b["repayment_result"]["total_interest"],
                     "scenario_b_earnings_premium": scenario_b["roi_result"]["earnings_premium"],
                     "scenario_b_roi_pct": scenario_b["roi_result"]["roi_pct"],
+                    "scenario_b_personal_contribution": personal_contribution_b,
                 })
                 roi_a = scenario_a["roi_result"]["roi_pct"]
                 roi_b = scenario_b["roi_result"]["roi_pct"]
@@ -1265,9 +1311,16 @@ debt above, not the slider alone.
 **10-Year ROI** — Cumulative 10-year earnings for the major, minus loan
 payments made in that window, compared against the high school graduate's
 cumulative 10-year earnings (assumed debt-free). ROI% is measured against
-the *effective* principal (slider + any additional training debt), so a
-Medicine major's ROI% reflects the true ~$200K+ total investment, not just
-the undergrad loan amount entered.
+*total investment*, not the raw loan slider: `effective_principal` (loan
+slider + any additional training debt, e.g. Medicine's ~$200K+ med school
+debt) *plus* whatever you enter in **Personal Contribution ($)** -- savings,
+scholarships, or family money that went toward the degree without being
+borrowed. Personal contribution only affects this ROI% denominator; it is
+never added to the principal the loan-payoff simulation above actually
+amortizes, since no interest accrues on money you didn't borrow. Two
+identical outcomes with different personal contributions will show
+different ROI%, by design -- ROI here means "return on what you actually
+put in," not "return on your loan" alone.
 
 **Taxes** — Federal tax uses real 2024 single-filer brackets and standard
 deduction (IRS Rev. Proc. 2023-34); FICA is 6.2% Social Security (up to the
@@ -1326,8 +1379,8 @@ school never resets a loan amount you've already typed in by hand.
 
 **Survey data** — Each anonymous survey submission is tagged with
 Scenario A's full inputs and outputs, active at the exact moment of
-submission: school name, major, loan amount, interest rate, repayment
-strategy, `starting_salary` (the major's baseline entry-level wage from
+submission: school name, major, loan amount, personal contribution,
+interest rate, repayment strategy, `starting_salary` (the major's baseline entry-level wage from
 `MAJOR_DATA`, *not* the training-delay-adjusted figure Medicine/Law/
 Athletic Training use elsewhere), `dti_ratio` (loan amount ÷ starting
 salary -- the literal slider value, not the effective principal that
