@@ -34,38 +34,43 @@ COLLEGE_SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.jso
 # U.S. Bureau of Labor Statistics Occupational Employment and Wage Statistics
 # (OEWS), May 2023 national estimates (bls.gov/oes/2023/may/). Each major is
 # mapped to its closest BLS-tracked occupation (SOC code below).
-# "starting_salary" is that occupation's 10th-percentile annual wage (a proxy
+# "starting_salary" is that occupation's 25th-percentile annual wage (a proxy
 # for an entry-level new grad); "median_salary" is the occupation's median
-# annual wage (a proxy for a mid-career worker, ~10 years in). The annual
-# growth rate implied between these two real BLS figures is derived on demand
-# by get_major_growth_rate() -- see 2a -- rather than stored separately, so
-# the loan/ROI simulation's year-10 salary always matches this median exactly.
+# annual wage (a proxy for a mid-career worker, ~10 years in). 25th percentile
+# rather than 10th: OEWS's 10th percentile mixes in part-time/reporting-quirk
+# outliers (most visible for occupations like physicians, where it understates
+# real entry-level pay dramatically -- 10th pct $68,890 vs. this 25th pct
+# $152,810 for Family Medicine Physicians below) and produced unrealistically
+# low starting-salary figures. The annual growth rate implied between these
+# two real BLS figures is derived on demand by get_major_growth_rate() -- see
+# 2a -- rather than stored separately, so the loan/ROI simulation's year-10
+# salary always matches this median exactly.
 CURATED_MAJOR_DATA = {
-    # Software Developers, SOC 15-1252: 10th pct $77,020 / median $132,270
-    "Computer Science": {"starting_salary": 77020, "median_salary": 132270},
-    # Registered Nurses, SOC 29-1141: 10th pct $63,720 / median $86,070
-    "Nursing": {"starting_salary": 63720, "median_salary": 86070},
-    # Business Operations Specialists, All Other, SOC 13-1199: 10th pct $44,370 / median $79,590
-    "Business": {"starting_salary": 44370, "median_salary": 79590},
-    # Financial and Investment Analysts, SOC 13-2051: 10th pct $60,830 / median $99,010
-    "Finance": {"starting_salary": 60830, "median_salary": 99010},
-    # Market Research Analysts and Marketing Specialists, SOC 13-1161: 10th pct $40,040 / median $74,680
-    "Humanities": {"starting_salary": 40040, "median_salary": 74680},
-    # Fine Artists, Including Painters, Sculptors, and Illustrators, SOC 27-1013: 10th pct $28,390 / median $59,300
-    "Arts": {"starting_salary": 28390, "median_salary": 59300},
-    # Coaches and Scouts, SOC 27-2022: 10th pct $27,040 / median $45,910
-    "Sports Management": {"starting_salary": 27040, "median_salary": 45910},
-    # Exercise Physiologists, SOC 29-1128: 10th pct $35,460 / median $54,860
-    "Exercise Science": {"starting_salary": 35460, "median_salary": 54860},
-    # Athletic Trainers, SOC 29-9091: 10th pct $43,180 / median $57,930. BLS
+    # Software Developers, SOC 15-1252: 25th pct $101,200 / median $132,270
+    "Computer Science": {"starting_salary": 101200, "median_salary": 132270},
+    # Registered Nurses, SOC 29-1141: 25th pct $75,990 / median $86,070
+    "Nursing": {"starting_salary": 75990, "median_salary": 86070},
+    # Business Operations Specialists, All Other, SOC 13-1199: 25th pct $59,010 / median $79,590
+    "Business": {"starting_salary": 59010, "median_salary": 79590},
+    # Financial and Investment Analysts, SOC 13-2051: 25th pct $76,880 / median $99,010
+    "Finance": {"starting_salary": 76880, "median_salary": 99010},
+    # Market Research Analysts and Marketing Specialists, SOC 13-1161: 25th pct $52,840 / median $74,680
+    "Humanities": {"starting_salary": 52840, "median_salary": 74680},
+    # Fine Artists, Including Painters, Sculptors, and Illustrators, SOC 27-1013: 25th pct $38,160 / median $59,300
+    "Arts": {"starting_salary": 38160, "median_salary": 59300},
+    # Coaches and Scouts, SOC 27-2022: 25th pct $32,440 / median $45,910
+    "Sports Management": {"starting_salary": 32440, "median_salary": 45910},
+    # Exercise Physiologists, SOC 29-1128: 25th pct $45,870 / median $54,860
+    "Exercise Science": {"starting_salary": 45870, "median_salary": 54860},
+    # Athletic Trainers, SOC 29-9091: 25th pct $49,750 / median $57,930. BLS
     # now lists a master's as the typical entry-level education, so this
     # major has a 2-year unpaid training delay (the accredited master's
     # program) before the salary above applies -- see get_annual_salary_for_year.
     "Athletic Training": {
-        "starting_salary": 43180, "median_salary": 57930,
+        "starting_salary": 49750, "median_salary": 57930,
         "unpaid_training_years": 2,
     },
-    # Family Medicine Physicians, SOC 29-1215: 10th pct $68,890 / median
+    # Family Medicine Physicians, SOC 29-1215: 25th pct $152,810 / median
     # $224,640. 4 unpaid years (med school) + 3 stipend years (residency;
     # 3-year length matches Family Medicine's real ACGME program length, so
     # this pathway is internally consistent). Stipend is AAMC's 2024
@@ -75,16 +80,16 @@ CURATED_MAJOR_DATA = {
     # median medical school debt ($205,000, aamc.org/data-reports/students-
     # residents) -- added to the user's loan slider as the true principal.
     "Medicine": {
-        "starting_salary": 68890, "median_salary": 224640,
+        "starting_salary": 152810, "median_salary": 224640,
         "unpaid_training_years": 4, "stipend_training_years": 3,
         "stipend_salary": 65000, "additional_training_debt": 205000,
     },
-    # Lawyers, SOC 23-1011: 10th pct $69,760 / median $145,760. 3 unpaid
+    # Lawyers, SOC 23-1011: 25th pct $98,030 / median $145,760. 3 unpaid
     # years (law school, no paid-training equivalent). additional_training_
     # debt is the ABA Young Lawyers Division 2024 Student Loan Survey's
     # average law-school-only debt ($130,000, americanbar.org).
     "Law": {
-        "starting_salary": 69760, "median_salary": 145760,
+        "starting_salary": 98030, "median_salary": 145760,
         "unpaid_training_years": 3, "additional_training_debt": 130000,
     },
 }
@@ -107,7 +112,7 @@ def load_bls_careers(csv_path: str) -> dict:
     except (FileNotFoundError, pd.errors.EmptyDataError):
         return {}
     return {
-        row.occ_title: {"starting_salary": row.a_pct10, "median_salary": row.a_median}
+        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median}
         for row in careers_df.itertuples()
     }
 
@@ -1550,26 +1555,30 @@ with st.expander("📚 Methodology & Sources"):
 **Major salary data** — U.S. Bureau of Labor Statistics, Occupational Employment
 and Wage Statistics (OEWS), May 2023 national estimates. Each major is mapped
 to its closest BLS-tracked occupation; *Starting Salary* is that occupation's
-10th-percentile annual wage (a proxy for entry-level pay), and *Growth Rate*
-is the compound annual rate needed to climb from the 10th percentile to the
+25th-percentile annual wage (a proxy for entry-level pay), and *Growth Rate*
+is the compound annual rate needed to climb from the 25th percentile to the
 occupation's median wage over an assumed 10-year horizon —
-`(median / entry) ** (1/10) - 1`. This growth rate is a modeling assumption
-applied to real BLS wage-distribution data, not a BLS-published trajectory;
-BLS does not track individual workers' pay over time.
+`(median / entry) ** (1/10) - 1`. 25th percentile rather than the 10th: BLS's
+10th percentile mixes in part-time workers and reporting quirks that can
+understate real entry-level pay dramatically for some occupations (most
+visibly physicians — see below), so the 25th percentile is a more realistic
+"typical new grad" floor. This growth rate is a modeling assumption applied
+to real BLS wage-distribution data, not a BLS-published trajectory; BLS does
+not track individual workers' pay over time.
 
-| Major | BLS Occupation (SOC) | 10th Pctile | Median |
+| Major | BLS Occupation (SOC) | 25th Pctile | Median |
 |---|---|---|---|
-| Computer Science | Software Developers (15-1252) | $77,020 | $132,270 |
-| Nursing | Registered Nurses (29-1141) | $63,720 | $86,070 |
-| Business | Business Operations Specialists, All Other (13-1199) | $44,370 | $79,590 |
-| Finance | Financial and Investment Analysts (13-2051) | $60,830 | $99,010 |
-| Humanities | Market Research Analysts & Marketing Specialists (13-1161) | $40,040 | $74,680 |
-| Arts | Fine Artists, incl. Painters/Sculptors/Illustrators (27-1013) | $28,390 | $59,300 |
-| Sports Management | Coaches and Scouts (27-2022) | $27,040 | $45,910 |
-| Exercise Science | Exercise Physiologists (29-1128) | $35,460 | $54,860 |
-| Athletic Training | Athletic Trainers (29-9091) | $43,180 | $57,930 |
-| Medicine | Family Medicine Physicians (29-1215) | $68,890 | $224,640 |
-| Law | Lawyers (23-1011) | $69,760 | $145,760 |
+| Computer Science | Software Developers (15-1252) | $101,200 | $132,270 |
+| Nursing | Registered Nurses (29-1141) | $75,990 | $86,070 |
+| Business | Business Operations Specialists, All Other (13-1199) | $59,010 | $79,590 |
+| Finance | Financial and Investment Analysts (13-2051) | $76,880 | $99,010 |
+| Humanities | Market Research Analysts & Marketing Specialists (13-1161) | $52,840 | $74,680 |
+| Arts | Fine Artists, incl. Painters/Sculptors/Illustrators (27-1013) | $38,160 | $59,300 |
+| Sports Management | Coaches and Scouts (27-2022) | $32,440 | $45,910 |
+| Exercise Science | Exercise Physiologists (29-1128) | $45,870 | $54,860 |
+| Athletic Training | Athletic Trainers (29-9091) | $49,750 | $57,930 |
+| Medicine | Family Medicine Physicians (29-1215) | $152,810 | $224,640 |
+| Law | Lawyers (23-1011) | $98,030 | $145,760 |
 
 Source: [bls.gov/oes/2023/may](https://www.bls.gov/oes/2023/may/) (occupation
 profile pages by SOC code).
@@ -1578,14 +1587,14 @@ profile pages by SOC code).
 dropdown also includes every "detailed" occupation (i.e. a real,
 individually reported job title, not a summary category) from a BLS OEWS
 XLSX release, cleaned by `data_pipeline.py`. Each gets the same *Starting
-Salary* (10th percentile) / *Growth Rate* (10-year CAGR to the median)
+Salary* (25th percentile) / *Growth Rate* (10-year CAGR to the median)
 treatment as the curated majors above, computed identically by the same
 formula. Two BLS-specific data quality markers are handled during
 cleaning: `#` (wage top-coded above BLS's published $239,200/year
 threshold) is converted to that real floor value; `*` (estimate suppressed
 for confidentiality/reliability) causes that occupation to be dropped if
 its median wage is unusable, or falls back to an assumed 3% annual growth
-rate if only its 10th-percentile wage is unusable. Where a BLS occupation
+rate if only its 25th-percentile wage is unusable. Where a BLS occupation
 happens to share a name with one of the 11 curated majors, the curated
 entry (with its richer training-delay/debt modeling, see below) always
 takes precedence.
