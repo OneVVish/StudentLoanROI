@@ -22,6 +22,7 @@ import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from st_supabase_connection import SupabaseConnection, execute_query
 
 # ============================================================
@@ -712,25 +713,40 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     }
 
 
-def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_year: float,
-                               grants_per_year: float, inflation_rate: float,
-                               years: int = UNDERGRAD_YEARS) -> float:
-    """Total loan across `years` of enrollment, growing Cost of Attendance
-    year-over-year by inflation_rate while Personal Contribution and Grants
-    & Scholarships both stay flat nominal amounts -- Year 1 uses
+def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per_year: float,
+                                   grants_per_year: float, inflation_rate: float,
+                                   years: int = UNDERGRAD_YEARS) -> list:
+    """Per-year loan breakdown across `years` of enrollment, growing Cost of
+    Attendance year-over-year by inflation_rate while Personal Contribution
+    and Grants & Scholarships both stay flat nominal amounts -- Year 1 uses
     coa_per_year as entered/auto-filled; each subsequent year compounds by
     (1 + inflation_rate). The loan gap widens each year since neither
     funding source scales with rising costs, matching how this plays out
-    for most families/awards in practice. Grants & Scholarships reduces the
-    loan the same way Personal Contribution does, but -- unlike Personal
-    Contribution -- is never added to total_investment (the ROI%
-    denominator) in compute_scenario_results, since it's free third-party
-    money, not something the student/family gave up."""
-    total = 0.0
+    for most families/awards in practice. Returns one dict per year
+    (1-indexed): {"year", "coa", "loan_amount"}. compute_total_loan_amount
+    below just sums this -- kept separate so the results page can show the
+    year-by-year build-up, not only the final total."""
+    schedule = []
     for year_index in range(years):
         coa_this_year = coa_per_year * (1 + inflation_rate) ** year_index
-        total += max(coa_this_year - personal_contribution_per_year - grants_per_year, 0)
-    return total
+        loan_amount = max(coa_this_year - personal_contribution_per_year - grants_per_year, 0)
+        schedule.append({"year": year_index + 1, "coa": coa_this_year, "loan_amount": loan_amount})
+    return schedule
+
+
+def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_year: float,
+                               grants_per_year: float, inflation_rate: float,
+                               years: int = UNDERGRAD_YEARS) -> float:
+    """Total loan across `years` of enrollment -- see
+    compute_loan_schedule_by_year for the year-by-year math this sums.
+    Grants & Scholarships reduces the loan the same way Personal
+    Contribution does, but -- unlike Personal Contribution -- is never
+    added to total_investment (the ROI% denominator) in
+    compute_scenario_results, since it's free third-party money, not
+    something the student/family gave up."""
+    schedule = compute_loan_schedule_by_year(coa_per_year, personal_contribution_per_year,
+                                              grants_per_year, inflation_rate, years)
+    return sum(row["loan_amount"] for row in schedule)
 
 
 def compute_scenario_results(major_name: str, loan_amount: float,
@@ -972,6 +988,22 @@ if "has_compared" not in st.session_state:
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
 
+# Read here (before the checkbox widget below it is even drawn) so the
+# button's label/click-handling -- which sits ABOVE the "Compare Two
+# Scenarios" checkbox on the page -- always reflects the checkbox's
+# current value. Streamlit persists key="compare_mode" in session_state
+# across reruns, so toggling the checkbox (further down) updates this
+# same slot and the button picks it up correctly on the next rerun.
+if "compare_mode" not in st.session_state:
+    st.session_state.compare_mode = False
+
+# Admin Analytics View starts hidden -- Ctrl+Shift+A reveals the checkbox
+# that controls it (see the hidden trigger button + injected JS near the
+# bottom of the sidebar). Stays revealed for the rest of the session once
+# triggered, matching the has_calculated/has_compared one-way-flag pattern.
+if "admin_revealed" not in st.session_state:
+    st.session_state.admin_revealed = False
+
 
 # ============================================================
 # 4. SIDEBAR — USER INPUTS
@@ -979,9 +1011,51 @@ if "survey_submitted" not in st.session_state:
 
 st.sidebar.header("🎓 Your Profile")
 
-with st.sidebar.expander("College Scorecard Lookup (optional)"):
-    st.caption("Pulls real tuition & median debt for the school above via api.data.gov.")
-    scorecard_api_key = st.text_input("API Key", value="DEMO_KEY", type="password")
+# Global styling for every number_input in the sidebar (Scenario A and B
+# alike): hide the +/- stepper buttons, and show a $ or % unit prefix on
+# the left based on which one appears in the widget's own label -- every
+# number_input in this app has exactly one or the other (e.g. "Cost of
+# Attendance (per year, $)", "Average Loan Interest Rate (%)"), and
+# Streamlit mirrors that label text onto the input's aria-label, so a
+# plain CSS attribute selector is enough without touching each widget.
+st.markdown(
+    """
+    <style>
+    div[data-testid="stNumberInputContainer"] div:has(> button[data-testid="stNumberInputStepUp"]) {
+        display: none;
+    }
+    div[data-baseweb="input"] {
+        position: relative;
+    }
+    div[data-baseweb="input"]:has(input[aria-label*="$"])::before,
+    div[data-baseweb="input"]:has(input[aria-label*="%"])::before {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #808495;
+        z-index: 2;
+        pointer-events: none;
+    }
+    div[data-baseweb="input"]:has(input[aria-label*="$"])::before {
+        content: "$";
+    }
+    div[data-baseweb="input"]:has(input[aria-label*="%"])::before {
+        content: "%";
+    }
+    div[data-baseweb="input"]:has(input[aria-label*="$"]) input,
+    div[data-baseweb="input"]:has(input[aria-label*="%"]) input {
+        padding-left: 22px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Pulls real tuition & median debt for the school below via api.data.gov.
+# No sidebar control for this -- the public rate-limited DEMO_KEY is enough
+# for this app's usage volume, so there's nothing for a user to configure.
+scorecard_api_key = "DEMO_KEY"
 
 st.sidebar.subheader("💼 Career")
 
@@ -1000,9 +1074,18 @@ career_data_source = st.sidebar.radio(
 careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
 MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
 
-major = st.sidebar.selectbox("Target Major", sorted(MAJOR_DATA.keys()))
+major = st.sidebar.selectbox(
+    "Target Major", sorted(MAJOR_DATA.keys()),
+    help="Pick the career you're evaluating -- this determines the salary "
+         "numbers used everywhere else in the app.",
+)
 
-city = st.sidebar.selectbox("City / Metro Area", list(CITY_DATA.keys()))
+city = st.sidebar.selectbox(
+    "City / Metro Area", list(CITY_DATA.keys()),
+    help="Where you plan to live and work after graduating. Adjusts your "
+         "take-home pay and the 10-year comparison for how expensive that "
+         "area is to live in.",
+)
 # Computed here (not just where it's first used, further down) so it's
 # available for every compute_scenario_results() call in section 5 --
 # including Compare Mode's, which run before the Real-World Take-Home
@@ -1015,10 +1098,16 @@ city_info = CITY_DATA[city]
 school_name_a = st.sidebar.text_input(
     "Target Undergraduate School", placeholder="e.g. University of Michigan",
     key="school_name_a", on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
+    help="Type a school name to auto-fill Cost of Attendance below from "
+         "real government data, if we have it on file. If your school "
+         "isn't found, just enter Cost of Attendance yourself.",
 )
 in_state_a = st.sidebar.checkbox(
     "In-State Student?", key="in_state_a",
     on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
+    help="Check this if you'd pay in-state tuition at the school above. "
+         "Changes the auto-filled Cost of Attendance and how fast tuition "
+         "is estimated to grow each year.",
 )
 coa_match_a = find_school_coa(school_name_a, load_coa_dataset()) if school_name_a else None
 coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
@@ -1029,13 +1118,21 @@ if coa_caption_a:
 # (5d) snapshots -- has no functional dependency on School/In-State above
 # or Financing/City below, so its position here is purely about profile
 # layout, not calculation order.
-career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
+career_stage_label = st.sidebar.radio(
+    "Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()),
+    help="Preview your income right after graduating (Year 1) or 10 years "
+         "into this career, in the Real-World Take-Home section below.",
+)
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
 st.sidebar.subheader("💰 Financing")
 coa_per_year_a = st.sidebar.number_input(
     "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
     key="coa_per_year_a",
+    help="The full sticker price for one year at this school -- tuition, "
+         "fees, room & board, books, everything -- before subtracting "
+         "scholarships or what you pay yourself. Auto-fills if we found "
+         "your school above.",
 )
 personal_contribution_per_year_a = st.sidebar.number_input(
     "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
@@ -1069,31 +1166,116 @@ st.sidebar.caption((
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
     f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
-interest_rate = st.sidebar.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
-                                         value=5.5, step=0.1)
+interest_rate = st.sidebar.number_input(
+    "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0, value=5.5, step=0.1,
+    help="The interest rate on your student loan. 5.50% is a reasonable "
+         "placeholder for recent federal undergraduate loan rates -- check "
+         "your school's financial aid offer for your real rate.",
+)
 repayment_strategy = st.sidebar.selectbox(
     "Repayment Strategy",
     ["Standard 10-Year", "Income-Driven Repayment (IDR)"],
+    help="Standard 10-Year: a fixed payment every month for 10 years. "
+         "Income-Driven Repayment (IDR): your payment is based on your "
+         "income instead, and whatever's left is forgiven after 20 years.",
 )
+
+st.sidebar.divider()
+
+# Admin Analytics View is hidden by default -- a real (but invisible)
+# Streamlit button is the only way to actually flip admin_revealed, since
+# that's what makes the click go through Streamlit's normal widget/rerun
+# machinery instead of trying to fake session state from raw JS. The
+# injected script below just finds this button by its exact text and
+# calls .click() on it when Ctrl+Shift+A is pressed; the CSS block hides
+# its wrapping container so it's never visible or in the way.
+with st.sidebar.container(key="admin_reveal_trigger_wrap"):
+    admin_reveal_clicked = st.button("Reveal Admin Panel", key="admin_reveal_trigger")
+if admin_reveal_clicked:
+    st.session_state.admin_revealed = True
+
+st.markdown(
+    "<style>div.st-key-admin_reveal_trigger_wrap { display: none !important; }</style>",
+    unsafe_allow_html=True,
+)
+components.html(
+    """
+    <script>
+    (function() {
+        function findRevealButton() {
+            const doc = window.parent.document;
+            const buttons = doc.querySelectorAll("button");
+            for (const b of buttons) {
+                if (b.textContent.trim() === "Reveal Admin Panel") return b;
+            }
+            return null;
+        }
+        window.parent.document.addEventListener("keydown", function (e) {
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
+                e.preventDefault();
+                const btn = findRevealButton();
+                if (btn) btn.click();
+            }
+        });
+    })();
+    </script>
+    """,
+    height=0,
+)
+
+admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View") if st.session_state.admin_revealed else False
+
+# Read from session_state (not a bare compare_mode variable, which doesn't
+# exist yet at this point in the script -- see the "Compare Two Scenarios"
+# checkbox below, now positioned after this button per request) so the
+# label/click-handling still reflect the checkbox's current value.
+button_label = "⚖️ Compare Scenarios" if st.session_state.compare_mode else "🚀 Calculate My Payoff Plan & ROI"
+action_clicked = st.sidebar.button(button_label, use_container_width=True)
+if action_clicked:
+    if st.session_state.compare_mode:
+        log_usage_event("comparison")
+        st.session_state.has_compared = True
+    else:
+        log_usage_event("calculation")
+        st.session_state.has_calculated = True
 
 # Compare Mode adds a second scenario (Scenario B) rather than hiding the
 # widgets above -- those always represent Scenario A, in both modes. This
 # means toggling Compare Mode on/off never loses a tuned value (there's
 # only ever one copy of Scenario A's inputs) and the survey section below
-# never needs to guess which scenario's context to save.
-compare_mode = st.sidebar.checkbox("🔀 Compare Two Scenarios")
+# never needs to guess which scenario's context to save. Positioned below
+# the Calculate/Compare button (unlike every other input, which sits above
+# it) per request -- key="compare_mode" keeps this checkbox's value in
+# sync with the session_state read the button above needs before this
+# checkbox is even drawn.
+compare_mode = st.sidebar.checkbox(
+    "🔀 Compare Two Scenarios", key="compare_mode",
+    help="Turn this on to compare two different majors, schools, or loan "
+         "setups side by side instead of looking at just one.",
+)
 
 if compare_mode:
     with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
-        major_b = st.selectbox("Target Major", sorted(MAJOR_DATA.keys()), key="major_b")
+        major_b = st.selectbox(
+            "Target Major", sorted(MAJOR_DATA.keys()), key="major_b",
+            help="Pick the career you're evaluating -- this determines the "
+                 "salary numbers used everywhere else in the app.",
+        )
 
         school_name_b = st.text_input(
             "Target Undergraduate School", placeholder="e.g. Ohio State University",
             key="school_name_b", on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
+            help="Type a school name to auto-fill Cost of Attendance below "
+                 "from real government data, if we have it on file. If "
+                 "your school isn't found, just enter Cost of Attendance "
+                 "yourself.",
         )
         in_state_b = st.checkbox(
             "In-State Student?", key="in_state_b",
             on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
+            help="Check this if you'd pay in-state tuition at the school "
+                 "above. Changes the auto-filled Cost of Attendance and how "
+                 "fast tuition is estimated to grow each year.",
         )
         coa_match_b = find_school_coa(school_name_b, load_coa_dataset()) if school_name_b else None
         coa_caption_b = get_coa_confirmation_caption(school_name_b, coa_match_b, in_state_b)
@@ -1104,6 +1286,10 @@ if compare_mode:
         coa_per_year_b = st.number_input(
             "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
             key="coa_per_year_b",
+            help="The full sticker price for one year at this school -- "
+                 "tuition, fees, room & board, books, everything -- before "
+                 "subtracting scholarships or what you pay yourself. "
+                 "Auto-fills if we found your school above.",
         )
         personal_contribution_per_year_b = st.number_input(
             "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
@@ -1131,26 +1317,23 @@ if compare_mode:
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
             f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
-        interest_rate_b = st.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
-                                           value=5.5, step=0.1, key="interest_rate_b")
+        interest_rate_b = st.number_input(
+            "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0, value=5.5, step=0.1,
+            key="interest_rate_b",
+            help="The interest rate on your student loan. 5.50% is a "
+                 "reasonable placeholder for recent federal undergraduate "
+                 "loan rates -- check your school's financial aid offer "
+                 "for your real rate.",
+        )
         repayment_strategy_b = st.selectbox(
             "Repayment Strategy",
             ["Standard 10-Year", "Income-Driven Repayment (IDR)"],
             key="repayment_strategy_b",
+            help="Standard 10-Year: a fixed payment every month for 10 "
+                 "years. Income-Driven Repayment (IDR): your payment is "
+                 "based on your income instead, and whatever's left is "
+                 "forgiven after 20 years.",
         )
-
-st.sidebar.divider()
-admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View")
-
-button_label = "⚖️ Compare Scenarios" if compare_mode else "🚀 Calculate My Payoff Plan & ROI"
-action_clicked = st.sidebar.button(button_label, use_container_width=True)
-if action_clicked:
-    if compare_mode:
-        log_usage_event("comparison")
-        st.session_state.has_compared = True
-    else:
-        log_usage_event("calculation")
-        st.session_state.has_calculated = True
 
 
 # ============================================================
@@ -1224,11 +1407,9 @@ if admin_enabled:
 
 # ---- 5b. School Data Lookup (local COA dataset + College Scorecard API) --
 # Cost of Attendance (in/out-of-state) comes from the local dataset built by
-# clean_college_scorecard.py -- currently a small real-data sample (see
-# data/college_scorecard_sample_raw.csv), so only a handful of schools will
-# match until the full College Scorecard institution file is run through
-# that script and swapped in at data/college_coa_clean.csv. Median debt is
-# still fetched live, which works for any school regardless of local
+# clean_college_scorecard.py, run against the real College Scorecard
+# institution file (data/college_coa_clean.csv, 5,000+ real schools).
+# Median debt is still fetched live, which works for any school regardless of local
 # dataset coverage. A matched school's COA also auto-fills that scenario's
 # per-year Cost of Attendance field (in-state or out-of-state, per the
 # In-State Student? checkbox) -- see _autofill_coa in section 2c.
@@ -1383,6 +1564,24 @@ elif st.session_state.has_calculated:
     loan_caption = get_loan_principal_caption(scenario)
     if loan_caption:
         st.caption(loan_caption)
+
+    loan_schedule_a = compute_loan_schedule_by_year(
+        coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a
+    )
+    st.caption(
+        "Here's how your loan builds up year by year -- Cost of Attendance "
+        "grows by the estimated inflation rate each year, while Personal "
+        "Contribution and Grants & Scholarships stay the same."
+    )
+    st.dataframe(
+        pd.DataFrame([
+            {"Year": row["year"], "Cost of Attendance": fmt_money(row["coa"]),
+             "Loan Amount This Year": fmt_money(row["loan_amount"])}
+            for row in loan_schedule_a
+        ]),
+        hide_index=True, use_container_width=True,
+    )
+    st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
 
     loan_metric_cols = st.columns(3)
     loan_metric_cols[0].metric(
@@ -1569,19 +1768,23 @@ with st.expander("📚 Methodology & Sources"):
     # escaped below to stop Streamlit from swallowing text between an
     # accidental pair of them into a garbled math span.
     methodology_text = """
-**Major salary data** — U.S. Bureau of Labor Statistics, Occupational Employment
-and Wage Statistics (OEWS), May 2023 national estimates. Each major is mapped
-to its closest BLS-tracked occupation; *Starting Salary* is that occupation's
-25th-percentile annual wage (a proxy for entry-level pay), and *Growth Rate*
-is the compound annual rate needed to climb from the 25th percentile to the
-occupation's median wage over an assumed 10-year horizon —
-`(median / entry) ** (1/10) - 1`. 25th percentile rather than the 10th: BLS's
-10th percentile mixes in part-time workers and reporting quirks that can
-understate real entry-level pay dramatically for some occupations (most
-visibly physicians — see below), so the 25th percentile is a more realistic
-"typical new grad" floor. This growth rate is a modeling assumption applied
-to real BLS wage-distribution data, not a BLS-published trajectory; BLS does
-not track individual workers' pay over time.
+**Major salary data.** For each major, we look up two real numbers from
+the U.S. Bureau of Labor Statistics (BLS): what someone new to that career
+typically earns starting out, and what someone earns after being in that
+career for a while. *Starting Salary* is the 25th-percentile annual wage
+for that occupation — meaning 25% of workers in that job earn less than
+this, a reasonable stand-in for "what a typical new grad makes." *Growth
+Rate* is how much pay would need to grow every year, for 10 years straight,
+to climb from that starting number up to the occupation's median (the
+middle-of-the-pack wage): `(median / entry) ** (1/10) - 1`.
+
+Why the 25th percentile instead of the 10th? BLS's 10th percentile mixes
+in a lot of part-time workers and some data quirks that can make pay look
+unrealistically low for certain careers — most noticeably physicians (see
+below). The 25th percentile is a more realistic floor for "typical new
+grad" pay. This growth rate is our own estimate built from real BLS wage
+data, not something BLS itself publishes — BLS doesn't track how any one
+person's paycheck actually changes over 10 years.
 
 | Major | BLS Occupation (SOC) | 25th Pctile | Median |
 |---|---|---|---|
@@ -1600,215 +1803,216 @@ not track individual workers' pay over time.
 Source: [bls.gov/oes/2023/may](https://www.bls.gov/oes/2023/may/) (occupation
 profile pages by SOC code).
 
-**Additional careers (BLS OEWS)** — Beyond the 11 majors above, the
-dropdown also includes every "detailed" occupation (i.e. a real,
-individually reported job title, not a summary category) from a BLS OEWS
-XLSX release, cleaned by `data_pipeline.py`. Each gets the same *Starting
-Salary* (25th percentile) / *Growth Rate* (10-year CAGR to the median)
-treatment as the curated majors above, computed identically by the same
-formula. Two BLS-specific data quality markers are handled during
-cleaning: `#` (wage top-coded above BLS's published $239,200/year
-threshold) is converted to that real floor value; `*` (estimate suppressed
-for confidentiality/reliability) causes that occupation to be dropped if
-its median wage is unusable, or falls back to an assumed 3% annual growth
-rate if only its 25th-percentile wage is unusable. Where a BLS occupation
-happens to share a name with one of the 11 curated majors, the curated
-entry (with its richer training-delay/debt modeling, see below) always
-takes precedence.
+**Careers beyond the 11 majors above.** The dropdown also includes
+hundreds of other real jobs, pulled straight from a BLS government data
+file (cleaned by a script called `data_pipeline.py`) instead of being
+hand-picked one at a time. Each gets the same Starting Salary/Growth Rate
+treatment described above, computed the exact same way.
 
-The **"Career Salary Data" sidebar selector** picks which BLS geographic
-release backs this additional list: *National* (`cleaned_careers.csv`,
-from BLS's National XLSX release) or *California* (`cleaned_careers_ca.csv`,
-from BLS's State XLSX release filtered to California via
-`data_pipeline.py ... --state CA`) — the same occupation can pay
-noticeably more or less depending on which is selected, since this is real
-state-level wage data, not a scaled estimate.
+BLS marks some wages with special symbols instead of numbers, which we
+have to clean up: `#` means the real number was too high to publish, so we
+use BLS's own published floor for that case ($239,200/year); `*` means the
+number wasn't reliable enough to publish at all, so we either drop that
+career entirely (if we don't even have a usable median wage for it) or
+fall back to a flat 3%/year growth estimate (if only the "starting salary"
+half was unusable). If a BLS career happens to share a name with one of
+the 11 hand-picked majors above, the hand-picked version always wins,
+since it has extra detail (like training delays) the generic BLS data
+doesn't capture.
 
-**Majors requiring school beyond a 4-year bachelor's** — Athletic Training,
-Medicine, and Law don't pay a professional salary right after a 4-year
-degree in real life, so this calculator models a training delay for them
-instead of pretending otherwise:
+The **"Career Salary Data" sidebar selector** lets you pick
+whether these extra careers use *National* average wages or
+*California*-specific wages, which can be noticeably higher for some jobs
+(tech and healthcare especially). This is real state-level government
+data, not just the national number scaled up.
 
-- **Athletic Training**: 2 unpaid years, representing the accredited
-  master's program BLS now lists as this occupation's typical entry-level
-  education.
-- **Medicine**: 4 unpaid years (med school) + 3 years earning a flat
-  $65,000/year stipend (AAMC's 2024 preliminary median first-post-MD-year
-  resident stipend; real pay rises a few thousand per PGY year, simplified
-  here to one flat figure), matching Family Medicine's real 3-year ACGME
-  residency length — then the Family Medicine Physician salary above
-  applies. **+$205,000** additional loan principal (AAMC's 2024 median
-  medical school debt, [aamc.org](https://www.aamc.org/data-reports/students-residents/report/physician-education-debt-and-cost-attend-medical-school)),
-  added on top of the loan slider.
-- **Law**: 3 unpaid years (law school, no paid-training equivalent), then
-  the Lawyer salary above applies. **+$130,000** additional loan principal
-  (ABA Young Lawyers Division 2024 Student Loan Survey average law-school
-  debt, [americanbar.org](https://www.americanbar.org/groups/young_lawyers/resources/after-the-bar/personal-financial/young-lawyers-significantly-impacted-by-high-debt-burdens/)).
+**Majors that need school beyond a 4-year degree.** In real life,
+Athletic Training, Medicine, and Law don't pay a professional salary
+right after a 4-year degree — you need more school first. This calculator
+models that delay honestly instead of pretending everyone starts earning
+right away:
 
-During unpaid years, gross salary is $0 and any loan already taken out
-still accrues interest with no payments — this is intentional, not a bug,
-and it's a deliberate part of what this calculator is trying to show: at
-age ~25 (year 1 out of undergrad), a Medicine major is still in medical
-school with $0 income, not earning doctor money yet.
+- **Athletic Training**: 2 years with no income, representing the
+  master's degree BLS says is now typically required for this job.
+- **Medicine**: 4 years with no income (medical school), then 3 years
+  earning a flat $65,000/year (a stand-in for a medical resident's real
+  pay, which actually rises a bit each year — simplified here to one
+  number; source: AAMC's 2024 median first-year resident stipend). After
+  that, the real Family Medicine Physician salary from the table above
+  kicks in. On top of your loan, we add **$205,000** — the median amount
+  medical school itself costs, according to AAMC's 2024 data
+  ([source](https://www.aamc.org/data-reports/students-residents/report/physician-education-debt-and-cost-attend-medical-school)).
+- **Law**: 3 years with no income (law school), then the real Lawyer
+  salary from the table above kicks in. We add **$130,000** on top of your
+  loan for average law school debt, from the ABA's 2024 survey
+  ([source](https://www.americanbar.org/groups/young_lawyers/resources/after-the-bar/personal-financial/young-lawyers-significantly-impacted-by-high-debt-burdens/)).
 
-**High school graduate baseline** — $49,192/year, from median usual weekly
-earnings of full-time workers age 25+ with a high school diploma and no
-college ($946/week, Q3 2024), annualized. Source:
-[BLS, "Median weekly earnings $946 for workers with high school diploma"](https://www.bls.gov/opub/ted/2024/median-weekly-earnings-946-for-workers-with-high-school-diploma-1533-for-bachelors-degree.htm).
-Its annual growth rate (2%) is a modest cost-of-living/seniority assumption,
-since BLS does not publish a matching by-experience wage trajectory for this
-group.
+During those unpaid years, this calculator shows $0 income — and any loan
+you've taken out is still quietly racking up interest the whole time,
+since you're not making payments yet. That's on purpose, not a bug: it's
+the whole point of showing this stuff honestly. A first-year med student
+really does earn $0, not a doctor's salary.
 
-**Repayment math** — Standard 10-Year uses the standard fixed-payment loan
-amortization formula. Income-Driven Repayment models a payment of 10% of
-discretionary income (salary above a $22,000 living allowance), with any
-balance still outstanding after 20 years forgiven — a simplified version of
-federal undergraduate REPAYE/SAVE-style IDR plans, not an exact reproduction
-of federal rules. For Medicine/Law/Athletic Training, the loan principal fed
-into both strategies is the loan slider **plus** the additional training
-debt above, not the slider alone.
+**What if you skip college? The high school graduate baseline.** We
+compare every major against $49,192/year — real median pay for full-time
+workers 25 and older who only finished high school (based on $946/week in
+late 2024, annualized).
+[Source: BLS](https://www.bls.gov/opub/ted/2024/median-weekly-earnings-946-for-workers-with-high-school-diploma-1533-for-bachelors-degree.htm).
+We assume this grows a modest 2%/year (a stand-in for normal raises and
+cost-of-living bumps) since BLS doesn't publish a real year-by-year
+trajectory for this group the way it does for individual careers.
 
-**10-Year ROI** — Cumulative 10-year earnings for the major, minus loan
-payments made in that window, compared against the high school graduate's
-cumulative 10-year earnings (assumed debt-free). ROI% is measured against
-*total investment*, not the raw loan slider: `effective_principal` (loan
-slider + any additional training debt, e.g. Medicine's ~$200K+ med school
-debt) *plus* whatever you enter in **Personal Contribution ($)** -- savings,
-scholarships, or family money that went toward the degree without being
-borrowed. Personal contribution only affects this ROI% denominator; it is
-never added to the principal the loan-payoff simulation above actually
-amortizes, since no interest accrues on money you didn't borrow. Two
-identical outcomes with different personal contributions will show
-different ROI%, by design -- ROI here means "return on what you actually
-put in," not "return on your loan" alone.
+**How your loan payment is calculated.** *Standard 10-Year* just means a
+fixed payment every month for 10 years, using the standard math lenders
+use to make sure your last payment fully pays off both what you borrowed
+and the interest on it (this is called "amortization"). *Income-Driven
+Repayment (IDR)* works differently: your payment is 10% of your
+"discretionary income" — basically your salary minus a $22,000 living
+allowance — and after 20 years, whatever's still unpaid gets forgiven.
+This is a simplified version of real federal IDR plans, not an exact
+copy of federal rules. For Medicine, Law, and Athletic Training, both
+options are calculated using your loan *plus* the extra training debt
+described above — not just the loan by itself.
 
-**Cost of living in the ROI calculation.** Both sides of the ROI
-comparison -- the major's net position and the high-school-graduate
-baseline -- are adjusted for the selected City / Metro Area's cost of
-living, on the assumption that the HS grad lives in the same city as the
-major track (the only city input this app has; no separate HS-grad city
-selector exists). "10-Year Earnings Premium" and the ROI charts are
-labeled "(COL-Adjusted)" for this reason -- a dollar in San Francisco and
-a dollar in Columbus no longer count the same. Selecting "National
-Average" (`col_index = 100`) is a no-op and reproduces the original
-nominal, national-average comparison exactly. *Total investment* (debt +
-personal contribution, the ROI% denominator) is never cost-of-living
-adjusted -- you repay a fixed nominal dollar amount regardless of where
-you live, the same reason the loan repayment simulation itself isn't
-COL-adjusted either. In Compare Mode, one shared city selector applies to
-both Scenario A and B, rather than each scenario getting its own city.
+**How we calculate 10-Year ROI (return on investment).** We add up 10
+years of a major's earnings, subtract whatever loan payments you made
+during that time, and compare the result to what a debt-free high school
+graduate would have earned over the same 10 years. ROI% specifically
+compares that result to your *total investment* — not just your loan.
+Total investment means your effective loan principal (your loan, plus any
+extra training debt like medical school) *plus* whatever you type into
+**Personal Contribution ($)**: savings, scholarships, or family money that
+went toward school without being borrowed. Personal Contribution only
+affects this ROI% comparison — it's never added to the loan itself,
+since you don't pay interest on money you never borrowed. This means two
+people with the exact same major and loan, but different Personal
+Contributions, will see different ROI% numbers — on purpose. ROI here
+means "return on everything you actually put in," not just "return on
+your loan."
 
-**Taxes** — Federal tax uses real 2024 single-filer brackets and standard
-deduction (IRS Rev. Proc. 2023-34); FICA is 6.2% Social Security (up to the
-$168,600 2024 wage base) + 1.45% Medicare. Scope: single filer only, no
-dependents, no itemized deductions/credits, no Additional Medicare Tax (no
-major's trajectory reaches the $200K threshold for it). State tax uses real
-marginal brackets for New York, California, and Ohio (a flat top-marginal
-rate would badly overstate tax at these salary levels — e.g. NY's 10.9% top
-rate only applies above $25M); Illinois, Georgia, Colorado, and Texas are
-genuinely flat/zero-rate states. New York City's local tax is a flat 3.5%
-approximation of its real 3.078%–3.876% resident bracket range. Source:
-[Tax Foundation, 2024 State Income Tax Rates](https://taxfoundation.org/data/all/state/state-income-tax-rates-2024/).
+**Why we adjust for cost of living.** A dollar goes a lot further in
+Columbus than it does in San Francisco. So both sides of the ROI
+comparison — the major's outcome and the high-school-grad baseline — get
+adjusted for the cost of living in whatever City/Metro Area you picked
+(we assume the high school grad lives in the same city, since this app
+only has one city selector). That's what **"(COL-Adjusted)"** means next
+to "10-Year Earnings Premium" and the ROI charts. Picking "National
+Average" is the same as not adjusting at all. One thing that does *not*
+get cost-of-living adjusted: your total investment (debt + personal
+contribution) — you owe a fixed dollar amount no matter where you live,
+so that number stays as-is. In Compare Mode, both scenarios share one
+city selector rather than each getting their own.
 
-**Cost of living** — City `col_index` values come from BEA Regional Price
-Parities, 2023 release (national average = 100), via Tax Foundation's "Real
-Value of $100 by Metro" compilation of the same BEA data:
-`col_index = 10000 / real_value_of_100_dollars`. "National Average" has no
-specific state, shown as tax "N/A" rather than "$0" — those are different
-claims.
+**Taxes.** We use real 2024 federal tax brackets for a single filer with
+no dependents (IRS Rev. Proc. 2023-34), plus FICA taxes (6.2% Social
+Security, up to a $168,600 wage cap, + 1.45% Medicare). We don't model
+itemized deductions, tax credits, or the extra Medicare tax that kicks in
+above $200K (no major's salary here reaches that high). For state tax, we
+use real tax brackets for New York, California, and Ohio — a single flat
+rate would badly overstate what most people actually pay (New York's
+top rate of 10.9%, for example, only kicks in above $25 million). Illinois,
+Georgia, Colorado, and Texas are genuinely flat-rate or no-income-tax
+states already. New York City's local tax is approximated as a flat 3.5%
+(its real resident tax bracket actually ranges from 3.078% to 3.876%
+depending on income, so 3.5% is a reasonable stand-in).
+[Source: Tax Foundation, 2024 State Income Tax Rates](https://taxfoundation.org/data/all/state/state-income-tax-rates-2024/).
 
-**Career Stage Snapshot** — This toggle ("Starting" vs. "Mid-Career") only
-changes the Real-World Take-Home section above; it never changes the loan
-payoff schedule or ROI numbers, which always simulate the full year-by-year
-trajectory starting from year 1 regardless of which snapshot is selected.
-Feeding a mid-career salary into the loan simulator as a fake "year 1" would
-double-count growth and produce a nonsensical payoff schedule — the toggle
-is a window into one point on the same real trajectory, not an alternate
-starting condition.
+**How "cost of living" is measured.** Each city's cost-of-living number
+comes from real government data (BEA Regional Price Parities, 2023),
+by way of the Tax Foundation's "Real Value of $100 by Metro" report. In
+short: if $100 buys less in a city than the national average, that city's
+cost-of-living number goes up. "National Average" doesn't correspond to
+any one state, which is why we show its tax rate as "N/A" instead of "$0"
+— those mean different things.
 
-**Compare Two Scenarios** — Runs the exact same `compute_scenario_results`
-calculation path as the single-scenario view above, once per scenario — no
-separate or duplicated math. v1 only compares loan payoff and 10-year ROI;
-it does not (yet) compare take-home pay or cost of living between the two
-scenarios, since each scenario would need its own city/career-stage
-selection to do that meaningfully. Scenario A is always the sidebar's main
-inputs; enabling Compare Mode adds Scenario B alongside it rather than
-replacing anything, so switching the mode off never loses a tuned value.
+**What "Career Stage Snapshot" actually changes.** Switching between
+"Starting" and "Mid-Career" only changes what you see in the Real-World
+Take-Home section above — it does not change your loan payoff schedule or
+your 10-Year ROI numbers, which always simulate a full, real year-by-year
+path starting from year 1 no matter which snapshot you're looking at.
+Think of it as a window into one moment of a story that's always the same
+story — not a way to start the story over from a different point.
 
-**School Cost of Attendance & debt lookup** — U.S. Department of Education
-College Scorecard ([collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)).
-In-state/out-of-state Cost of Attendance comes from a locally pre-cleaned
-dataset (see `clean_college_scorecard.py`, which derives it from
-`COSTT4_A`/`COSTT4_P` and the public-school in-state/out-of-state tuition
-swap) rather than a live call per lookup; that dataset currently covers only
-a small real-data sample, so most schools won't have a match yet until the
-full institution file is processed and swapped in. Median completer debt
-has no equivalent in that dataset and is still fetched live, so it works
-for any school. Both figures are shown as contextual information only and
-are not used in the calculator's math. Each scenario has its own school
-field (so Compare Mode can hold e.g. "Computer Science at School A" against
-"Computer Science at School B"); when a school matches the local dataset,
-that scenario's **Cost of Attendance (per year)** field is auto-filled --
-using in-state or out-of-state COA depending on the **In-State Student?**
-checkbox for that scenario. A non-matching school never resets a COA
-estimate you've already typed in by hand; you can always override the
-auto-filled figure directly.
+**How "Compare Two Scenarios" works.** Comparing two scenarios runs the
+exact same calculations described above, just twice — once for each
+scenario, with no shortcuts or different math. Right now, comparisons
+only cover loan payoff and 10-Year ROI; take-home pay and cost of living
+aren't compared side by side yet, since that would need each scenario to
+have its own city and career-stage picks. Scenario A is always your main
+sidebar inputs; turning on Compare Mode adds Scenario B next to it rather
+than replacing anything, so turning it back off never loses what you've
+entered.
 
-**Loan amount is derived, not entered.** Each scenario asks for Cost of
-Attendance (per year), Personal Contribution (per year), and Grants &
-Scholarships (per year); the total loan amount grows Cost of Attendance
-year-over-year by an estimated inflation rate while Personal Contribution
-and Grants & Scholarships both stay flat nominal amounts, then sums across
-`UNDERGRAD_YEARS` (4, an assumed bachelor's degree length):
-`Loan (Year N) = max(Cost of Attendance × (1 + inflation_rate)^(N-1) − Personal Contribution − Grants & Scholarships, 0)`,
-summed for N = 1..4. Because neither funding source scales with rising
-costs, the loan gap widens each year -- the resulting total feeds
-`effective_principal` and the loan repayment simulation exactly as it did
-when loan amount used to be a single flat entry.
+**Where school cost and debt numbers come from.** Cost of Attendance and
+debt figures come from the U.S. Department of Education's College
+Scorecard ([collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)).
+In-state and out-of-state Cost of Attendance are pre-calculated for over
+5,000 real U.S. schools (see `clean_college_scorecard.py` for exactly how)
+rather than looked up live each time. Typical debt-at-graduation is looked
+up live instead, so it works for any school in College Scorecard's
+database. Both numbers are shown just for context — they don't feed into
+any of the calculator's math directly. Each scenario has its own school
+field, so Compare Mode can hold, say, "Computer Science at School A"
+against "Computer Science at School B." When your school is found, Cost
+of Attendance below auto-fills using in-state or out-of-state pricing,
+based on whether you checked **In-State Student?**. If your school isn't
+found, or you'd rather enter your own number, typing over the auto-filled
+value always works — it won't get overwritten later.
 
-**Grants & Scholarships reduces the loan but not the ROI% denominator.**
-Personal Contribution counts toward `total_investment` (the ROI%
-denominator) because it's money the student/family actually gave up --
-real opportunity cost. Grants & Scholarships is free third-party money: it
-shrinks what you need to borrow, but it was never your money to begin
-with, so it's deliberately excluded from `total_investment` in
-`compute_scenario_results` -- only `personal_contribution` is added to
-`effective_principal` there.
+**How your loan amount is actually calculated.** You don't type in a loan
+amount directly — instead, each scenario asks for three things per year:
+Cost of Attendance, Personal Contribution, and Grants & Scholarships.
+Cost of Attendance is assumed to grow a little every year (an estimated
+inflation rate), while Personal Contribution and Grants & Scholarships
+stay the same dollar amount each year. Each year's loan amount is
+whatever's left after subtracting Personal Contribution and Grants &
+Scholarships from that year's Cost of Attendance (never less than $0),
+and the total loan is those four years added together:
+`Loan (Year N) = max(Cost of Attendance × (1 + inflation rate)^(N-1) − Personal Contribution − Grants & Scholarships, 0)`,
+added up for all 4 years of an assumed bachelor's degree. Because tuition
+keeps rising while your personal contribution and any scholarships don't,
+the gap — and your loan — tends to grow a bit each year.
 
-**Cost of Attendance inflation rate** is estimated per school: the CAGR
-between two fixed College Scorecard data years (2018 and 2022,
-`(coa_2022 / coa_2018) ** (1/4) - 1`) from a live lookup -- fixed years
-rather than "latest" keep the estimate stable across app runs instead of
-silently drifting whenever College Scorecard releases newer data. When
-school-specific history isn't available (no API key, missing year data,
-or no school entered), it falls back to a rate by institution type, from
-College Board's *Trends in College Pricing 2024* (nominal year-over-year
-increase, 2023-24 → 2024-25): **2.7%** Public, **3.9%** Private Non-Profit.
-**Private For-Profit (2.5%)** has no equivalent recent nominal figure
-readily published -- NCES Fast Facts shows for-profit *real*
-(inflation-adjusted) tuition has been flat-to-declining over the last
-decade, so this rate assumes nominal growth tracks general price inflation
-rather than the tuition-specific premium seen in the other two sectors;
-this is a modeling judgment call, not a directly sourced figure. An
-unknown control type (no local dataset match at all) defaults to the
-Public rate.
+**Why Grants & Scholarships and Personal Contribution are treated
+differently.** Personal Contribution counts toward your "total
+investment" (the ROI% comparison) because it's money you or your family
+actually gave up — a real cost to you. Grants & Scholarships is free
+money from someone else: it shrinks how much you have to borrow, but
+since it was never your money to begin with, it's left out of your "total
+investment" on purpose.
 
-**Survey data** — Each anonymous survey submission is tagged with
-Scenario A's full inputs and outputs, active at the exact moment of
-submission: school name, major, loan amount, personal contribution,
-interest rate, repayment strategy, `starting_salary` (the major's baseline entry-level wage from
-`MAJOR_DATA`, *not* the training-delay-adjusted figure Medicine/Law/
-Athletic Training use elsewhere), `dti_ratio` (loan amount ÷ starting
-salary -- the literal slider value, not the effective principal that
-includes additional training debt), monthly payment (null for IDR, since
-its payment varies month to month), payoff timeline, total interest, 10-
-year earnings premium, and ROI%. When Compare Mode is on at submission
-time, the same fields for Scenario B are captured too, plus `roi_pct_delta`
-(the absolute difference between the two scenarios' ROI%) -- otherwise
-those fields are left null, since there's no Scenario B to report. This
-lets the admin view and any exported CSV break survey responses down by
-exactly what the respondent was simulating and comparing, for the
-companion behavioral-economics research paper.
+**How we estimate tuition inflation for your specific school.** We
+compare a school's real Cost of Attendance in 2018 versus 2022 (from
+College Scorecard) and calculate the steady yearly growth rate that would
+turn one into the other: `(coa_2022 / coa_2018) ** (1/4) - 1`. This kind
+of calculation is called CAGR (compound annual growth rate), which just
+means "the constant percentage growth per year that explains the total
+change." We use fixed years (2018 and 2022)
+instead of "the most recent data available" so this estimate doesn't
+quietly change every time College Scorecard updates. If we can't find
+your specific school's history, we fall back to a typical rate based on
+the type of school: **2.7%/year** for public schools, **3.9%/year** for
+private non-profit schools (both from the College Board's 2024 tuition
+pricing report). **Private for-profit schools** don't have an equally
+solid recent number available, so we use **2.5%/year** as an educated
+estimate based on general inflation trends — this one is a judgment call,
+not a number we found in a report. If we don't even know what type of
+school it is, we default to the public-school rate.
+
+**What we save when you submit the survey.** Each anonymous response
+saves your exact inputs and results at that moment: school, major, loan
+amount, personal contribution, interest rate, repayment strategy, your
+major's starting salary, and something called `dti_ratio` — short for
+"debt-to-income ratio," which just means your loan amount divided by your
+starting salary, a common way to describe how big a loan is relative to
+what you'll earn. We also save your monthly payment (blank for IDR, since
+that payment amount changes over time), payoff timeline, total interest,
+10-year earnings premium, and ROI%. If Compare Mode was on when you
+submitted, we save all of that for Scenario B too, plus the difference
+between the two scenarios' ROI%. None of this is tied to your name or
+any personal identifying information — it's used to help a companion
+research paper understand how tools like this one affect students'
+thinking about college and careers.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
