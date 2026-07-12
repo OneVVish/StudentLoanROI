@@ -16,7 +16,6 @@ Architecture:
                                 and the impact survey.
 """
 
-import os
 from datetime import datetime
 
 import pandas as pd
@@ -24,13 +23,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+from st_supabase_connection import SupabaseConnection, execute_query
 
 # ============================================================
 # 1. CONFIGURATION & CONSTANTS
 # ============================================================
-
-USAGE_LOG_FILE = "usage_logs.csv"
-SURVEY_LOG_FILE = "survey_responses.csv"
 
 COLLEGE_SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.json"
 
@@ -258,31 +255,53 @@ def get_effective_principal(major_name: str, loan_amount: float) -> float:
     return loan_amount + MAJOR_DATA[major_name].get("additional_training_debt", 0)
 
 
-# ---- 2b. Usage / Survey Logging (File I/O) ------------------------------
+# ---- 2b. Usage / Survey Logging (Supabase) -------------------------------
+# Backed by a hosted Postgres table (via st-supabase-connection) instead of
+# local CSVs, since Streamlit Community Cloud's filesystem is ephemeral --
+# local files would be silently wiped on every sleep/restart, defeating the
+# whole point of logging this data for the companion research paper.
+
+@st.cache_resource
+def get_supabase_connection():
+    return st.connection("supabase_connection", type=SupabaseConnection)
+
 
 def log_usage_event(action: str):
-    """Append a single usage event to usage_logs.csv, creating it on first use."""
-    entry = pd.DataFrame([{"timestamp": datetime.now().isoformat(), "action": action}])
-    file_exists = os.path.exists(USAGE_LOG_FILE)
-    entry.to_csv(USAGE_LOG_FILE, mode="a", header=not file_exists, index=False)
+    """Insert a single usage event into the usage_logs table."""
+    conn = get_supabase_connection()
+    execute_query(
+        conn.table("usage_logs").insert(
+            [{"timestamp": datetime.now().isoformat(), "action": action}],
+            count="None",
+        ),
+        ttl=0,
+    )
 
 
 def save_survey_response(perception_change: str, feedback_text: str):
-    """Append one anonymous survey submission to survey_responses.csv."""
-    entry = pd.DataFrame([{
-        "timestamp": datetime.now().isoformat(),
-        "perception_change": perception_change,
-        "feedback_text": feedback_text,
-    }])
-    file_exists = os.path.exists(SURVEY_LOG_FILE)
-    entry.to_csv(SURVEY_LOG_FILE, mode="a", header=not file_exists, index=False)
+    """Insert one anonymous survey submission into the survey_responses table."""
+    conn = get_supabase_connection()
+    execute_query(
+        conn.table("survey_responses").insert(
+            [{
+                "timestamp": datetime.now().isoformat(),
+                "perception_change": perception_change,
+                "feedback_text": feedback_text,
+            }],
+            count="None",
+        ),
+        ttl=0,
+    )
 
 
-def load_csv_safe(path: str, columns: list) -> pd.DataFrame:
-    """Read a log CSV, tolerating the file not existing yet (first run)."""
+def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
+    """Read all rows from a Supabase table, tolerating any connection/query
+    failure (e.g. secrets not configured yet) by returning an empty frame."""
     try:
-        return pd.read_csv(path)
-    except (FileNotFoundError, pd.errors.EmptyDataError):
+        conn = get_supabase_connection()
+        result = execute_query(conn.table(table_name).select("*"), ttl=0)
+        return pd.DataFrame(result.data) if result.data else pd.DataFrame(columns=columns)
+    except Exception:
         return pd.DataFrame(columns=columns)
 
 
@@ -641,8 +660,8 @@ st.caption(
 if admin_enabled:
     st.subheader("📊 Admin Analytics Dashboard")
 
-    usage_df = load_csv_safe(USAGE_LOG_FILE, columns=["timestamp", "action"])
-    survey_df = load_csv_safe(SURVEY_LOG_FILE, columns=["timestamp", "perception_change", "feedback_text"])
+    usage_df = load_table_safe("usage_logs", columns=["timestamp", "action"])
+    survey_df = load_table_safe("survey_responses", columns=["timestamp", "perception_change", "feedback_text"])
 
     col1, col2 = st.columns(2)
     col1.metric("Total App Interactions", len(usage_df))

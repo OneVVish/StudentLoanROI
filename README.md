@@ -44,16 +44,58 @@ for the school you enter. It works out of the box with the public
 [api.data.gov/signup](https://api.data.gov/signup/) and paste it into the
 sidebar field.
 
-## Data files
+## Data storage (Supabase)
 
-The app writes two CSV files in the working directory as you use it:
+Usage/survey logging is backed by a [Supabase](https://supabase.com) Postgres
+database instead of local files, since Streamlit Community Cloud's
+filesystem is ephemeral — local CSVs would silently get wiped on every
+sleep/restart, which defeats the point of collecting this data for the
+companion research paper.
 
-- `usage_logs.csv` — anonymous pageview/calculation event timestamps
-- `survey_responses.csv` — anonymous survey submissions
+To run the app yourself, you need your own free Supabase project:
 
-Both are created automatically on first use and are safe to delete; the
-sidebar's "Admin Analytics View" checkbox reads them back to show usage
-metrics and survey results.
+1. Sign up at [supabase.com](https://supabase.com) (GitHub login works) and
+   create a new project (free tier).
+2. In the project's SQL Editor, run:
+   ```sql
+   create table usage_logs (
+     timestamp text,
+     action text
+   );
+
+   create table survey_responses (
+     timestamp text,
+     perception_change text,
+     feedback_text text
+   );
+   ```
+3. From **Project Settings → API**, copy the **Project URL** and the
+   **anon public API key**.
+4. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and
+   fill in those two values:
+   ```toml
+   [connections.supabase_connection]
+   SUPABASE_URL = "https://your-project-ref.supabase.co"
+   SUPABASE_KEY = "your-anon-public-key"
+   ```
+   `secrets.toml` is gitignored — never commit real credentials.
+
+The sidebar's "Admin Analytics View" checkbox reads both tables back to
+show usage metrics and survey results; you can also browse them directly
+in Supabase's Table Editor.
+
+## Deploying to Streamlit Community Cloud
+
+1. Push your code to a GitHub repo (this one's already at
+   [github.com/OneVVish/StudentLoanROI](https://github.com/OneVVish/StudentLoanROI)).
+2. Go to [share.streamlit.io](https://share.streamlit.io), sign in with
+   GitHub, and click **Create app → "Yup, I have an app."**
+3. Pick your repo, branch `main`, and file path `app.py`.
+4. In **Advanced settings → Secrets**, paste the same
+   `[connections.supabase_connection]` block from your local
+   `secrets.toml` — this is how the deployed app gets Supabase credentials
+   without them ever being in the git repo.
+5. Click **Deploy**.
 
 ## Disclaimer
 
