@@ -866,10 +866,10 @@ def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major
     })
     fig = px.bar(
         comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
-        title="10-Year Net Financial Position (COL-Adjusted): Major vs. High School Baseline",
+        title=f"10-Year Net Financial Position (COL-Adjusted): {major_name} vs. High School Baseline",
         text_auto=".2s",
     )
-    fig.update_layout(yaxis_tickprefix="$", showlegend=False)
+    fig.update_layout(yaxis_tickprefix="$", showlegend=False, title_x=0.5)
     return fig
 
 
@@ -983,6 +983,8 @@ with st.sidebar.expander("College Scorecard Lookup (optional)"):
     st.caption("Pulls real tuition & median debt for the school above via api.data.gov.")
     scorecard_api_key = st.text_input("API Key", value="DEMO_KEY", type="password")
 
+st.sidebar.subheader("💼 Career")
+
 # Which BLS OEWS geographic release backs the career dropdown below --
 # National (every state combined into one nationwide figure per occupation)
 # or California (that state's own wages, which run higher for many careers,
@@ -999,6 +1001,13 @@ careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" els
 MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
 
 major = st.sidebar.selectbox("Target Major", sorted(MAJOR_DATA.keys()))
+
+# Which point in this major's career the Real-World Take-Home section
+# (5d) snapshots -- grouped here with Career Salary Data/Target Major
+# since it's just as much a "career" decision, even though it has no
+# functional dependency on School/Financing/City below it.
+career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
+career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
 # School next: entering it immediately shows Cost of Attendance below, and
 # (if it matches the local dataset) auto-fills the per-year COA field --
@@ -1024,11 +1033,12 @@ coa_per_year_a = st.sidebar.number_input(
 personal_contribution_per_year_a = st.sidebar.number_input(
     "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
     key="personal_contribution_per_year_a",
-    help="Savings or family money toward this year's cost that you did NOT "
-         "borrow. The loan amount below is Cost of Attendance minus this "
-         "and Grants & Scholarships -- counted in the ROI% denominator, but "
-         "not added to the loan you're actually repaying (no interest "
-         "accrues on it).",
+    help="Also called the Student Aid Index (SAI) -- the amount your family "
+         "is expected to contribute. Savings or family money toward this "
+         "year's cost that you did NOT borrow. The loan amount below is "
+         "Cost of Attendance minus this and Grants & Scholarships -- "
+         "counted in the ROI% denominator, but not added to the loan "
+         "you're actually repaying (no interest accrues on it).",
 )
 grants_per_year_a = st.sidebar.number_input(
     "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, value=0, step=500,
@@ -1091,9 +1101,11 @@ if compare_mode:
         personal_contribution_per_year_b = st.number_input(
             "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
             key="personal_contribution_per_year_b",
-            help="Savings or family money toward this year's cost that wasn't "
-                 "borrowed. The loan amount below is Cost of Attendance minus "
-                 "this and Grants & Scholarships.",
+            help="Also called the Student Aid Index (SAI) -- the amount your "
+                 "family is expected to contribute. Savings or family money "
+                 "toward this year's cost that wasn't borrowed. The loan "
+                 "amount below is Cost of Attendance minus this and Grants "
+                 "& Scholarships.",
         )
         grants_per_year_b = st.number_input(
             "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, value=0, step=500,
@@ -1126,8 +1138,6 @@ city = st.sidebar.selectbox("City / Metro Area", list(CITY_DATA.keys()))
 # including Compare Mode's, which run before the Real-World Take-Home
 # section that used to be the only place this was computed.
 city_info = CITY_DATA[city]
-career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
-career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
 st.sidebar.divider()
 admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View")
@@ -1431,9 +1441,12 @@ elif st.session_state.has_calculated:
     st.caption((
         f"This compares two paths over your first 10 years after high school: going into "
         f"**{major}** (paying off the loan above along the way) vs. skipping college and "
-        f"working right away as a high school graduate. Both numbers are adjusted for the "
-        f"cost of living in **{city}**, so it's a fair, apples-to-apples comparison of real "
-        f"spending power -- not just which raw number is bigger."
+        f"working right away as a high school graduate who takes on **no loan of their own**. "
+        f"Both numbers are adjusted for the cost of living in **{city}** -- that's what "
+        f"**\"COL-Adjusted\"** means -- so it's a fair, apples-to-apples comparison of real "
+        f"spending power, not just which raw number is bigger. **Earnings Premium** is simply "
+        f"the difference between the two: how much more (or less) you'd have after 10 years "
+        f"by choosing {major} instead of skipping college."
     ).replace("$", r"\$"))
 
     investment_caption = get_total_investment_caption(scenario)
@@ -1441,12 +1454,16 @@ elif st.session_state.has_calculated:
         st.caption(investment_caption)
 
     position_cols = st.columns(3)
-    position_cols[0].metric("High School Grad — 10-Yr Net Position", fmt_money(roi_result["hs_net_position"]))
+    position_cols[0].metric(
+        "High School Grad — 10-Yr Net Position (No Loan)", fmt_money(roi_result["hs_net_position"]),
+    )
     position_cols[1].metric(f"{major} — 10-Yr Net Position", fmt_money(roi_result["major_net_position"]))
     position_cols[2].metric(
         "Earnings Premium (COL-Adjusted)",
         fmt_money(roi_result["earnings_premium"]),
         delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
+        help="Earnings Premium = your 10-Yr Net Position minus the High School Grad's. "
+             "COL-Adjusted = adjusted for cost of living, so cities are compared fairly.",
     )
 
     st.plotly_chart(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major), use_container_width=True)
