@@ -1,10 +1,17 @@
 """
 Clean and Format BLS OEWS Occupational Wage Data
 --------------------------------------------------------------------------
-Loads the U.S. Bureau of Labor Statistics' Occupational Employment and Wage
-Statistics (OEWS) national XLSX release (download at bls.gov/oes/tables.htm)
-and produces a clean per-occupation wage dataset for the app's career
-dropdown: cleaned_careers.csv.
+Loads a U.S. Bureau of Labor Statistics' Occupational Employment and Wage
+Statistics (OEWS) XLSX release (download at bls.gov/oes/tables.htm) and
+produces a clean per-occupation wage dataset for the app's career dropdown.
+
+Two geographic scopes are supported from two different BLS releases:
+  - National ("oesm##nat.zip" -> a file like national_M2025_dl.xlsx): every
+    occupation, one row per occupation, no --state flag needed.
+  - State ("oesm##st.zip" -> a file like state_M2025_dl.xlsx): every
+    occupation *for every state combined in one file* -- pass --state (a
+    two-letter abbreviation, e.g. CA) to filter down to just that state.
+    Do NOT pass the National file with --state; it has no state column.
 
 Project rules this script implements:
   1. Column names are normalized to lowercase on load -- BLS's real XLSX
@@ -29,10 +36,18 @@ Project rules this script implements:
      is still included per-row as a documented, human-readable summary of
      that same rate (and as the fallback value on the rare row where
      a_pct10 itself is unusable).
+  5. When --state is given, rows are additionally filtered to that state
+     before the o_group/wage cleaning above. The state column's exact name
+     isn't hardcoded to one guess -- BLS has used different names for it
+     across releases -- so a short list of known candidates is checked in
+     order, and column values are matched as either a 2-letter abbreviation
+     or a full state name, whichever the file actually contains.
 
 Usage:
     python data_pipeline.py raw_bls_data.xlsx
     python data_pipeline.py raw_bls_data.xlsx -o cleaned_careers.csv
+    python data_pipeline.py state_M2025_dl.xlsx --state CA
+    python data_pipeline.py state_M2025_dl.xlsx --state CA -o cleaned_careers_ca.csv
 """
 
 import argparse
@@ -57,6 +72,59 @@ GROWTH_WINDOW_YEARS = 10
 DEFAULT_GROWTH_RATE = 0.03
 
 REQUIRED_COLUMNS = ["occ_code", "occ_title", "o_group", "a_median", "a_pct10"]
+
+# Candidate column names BLS has used to hold the state for each row in the
+# State release, checked in order -- whichever one is actually present in
+# the loaded file is used, so this script isn't locked to one exact release.
+STATE_COLUMN_CANDIDATES = ["prim_state", "st", "state", "area_title"]
+
+STATE_ABBR_TO_NAME = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "DC": "District of Columbia", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii",
+    "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+
+def find_state_column(df: pd.DataFrame) -> str:
+    """Return whichever known state-column name is present in this file.
+    Raises ValueError (with the real column list) if none match, instead
+    of silently filtering on a column that doesn't exist."""
+    for candidate in STATE_COLUMN_CANDIDATES:
+        if candidate in df.columns:
+            return candidate
+    raise ValueError(
+        f"--state was given, but no recognized state column "
+        f"({STATE_COLUMN_CANDIDATES}) was found. Found columns: {list(df.columns)}. "
+        f"Make sure you're passing the BLS *State* release, not the National one."
+    )
+
+
+def filter_to_state(df: pd.DataFrame, state_abbr: str) -> pd.DataFrame:
+    """Filter to rows matching state_abbr (e.g. "CA"), auto-detecting
+    whether this file's state column holds 2-letter abbreviations or full
+    state names."""
+    state_abbr = state_abbr.strip().upper()
+    if state_abbr not in STATE_ABBR_TO_NAME:
+        raise ValueError(f"'{state_abbr}' isn't a recognized two-letter state abbreviation.")
+
+    column = find_state_column(df)
+    values = df[column].astype(str).str.strip()
+    looks_like_abbreviation = values.str.len().median() <= 3
+    if looks_like_abbreviation:
+        matches = values.str.upper() == state_abbr
+    else:
+        matches = values.str.lower() == STATE_ABBR_TO_NAME[state_abbr].lower()
+    return df[matches]
 
 
 def load_bls_data(xlsx_path: str) -> pd.DataFrame:
@@ -87,9 +155,14 @@ def clean_wage_column(series: pd.Series) -> pd.Series:
     return numeric
 
 
-def build_clean_dataframe(xlsx_path: str) -> pd.DataFrame:
-    """Load, filter, and clean the raw BLS release into the final dataset."""
+def build_clean_dataframe(xlsx_path: str, state: str = None) -> pd.DataFrame:
+    """Load, filter, and clean the raw BLS release into the final dataset.
+    state, if given (e.g. "CA"), restricts to that state -- only valid
+    against the BLS *State* release, which has every state in one file."""
     raw = load_bls_data(xlsx_path)
+
+    if state:
+        raw = filter_to_state(raw, state)
 
     detailed = raw[raw["o_group"].astype(str).str.strip().str.lower() == "detailed"].copy()
 
@@ -146,17 +219,25 @@ if __name__ == "__main__":
         description="Clean a BLS OEWS national XLSX release into a per-occupation wage dataset."
     )
     parser.add_argument("input_xlsx", nargs="?", default="raw_bls_data.xlsx",
-                         help="Path to the raw BLS OEWS national XLSX file (default: raw_bls_data.xlsx)")
-    parser.add_argument("-o", "--output", default="cleaned_careers.csv", help="Output CSV path")
+                         help="Path to the raw BLS OEWS XLSX file (default: raw_bls_data.xlsx)")
+    parser.add_argument("--state", default=None,
+                         help="Two-letter state abbreviation (e.g. CA) to filter to. "
+                              "Requires the BLS OEWS *State* release, not the National file.")
+    parser.add_argument("-o", "--output", default=None,
+                         help="Output CSV path (default: cleaned_careers.csv, or "
+                              "cleaned_careers_<state>.csv when --state is given)")
     args = parser.parse_args()
+    output_path = args.output or (
+        f"cleaned_careers_{args.state.lower()}.csv" if args.state else "cleaned_careers.csv"
+    )
 
     try:
-        clean_df = build_clean_dataframe(args.input_xlsx)
+        clean_df = build_clean_dataframe(args.input_xlsx, state=args.state)
     except FileNotFoundError:
         raise SystemExit(f"Error: could not find '{args.input_xlsx}'. Download it from bls.gov/oes/tables.htm.")
     except ValueError as exc:
         raise SystemExit(f"Error: {exc}")
 
-    clean_df.to_csv(args.output, index=False)
-    print(f"Wrote {len(clean_df)} rows to {args.output}")
+    clean_df.to_csv(output_path, index=False)
+    print(f"Wrote {len(clean_df)} rows to {output_path}")
     print_summary(clean_df)
