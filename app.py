@@ -90,6 +90,33 @@ MAJOR_DATA = {
     },
 }
 
+# BLS OEWS-sourced careers from data_pipeline.py's output (cleaned_careers.csv),
+# in the same {major_name: {starting_salary, median_salary}} shape as the
+# curated dict above, so every existing calculation (get_major_growth_rate,
+# get_annual_salary_for_year, etc.) works on them identically -- no
+# special-casing needed anywhere else in the app.
+CAREERS_CSV_PATH = "cleaned_careers.csv"
+
+
+@st.cache_data
+def load_bls_careers() -> dict:
+    try:
+        careers_df = pd.read_csv(CAREERS_CSV_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return {}
+    return {
+        row.occ_title: {"starting_salary": row.a_pct10, "median_salary": row.a_median}
+        for row in careers_df.itertuples()
+    }
+
+
+# Curated majors are spread last so their hand-built training-delay/debt
+# fields (Medicine, Law, Athletic Training) always win over a same-named
+# BLS entry -- in practice there's no collision, since curated keys are
+# friendly labels ("Nursing") and BLS occ_titles are official SOC titles
+# ("Registered Nurses").
+MAJOR_DATA = {**load_bls_careers(), **MAJOR_DATA}
+
 # Baseline comparison group: a high school graduate (no college) who takes on
 # no loans. Annual figure is real BLS Current Population Survey data: median
 # usual weekly earnings for full-time workers age 25+ with a high school
@@ -956,7 +983,7 @@ with st.sidebar.expander("College Scorecard Lookup (optional)"):
     st.caption("Pulls real tuition & median debt for the school above via api.data.gov.")
     scorecard_api_key = st.text_input("API Key", value="DEMO_KEY", type="password")
 
-major = st.sidebar.selectbox("Target Major", list(MAJOR_DATA.keys()))
+major = st.sidebar.selectbox("Target Major", sorted(MAJOR_DATA.keys()))
 
 # School next: entering it immediately shows Cost of Attendance below, and
 # (if it matches the local dataset) auto-fills the per-year COA field --
@@ -1026,7 +1053,7 @@ compare_mode = st.sidebar.checkbox("🔀 Compare Two Scenarios")
 
 if compare_mode:
     with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
-        major_b = st.selectbox("Target Major", list(MAJOR_DATA.keys()), key="major_b")
+        major_b = st.selectbox("Target Major", sorted(MAJOR_DATA.keys()), key="major_b")
 
         school_name_b = st.text_input(
             "Target Undergraduate School", placeholder="e.g. Ohio State University",
@@ -1507,6 +1534,22 @@ BLS does not track individual workers' pay over time.
 
 Source: [bls.gov/oes/2023/may](https://www.bls.gov/oes/2023/may/) (occupation
 profile pages by SOC code).
+
+**Additional careers (BLS OEWS national release)** — Beyond the 11 majors
+above, the dropdown also includes every "detailed" occupation (i.e. a real,
+individually reported job title, not a summary category) from a BLS OEWS
+national XLSX release, cleaned by `data_pipeline.py` into `cleaned_careers.csv`.
+Each gets the same *Starting Salary* (10th percentile) / *Growth Rate*
+(10-year CAGR to the median) treatment as the curated majors above, computed
+identically by the same formula. Two BLS-specific data quality markers are
+handled during cleaning: `#` (wage top-coded above BLS's published
+$239,200/year threshold) is converted to that real floor value; `*`
+(estimate suppressed for confidentiality/reliability) causes that occupation
+to be dropped if its median wage is unusable, or falls back to an assumed 3%
+annual growth rate if only its 10th-percentile wage is unusable. Where a
+BLS occupation happens to share a name with one of the 11 curated majors,
+the curated entry (with its richer training-delay/debt modeling, see below)
+always takes precedence.
 
 **Majors requiring school beyond a 4-year bachelor's** — Athletic Training,
 Medicine, and Law don't pay a professional salary right after a 4-year
