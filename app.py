@@ -363,6 +363,31 @@ def find_school_coa(school_name: str, coa_df: pd.DataFrame):
     return partial.iloc[0] if not partial.empty else None
 
 
+def get_suggested_loan_amount(school_name: str):
+    """Out-of-state Cost of Attendance for a school in the local COA
+    dataset, for auto-filling a scenario's loan amount -- or None if the
+    school has no match (expected while the dataset only covers a small
+    sample; see find_school_coa). Uses out_of_state_coa specifically as a
+    single conservative default -- there's no in-state/out-of-state choice
+    in the UI yet, a stated v1 simplification, not an oversight."""
+    match = find_school_coa(school_name, load_coa_dataset())
+    return float(match["out_of_state_coa"]) if match is not None else None
+
+
+def _autofill_loan_amount(school_key: str, loan_key: str):
+    """on_change callback for a school text_input: suggests a loan amount
+    into the paired number_input's session_state key when the just-typed
+    school matches the local COA dataset. A no-match (or the field being
+    cleared) is a no-op -- it never resets a manually-tuned loan amount
+    just because the lookup came up empty. Must write to st.session_state
+    directly (not return a value) since callbacks run before the script
+    reruns, and a number_input's value= argument only sets its first-render
+    default, not later reruns, once it has a key."""
+    suggested = get_suggested_loan_amount(st.session_state.get(school_key, ""))
+    if suggested is not None:
+        st.session_state[loan_key] = suggested
+
+
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_median_debt(school_name: str, api_key: str):
     """
@@ -754,9 +779,12 @@ if "survey_submitted" not in st.session_state:
 st.sidebar.header("🎓 Your Profile")
 
 major = st.sidebar.selectbox("Target Major", list(MAJOR_DATA.keys()))
-school_name = st.sidebar.text_input("Target Undergraduate School", placeholder="e.g. University of Michigan")
+school_name_a = st.sidebar.text_input(
+    "Target Undergraduate School", placeholder="e.g. University of Michigan",
+    key="school_name_a", on_change=lambda: _autofill_loan_amount("school_name_a", "loan_amount"),
+)
 loan_amount = st.sidebar.number_input("Total Student Loan Amount ($)", min_value=0, max_value=300000,
-                                       value=30000, step=500)
+                                       value=30000, step=500, key="loan_amount")
 interest_rate = st.sidebar.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
                                          value=5.5, step=0.1)
 repayment_strategy = st.sidebar.selectbox(
@@ -774,6 +802,10 @@ compare_mode = st.sidebar.checkbox("🔀 Compare Two Scenarios")
 if compare_mode:
     with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
         major_b = st.selectbox("Target Major", list(MAJOR_DATA.keys()), key="major_b")
+        school_name_b = st.text_input(
+            "Target Undergraduate School", placeholder="e.g. Ohio State University",
+            key="school_name_b", on_change=lambda: _autofill_loan_amount("school_name_b", "loan_amount_b"),
+        )
         loan_amount_b = st.number_input("Total Student Loan Amount ($)", min_value=0, max_value=300000,
                                          value=30000, step=500, key="loan_amount_b")
         interest_rate_b = st.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
@@ -822,12 +854,12 @@ if admin_enabled:
 
     usage_df = load_table_safe("usage_logs", columns=["timestamp", "action"])
     survey_df = load_table_safe("survey_responses", columns=[
-        "timestamp", "perception_change", "feedback_text", "school_name",
-        "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
+        "timestamp", "perception_change", "feedback_text",
+        "scenario_a_school_name", "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
         "scenario_a_repayment_strategy", "scenario_a_starting_salary", "scenario_a_dti_ratio",
         "scenario_a_monthly_payment", "scenario_a_payoff_years", "scenario_a_total_interest",
         "scenario_a_earnings_premium", "scenario_a_roi_pct",
-        "scenario_b_major", "scenario_b_loan_amount", "scenario_b_interest_rate",
+        "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount", "scenario_b_interest_rate",
         "scenario_b_repayment_strategy", "scenario_b_starting_salary", "scenario_b_dti_ratio",
         "scenario_b_monthly_payment", "scenario_b_payoff_years", "scenario_b_total_interest",
         "scenario_b_earnings_premium", "scenario_b_roi_pct", "roi_pct_delta",
@@ -856,10 +888,10 @@ if admin_enabled:
         chart_col.plotly_chart(build_survey_pie_chart(survey_df), use_container_width=True)
         table_col.dataframe(
             survey_df[[
-                "timestamp", "school_name",
+                "timestamp", "scenario_a_school_name",
                 "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
                 "scenario_a_repayment_strategy", "scenario_a_roi_pct",
-                "scenario_b_major", "scenario_b_loan_amount", "scenario_b_roi_pct",
+                "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount", "scenario_b_roi_pct",
                 "roi_pct_delta", "feedback_text",
             ]],
             use_container_width=True, height=380,
@@ -879,32 +911,48 @@ if admin_enabled:
 # match until the full College Scorecard institution file is run through
 # that script and swapped in at data/college_coa_clean.csv. Median debt is
 # still fetched live, which works for any school regardless of local
-# dataset coverage.
+# dataset coverage. A matched school's out-of-state COA also auto-fills
+# that scenario's loan amount -- see _autofill_loan_amount in section 2c.
 
-if school_name:
-    coa_match = find_school_coa(school_name, load_coa_dataset())
-    debt_data = fetch_median_debt(school_name, scorecard_api_key)
+def render_school_lookup(container, school_name: str, label: str):
+    """Render one scenario's school lookup (COA match + median debt) into a
+    layout container. Used once for the single-scenario view and twice
+    (Scenario A / B) in Compare Mode, so the two can't drift apart from
+    being hand-copied -- same reasoning as render_scenario_panel."""
+    with container:
+        if not school_name:
+            return
+        coa_match = find_school_coa(school_name, load_coa_dataset())
+        debt_data = fetch_median_debt(school_name, scorecard_api_key)
 
-    if coa_match is not None:
-        coa_text = (
-            f"**{coa_match['INSTNM']}** ({coa_match['control_type']}) — "
-            f"In-state Cost of Attendance: {fmt_money(coa_match['in_state_coa'])} | "
-            f"Out-of-state Cost of Attendance: {fmt_money(coa_match['out_of_state_coa'])}"
-        ).replace("$", r"\$")
-        st.info(coa_text)
-    else:
-        st.caption(
-            "No Cost of Attendance match in the local dataset yet "
-            "(currently only a small sample of schools -- see data/college_coa_clean.csv)."
-        )
+        if coa_match is not None:
+            coa_text = (
+                f"**Scenario {label}: {coa_match['INSTNM']}** ({coa_match['control_type']}) — "
+                f"In-state Cost of Attendance: {fmt_money(coa_match['in_state_coa'])} | "
+                f"Out-of-state Cost of Attendance: {fmt_money(coa_match['out_of_state_coa'])}"
+            ).replace("$", r"\$")
+            st.info(coa_text)
+        else:
+            st.caption(
+                f"Scenario {label}: no Cost of Attendance match in the local dataset yet "
+                "(currently only a small sample of schools -- see data/college_coa_clean.csv)."
+            )
 
-    if debt_data and debt_data.get("median_debt"):
-        # Escape "$" -- st.caption renders markdown, and a pair of literal
-        # "$" gets parsed as inline LaTeX math, mangling the text between them.
-        st.caption(
-            f"Median completer debt for {debt_data['name']}: {fmt_money(debt_data['median_debt'])}"
-            .replace("$", r"\$")
-        )
+        if debt_data and debt_data.get("median_debt"):
+            # Escape "$" -- st.caption renders markdown, and a pair of literal
+            # "$" gets parsed as inline LaTeX math, mangling the text between them.
+            st.caption(
+                f"Median completer debt for {debt_data['name']}: {fmt_money(debt_data['median_debt'])}"
+                .replace("$", r"\$")
+            )
+
+
+if compare_mode:
+    lookup_col_a, lookup_col_b = st.columns(2)
+    render_school_lookup(lookup_col_a, school_name_a, "A")
+    render_school_lookup(lookup_col_b, school_name_b, "B")
+else:
+    render_school_lookup(st.container(), school_name_a, "A")
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
@@ -1085,7 +1133,7 @@ if not st.session_state.survey_submitted:
             scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy)
 
             context = {
-                "school_name": school_name or None,
+                "scenario_a_school_name": school_name_a or None,
                 "scenario_a_major": major,
                 "scenario_a_loan_amount": loan_amount,
                 "scenario_a_interest_rate": interest_rate,
@@ -1107,6 +1155,7 @@ if not st.session_state.survey_submitted:
                 dti_ratio_b = round(loan_amount_b / starting_salary_b, 4) if starting_salary_b else None
                 scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b)
                 context.update({
+                    "scenario_b_school_name": school_name_b or None,
                     "scenario_b_major": major_b,
                     "scenario_b_loan_amount": loan_amount_b,
                     "scenario_b_interest_rate": interest_rate_b,
@@ -1267,11 +1316,17 @@ a small real-data sample, so most schools won't have a match yet until the
 full institution file is processed and swapped in. Median completer debt
 has no equivalent in that dataset and is still fetched live, so it works
 for any school. Both figures are shown as contextual information only and
-are not used in the calculator's math.
+are not used in the calculator's math. Each scenario has its own school
+field (so Compare Mode can hold e.g. "Computer Science at School A" against
+"Computer Science at School B"); when a school matches the local dataset,
+that scenario's loan amount is auto-filled with its **out-of-state** Cost
+of Attendance specifically -- there's no in-state/out-of-state choice in
+the UI yet, a stated simplification, not an oversight. A non-matching
+school never resets a loan amount you've already typed in by hand.
 
-**Survey data** — Each anonymous survey submission is tagged with the
-school name and Scenario A's full inputs and outputs, active at the exact
-moment of submission: major, loan amount, interest rate, repayment
+**Survey data** — Each anonymous survey submission is tagged with
+Scenario A's full inputs and outputs, active at the exact moment of
+submission: school name, major, loan amount, interest rate, repayment
 strategy, `starting_salary` (the major's baseline entry-level wage from
 `MAJOR_DATA`, *not* the training-delay-adjusted figure Medicine/Law/
 Athletic Training use elsewhere), `dti_ratio` (loan amount ÷ starting
