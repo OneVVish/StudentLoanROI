@@ -122,6 +122,31 @@ ROI_WINDOW_YEARS = 10
 # you're *repaying*.
 UNDERGRAD_YEARS = 4
 
+# Cost of Attendance inflation estimate: CAGR between these two fixed
+# College Scorecard data years (school-specific, via the API's year-prefixed
+# fields, e.g. "2018.cost.attendance.academic_year"). Fixed years rather
+# than "latest" keep the estimate stable across app runs instead of
+# silently drifting whenever College Scorecard releases newer data.
+COA_INFLATION_START_YEAR = 2018
+COA_INFLATION_END_YEAR = 2022
+
+# Fallback annual COA inflation rate by institution control type, used when
+# a school-specific estimate isn't available (no API key, missing year
+# data, or no school entered). Source: College Board, Trends in College
+# Pricing 2024 (nominal year-over-year increase, 2023-24 -> 2024-25) for
+# Public/Private Non-Profit. Private For-Profit has no equivalent recent
+# nominal figure readily published -- NCES Fast Facts shows for-profit
+# *real* (inflation-adjusted) tuition has been flat-to-declining over the
+# last decade, so its nominal growth is assumed to track general price
+# inflation rather than the tuition-specific premium seen in the other two
+# sectors. This is a modeling judgment call, not a directly sourced figure.
+CATEGORY_COA_INFLATION_RATES = {
+    "Public": 0.027,
+    "Private Non-Profit": 0.039,
+    "Private For-Profit": 0.025,
+}
+DEFAULT_COA_INFLATION_RATE = 0.027  # Public rate, used when control type is unknown
+
 # Federal income tax, 2024, single filer. Source: IRS Rev. Proc. 2023-34.
 # Brackets are (upper bound of bracket, marginal rate on income up to that
 # bound). Scope: single filer only, no dependents, no itemized deductions or
@@ -401,15 +426,16 @@ def _autofill_coa(school_key: str, in_state_key: str, coa_key: str):
         st.session_state[coa_key] = suggested
 
 
-def get_coa_confirmation_caption(school_name: str, in_state: bool):
+def get_coa_confirmation_caption(school_name: str, match, in_state: bool):
     """One-line confirmation of what the local COA dataset matched (or
     didn't), meant to render immediately under the school name field so a
     student sees Cost of Attendance feedback right away rather than several
-    sections down the page. Returns None (render nothing) if the school
-    field is empty."""
+    sections down the page. Takes an already-looked-up `match` (from
+    find_school_coa) rather than re-querying, so the caller can reuse the
+    same match for control_type / inflation-rate purposes too. Returns None
+    (render nothing) if the school field is empty."""
     if not school_name:
         return None
-    match = find_school_coa(school_name, load_coa_dataset())
     if match is None:
         return "No Cost of Attendance match in the local dataset yet -- enter your own estimate below."
     label = "In-state" if in_state else "Out-of-state"
@@ -446,6 +472,59 @@ def fetch_median_debt(school_name: str, api_key: str):
         }
     except (requests.exceptions.RequestException, ValueError, KeyError):
         return None
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_school_coa_history(school_name: str, api_key: str):
+    """
+    Look up a school's Cost of Attendance for the two fixed reference years
+    (COA_INFLATION_START_YEAR/END_YEAR), for estimating a school-specific
+    COA inflation rate. Fixed years (not "latest") keep the estimate stable
+    across app runs rather than silently drifting whenever College
+    Scorecard releases newer data. Returns None on any failure.
+    """
+    if not school_name or not api_key:
+        return None
+    params = {
+        "school.name": school_name,
+        "fields": (
+            "school.name,"
+            f"{COA_INFLATION_START_YEAR}.cost.attendance.academic_year,"
+            f"{COA_INFLATION_END_YEAR}.cost.attendance.academic_year"
+        ),
+        "api_key": api_key,
+    }
+    try:
+        response = requests.get(COLLEGE_SCORECARD_URL, params=params, timeout=6)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+        if not results:
+            return None
+        top = results[0]
+        return {
+            "coa_start": top.get(f"{COA_INFLATION_START_YEAR}.cost.attendance.academic_year"),
+            "coa_end": top.get(f"{COA_INFLATION_END_YEAR}.cost.attendance.academic_year"),
+        }
+    except (requests.exceptions.RequestException, ValueError, KeyError):
+        return None
+
+
+def estimate_coa_inflation_rate(school_name: str, api_key: str, control_type) -> float:
+    """
+    School-specific annual COA inflation rate: the CAGR between
+    COA_INFLATION_START_YEAR and COA_INFLATION_END_YEAR from a live College
+    Scorecard lookup. Falls back to a category rate (by control_type --
+    "Public"/"Private Non-Profit"/"Private For-Profit", from the local COA
+    dataset match; may be None) when school-specific history is
+    unavailable, and to DEFAULT_COA_INFLATION_RATE when control_type itself
+    is unknown. Always returns a usable number, never None, since the loan
+    calculation needs *some* rate every run.
+    """
+    history = fetch_school_coa_history(school_name, api_key)
+    if history and history.get("coa_start") and history.get("coa_end"):
+        years = COA_INFLATION_END_YEAR - COA_INFLATION_START_YEAR
+        return (history["coa_end"] / history["coa_start"]) ** (1 / years) - 1
+    return CATEGORY_COA_INFLATION_RATES.get(control_type, DEFAULT_COA_INFLATION_RATE)
 
 
 # ---- 2d. Financial Math: Standard Amortization ---------------------------
@@ -586,6 +665,21 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
         "earnings_premium": earnings_premium,
         "roi_pct": roi_pct,
     }
+
+
+def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_year: float,
+                               inflation_rate: float, years: int = UNDERGRAD_YEARS) -> float:
+    """Total loan across `years` of enrollment, growing Cost of Attendance
+    year-over-year by inflation_rate while Personal Contribution stays a
+    flat nominal amount -- Year 1 uses coa_per_year as entered/auto-filled;
+    each subsequent year compounds by (1 + inflation_rate). The loan gap
+    widens each year since Personal Contribution doesn't scale with rising
+    costs, matching how this plays out for most families in practice."""
+    total = 0.0
+    for year_index in range(years):
+        coa_this_year = coa_per_year * (1 + inflation_rate) ** year_index
+        total += max(coa_this_year - personal_contribution_per_year, 0)
+    return total
 
 
 def compute_scenario_results(major_name: str, loan_amount: float,
@@ -826,6 +920,10 @@ if "survey_submitted" not in st.session_state:
 
 st.sidebar.header("🎓 Your Profile")
 
+with st.sidebar.expander("College Scorecard Lookup (optional)"):
+    st.caption("Pulls real tuition & median debt for the school above via api.data.gov.")
+    scorecard_api_key = st.text_input("API Key", value="DEMO_KEY", type="password")
+
 # School first: entering it immediately shows Cost of Attendance below, and
 # (if it matches the local dataset) auto-fills the per-year COA field --
 # everything else in this scenario builds on that number.
@@ -837,7 +935,8 @@ in_state_a = st.sidebar.checkbox(
     "In-State Student?", key="in_state_a",
     on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
 )
-coa_caption_a = get_coa_confirmation_caption(school_name_a, in_state_a)
+coa_match_a = find_school_coa(school_name_a, load_coa_dataset()) if school_name_a else None
+coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
 if coa_caption_a:
     st.sidebar.caption(coa_caption_a)
 coa_per_year_a = st.sidebar.number_input(
@@ -856,14 +955,18 @@ personal_contribution_per_year_a = st.sidebar.number_input(
          "the loan you're actually repaying (no interest accrues on it).",
 )
 # Loan amount is derived, not entered: Cost of Attendance minus whatever
-# isn't borrowed, per year, then multiplied out to the totals every
-# downstream calculation (effective_principal, ROI, take-home) operates on.
-loan_amount_per_year_a = max(coa_per_year_a - personal_contribution_per_year_a, 0)
-loan_amount = loan_amount_per_year_a * UNDERGRAD_YEARS
+# isn't borrowed, per year, growing COA by an estimated inflation rate each
+# year while Personal Contribution stays flat -- then summed to the total
+# every downstream calculation (effective_principal, ROI, take-home)
+# operates on.
+control_type_a = coa_match_a["control_type"] if coa_match_a is not None else None
+inflation_rate_a = estimate_coa_inflation_rate(school_name_a, scorecard_api_key, control_type_a)
+loan_amount = compute_total_loan_amount(coa_per_year_a, personal_contribution_per_year_a, inflation_rate_a)
 personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
 st.sidebar.caption((
-    f"Per year: {fmt_money(loan_amount_per_year_a)} loan + {fmt_money(personal_contribution_per_year_a)} personal "
-    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
+    f"Year 1: {fmt_money(coa_per_year_a)} COA − {fmt_money(personal_contribution_per_year_a)} personal "
+    f"→ est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr → over {UNDERGRAD_YEARS} years: "
+    f"**{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
 
 interest_rate = st.sidebar.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
@@ -890,7 +993,8 @@ if compare_mode:
             "In-State Student?", key="in_state_b",
             on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
         )
-        coa_caption_b = get_coa_confirmation_caption(school_name_b, in_state_b)
+        coa_match_b = find_school_coa(school_name_b, load_coa_dataset()) if school_name_b else None
+        coa_caption_b = get_coa_confirmation_caption(school_name_b, coa_match_b, in_state_b)
         if coa_caption_b:
             st.caption(coa_caption_b)
         coa_per_year_b = st.number_input(
@@ -907,12 +1011,14 @@ if compare_mode:
                  "that wasn't borrowed. The loan amount below is Cost of "
                  "Attendance minus this.",
         )
-        loan_amount_per_year_b = max(coa_per_year_b - personal_contribution_per_year_b, 0)
-        loan_amount_b = loan_amount_per_year_b * UNDERGRAD_YEARS
+        control_type_b = coa_match_b["control_type"] if coa_match_b is not None else None
+        inflation_rate_b = estimate_coa_inflation_rate(school_name_b, scorecard_api_key, control_type_b)
+        loan_amount_b = compute_total_loan_amount(coa_per_year_b, personal_contribution_per_year_b, inflation_rate_b)
         personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
         st.caption((
-            f"Per year: {fmt_money(loan_amount_per_year_b)} loan + {fmt_money(personal_contribution_per_year_b)} personal "
-            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
+            f"Year 1: {fmt_money(coa_per_year_b)} COA − {fmt_money(personal_contribution_per_year_b)} personal "
+            f"→ est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr → over {UNDERGRAD_YEARS} years: "
+            f"**{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
 
         interest_rate_b = st.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
@@ -926,10 +1032,6 @@ if compare_mode:
 city = st.sidebar.selectbox("City / Metro Area", list(CITY_DATA.keys()))
 career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
-
-with st.sidebar.expander("College Scorecard Lookup (optional)"):
-    st.caption("Pulls real tuition & median debt for the school above via api.data.gov.")
-    scorecard_api_key = st.text_input("API Key", value="DEMO_KEY", type="password")
 
 st.sidebar.divider()
 admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View")
@@ -966,10 +1068,12 @@ if admin_enabled:
         "scenario_a_repayment_strategy", "scenario_a_starting_salary", "scenario_a_dti_ratio",
         "scenario_a_monthly_payment", "scenario_a_payoff_years", "scenario_a_total_interest",
         "scenario_a_earnings_premium", "scenario_a_roi_pct", "scenario_a_personal_contribution",
+        "scenario_a_coa_inflation_rate",
         "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount", "scenario_b_interest_rate",
         "scenario_b_repayment_strategy", "scenario_b_starting_salary", "scenario_b_dti_ratio",
         "scenario_b_monthly_payment", "scenario_b_payoff_years", "scenario_b_total_interest",
         "scenario_b_earnings_premium", "scenario_b_roi_pct", "scenario_b_personal_contribution", "roi_pct_delta",
+        "scenario_b_coa_inflation_rate",
     ])
 
     col1, col2 = st.columns(2)
@@ -1268,6 +1372,7 @@ if not st.session_state.survey_submitted:
                 "scenario_a_earnings_premium": scenario_a["roi_result"]["earnings_premium"],
                 "scenario_a_roi_pct": scenario_a["roi_result"]["roi_pct"],
                 "scenario_a_personal_contribution": personal_contribution,
+                "scenario_a_coa_inflation_rate": inflation_rate_a,
             }
 
             # Scenario B / roi_pct_delta only exist when Compare Mode is on
@@ -1291,6 +1396,7 @@ if not st.session_state.survey_submitted:
                     "scenario_b_earnings_premium": scenario_b["roi_result"]["earnings_premium"],
                     "scenario_b_roi_pct": scenario_b["roi_result"]["roi_pct"],
                     "scenario_b_personal_contribution": personal_contribution_b,
+                    "scenario_b_coa_inflation_rate": inflation_rate_b,
                 })
                 roi_a = scenario_a["roi_result"]["roi_pct"]
                 roi_b = scenario_b["roi_result"]["roi_pct"]
@@ -1457,14 +1563,34 @@ estimate you've already typed in by hand; you can always override the
 auto-filled figure directly.
 
 **Loan amount is derived, not entered.** Each scenario asks for Cost of
-Attendance (per year) and Personal Contribution (per year), then computes:
-`Loan Amount (per year) = Cost of Attendance − Personal Contribution`
-(floored at $0). Both the per-year loan amount and per-year personal
-contribution are multiplied by `UNDERGRAD_YEARS` (4, an assumed bachelor's
-degree length) to get the totals every other calculation in this app
-operates on -- `effective_principal`, the loan repayment simulation, and
-the ROI% `total_investment` denominator all use these 4-year totals exactly
-as they did when loan amount used to be typed in directly as one lump sum.
+Attendance (per year) and Personal Contribution (per year); the total loan
+amount grows Cost of Attendance year-over-year by an estimated inflation
+rate while Personal Contribution stays a flat nominal amount, then sums
+across `UNDERGRAD_YEARS` (4, an assumed bachelor's degree length):
+`Loan (Year N) = max(Cost of Attendance × (1 + inflation_rate)^(N-1) − Personal Contribution, 0)`,
+summed for N = 1..4. Because Personal Contribution doesn't scale with
+rising costs, the loan gap widens each year -- the resulting total feeds
+`effective_principal`, the loan repayment simulation, and the ROI%
+`total_investment` denominator exactly as it did when loan amount used to
+be a single flat entry.
+
+**Cost of Attendance inflation rate** is estimated per school: the CAGR
+between two fixed College Scorecard data years (2018 and 2022,
+`(coa_2022 / coa_2018) ** (1/4) - 1`) from a live lookup -- fixed years
+rather than "latest" keep the estimate stable across app runs instead of
+silently drifting whenever College Scorecard releases newer data. When
+school-specific history isn't available (no API key, missing year data,
+or no school entered), it falls back to a rate by institution type, from
+College Board's *Trends in College Pricing 2024* (nominal year-over-year
+increase, 2023-24 → 2024-25): **2.7%** Public, **3.9%** Private Non-Profit.
+**Private For-Profit (2.5%)** has no equivalent recent nominal figure
+readily published -- NCES Fast Facts shows for-profit *real*
+(inflation-adjusted) tuition has been flat-to-declining over the last
+decade, so this rate assumes nominal growth tracks general price inflation
+rather than the tuition-specific premium seen in the other two sectors;
+this is a modeling judgment call, not a directly sourced figure. An
+unknown control type (no local dataset match at all) defaults to the
+Public rate.
 
 **Survey data** — Each anonymous survey submission is tagged with
 Scenario A's full inputs and outputs, active at the exact moment of
