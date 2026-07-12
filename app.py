@@ -230,6 +230,25 @@ STATE_TAX_BRACKETS = {
     "GA": {"brackets": [(float("inf"), 0.0539)], "standard_deduction": 0},
     "CO": {"brackets": [(float("inf"), 0.0425)], "standard_deduction": 0},
     "TX": {"brackets": [(float("inf"), 0.0)], "standard_deduction": 0},
+    "MN": {
+        # Real 2024 brackets (Minnesota Dept. of Revenue).
+        "brackets": [
+            (31690, 0.0535), (104090, 0.068), (193240, 0.0785), (float("inf"), 0.0985),
+        ],
+        "standard_deduction": 14950,
+    },
+    "PA": {"brackets": [(float("inf"), 0.0307)], "standard_deduction": 0},
+    "AZ": {"brackets": [(float("inf"), 0.025)], "standard_deduction": 0},
+    "MI": {"brackets": [(float("inf"), 0.0425)], "standard_deduction": 0},
+    "NC": {"brackets": [(float("inf"), 0.045)], "standard_deduction": 0},
+    # MA is a flat 5% up to $1M/year, plus a 4% "millionaire's tax" surtax
+    # above that -- omitted here since no major's trajectory in this app
+    # gets anywhere close to $1M, the same scope limitation already noted
+    # for the federal Additional Medicare Tax above.
+    "MA": {"brackets": [(float("inf"), 0.05)], "standard_deduction": 0},
+    "FL": {"brackets": [(float("inf"), 0.0)], "standard_deduction": 0},
+    "WA": {"brackets": [(float("inf"), 0.0)], "standard_deduction": 0},
+    "TN": {"brackets": [(float("inf"), 0.0)], "standard_deduction": 0},
 }
 
 # Cost of living by metro area, from BEA Regional Price Parities (RPP), 2023
@@ -248,6 +267,21 @@ CITY_DATA = {
     "Atlanta, GA": {"state_key": "GA", "col_index": 100.9, "local_tax_rate": 0.0},
     "Columbus, OH": {"state_key": "OH", "col_index": 94.5, "local_tax_rate": 0.0},
     "Denver, CO": {"state_key": "CO", "col_index": 105.5, "local_tax_rate": 0.0},
+    "Los Angeles, CA": {"state_key": "CA", "col_index": 115.47, "local_tax_rate": 0.0},
+    "San Diego, CA": {"state_key": "CA", "col_index": 111.49, "local_tax_rate": 0.0},
+    "Dallas, TX": {"state_key": "TX", "col_index": 103.30, "local_tax_rate": 0.0},
+    "Houston, TX": {"state_key": "TX", "col_index": 100.22, "local_tax_rate": 0.0},
+    "San Antonio, TX": {"state_key": "TX", "col_index": 93.73, "local_tax_rate": 0.0},
+    "Cleveland, OH": {"state_key": "OH", "col_index": 93.05, "local_tax_rate": 0.0},
+    "Miami, FL": {"state_key": "FL", "col_index": 111.82, "local_tax_rate": 0.0},
+    "Seattle, WA": {"state_key": "WA", "col_index": 113.00, "local_tax_rate": 0.0},
+    "Nashville, TN": {"state_key": "TN", "col_index": 97.43, "local_tax_rate": 0.0},
+    "Philadelphia, PA": {"state_key": "PA", "col_index": 103.55, "local_tax_rate": 0.0},
+    "Boston, MA": {"state_key": "MA", "col_index": 111.57, "local_tax_rate": 0.0},
+    "Phoenix, AZ": {"state_key": "AZ", "col_index": 105.52, "local_tax_rate": 0.0},
+    "Detroit, MI": {"state_key": "MI", "col_index": 98.01, "local_tax_rate": 0.0},
+    "Charlotte, NC": {"state_key": "NC", "col_index": 96.97, "local_tax_rate": 0.0},
+    "Minneapolis, MN": {"state_key": "MN", "col_index": 104.50, "local_tax_rate": 0.0},
 }
 
 # Maps a UI-facing career-stage label to a 0-based year_index, fed straight
@@ -1077,7 +1111,9 @@ MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
 major = st.sidebar.selectbox(
     "Target Major", sorted(MAJOR_DATA.keys()),
     help="Pick the career you're evaluating -- this determines the salary "
-         "numbers used everywhere else in the app.",
+         "numbers used everywhere else in the app. There are hundreds of "
+         "options, so instead of scrolling, click the box and type part of "
+         "your major or career to jump straight to it.",
 )
 
 city = st.sidebar.selectbox(
@@ -1259,7 +1295,10 @@ if compare_mode:
         major_b = st.selectbox(
             "Target Major", sorted(MAJOR_DATA.keys()), key="major_b",
             help="Pick the career you're evaluating -- this determines the "
-                 "salary numbers used everywhere else in the app.",
+                 "salary numbers used everywhere else in the app. There are "
+                 "hundreds of options, so instead of scrolling, click the "
+                 "box and type part of your major or career to jump "
+                 "straight to it.",
         )
 
         school_name_b = st.text_input(
@@ -1908,11 +1947,16 @@ no dependents (IRS Rev. Proc. 2023-34), plus FICA taxes (6.2% Social
 Security, up to a $168,600 wage cap, + 1.45% Medicare). We don't model
 itemized deductions, tax credits, or the extra Medicare tax that kicks in
 above $200K (no major's salary here reaches that high). For state tax, we
-use real tax brackets for New York, California, and Ohio — a single flat
-rate would badly overstate what most people actually pay (New York's
-top rate of 10.9%, for example, only kicks in above $25 million). Illinois,
-Georgia, Colorado, and Texas are genuinely flat-rate or no-income-tax
-states already. New York City's local tax is approximated as a flat 3.5%
+use real tax brackets for New York, California, Ohio, and Minnesota — a
+single flat rate would badly overstate what most people actually pay
+(New York's top rate of 10.9%, for example, only kicks in above $25
+million). Illinois, Georgia, Colorado, Texas, Pennsylvania, Arizona,
+Michigan, North Carolina, and Massachusetts are genuinely flat-rate
+states (Massachusetts also has a 4% surtax above $1M, which we skip for
+the same reason we skip the federal Additional Medicare Tax — no major's
+trajectory here gets close); Florida, Washington, and Tennessee charge no
+state income tax at all. New York City's local tax is approximated as a
+flat 3.5%
 (its real resident tax bracket actually ranges from 3.078% to 3.876%
 depending on income, so 3.5% is a reasonable stand-in).
 [Source: Tax Foundation, 2024 State Income Tax Rates](https://taxfoundation.org/data/all/state/state-income-tax-rates-2024/).
