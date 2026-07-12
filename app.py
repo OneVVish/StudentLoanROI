@@ -113,6 +113,15 @@ IDR_MAX_TERM_YEARS = 20
 STANDARD_TERM_YEARS = 10
 ROI_WINDOW_YEARS = 10
 
+# Assumed bachelor's degree length, for converting the per-year Cost of
+# Attendance / Personal Contribution sidebar inputs into 4-year totals (the
+# figures every downstream calculation -- effective_principal, ROI,
+# take-home snapshot -- actually operates on). Distinct from
+# STANDARD_TERM_YEARS (loan repayment term) and IDR_MAX_TERM_YEARS
+# (forgiveness horizon) -- this is how long you're *enrolled*, not how long
+# you're *repaying*.
+UNDERGRAD_YEARS = 4
+
 # Federal income tax, 2024, single filer. Source: IRS Rev. Proc. 2023-34.
 # Brackets are (upper bound of bracket, marginal rate on income up to that
 # bound). Scope: single filer only, no dependents, no itemized deductions or
@@ -363,29 +372,51 @@ def find_school_coa(school_name: str, coa_df: pd.DataFrame):
     return partial.iloc[0] if not partial.empty else None
 
 
-def get_suggested_loan_amount(school_name: str):
-    """Out-of-state Cost of Attendance for a school in the local COA
-    dataset, for auto-filling a scenario's loan amount -- or None if the
-    school has no match (expected while the dataset only covers a small
-    sample; see find_school_coa). Uses out_of_state_coa specifically as a
-    single conservative default -- there's no in-state/out-of-state choice
-    in the UI yet, a stated v1 simplification, not an oversight."""
+def get_suggested_coa_per_year(school_name: str, in_state: bool):
+    """Cost of Attendance (in-state or out-of-state, per `in_state`) for a
+    school in the local COA dataset, for auto-filling a scenario's per-year
+    cost -- or None if the school has no match (expected while the dataset
+    only covers a small sample; see find_school_coa)."""
     match = find_school_coa(school_name, load_coa_dataset())
-    return float(match["out_of_state_coa"]) if match is not None else None
+    if match is None:
+        return None
+    return float(match["in_state_coa"] if in_state else match["out_of_state_coa"])
 
 
-def _autofill_loan_amount(school_key: str, loan_key: str):
-    """on_change callback for a school text_input: suggests a loan amount
-    into the paired number_input's session_state key when the just-typed
-    school matches the local COA dataset. A no-match (or the field being
-    cleared) is a no-op -- it never resets a manually-tuned loan amount
-    just because the lookup came up empty. Must write to st.session_state
-    directly (not return a value) since callbacks run before the script
-    reruns, and a number_input's value= argument only sets its first-render
-    default, not later reruns, once it has a key."""
-    suggested = get_suggested_loan_amount(st.session_state.get(school_key, ""))
+def _autofill_coa(school_key: str, in_state_key: str, coa_key: str):
+    """on_change callback for a school text_input or its In-State checkbox:
+    suggests a per-year Cost of Attendance into the paired number_input's
+    session_state key when the school matches the local COA dataset. A
+    no-match (or the field being cleared) is a no-op -- it never resets a
+    manually-entered COA estimate just because the lookup came up empty.
+    Must write to st.session_state directly (not return a value) since
+    callbacks run before the script reruns, and a number_input's value=
+    argument only sets its first-render default, not later reruns, once it
+    has a key."""
+    suggested = get_suggested_coa_per_year(
+        st.session_state.get(school_key, ""),
+        st.session_state.get(in_state_key, False),
+    )
     if suggested is not None:
-        st.session_state[loan_key] = suggested
+        st.session_state[coa_key] = suggested
+
+
+def get_coa_confirmation_caption(school_name: str, in_state: bool):
+    """One-line confirmation of what the local COA dataset matched (or
+    didn't), meant to render immediately under the school name field so a
+    student sees Cost of Attendance feedback right away rather than several
+    sections down the page. Returns None (render nothing) if the school
+    field is empty."""
+    if not school_name:
+        return None
+    match = find_school_coa(school_name, load_coa_dataset())
+    if match is None:
+        return "No Cost of Attendance match in the local dataset yet -- enter your own estimate below."
+    label = "In-state" if in_state else "Out-of-state"
+    coa_value = match["in_state_coa"] if in_state else match["out_of_state_coa"]
+    return (
+        f"✅ {match['INSTNM']} ({match['control_type']}) — {label} COA: {fmt_money(coa_value)}/year"
+    ).replace("$", r"\$")
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -795,20 +826,46 @@ if "survey_submitted" not in st.session_state:
 
 st.sidebar.header("🎓 Your Profile")
 
-major = st.sidebar.selectbox("Target Major", list(MAJOR_DATA.keys()))
+# School first: entering it immediately shows Cost of Attendance below, and
+# (if it matches the local dataset) auto-fills the per-year COA field --
+# everything else in this scenario builds on that number.
 school_name_a = st.sidebar.text_input(
     "Target Undergraduate School", placeholder="e.g. University of Michigan",
-    key="school_name_a", on_change=lambda: _autofill_loan_amount("school_name_a", "loan_amount"),
+    key="school_name_a", on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
 )
-loan_amount = st.sidebar.number_input("Total Student Loan Amount ($)", min_value=0, max_value=300000,
-                                       value=30000, step=500, key="loan_amount")
-personal_contribution = st.sidebar.number_input(
-    "Personal Contribution ($)", min_value=0, max_value=300000, value=0, step=500,
-    key="personal_contribution",
-    help="Savings, scholarships, or family money toward your degree that you "
-         "did NOT borrow. Counted in the ROI% denominator, but not added to "
+in_state_a = st.sidebar.checkbox(
+    "In-State Student?", key="in_state_a",
+    on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
+)
+coa_caption_a = get_coa_confirmation_caption(school_name_a, in_state_a)
+if coa_caption_a:
+    st.sidebar.caption(coa_caption_a)
+coa_per_year_a = st.sidebar.number_input(
+    "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
+    key="coa_per_year_a",
+)
+
+major = st.sidebar.selectbox("Target Major", list(MAJOR_DATA.keys()))
+
+personal_contribution_per_year_a = st.sidebar.number_input(
+    "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+    key="personal_contribution_per_year_a",
+    help="Savings, scholarships, or family money toward this year's cost that "
+         "you did NOT borrow. The loan amount below is Cost of Attendance "
+         "minus this -- counted in the ROI% denominator, but not added to "
          "the loan you're actually repaying (no interest accrues on it).",
 )
+# Loan amount is derived, not entered: Cost of Attendance minus whatever
+# isn't borrowed, per year, then multiplied out to the totals every
+# downstream calculation (effective_principal, ROI, take-home) operates on.
+loan_amount_per_year_a = max(coa_per_year_a - personal_contribution_per_year_a, 0)
+loan_amount = loan_amount_per_year_a * UNDERGRAD_YEARS
+personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
+st.sidebar.caption((
+    f"Per year: {fmt_money(loan_amount_per_year_a)} loan + {fmt_money(personal_contribution_per_year_a)} personal "
+    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
+).replace("$", r"\$"))
+
 interest_rate = st.sidebar.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
                                          value=5.5, step=0.1)
 repayment_strategy = st.sidebar.selectbox(
@@ -825,19 +882,39 @@ compare_mode = st.sidebar.checkbox("🔀 Compare Two Scenarios")
 
 if compare_mode:
     with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
-        major_b = st.selectbox("Target Major", list(MAJOR_DATA.keys()), key="major_b")
         school_name_b = st.text_input(
             "Target Undergraduate School", placeholder="e.g. Ohio State University",
-            key="school_name_b", on_change=lambda: _autofill_loan_amount("school_name_b", "loan_amount_b"),
+            key="school_name_b", on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
         )
-        loan_amount_b = st.number_input("Total Student Loan Amount ($)", min_value=0, max_value=300000,
-                                         value=30000, step=500, key="loan_amount_b")
-        personal_contribution_b = st.number_input(
-            "Personal Contribution ($)", min_value=0, max_value=300000, value=0, step=500,
-            key="personal_contribution_b",
-            help="Savings, scholarships, or family money toward this degree that "
-                 "wasn't borrowed. Counted in the ROI% denominator only.",
+        in_state_b = st.checkbox(
+            "In-State Student?", key="in_state_b",
+            on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
         )
+        coa_caption_b = get_coa_confirmation_caption(school_name_b, in_state_b)
+        if coa_caption_b:
+            st.caption(coa_caption_b)
+        coa_per_year_b = st.number_input(
+            "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
+            key="coa_per_year_b",
+        )
+
+        major_b = st.selectbox("Target Major", list(MAJOR_DATA.keys()), key="major_b")
+
+        personal_contribution_per_year_b = st.number_input(
+            "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+            key="personal_contribution_per_year_b",
+            help="Savings, scholarships, or family money toward this year's cost "
+                 "that wasn't borrowed. The loan amount below is Cost of "
+                 "Attendance minus this.",
+        )
+        loan_amount_per_year_b = max(coa_per_year_b - personal_contribution_per_year_b, 0)
+        loan_amount_b = loan_amount_per_year_b * UNDERGRAD_YEARS
+        personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
+        st.caption((
+            f"Per year: {fmt_money(loan_amount_per_year_b)} loan + {fmt_money(personal_contribution_per_year_b)} personal "
+            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
+        ).replace("$", r"\$"))
+
         interest_rate_b = st.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
                                            value=5.5, step=0.1, key="interest_rate_b")
         repayment_strategy_b = st.selectbox(
@@ -942,8 +1019,9 @@ if admin_enabled:
 # match until the full College Scorecard institution file is run through
 # that script and swapped in at data/college_coa_clean.csv. Median debt is
 # still fetched live, which works for any school regardless of local
-# dataset coverage. A matched school's out-of-state COA also auto-fills
-# that scenario's loan amount -- see _autofill_loan_amount in section 2c.
+# dataset coverage. A matched school's COA also auto-fills that scenario's
+# per-year Cost of Attendance field (in-state or out-of-state, per the
+# In-State Student? checkbox) -- see _autofill_coa in section 2c.
 
 def render_school_lookup(container, school_name: str, label: str):
     """Render one scenario's school lookup (COA match + median debt) into a
@@ -1372,10 +1450,21 @@ for any school. Both figures are shown as contextual information only and
 are not used in the calculator's math. Each scenario has its own school
 field (so Compare Mode can hold e.g. "Computer Science at School A" against
 "Computer Science at School B"); when a school matches the local dataset,
-that scenario's loan amount is auto-filled with its **out-of-state** Cost
-of Attendance specifically -- there's no in-state/out-of-state choice in
-the UI yet, a stated simplification, not an oversight. A non-matching
-school never resets a loan amount you've already typed in by hand.
+that scenario's **Cost of Attendance (per year)** field is auto-filled --
+using in-state or out-of-state COA depending on the **In-State Student?**
+checkbox for that scenario. A non-matching school never resets a COA
+estimate you've already typed in by hand; you can always override the
+auto-filled figure directly.
+
+**Loan amount is derived, not entered.** Each scenario asks for Cost of
+Attendance (per year) and Personal Contribution (per year), then computes:
+`Loan Amount (per year) = Cost of Attendance − Personal Contribution`
+(floored at $0). Both the per-year loan amount and per-year personal
+contribution are multiplied by `UNDERGRAD_YEARS` (4, an assumed bachelor's
+degree length) to get the totals every other calculation in this app
+operates on -- `effective_principal`, the loan repayment simulation, and
+the ROI% `total_investment` denominator all use these 4-year totals exactly
+as they did when loan amount used to be typed in directly as one lump sum.
 
 **Survey data** — Each anonymous survey submission is tagged with
 Scenario A's full inputs and outputs, active at the exact moment of
