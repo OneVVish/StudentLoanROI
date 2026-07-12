@@ -1002,12 +1002,12 @@ MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
 
 major = st.sidebar.selectbox("Target Major", sorted(MAJOR_DATA.keys()))
 
-# Which point in this major's career the Real-World Take-Home section
-# (5d) snapshots -- grouped here with Career Salary Data/Target Major
-# since it's just as much a "career" decision, even though it has no
-# functional dependency on School/Financing/City below it.
-career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
-career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
+city = st.sidebar.selectbox("City / Metro Area", list(CITY_DATA.keys()))
+# Computed here (not just where it's first used, further down) so it's
+# available for every compute_scenario_results() call in section 5 --
+# including Compare Mode's, which run before the Real-World Take-Home
+# section that used to be the only place this was computed.
+city_info = CITY_DATA[city]
 
 # School next: entering it immediately shows Cost of Attendance below, and
 # (if it matches the local dataset) auto-fills the per-year COA field --
@@ -1024,6 +1024,13 @@ coa_match_a = find_school_coa(school_name_a, load_coa_dataset()) if school_name_
 coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
 if coa_caption_a:
     st.sidebar.caption(coa_caption_a)
+
+# Which point in this major's career the Real-World Take-Home section
+# (5d) snapshots -- has no functional dependency on School/In-State above
+# or Financing/City below, so its position here is purely about profile
+# layout, not calculation order.
+career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
+career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
 st.sidebar.subheader("💰 Financing")
 coa_per_year_a = st.sidebar.number_input(
@@ -1131,13 +1138,6 @@ if compare_mode:
             ["Standard 10-Year", "Income-Driven Repayment (IDR)"],
             key="repayment_strategy_b",
         )
-
-city = st.sidebar.selectbox("City / Metro Area", list(CITY_DATA.keys()))
-# Computed here (not just where it's first used, further down) so it's
-# available for every compute_scenario_results() call in section 5 --
-# including Compare Mode's, which run before the Real-World Take-Home
-# section that used to be the only place this was computed.
-city_info = CITY_DATA[city]
 
 st.sidebar.divider()
 admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View")
