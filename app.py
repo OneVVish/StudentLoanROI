@@ -687,17 +687,23 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
 
 
 def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_year: float,
-                               inflation_rate: float, years: int = UNDERGRAD_YEARS) -> float:
+                               grants_per_year: float, inflation_rate: float,
+                               years: int = UNDERGRAD_YEARS) -> float:
     """Total loan across `years` of enrollment, growing Cost of Attendance
-    year-over-year by inflation_rate while Personal Contribution stays a
-    flat nominal amount -- Year 1 uses coa_per_year as entered/auto-filled;
-    each subsequent year compounds by (1 + inflation_rate). The loan gap
-    widens each year since Personal Contribution doesn't scale with rising
-    costs, matching how this plays out for most families in practice."""
+    year-over-year by inflation_rate while Personal Contribution and Grants
+    & Scholarships both stay flat nominal amounts -- Year 1 uses
+    coa_per_year as entered/auto-filled; each subsequent year compounds by
+    (1 + inflation_rate). The loan gap widens each year since neither
+    funding source scales with rising costs, matching how this plays out
+    for most families/awards in practice. Grants & Scholarships reduces the
+    loan the same way Personal Contribution does, but -- unlike Personal
+    Contribution -- is never added to total_investment (the ROI%
+    denominator) in compute_scenario_results, since it's free third-party
+    money, not something the student/family gave up."""
     total = 0.0
     for year_index in range(years):
         coa_this_year = coa_per_year * (1 + inflation_rate) ** year_index
-        total += max(coa_this_year - personal_contribution_per_year, 0)
+        total += max(coa_this_year - personal_contribution_per_year - grants_per_year, 0)
     return total
 
 
@@ -950,9 +956,11 @@ with st.sidebar.expander("College Scorecard Lookup (optional)"):
     st.caption("Pulls real tuition & median debt for the school above via api.data.gov.")
     scorecard_api_key = st.text_input("API Key", value="DEMO_KEY", type="password")
 
-# School first: entering it immediately shows Cost of Attendance below, and
+major = st.sidebar.selectbox("Target Major", list(MAJOR_DATA.keys()))
+
+# School next: entering it immediately shows Cost of Attendance below, and
 # (if it matches the local dataset) auto-fills the per-year COA field --
-# everything else in this scenario builds on that number.
+# everything in the Financing section below builds on that number.
 school_name_a = st.sidebar.text_input(
     "Target Undergraduate School", placeholder="e.g. University of Michigan",
     key="school_name_a", on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
@@ -965,36 +973,43 @@ coa_match_a = find_school_coa(school_name_a, load_coa_dataset()) if school_name_
 coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
 if coa_caption_a:
     st.sidebar.caption(coa_caption_a)
+
+st.sidebar.subheader("💰 Financing")
 coa_per_year_a = st.sidebar.number_input(
     "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
     key="coa_per_year_a",
 )
-
-major = st.sidebar.selectbox("Target Major", list(MAJOR_DATA.keys()))
-
 personal_contribution_per_year_a = st.sidebar.number_input(
     "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
     key="personal_contribution_per_year_a",
-    help="Savings, scholarships, or family money toward this year's cost that "
-         "you did NOT borrow. The loan amount below is Cost of Attendance "
-         "minus this -- counted in the ROI% denominator, but not added to "
-         "the loan you're actually repaying (no interest accrues on it).",
+    help="Savings or family money toward this year's cost that you did NOT "
+         "borrow. The loan amount below is Cost of Attendance minus this "
+         "and Grants & Scholarships -- counted in the ROI% denominator, but "
+         "not added to the loan you're actually repaying (no interest "
+         "accrues on it).",
+)
+grants_per_year_a = st.sidebar.number_input(
+    "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+    key="grants_per_year_a",
+    help="Grant or scholarship aid that reduces what you need to borrow. "
+         "Unlike Personal Contribution, this is NOT counted as part of your "
+         "own investment for ROI purposes -- it was never your money.",
 )
 # Loan amount is derived, not entered: Cost of Attendance minus whatever
 # isn't borrowed, per year, growing COA by an estimated inflation rate each
-# year while Personal Contribution stays flat -- then summed to the total
-# every downstream calculation (effective_principal, ROI, take-home)
-# operates on.
+# year while Personal Contribution and Grants & Scholarships both stay flat
+# -- then summed to the total every downstream calculation
+# (effective_principal, ROI, take-home) operates on.
 control_type_a = coa_match_a["control_type"] if coa_match_a is not None else None
 inflation_rate_a = estimate_coa_inflation_rate(school_name_a, scorecard_api_key, control_type_a)
-loan_amount = compute_total_loan_amount(coa_per_year_a, personal_contribution_per_year_a, inflation_rate_a)
+loan_amount = compute_total_loan_amount(coa_per_year_a, personal_contribution_per_year_a,
+                                         grants_per_year_a, inflation_rate_a)
 personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
 st.sidebar.caption((
     f"Year 1: {fmt_money(coa_per_year_a)} COA − {fmt_money(personal_contribution_per_year_a)} personal "
-    f"→ est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr → over {UNDERGRAD_YEARS} years: "
-    f"**{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
+    f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
+    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
-
 interest_rate = st.sidebar.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
                                          value=5.5, step=0.1)
 repayment_strategy = st.sidebar.selectbox(
@@ -1011,6 +1026,8 @@ compare_mode = st.sidebar.checkbox("🔀 Compare Two Scenarios")
 
 if compare_mode:
     with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
+        major_b = st.selectbox("Target Major", list(MAJOR_DATA.keys()), key="major_b")
+
         school_name_b = st.text_input(
             "Target Undergraduate School", placeholder="e.g. Ohio State University",
             key="school_name_b", on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
@@ -1023,30 +1040,36 @@ if compare_mode:
         coa_caption_b = get_coa_confirmation_caption(school_name_b, coa_match_b, in_state_b)
         if coa_caption_b:
             st.caption(coa_caption_b)
+
+        st.subheader("💰 Financing")
         coa_per_year_b = st.number_input(
             "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
             key="coa_per_year_b",
         )
-
-        major_b = st.selectbox("Target Major", list(MAJOR_DATA.keys()), key="major_b")
-
         personal_contribution_per_year_b = st.number_input(
             "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
             key="personal_contribution_per_year_b",
-            help="Savings, scholarships, or family money toward this year's cost "
-                 "that wasn't borrowed. The loan amount below is Cost of "
-                 "Attendance minus this.",
+            help="Savings or family money toward this year's cost that wasn't "
+                 "borrowed. The loan amount below is Cost of Attendance minus "
+                 "this and Grants & Scholarships.",
+        )
+        grants_per_year_b = st.number_input(
+            "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+            key="grants_per_year_b",
+            help="Grant or scholarship aid that reduces what you need to "
+                 "borrow. Not counted as part of your own investment for ROI "
+                 "purposes -- it was never your money.",
         )
         control_type_b = coa_match_b["control_type"] if coa_match_b is not None else None
         inflation_rate_b = estimate_coa_inflation_rate(school_name_b, scorecard_api_key, control_type_b)
-        loan_amount_b = compute_total_loan_amount(coa_per_year_b, personal_contribution_per_year_b, inflation_rate_b)
+        loan_amount_b = compute_total_loan_amount(coa_per_year_b, personal_contribution_per_year_b,
+                                                   grants_per_year_b, inflation_rate_b)
         personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
         st.caption((
             f"Year 1: {fmt_money(coa_per_year_b)} COA − {fmt_money(personal_contribution_per_year_b)} personal "
-            f"→ est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr → over {UNDERGRAD_YEARS} years: "
-            f"**{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
+            f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
+            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
-
         interest_rate_b = st.number_input("Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
                                            value=5.5, step=0.1, key="interest_rate_b")
         repayment_strategy_b = st.selectbox(
@@ -1099,12 +1122,12 @@ if admin_enabled:
         "scenario_a_repayment_strategy", "scenario_a_starting_salary", "scenario_a_dti_ratio",
         "scenario_a_monthly_payment", "scenario_a_payoff_years", "scenario_a_total_interest",
         "scenario_a_earnings_premium", "scenario_a_roi_pct", "scenario_a_personal_contribution",
-        "scenario_a_coa_inflation_rate",
+        "scenario_a_coa_inflation_rate", "scenario_a_grants_per_year",
         "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount", "scenario_b_interest_rate",
         "scenario_b_repayment_strategy", "scenario_b_starting_salary", "scenario_b_dti_ratio",
         "scenario_b_monthly_payment", "scenario_b_payoff_years", "scenario_b_total_interest",
         "scenario_b_earnings_premium", "scenario_b_roi_pct", "scenario_b_personal_contribution", "roi_pct_delta",
-        "scenario_b_coa_inflation_rate",
+        "scenario_b_coa_inflation_rate", "scenario_b_grants_per_year",
     ])
 
     col1, col2 = st.columns(2)
@@ -1407,6 +1430,7 @@ if not st.session_state.survey_submitted:
                 "scenario_a_roi_pct": scenario_a["roi_result"]["roi_pct"],
                 "scenario_a_personal_contribution": personal_contribution,
                 "scenario_a_coa_inflation_rate": inflation_rate_a,
+                "scenario_a_grants_per_year": grants_per_year_a,
             }
 
             # Scenario B / roi_pct_delta only exist when Compare Mode is on
@@ -1432,6 +1456,7 @@ if not st.session_state.survey_submitted:
                     "scenario_b_roi_pct": scenario_b["roi_result"]["roi_pct"],
                     "scenario_b_personal_contribution": personal_contribution_b,
                     "scenario_b_coa_inflation_rate": inflation_rate_b,
+                    "scenario_b_grants_per_year": grants_per_year_b,
                 })
                 roi_a = scenario_a["roi_result"]["roi_pct"]
                 roi_b = scenario_b["roi_result"]["roi_pct"]
@@ -1614,16 +1639,25 @@ estimate you've already typed in by hand; you can always override the
 auto-filled figure directly.
 
 **Loan amount is derived, not entered.** Each scenario asks for Cost of
-Attendance (per year) and Personal Contribution (per year); the total loan
-amount grows Cost of Attendance year-over-year by an estimated inflation
-rate while Personal Contribution stays a flat nominal amount, then sums
-across `UNDERGRAD_YEARS` (4, an assumed bachelor's degree length):
-`Loan (Year N) = max(Cost of Attendance × (1 + inflation_rate)^(N-1) − Personal Contribution, 0)`,
-summed for N = 1..4. Because Personal Contribution doesn't scale with
-rising costs, the loan gap widens each year -- the resulting total feeds
-`effective_principal`, the loan repayment simulation, and the ROI%
-`total_investment` denominator exactly as it did when loan amount used to
-be a single flat entry.
+Attendance (per year), Personal Contribution (per year), and Grants &
+Scholarships (per year); the total loan amount grows Cost of Attendance
+year-over-year by an estimated inflation rate while Personal Contribution
+and Grants & Scholarships both stay flat nominal amounts, then sums across
+`UNDERGRAD_YEARS` (4, an assumed bachelor's degree length):
+`Loan (Year N) = max(Cost of Attendance × (1 + inflation_rate)^(N-1) − Personal Contribution − Grants & Scholarships, 0)`,
+summed for N = 1..4. Because neither funding source scales with rising
+costs, the loan gap widens each year -- the resulting total feeds
+`effective_principal` and the loan repayment simulation exactly as it did
+when loan amount used to be a single flat entry.
+
+**Grants & Scholarships reduces the loan but not the ROI% denominator.**
+Personal Contribution counts toward `total_investment` (the ROI%
+denominator) because it's money the student/family actually gave up --
+real opportunity cost. Grants & Scholarships is free third-party money: it
+shrinks what you need to borrow, but it was never your money to begin
+with, so it's deliberately excluded from `total_investment` in
+`compute_scenario_results` -- only `personal_contribution` is added to
+`effective_principal` there.
 
 **Cost of Attendance inflation rate** is estimated per school: the CAGR
 between two fixed College Scorecard data years (2018 and 2022,
