@@ -631,7 +631,8 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
 # ---- 2f. 10-Year ROI ------------------------------------------------------
 
 def calculate_roi(major_name: str, total_loan_payments_in_window: float,
-                   total_investment: float, years: int = ROI_WINDOW_YEARS) -> dict:
+                   total_investment: float, col_index: float = 100.0,
+                   years: int = ROI_WINDOW_YEARS) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window) compared against a debt-free high school graduate's
@@ -644,6 +645,18 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     principal actually fed into the loan repayment simulation -- you don't
     pay interest on money you never borrowed, but it's still part of what
     you "invested" for ROI purposes.
+
+    Both net positions are adjusted for the selected city's cost of living
+    (col_index) -- assuming the HS grad lives in the same city as the major
+    track, since that's the only city input this app has -- so Earnings
+    Premium/ROI% reflect real purchasing power in that city, not nominal
+    national-average dollars. col_index=100.0 (national average) is a
+    no-op, preserving the original nominal comparison when no city is
+    selected (or "National Average" is). total_investment is never
+    COL-adjusted -- you repay a fixed nominal dollar amount regardless of
+    where you live, consistent with the loan repayment simulation itself
+    not being COL-adjusted either. Only earnings/purchasing power get
+    adjusted, never debt.
     """
     major_cumulative_earnings = sum(
         get_annual_salary_for_year(major_name, y) for y in range(years)
@@ -652,8 +665,11 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
         HS_GRAD_SALARY * (1 + HS_GRAD_GROWTH_RATE) ** y for y in range(years)
     )
 
-    major_net_position = major_cumulative_earnings - total_loan_payments_in_window
-    hs_net_position = hs_cumulative_earnings
+    major_net_position_nominal = major_cumulative_earnings - total_loan_payments_in_window
+    hs_net_position_nominal = hs_cumulative_earnings
+
+    major_net_position = adjust_for_cost_of_living(major_net_position_nominal, col_index)
+    hs_net_position = adjust_for_cost_of_living(hs_net_position_nominal, col_index)
     earnings_premium = major_net_position - hs_net_position
     roi_pct = (earnings_premium / total_investment * 100) if total_investment > 0 else None
 
@@ -664,6 +680,9 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
         "hs_net_position": hs_net_position,
         "earnings_premium": earnings_premium,
         "roi_pct": roi_pct,
+        "major_net_position_nominal": major_net_position_nominal,
+        "hs_net_position_nominal": hs_net_position_nominal,
+        "earnings_premium_nominal": major_net_position_nominal - hs_net_position_nominal,
     }
 
 
@@ -684,7 +703,8 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
 
 def compute_scenario_results(major_name: str, loan_amount: float,
                               interest_rate: float, repayment_strategy: str,
-                              personal_contribution: float = 0.0) -> dict:
+                              personal_contribution: float = 0.0,
+                              col_index: float = 100.0) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -696,6 +716,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     simulation, since you don't pay interest on money you never borrowed.
     Defaults to 0.0 so every existing call site is unaffected until it
     explicitly opts in.
+
+    col_index (the selected city's cost-of-living index, default 100.0 =
+    national average = no-op) is passed straight through to calculate_roi,
+    which adjusts both sides of the ROI comparison -- see that function's
+    docstring.
     """
     effective_principal = get_effective_principal(major_name, loan_amount)
     total_investment = effective_principal + personal_contribution
@@ -705,7 +730,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     else:
         repayment_result = calculate_idr_repayment(effective_principal, interest_rate, major_name)
         strategy_label = "Income-Driven Repayment"
-    roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"], total_investment)
+    roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
+                                total_investment, col_index=col_index)
     return {
         "major": major_name,
         "strategy_label": strategy_label,
@@ -808,7 +834,7 @@ def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major
     })
     fig = px.bar(
         comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
-        title="10-Year Net Financial Position: Major vs. High School Baseline",
+        title="10-Year Net Financial Position (COL-Adjusted): Major vs. High School Baseline",
         text_auto=".2s",
     )
     fig.update_layout(yaxis_tickprefix="$", showlegend=False)
@@ -843,7 +869,7 @@ def build_scenario_comparison_roi_chart(hs_net_position: float,
     })
     fig = px.bar(
         comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
-        title="10-Year Net Financial Position: Scenario Comparison",
+        title="10-Year Net Financial Position (COL-Adjusted): Scenario Comparison",
         text_auto=".2s",
     )
     fig.update_layout(yaxis_tickprefix="$", showlegend=False)
@@ -1030,6 +1056,11 @@ if compare_mode:
         )
 
 city = st.sidebar.selectbox("City / Metro Area", list(CITY_DATA.keys()))
+# Computed here (not just where it's first used, further down) so it's
+# available for every compute_scenario_results() call in section 5 --
+# including Compare Mode's, which run before the Real-World Take-Home
+# section that used to be the only place this was computed.
+city_info = CITY_DATA[city]
 career_stage_label = st.sidebar.radio("Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()))
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
@@ -1216,7 +1247,7 @@ def render_scenario_panel(column, scenario: dict, label: str):
         st.metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
         st.metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
         st.metric(
-            "10-Year Earnings Premium",
+            "10-Year Earnings Premium (COL-Adjusted)",
             fmt_money(roi_result["earnings_premium"]),
             delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
         )
@@ -1229,8 +1260,10 @@ def render_scenario_panel(column, scenario: dict, label: str):
 if compare_mode:
     st.subheader("⚖️ Scenario Comparison")
     if st.session_state.has_compared:
-        scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy, personal_contribution)
-        scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b, personal_contribution_b)
+        scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
+                                               personal_contribution, city_info["col_index"])
+        scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
+                                               personal_contribution_b, city_info["col_index"])
 
         col_a, col_b = st.columns(2)
         render_scenario_panel(col_a, scenario_a, "A")
@@ -1254,7 +1287,8 @@ if compare_mode:
     else:
         st.info("Configure Scenario B in the sidebar, then click **Compare Scenarios**.")
 elif st.session_state.has_calculated:
-    scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy, personal_contribution)
+    scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
+                                         personal_contribution, city_info["col_index"])
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -1273,7 +1307,7 @@ elif st.session_state.has_calculated:
     metric_cols[1].metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
     metric_cols[2].metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
     metric_cols[3].metric(
-        "10-Year Earnings Premium",
+        "10-Year Earnings Premium (COL-Adjusted)",
         fmt_money(roi_result["earnings_premium"]),
         delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
     )
@@ -1292,7 +1326,6 @@ elif st.session_state.has_calculated:
 
     st.subheader(f"🏙️ Real-World Take-Home — {career_stage_label} in {city}")
 
-    city_info = CITY_DATA[city]
     gross = get_annual_salary_for_year(major, career_stage_key)
     take_home = calculate_take_home_pay(gross, city_info["state_key"], city_info["local_tax_rate"])
     target_month = (career_stage_key + 1) * 12
@@ -1356,7 +1389,8 @@ if not st.session_state.survey_submitted:
             # than reused from st.session_state, so the survey reflects
             # exact click-time state even if the user never pressed
             # Calculate/Compare before submitting.
-            scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy, personal_contribution)
+            scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
+                                                   personal_contribution, city_info["col_index"])
 
             context = {
                 "scenario_a_school_name": school_name_a or None,
@@ -1381,7 +1415,8 @@ if not st.session_state.survey_submitted:
             if compare_mode:
                 starting_salary_b = MAJOR_DATA[major_b]["starting_salary"]
                 dti_ratio_b = round(loan_amount_b / starting_salary_b, 4) if starting_salary_b else None
-                scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b, personal_contribution_b)
+                scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
+                                                       personal_contribution_b, city_info["col_index"])
                 context.update({
                     "scenario_b_school_name": school_name_b or None,
                     "scenario_b_major": major_b,
@@ -1505,6 +1540,22 @@ amortizes, since no interest accrues on money you didn't borrow. Two
 identical outcomes with different personal contributions will show
 different ROI%, by design -- ROI here means "return on what you actually
 put in," not "return on your loan" alone.
+
+**Cost of living in the ROI calculation.** Both sides of the ROI
+comparison -- the major's net position and the high-school-graduate
+baseline -- are adjusted for the selected City / Metro Area's cost of
+living, on the assumption that the HS grad lives in the same city as the
+major track (the only city input this app has; no separate HS-grad city
+selector exists). "10-Year Earnings Premium" and the ROI charts are
+labeled "(COL-Adjusted)" for this reason -- a dollar in San Francisco and
+a dollar in Columbus no longer count the same. Selecting "National
+Average" (`col_index = 100`) is a no-op and reproduces the original
+nominal, national-average comparison exactly. *Total investment* (debt +
+personal contribution, the ROI% denominator) is never cost-of-living
+adjusted -- you repay a fixed nominal dollar amount regardless of where
+you live, the same reason the loan repayment simulation itself isn't
+COL-adjusted either. In Compare Mode, one shared city selector applies to
+both Scenario A and B, rather than each scenario getting its own city.
 
 **Taxes** — Federal tax uses real 2024 single-filer brackets and standard
 deduction (IRS Rev. Proc. 2023-34); FICA is 6.2% Social Security (up to the
