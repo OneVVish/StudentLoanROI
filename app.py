@@ -214,12 +214,12 @@ SOCIAL_SECURITY_WAGE_BASE_2024 = 168600
 SOCIAL_SECURITY_RATE = 0.062
 MEDICARE_RATE = 0.0145
 
-# Loan-to-income risk-tier thresholds for the "Loan Payment / Take-Home
-# Ratio" metric (5d). Both real, commonly-cited guidelines are expressed as a
-# percentage of GROSS income, not the net/take-home figure this app's ratio
-# actually uses -- see get_loan_to_income_risk_tier for how they're
-# converted onto a net basis using the scenario's own effective tax rate,
-# rather than assuming a generic conversion factor.
+# Loan-to-income risk-tier thresholds for the "Student Loan Payment /
+# Take-Home Ratio" metric (5d). Both real, commonly-cited guidelines are
+# expressed as a percentage of GROSS income, not the net/take-home figure
+# this app's ratio actually uses -- see get_loan_to_income_risk_tier for how
+# they're converted onto a net basis using the scenario's own effective tax
+# rate, rather than assuming a generic conversion factor.
 # MANAGEABLE: student loan payments at or below 10% of gross monthly income
 # are widely cited as leaving room for other budget priorities (e.g. SoFi,
 # "What Percentage of Your Income Should Go to Student Loans?",
@@ -1479,7 +1479,7 @@ def calculate_take_home_pay(gross_annual_income: float, state_key, local_tax_rat
 
 
 def get_loan_to_income_risk_tier(loan_to_takehome_pct: float, effective_tax_rate: float) -> dict:
-    """Classifies a "Loan Payment / Take-Home" ratio (already expressed as
+    """Classifies a "Student Loan Payment / Take-Home" ratio (already expressed as
     % of NET/take-home pay) against the real, gross-income-based guidelines
     in LOAN_TO_INCOME_GROSS_*_PCT, converted onto this scenario's own net
     basis: `gross_pct / (1 - effective_tax_rate)` -- e.g. a person paying an
@@ -1604,38 +1604,37 @@ def build_takehome_pie_chart(take_home: dict):
                  take_home["state_tax"], take_home["fica_tax"]],
         title="Where Your Salary Actually Goes",
     )
-    fig.update_traces(textinfo="percent+label")
+    fig.update_traces(textinfo="percent+label", automargin=True)
     fig.update_layout(showlegend=False, title_font_size=14)
     return fig
 
 
 def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: float):
-    """Pie chart splitting monthly take-home pay into loan payment vs.
-    remaining disposable income -- while the payment still fits inside
+    """Pie chart splitting monthly take-home pay into student loan payment
+    vs. remaining disposable income -- while the payment still fits inside
     take-home pay. A pie chart can't represent a payment that *exceeds*
     take-home pay (no valid slice set sums past 100%), so in that case this
-    returns a simple 2-bar comparison of Take-Home Pay vs. Required Loan
-    Payment instead, which can show the overage naturally. No legend, same
-    reasoning as build_takehome_pie_chart -- each slice already labels
-    itself."""
+    returns a simple 2-bar comparison of Take-Home Pay vs. Required Student
+    Loan Payment instead, which can show the overage naturally. No legend,
+    same reasoning as build_takehome_pie_chart -- each slice already labels
+    itself. Deliberately no custom margin= override here -- Plotly's own
+    defaults (plus automargin for label overflow) are what
+    build_takehome_pie_chart uses, and these two charts should always
+    render at the same size."""
     if monthly_payment <= monthly_net_take_home:
         remaining = monthly_net_take_home - monthly_payment
         fig = px.pie(
-            names=["Loan Payment", "Remaining Disposable Income"],
+            names=["Student Loan Payment", "Remaining Disposable Income"],
             values=[monthly_payment, remaining],
-            title="Loan Payment vs. Disposable Income",
+            title="Student Loan Payment vs. Disposable Income",
         )
-        fig.update_traces(textinfo="percent+label")
-        # automargin lets Plotly expand the figure's own margins to fit a
-        # small slice's outside-pulled label instead of clipping it -- the
-        # small fixed left margin is a fallback for older Plotly behavior.
-        fig.update_traces(automargin=True)
-        fig.update_layout(showlegend=False, title_font_size=14, margin=dict(l=40, r=10, t=40, b=10))
+        fig.update_traces(textinfo="percent+label", automargin=True)
+        fig.update_layout(showlegend=False, title_font_size=14)
         return fig
     fig = px.bar(
-        x=["Take-Home Pay", "Required Loan Payment"],
+        x=["Take-Home Pay", "Required Student Loan Payment"],
         y=[monthly_net_take_home, monthly_payment],
-        title="Monthly Loan Payment Exceeds Take-Home Pay",
+        title="Monthly Student Loan Payment Exceeds Take-Home Pay",
     )
     fig.update_layout(yaxis_title="Monthly $", xaxis_title=None, title_font_size=14)
     return fig
@@ -3140,7 +3139,7 @@ else:
     if gross > 0:
         st.plotly_chart(build_takehome_pie_chart(take_home), use_container_width=True, config=PLOTLY_CHART_CONFIG)
         monthly_net_take_home = take_home["net_take_home"] / 12
-        # Loan Payment ÷ Take-Home Pay -- the same split the chart's slices
+        # Student Loan Payment ÷ Take-Home Pay -- the same split the chart's slices
         # (or bars, if the payment exceeds take-home pay) already encode
         # visually, surfaced here as an explicit number. Guarded against a
         # $0 take-home edge case rather than assuming gross > 0 always
@@ -3157,7 +3156,7 @@ else:
             st.markdown(
                 f"""
                 <div>
-                    <div style="font-size: 0.875rem; color: #808495;">Loan Payment / Take-Home Ratio</div>
+                    <div style="font-size: 0.875rem; color: #808495;">Student Loan Payment / Take-Home Ratio</div>
                     <div style="font-size: 2rem; font-weight: 600; color: {risk['color']}; line-height: 1.2;">
                         {fmt_pct(loan_to_disposable_ratio)}
                     </div>
@@ -3183,7 +3182,7 @@ else:
                 "pay."
             ))
         else:
-            st.metric("Loan Payment / Take-Home Ratio", "N/A")
+            st.metric("Student Loan Payment / Take-Home Ratio", "N/A")
 
     # ---- 5e. 10-Year Financial Position -------------------------------------
 
@@ -3505,7 +3504,7 @@ path starting from year 1 no matter which snapshot you're looking at.
 Think of it as a window into one moment of a story that's always the same
 story — not a way to start the story over from a different point.
 
-**How the "Loan Payment / Take-Home Ratio" color coding works.** This
+**How the "Student Loan Payment / Take-Home Ratio" color coding works.** This
 percentage (shown below the take-home chart) is color-coded against two real, commonly-cited
 guidelines — Green ("Manageable") means your loan payment is at or under 10%
 of gross monthly income, a widely-cited student-loan budgeting guideline
