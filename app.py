@@ -2589,7 +2589,7 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
 
 def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest_rate_a: float,
                                     scenario_b: dict = None, major_name_b: str = None,
-                                    interest_rate_b: float = None) -> dict:
+                                    interest_rate_b: float = None, col_index: float = 100.0) -> dict:
     """2026 Federal Loan Framework & Macro Forecasting container (only
     rendered when enable_future_proofing is True). Returns the
     {column_name: value} fields for build_module_context. See the RAP_*
@@ -2633,6 +2633,34 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
                 "your own payment doesn't cover that much -- so your balance "
                 "never grows from unpaid interest (real OBBBA provisions)."
             )
+
+        st.plotly_chart(
+            build_balance_chart(result["schedule"], future_plan),
+            use_container_width=True, key=f"future_balance_chart_{key_suffix}",
+        )
+
+        roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
+                                         scenario["total_investment"], col_index=col_index)
+        st.markdown("**10-Year Financial Position Under This Plan**")
+        st.caption(
+            "Recomputed using this 2026 plan's actual payments, instead of "
+            "your selected Repayment Strategy above -- same COL-adjusted "
+            "comparison as the main 10-Year Financial Position section."
+        )
+        pos_cols = st.columns(3)
+        pos_cols[0].metric(
+            "High School Grad — 10-Yr Net Position (No Loan)",
+            fmt_money(roi_result_2026["hs_net_position"]),
+        )
+        pos_cols[1].metric(f"{major_name} — 10-Yr Net Position", fmt_money(roi_result_2026["major_net_position"]))
+        pos_cols[2].metric(
+            "Earnings Premium (COL-Adjusted)", fmt_money(roi_result_2026["earnings_premium"]),
+            delta=fmt_pct(roi_result_2026["roi_pct"]) + " ROI" if roi_result_2026["roi_pct"] is not None else None,
+        )
+        st.plotly_chart(
+            build_roi_bar_chart(roi_result_2026["hs_net_position"], roi_result_2026["major_net_position"], major_name),
+            use_container_width=True, key=f"future_roi_chart_{key_suffix}",
+        )
         return future_plan
 
     if scenario_b is not None:
@@ -2741,7 +2769,8 @@ if compare_mode:
     future_context = {}
     if enable_future_proofing:
         future_context = render_future_proofing_section(scenario_a, major, interest_rate,
-                                                          scenario_b, major_b, interest_rate_b)
+                                                          scenario_b, major_b, interest_rate_b,
+                                                          col_index=city_info["col_index"])
 
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None,
@@ -2919,7 +2948,8 @@ else:
 
     future_context = {}
     if enable_future_proofing:
-        future_context = render_future_proofing_section(scenario, major, interest_rate)
+        future_context = render_future_proofing_section(scenario, major, interest_rate,
+                                                          col_index=city_info["col_index"])
 
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None, None, ai_context, future_context,
