@@ -1544,6 +1544,31 @@ def build_takehome_pie_chart(take_home: dict):
     return fig
 
 
+def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: float):
+    """Pie chart splitting monthly take-home pay into loan payment vs.
+    remaining disposable income -- while the payment still fits inside
+    take-home pay. A pie chart can't represent a payment that *exceeds*
+    take-home pay (no valid slice set sums past 100%), so in that case this
+    returns a simple 2-bar comparison of Take-Home Pay vs. Required Loan
+    Payment instead, which can show the overage naturally."""
+    if monthly_payment <= monthly_net_take_home:
+        remaining = monthly_net_take_home - monthly_payment
+        fig = px.pie(
+            names=["Loan Payment", "Remaining Disposable Income"],
+            values=[monthly_payment, remaining],
+            title="Monthly Take-Home Pay: Loan Payment vs. Disposable Income",
+        )
+        fig.update_traces(textinfo="percent+label")
+        return fig
+    fig = px.bar(
+        x=["Take-Home Pay", "Required Loan Payment"],
+        y=[monthly_net_take_home, monthly_payment],
+        title="Monthly Loan Payment Exceeds Take-Home Pay",
+    )
+    fig.update_layout(yaxis_title="Monthly $", xaxis_title=None)
+    return fig
+
+
 # ---- 2k. PDF Report Generation --------------------------------------------
 # Reuses the same compute_scenario_results dicts as the on-screen views,
 # laid out as tables/metrics with reportlab -- deliberately no chart images.
@@ -1936,84 +1961,12 @@ st.markdown(
 # silently degrading this one's COA-inflation estimates under load.
 scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 
-st.sidebar.subheader("💼 Career")
-
-# Which BLS OEWS geographic release backs the career dropdown below --
-# National (every state combined into one nationwide figure per occupation)
-# or California (that state's own wages, which run higher for many careers,
-# e.g. tech and healthcare). Affects every curated-major lookup too, since
-# MAJOR_DATA is rebuilt from this choice on every rerun -- picking a source
-# here is a data-source preference for the whole session, not per-scenario.
-career_source_options = ["National", "California"]
-shared_career_source = get_shared_default("career_source", "California")
-default_career_source_index = (
-    career_source_options.index(shared_career_source) if shared_career_source in career_source_options else 0
-)
-career_data_source = st.sidebar.radio(
-    "Career Salary Data", career_source_options, index=default_career_source_index,
-    help="National: nationwide BLS OEWS wage estimates (cleaned_careers.csv). "
-         "California: that state's own BLS OEWS wage estimates "
-         "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`.",
-)
-careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
-MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
-
-# Defaults below assume a popular, concrete profile (Software Developer in
-# San Francisco, in-state at UC Berkeley, 10 years in) instead of generic
-# empty/first-alphabetical values, so there's something real on screen
-# before a visitor touches anything -- see get_suggested_coa_per_year()
-# usage further down for how Cost of Attendance's default is derived from
-# the same school/in-state choice rather than a flat placeholder.
-major_options = sorted(MAJOR_DATA.keys())
-shared_major = get_shared_default("major", "Software Developers")
-default_major_index = major_options.index(shared_major) if shared_major in major_options else (
-    major_options.index("Software Developers") if "Software Developers" in major_options else 0
-)
-major = st.sidebar.selectbox(
-    "Target Profession", major_options, index=default_major_index,
-    help="Pick the career you're evaluating -- this determines the salary "
-         "numbers used everywhere else in the app. There are hundreds of "
-         "options, so instead of scrolling, click the box and type part of "
-         "your major or career to jump straight to it.",
-)
-
-city_options = list(CITY_DATA.keys())
-shared_city = get_shared_default("city", "San Francisco, CA")
-default_city_index = city_options.index(shared_city) if shared_city in city_options else (
-    city_options.index("San Francisco, CA") if "San Francisco, CA" in city_options else 0
-)
-city = st.sidebar.selectbox(
-    "City / Metro Area", city_options, index=default_city_index,
-    help="Where you plan to live and work after graduating. Adjusts your "
-         "take-home pay and the 10-year comparison for how expensive that "
-         "area is to live in.",
-)
-# Computed here (not just where it's first used, further down) so it's
-# available for every compute_scenario_results() call in section 5 --
-# including Compare Mode's, which run before the Real-World Take-Home
-# section that used to be the only place this was computed.
-city_info = CITY_DATA[city]
-
-# Which point in this major's career the Real-World Take-Home section
-# (5d) snapshots -- has no functional dependency on School/In-State or
-# Financing below, so its position here is purely about profile layout
-# (career-identity fields together), not calculation order.
-career_stage_options = list(CAREER_STAGE_OPTIONS.keys())
-shared_career_stage = get_shared_default("stage", "Mid-Career (Year 10)")
-default_career_stage_index = career_stage_options.index(shared_career_stage) if shared_career_stage in career_stage_options else (
-    career_stage_options.index("Mid-Career (Year 10)") if "Mid-Career (Year 10)" in career_stage_options else 0
-)
-career_stage_label = st.sidebar.radio(
-    "Career Stage Snapshot", career_stage_options, index=default_career_stage_index,
-    help="Preview your income right after graduating (Year 1) or 10 years "
-         "into this career, in the Real-World Take-Home section below.",
-)
-career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
-
 # Three independent, optional modules -- each defaults off, and the app
 # behaves exactly as it did before any of them existed when left off. See
 # the Methodology footer for what each one models and, just as importantly,
-# what it deliberately does NOT claim.
+# what it deliberately does NOT claim. Placed before Financing since
+# enable_prestige_mode decides whether Financing shows a school lookup or a
+# college-tier picker.
 with st.sidebar.expander("🧪 Advanced Analysis Settings"):
     enable_prestige_mode = st.checkbox(
         "Enable College Prestige & Cost Estimator", value=False, key="enable_prestige_mode",
@@ -2066,8 +2019,7 @@ if enable_prestige_mode:
 else:
     # School first: entering it immediately shows Cost of Attendance below, and
     # (if it matches the local dataset) auto-fills the per-year COA field --
-    # everything else in this section builds on that number, which is why the
-    # school/in-state choice lives here rather than up in Career. Many real
+    # everything else in this section builds on that number. Many real
     # school names collide on a simple substring search (e.g. every
     # "University of California" campus), so a search matching 2+ schools
     # shows a picker instead of silently guessing which one was meant.
@@ -2169,11 +2121,6 @@ st.sidebar.caption((
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
     f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
-if enable_prestige_mode:
-    # Apply the tier's salary premium to Scenario A's major -- see
-    # get_prestige_adjusted_major_name for why this is a synthetic MAJOR_DATA
-    # entry rather than a new parameter threaded through every calculation.
-    major = get_prestige_adjusted_major_name(major, prestige_tier_a)
 interest_rate = st.sidebar.number_input(
     "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
     value=get_shared_float("rate", 5.5), step=0.1,
@@ -2192,6 +2139,98 @@ repayment_strategy = st.sidebar.selectbox(
     help="Standard 10-Year: a fixed payment every month for 10 years. "
          "Income-Driven Repayment (IDR): your payment is based on your "
          "income instead, and whatever's left is forgiven after 20 years.",
+)
+
+st.sidebar.subheader("💼 Career")
+
+# Which BLS OEWS geographic release backs the career dropdown below --
+# National (every state combined into one nationwide figure per occupation)
+# or California (that state's own wages, which run higher for many careers,
+# e.g. tech and healthcare). Affects every curated-major lookup too, since
+# MAJOR_DATA is rebuilt from this choice on every rerun -- picking a source
+# here is a data-source preference for the whole session, not per-scenario.
+# The widget itself renders at the bottom of this section (after Career
+# Stage Snapshot) -- its value is read from session_state here, before that
+# widget exists, so Target Profession's options below can be built from the
+# right MAJOR_DATA even on the very first render.
+career_source_options = ["National", "California"]
+shared_career_source = get_shared_default("career_source", "California")
+st.session_state.setdefault(
+    "career_source_radio",
+    shared_career_source if shared_career_source in career_source_options else "California",
+)
+career_data_source = st.session_state["career_source_radio"]
+careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
+MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
+
+# Defaults below assume a popular, concrete profile (Software Developer in
+# San Francisco, in-state at UC Berkeley, 10 years in) instead of generic
+# empty/first-alphabetical values, so there's something real on screen
+# before a visitor touches anything -- see get_suggested_coa_per_year()
+# usage further up for how Cost of Attendance's default is derived from
+# the same school/in-state choice rather than a flat placeholder.
+major_options = sorted(MAJOR_DATA.keys())
+shared_major = get_shared_default("major", "Software Developers")
+default_major_index = major_options.index(shared_major) if shared_major in major_options else (
+    major_options.index("Software Developers") if "Software Developers" in major_options else 0
+)
+major = st.sidebar.selectbox(
+    "Target Profession", major_options, index=default_major_index,
+    help="Pick the career you're evaluating -- this determines the salary "
+         "numbers used everywhere else in the app. There are hundreds of "
+         "options, so instead of scrolling, click the box and type part of "
+         "your major or career to jump straight to it.",
+)
+if enable_prestige_mode:
+    # Apply the tier's salary premium (chosen above, in Financing) to
+    # Scenario A's major -- see get_prestige_adjusted_major_name for why
+    # this is a synthetic MAJOR_DATA entry rather than a new parameter
+    # threaded through every calculation.
+    major = get_prestige_adjusted_major_name(major, prestige_tier_a)
+
+city_options = list(CITY_DATA.keys())
+shared_city = get_shared_default("city", "San Francisco, CA")
+default_city_index = city_options.index(shared_city) if shared_city in city_options else (
+    city_options.index("San Francisco, CA") if "San Francisco, CA" in city_options else 0
+)
+city = st.sidebar.selectbox(
+    "City / Metro Area", city_options, index=default_city_index,
+    help="Where you plan to live and work after graduating. Adjusts your "
+         "take-home pay and the 10-year comparison for how expensive that "
+         "area is to live in.",
+)
+# Computed here (not just where it's first used, further down) so it's
+# available for every compute_scenario_results() call in section 5 --
+# including Compare Mode's, which run before the Real-World Take-Home
+# section that used to be the only place this was computed.
+city_info = CITY_DATA[city]
+
+# Which point in this major's career the Real-World Take-Home section
+# (5d) snapshots -- has no functional dependency on School/In-State or
+# Financing above, so its position here is purely about profile layout
+# (career-identity fields together), not calculation order.
+career_stage_options = list(CAREER_STAGE_OPTIONS.keys())
+shared_career_stage = get_shared_default("stage", "Mid-Career (Year 10)")
+default_career_stage_index = career_stage_options.index(shared_career_stage) if shared_career_stage in career_stage_options else (
+    career_stage_options.index("Mid-Career (Year 10)") if "Mid-Career (Year 10)" in career_stage_options else 0
+)
+career_stage_label = st.sidebar.radio(
+    "Career Stage Snapshot", career_stage_options, index=default_career_stage_index,
+    help="Preview your income right after graduating (Year 1) or 10 years "
+         "into this career, in the Real-World Take-Home section below.",
+)
+career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
+
+# Rendered last in this section: its current value was already read from
+# session_state above (before Target Profession) so MAJOR_DATA could be
+# built in time. No index= here since session_state already holds this
+# widget's value (seeded via setdefault above) -- passing both would
+# trigger Streamlit's widget-policy warning.
+career_data_source = st.sidebar.radio(
+    "Career Salary Data", career_source_options, key="career_source_radio",
+    help="National: nationwide BLS OEWS wage estimates (cleaned_careers.csv). "
+         "California: that state's own BLS OEWS wage estimates "
+         "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`.",
 )
 
 st.sidebar.divider()
@@ -2905,6 +2944,11 @@ else:
 
     if gross > 0:
         st.plotly_chart(build_takehome_pie_chart(take_home), use_container_width=True)
+        monthly_net_take_home = take_home["net_take_home"] / 12
+        st.plotly_chart(
+            build_takehome_vs_loan_chart(monthly_net_take_home, monthly_payment),
+            use_container_width=True,
+        )
 
     # ---- 5e. 10-Year Financial Position -------------------------------------
 
