@@ -449,6 +449,15 @@ def fmt_pct(value):
     return f"{value:.1f}%"
 
 
+def centered_columns(df: pd.DataFrame) -> dict:
+    """`column_config` for st.dataframe that center-aligns every column --
+    st.dataframe otherwise left-aligns text and right-aligns numbers by
+    default, which looks inconsistent across this app's tables (all of
+    which are small, formatted-string summaries, not data to scan
+    numerically)."""
+    return {col: st.column_config.Column(alignment="center") for col in df.columns}
+
+
 def get_major_growth_rate(major_name: str) -> float:
     """CAGR from a major's starting_salary to its median_salary over 10 years
     of actually practicing (excludes any training delay -- see
@@ -2911,7 +2920,10 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
             "City": c, "CoL Index": info["col_index"],
             "COL-Adjusted Disposable Income (annual)": fmt_money(disposable),
         })
-    st.dataframe(pd.DataFrame(col_rows), hide_index=True, use_container_width=True)
+    col_rows_df = pd.DataFrame(col_rows)
+    st.dataframe(
+        col_rows_df, hide_index=True, use_container_width=True, column_config=centered_columns(col_rows_df),
+    )
 
     st.divider()
     st.markdown("**Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)**")
@@ -3057,13 +3069,14 @@ else:
         "grows by the estimated inflation rate each year, while Personal "
         "Contribution and Grants & Scholarships stay the same."
     )
+    loan_schedule_df = pd.DataFrame([
+        {"Year": row["year"], "Cost of Attendance": fmt_money(row["coa"]),
+         "Loan Amount This Year": fmt_money(row["loan_amount"])}
+        for row in loan_schedule_a
+    ])
     st.dataframe(
-        pd.DataFrame([
-            {"Year": row["year"], "Cost of Attendance": fmt_money(row["coa"]),
-             "Loan Amount This Year": fmt_money(row["loan_amount"])}
-            for row in loan_schedule_a
-        ]),
-        hide_index=True, use_container_width=True,
+        loan_schedule_df, hide_index=True, use_container_width=True,
+        column_config=centered_columns(loan_schedule_df),
     )
     st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
     if abs(loan_amount - computed_loan_amount_a) >= 1:
