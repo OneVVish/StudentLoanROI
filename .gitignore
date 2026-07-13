@@ -15,3 +15,6 @@ analysis_output/
 
 # Research paper draft -- kept local, not part of the app codebase
 research_paper_draft.md
+
+# Slide deck for counselor/teacher outreach -- kept local, not part of the app codebase
+presentation/

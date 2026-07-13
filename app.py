@@ -18,7 +18,8 @@ Architecture:
 
 import io
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
@@ -368,15 +369,23 @@ def get_supabase_connection():
 
 
 def log_usage_event(action: str):
-    """Insert a single usage event into the usage_logs table."""
-    conn = get_supabase_connection()
-    execute_query(
-        conn.table("usage_logs").insert(
-            [{"timestamp": datetime.now().isoformat(), "action": action}],
-            count="None",
-        ),
-        ttl=0,
-    )
+    """Insert a single usage event into the usage_logs table. Tolerates any
+    connection/query failure (matching every other save_*/log_* helper in
+    this file) -- this fires on every single session via the pageview log
+    at the very top of the script, before anything else renders, so a
+    Supabase hiccup here must never be allowed to take down the whole
+    calculator for every visitor."""
+    try:
+        conn = get_supabase_connection()
+        execute_query(
+            conn.table("usage_logs").insert(
+                [{"timestamp": now_local().isoformat(), "action": action}],
+                count="None",
+            ),
+            ttl=0,
+        )
+    except Exception:
+        pass
 
 
 def save_survey_response(respondent_role: str, hs_graduation_year: str,
@@ -402,7 +411,7 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
     try:
         conn = get_supabase_connection()
         row = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now_local().isoformat(),
             "respondent_role": respondent_role,
             "hs_graduation_year": hs_graduation_year,
             "perception_change": perception_change,
@@ -573,7 +582,7 @@ def save_pdf_download(context: dict) -> bool:
     contract."""
     try:
         conn = get_supabase_connection()
-        row = {"timestamp": datetime.now().isoformat(), **context}
+        row = {"timestamp": now_local().isoformat(), **context}
         execute_query(
             conn.table("pdf_downloads").insert([row], count="None"),
             ttl=0,
@@ -591,7 +600,7 @@ def save_scenario_share(context: dict) -> bool:
     any failure, matching the other save_* helpers' contract."""
     try:
         conn = get_supabase_connection()
-        row = {"timestamp": datetime.now().isoformat(), **context}
+        row = {"timestamp": now_local().isoformat(), **context}
         execute_query(
             conn.table("scenario_shares").insert([row], count="None"),
             ttl=0,
@@ -627,6 +636,28 @@ def get_shared_float(param_name: str, fallback: float) -> float:
         return float(get_shared_default(param_name, str(fallback)))
     except (ValueError, TypeError):
         return fallback
+
+
+def get_user_timezone() -> str:
+    """The visitor's browser-detected IANA timezone (e.g. "America/Denver"),
+    set via the hidden "Set Timezone" trigger + JS near the top of section 3.
+    Falls back to UTC before that round-trip completes, or if a browser ever
+    supplies something zoneinfo doesn't recognize."""
+    return get_shared_default("tz", "UTC")
+
+
+def now_local() -> datetime:
+    """The current moment in the visitor's own local timezone, for anything
+    a visitor actually sees or that gets logged as "when this happened"
+    (usage/survey/PDF-download/scenario-share timestamps, the PDF footer) --
+    the server's own clock (UTC on Streamlit Cloud) means nothing to a
+    visitor reading a timestamp. Falls back to UTC for an invalid/unknown
+    zone name rather than raising."""
+    try:
+        tz = ZoneInfo(get_user_timezone())
+    except Exception:
+        tz = timezone.utc
+    return datetime.now(tz)
 
 
 def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
@@ -1315,7 +1346,7 @@ def _draw_pdf_header_footer(canvas, doc):
     canvas.drawString(doc.leftMargin, page_height - 30, APP_URL)
     canvas.drawRightString(
         page_width - doc.rightMargin, 30,
-        f"Generated {datetime.now().strftime('%B %d, %Y at %I:%M %p')}",
+        f"Generated {now_local().strftime('%B %d, %Y at %I:%M %p %Z')}",
     )
     canvas.restoreState()
 
@@ -1509,6 +1540,51 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
 # ============================================================
 
 st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page_icon="🎓", layout="wide")
+
+# Detects the visitor's browser timezone (IANA name, e.g. "America/Los_Angeles")
+# via get_user_timezone()/now_local() below, so logged timestamps and the PDF
+# footer reflect the visitor's local time instead of the server's clock
+# (UTC on Streamlit Cloud). Same hidden-button pattern as the admin-reveal
+# trigger further down: a real (invisible) Streamlit button is the only way
+# to get a rerun that picks up the newly-set query param, since changing the
+# URL via JS alone doesn't notify the running Python session. The script
+# re-checks on every rerun but only clicks the button when the detected
+# timezone doesn't match what's already in the URL, so this settles after
+# one extra rerun and never loops. The very first "pageview" log below still
+# can't benefit -- there's no timezone to read until this round-trip
+# completes -- so it's the one timestamp that may land in UTC regardless.
+with st.container(key="tz_trigger_wrap"):
+    st.button("Set Timezone", key="tz_trigger")
+st.markdown(
+    "<style>div.st-key-tz_trigger_wrap { display: none !important; }</style>",
+    unsafe_allow_html=True,
+)
+components.html(
+    """
+    <script>
+    (function() {
+        function findTzButton() {
+            const doc = window.parent.document;
+            const buttons = doc.querySelectorAll("button");
+            for (const b of buttons) {
+                if (b.textContent.trim() === "Set Timezone") return b;
+            }
+            return null;
+        }
+        const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const params = new URLSearchParams(window.parent.location.search);
+        if (params.get("tz") !== detected) {
+            params.set("tz", detected);
+            const newUrl = window.parent.location.pathname + "?" + params.toString();
+            window.parent.history.replaceState(null, "", newUrl);
+            const btn = findTzButton();
+            if (btn) btn.click();
+        }
+    })();
+    </script>
+    """,
+    height=0,
+)
 
 # Log exactly one "pageview" per browser session. This check runs before any
 # widgets are drawn, so later reruns triggered by moving a slider or opening
