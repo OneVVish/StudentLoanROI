@@ -28,7 +28,7 @@ import streamlit.components.v1 as components
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from st_supabase_connection import SupabaseConnection, execute_query
 
 # ============================================================
@@ -1259,12 +1259,19 @@ def build_takehome_pie_chart(take_home: dict):
 
 
 # ---- 2k. PDF Report Generation --------------------------------------------
-# Reuses the same compute_scenario_results dicts and build_*_chart figures
-# as the on-screen views, exported to PNG via kaleido (Plotly's static-image
-# engine) and laid out with reportlab. @st.cache_data means repeated reruns
-# that don't change the scenario (most reruns -- e.g. toggling Admin
-# Analytics View) reuse the same bytes instead of re-rendering chart images
-# from scratch every time.
+# Reuses the same compute_scenario_results dicts as the on-screen views,
+# laid out as tables/metrics with reportlab -- deliberately no chart images.
+# An earlier version exported the same Plotly figures to PNG via kaleido,
+# but kaleido's headless-Chromium rendering proved unstable in Streamlit
+# Community Cloud's sandboxed container: kaleido>=1.0 needs a separate
+# Chrome install that never happens there, and pinning kaleido==0.2.1 (which
+# bundles its own Chromium) instead segfaulted the whole Streamlit process
+# on the very first page load, taking the app down for every visitor, not
+# just the PDF feature. Every number a chart would show is already in a
+# table below it, so dropping the images trades a bit of visual polish for
+# an actually-reliable deployment. @st.cache_data means repeated reruns that
+# don't change the scenario (most reruns -- e.g. toggling Admin Analytics
+# View) reuse the same bytes instead of rebuilding the PDF every time.
 
 def _pdf_table(rows: list, header: bool = True) -> Table:
     """A simple bordered reportlab Table -- `header=True` bolds/shades row 0
@@ -1286,17 +1293,6 @@ def _pdf_table(rows: list, header: bool = True) -> Table:
         style.append(("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"))
     table.setStyle(TableStyle(style))
     return table
-
-
-def _pdf_chart_image(fig, width: float = 460) -> Image:
-    """Export a Plotly figure to PNG (via kaleido) and wrap it as a
-    width-constrained reportlab Image flowable, preserving aspect ratio."""
-    png_bytes = fig.to_image(format="png", width=900, height=550, scale=2)
-    img = Image(io.BytesIO(png_bytes))
-    aspect_ratio = img.imageHeight / img.imageWidth
-    img.drawWidth = width
-    img.drawHeight = width * aspect_ratio
-    return img
 
 
 def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
@@ -1329,8 +1325,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 scenario, take_home, gross, disposable_nominal,
                                 disposable_col_adjusted) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
-    Loan Information (+ per-year table + balance chart), Real-World
-    Take-Home (+ pie chart), 10-Year Financial Position (+ ROI bar chart)."""
+    Loan Information (+ per-year table), Real-World Take-Home, and
+    10-Year Financial Position -- tables/metrics only, no chart images
+    (see the section comment above for why)."""
     styles = getSampleStyleSheet()
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
@@ -1366,8 +1363,6 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                 fmt_money(repayment_result["total_interest"]),
             ],
         ]),
-        Spacer(1, 8),
-        _pdf_chart_image(build_balance_chart(repayment_result["schedule"], scenario["strategy_label"])),
         Spacer(1, 12),
         Paragraph(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}", styles["Heading2"]),
         _pdf_table([
@@ -1375,10 +1370,6 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             [fmt_money(gross), fmt_money(take_home["net_take_home"]),
              fmt_money(disposable_nominal), fmt_money(disposable_col_adjusted)],
         ]),
-    ]
-    if gross > 0:
-        story += [Spacer(1, 8), _pdf_chart_image(build_takehome_pie_chart(take_home))]
-    story += [
         Spacer(1, 12),
         Paragraph("📊 10-Year Financial Position", styles["Heading2"]),
         _pdf_table([
@@ -1386,8 +1377,6 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
              fmt_money(roi_result["earnings_premium"])],
         ]),
-        Spacer(1, 8),
-        _pdf_chart_image(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major)),
     ]
 
     buffer = io.BytesIO()
@@ -1416,7 +1405,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b,
                                  interest_rate_b, repayment_strategy_b, scenario_b) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
-    profile summaries + metric tables, then the two comparison charts."""
+    profile summaries + metric tables (no chart images -- see the section
+    comment above for why)."""
     styles = getSampleStyleSheet()
     story = [
         Paragraph("🎓 Student Loan Payoff & Major ROI Report — Scenario Comparison", styles["Title"]),
@@ -1444,17 +1434,6 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         ),
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_b),
-        Spacer(1, 12),
-        _pdf_chart_image(build_comparison_balance_chart(
-            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
-            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
-        )),
-        Spacer(1, 8),
-        _pdf_chart_image(build_scenario_comparison_roi_chart(
-            scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
-            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
-        )),
     ]
 
     buffer = io.BytesIO()
