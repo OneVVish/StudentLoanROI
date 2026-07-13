@@ -1471,34 +1471,6 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     return buffer.getvalue()
 
 
-def build_survey_pie_chart(survey_df: pd.DataFrame):
-    counts = survey_df["perception_change"].value_counts().reset_index()
-    counts.columns = ["Response", "Count"]
-    fig = px.pie(counts, names="Response", values="Count", title="Did This Tool Change Student Perceptions?")
-    return fig
-
-
-def build_perception_by_major_chart(survey_df: pd.DataFrame):
-    """Grouped bar chart: perception_change counts broken down by
-    scenario_a_major, for spotting whether some majors are more "elastic"
-    (more likely to report a changed perception) than others. Rows saved
-    before this field existed have a null scenario_a_major and are excluded
-    here (they still count in the overall pie chart/metrics above)."""
-    plottable = survey_df.dropna(subset=["scenario_a_major", "perception_change"])
-    cross_tab = (
-        plottable.groupby(["scenario_a_major", "perception_change"])
-        .size()
-        .reset_index(name="Count")
-    )
-    fig = px.bar(
-        cross_tab, x="scenario_a_major", y="Count", color="perception_change",
-        title="Impact of the Tool by Selected Major",
-        labels={"scenario_a_major": "Selected Major", "perception_change": "Response", "Count": "Responses"},
-        barmode="group",
-    )
-    return fig
-
-
 # ============================================================
 # 3. PAGE CONFIG & SESSION STATE
 # ============================================================
@@ -1948,57 +1920,15 @@ if admin_enabled:
     st.subheader("📊 Admin Analytics Dashboard")
 
     usage_df = load_table_safe("usage_logs", columns=["timestamp", "action"])
-    survey_df = load_table_safe("survey_responses", columns=[
-        "timestamp", "respondent_role", "hs_graduation_year", "perception_change", "feedback_text",
-        "scenario_a_school_name", "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
-        "scenario_a_repayment_strategy", "scenario_a_starting_salary", "scenario_a_dti_ratio",
-        "scenario_a_monthly_payment", "scenario_a_payoff_years", "scenario_a_total_interest",
-        "scenario_a_earnings_premium", "scenario_a_roi_pct", "scenario_a_personal_contribution",
-        "scenario_a_coa_inflation_rate", "scenario_a_grants_per_year",
-        "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount", "scenario_b_interest_rate",
-        "scenario_b_repayment_strategy", "scenario_b_starting_salary", "scenario_b_dti_ratio",
-        "scenario_b_monthly_payment", "scenario_b_payoff_years", "scenario_b_total_interest",
-        "scenario_b_earnings_premium", "scenario_b_roi_pct", "scenario_b_personal_contribution", "roi_pct_delta",
-        "scenario_b_coa_inflation_rate", "scenario_b_grants_per_year",
-    ])
+    pdf_downloads_df = load_table_safe("pdf_downloads", columns=["timestamp"])
+    scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp"])
+    survey_df = load_table_safe("survey_responses", columns=["timestamp"])
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total App Interactions", len(usage_df))
     col2.metric("Total Survey Responses", len(survey_df))
-
-    if not survey_df.empty:
-        # Research metrics: skip NaN automatically (rows saved before these
-        # fields existed, or saved with Compare Mode off for the B/delta
-        # ones, just don't count toward the average), and check there's at
-        # least one real value before displaying anything.
-        research_col1, research_col2 = st.columns(2)
-        if survey_df["scenario_a_loan_amount"].notna().any():
-            research_col1.metric("Average Loan Amount Simulated", fmt_money(survey_df["scenario_a_loan_amount"].mean()))
-        else:
-            research_col1.metric("Average Loan Amount Simulated", "N/A")
-        if survey_df["scenario_a_dti_ratio"].notna().any():
-            research_col2.metric("Average Debt-to-Income Ratio", f"{survey_df['scenario_a_dti_ratio'].mean():.2f}")
-        else:
-            research_col2.metric("Average Debt-to-Income Ratio", "N/A")
-
-        chart_col, table_col = st.columns(2)
-        chart_col.plotly_chart(build_survey_pie_chart(survey_df), use_container_width=True)
-        table_col.dataframe(
-            survey_df[[
-                "timestamp", "scenario_a_school_name",
-                "scenario_a_major", "scenario_a_loan_amount", "scenario_a_personal_contribution",
-                "scenario_a_interest_rate", "scenario_a_repayment_strategy", "scenario_a_roi_pct",
-                "scenario_b_school_name", "scenario_b_major", "scenario_b_loan_amount",
-                "scenario_b_personal_contribution", "scenario_b_roi_pct",
-                "roi_pct_delta", "feedback_text",
-            ]],
-            use_container_width=True, height=380,
-        )
-
-        if survey_df["scenario_a_major"].notna().any():
-            st.plotly_chart(build_perception_by_major_chart(survey_df), use_container_width=True)
-    else:
-        st.info("No survey responses recorded yet.")
+    col3.metric("Total PDF Downloads", len(pdf_downloads_df))
+    col4.metric("Total Scenario Shares", len(scenario_shares_df))
 
     st.divider()
 
