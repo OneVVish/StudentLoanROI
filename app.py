@@ -610,6 +610,25 @@ def get_shared_default(param_name: str, fallback: str) -> str:
     return st.query_params.get(param_name, fallback)
 
 
+def get_shared_int(param_name: str, fallback: int) -> int:
+    """Like get_shared_default, but safely cast to int -- a hand-edited,
+    stale, or otherwise malformed shared link (e.g. ?pc=abc) falls back to
+    `fallback` instead of raising an uncaught ValueError that would crash
+    the page for every visitor on that URL."""
+    try:
+        return int(get_shared_default(param_name, str(fallback)))
+    except (ValueError, TypeError):
+        return fallback
+
+
+def get_shared_float(param_name: str, fallback: float) -> float:
+    """Like get_shared_int, but for float-valued params (e.g. ?rate=abc)."""
+    try:
+        return float(get_shared_default(param_name, str(fallback)))
+    except (ValueError, TypeError):
+        return fallback
+
+
 def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
     """Read all rows from a Supabase table, tolerating any connection/query
     failure (e.g. secrets not configured yet) by returning an empty frame."""
@@ -1301,6 +1320,20 @@ def _draw_pdf_header_footer(canvas, doc):
     canvas.restoreState()
 
 
+# reportlab's default font (Helvetica) has no emoji glyphs -- every emoji
+# in a PDF heading renders as a solid black box, on every PDF, every time.
+# Stripping them (rather than embedding an emoji-capable font, a much
+# bigger lift for a cosmetic fix) keeps headings plain but legible.
+_EMOJI_PATTERN = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "\U0000FE00-\U0000FE0F\U0000200D]+"  # variation selectors + zero-width joiner
+)
+
+
+def _strip_emoji(text: str) -> str:
+    return _EMOJI_PATTERN.sub("", text).strip()
+
+
 def _pdf_table(rows: list, header: bool = True) -> Table:
     """A simple bordered reportlab Table -- `header=True` bolds/shades row 0
     (tabular data with column headers), `header=False` bolds column 0
@@ -1360,7 +1393,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
     roi_result = scenario["roi_result"]
 
     story = [
-        Paragraph("🎓 Student Loan Payoff & Major ROI Report", styles["Title"]),
+        Paragraph(_strip_emoji("🎓 Student Loan Payoff & Major ROI Report"), styles["Title"]),
         Paragraph(
             "Educational estimate tool — salary and cost figures are illustrative, not financial advice.",
             styles["Italic"],
@@ -1374,7 +1407,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             header=False,
         ),
         Spacer(1, 12),
-        Paragraph(f"💳 Loan Information — {scenario['strategy_label']}", styles["Heading2"]),
+        Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["Heading2"]),
         _pdf_table([
             ["Year", "Cost of Attendance", "Loan Amount This Year"],
             *[[row["year"], fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
@@ -1391,14 +1424,14 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             ],
         ]),
         Spacer(1, 12),
-        Paragraph(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}", styles["Heading2"]),
+        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}"), styles["Heading2"]),
         _pdf_table([
             ["Gross Salary", "Take-Home Pay (annual)", "Monthly Disposable", "COL-Adjusted Disposable"],
             [fmt_money(gross), fmt_money(take_home["net_take_home"]),
              fmt_money(disposable_nominal), fmt_money(disposable_col_adjusted)],
         ]),
         Spacer(1, 12),
-        Paragraph("📊 10-Year Financial Position", styles["Heading2"]),
+        Paragraph(_strip_emoji("📊 10-Year Financial Position"), styles["Heading2"]),
         _pdf_table([
             ["High School Grad — 10-Yr Net Position", f"{major} — 10-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
             [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
@@ -1437,7 +1470,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     comment above for why)."""
     styles = getSampleStyleSheet()
     story = [
-        Paragraph("🎓 Student Loan Payoff & Major ROI Report — Scenario Comparison", styles["Title"]),
+        Paragraph(_strip_emoji("🎓 Student Loan Payoff & Major ROI Report — Scenario Comparison"), styles["Title"]),
         Paragraph(
             "Educational estimate tool — salary and cost figures are illustrative, not financial advice.",
             styles["Italic"],
@@ -1544,9 +1577,14 @@ st.markdown(
 )
 
 # Pulls real tuition & median debt for the school below via api.data.gov.
-# No sidebar control for this -- the public rate-limited DEMO_KEY is enough
-# for this app's usage volume, so there's nothing for a user to configure.
-scorecard_api_key = "DEMO_KEY"
+# No sidebar control for this -- nothing for a visitor to configure. Uses
+# a personal key from secrets.toml if one's been set (COLLEGE_SCORECARD_API_KEY,
+# top-level, not nested under [connections....] like the Supabase ones),
+# falling back to the public "DEMO_KEY" otherwise -- DEMO_KEY's quota is
+# shared across every app that uses it, not just this one, so a personal
+# key (free, from https://api.data.gov/signup/) avoids that app's traffic
+# silently degrading this one's COA-inflation estimates under load.
+scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 
 st.sidebar.subheader("💼 Career")
 
@@ -1661,12 +1699,18 @@ if coa_caption_a:
     st.sidebar.caption(coa_caption_a)
 
 shared_coa_a = get_shared_default("coa", None)
+default_coa_per_year_a = None
 if shared_coa_a is not None:
     # A shared link's explicit COA wins over auto-fill -- it may reflect a
     # manual override the original sharer typed in, not just whatever the
-    # school+in-state lookup would recompute.
-    default_coa_per_year_a = float(shared_coa_a)
-else:
+    # school+in-state lookup would recompute. A malformed value (e.g. a
+    # hand-edited link) falls through to auto-fill below instead of
+    # crashing the page.
+    try:
+        default_coa_per_year_a = float(shared_coa_a)
+    except (ValueError, TypeError):
+        pass
+if default_coa_per_year_a is None:
     default_coa_per_year_a = get_suggested_coa_per_year(school_name_a, in_state_a)
     if default_coa_per_year_a is None:
         default_coa_per_year_a = 7500
@@ -1681,7 +1725,7 @@ coa_per_year_a = st.sidebar.number_input(
 )
 personal_contribution_per_year_a = st.sidebar.number_input(
     "Personal Contribution (per year, $)", min_value=0, max_value=100000,
-    value=int(get_shared_default("pc", "0")), step=500,
+    value=get_shared_int("pc", 0), step=500,
     key="personal_contribution_per_year_a",
     help="Also called the Student Aid Index (SAI) -- the amount your family "
          "is expected to contribute. Savings or family money toward this "
@@ -1692,7 +1736,7 @@ personal_contribution_per_year_a = st.sidebar.number_input(
 )
 grants_per_year_a = st.sidebar.number_input(
     "Grants & Scholarships (per year, $)", min_value=0, max_value=100000,
-    value=int(get_shared_default("grants", "0")), step=500,
+    value=get_shared_int("grants", 0), step=500,
     key="grants_per_year_a",
     help="Grant or scholarship aid that reduces what you need to borrow. "
          "Unlike Personal Contribution, this is NOT counted as part of your "
@@ -1715,7 +1759,7 @@ st.sidebar.caption((
 ).replace("$", r"\$"))
 interest_rate = st.sidebar.number_input(
     "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
-    value=float(get_shared_default("rate", "5.5")), step=0.1,
+    value=get_shared_float("rate", 5.5), step=0.1,
     help="The interest rate on your student loan. 5.50% is a reasonable "
          "placeholder for recent federal undergraduate loan rates -- check "
          "your school's financial aid offer for your real rate.",
@@ -1838,9 +1882,13 @@ if compare_mode:
             st.caption(coa_caption_b)
 
         shared_coa_b = get_shared_default("coa_b", None)
+        default_coa_per_year_b = None
         if shared_coa_b is not None:
-            default_coa_per_year_b = float(shared_coa_b)
-        else:
+            try:
+                default_coa_per_year_b = float(shared_coa_b)
+            except (ValueError, TypeError):
+                pass
+        if default_coa_per_year_b is None:
             default_coa_per_year_b = get_suggested_coa_per_year(school_name_b, in_state_b)
             if default_coa_per_year_b is None:
                 default_coa_per_year_b = 7500
@@ -1855,7 +1903,7 @@ if compare_mode:
         )
         personal_contribution_per_year_b = st.number_input(
             "Personal Contribution (per year, $)", min_value=0, max_value=100000,
-            value=int(get_shared_default("pc_b", "0")), step=500,
+            value=get_shared_int("pc_b", 0), step=500,
             key="personal_contribution_per_year_b",
             help="Also called the Student Aid Index (SAI) -- the amount your "
                  "family is expected to contribute. Savings or family money "
@@ -1865,7 +1913,7 @@ if compare_mode:
         )
         grants_per_year_b = st.number_input(
             "Grants & Scholarships (per year, $)", min_value=0, max_value=100000,
-            value=int(get_shared_default("grants_b", "0")), step=500,
+            value=get_shared_int("grants_b", 0), step=500,
             key="grants_per_year_b",
             help="Grant or scholarship aid that reduces what you need to "
                  "borrow. Not counted as part of your own investment for ROI "
@@ -1883,7 +1931,7 @@ if compare_mode:
         ).replace("$", r"\$"))
         interest_rate_b = st.number_input(
             "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
-            value=float(get_shared_default("rate_b", "5.5")), step=0.1,
+            value=get_shared_float("rate_b", 5.5), step=0.1,
             key="interest_rate_b",
             help="The interest rate on your student loan. 5.50% is a "
                  "reasonable placeholder for recent federal undergraduate "
