@@ -16,6 +16,7 @@ Architecture:
                                 and the impact survey.
 """
 
+import io
 import re
 from datetime import datetime
 
@@ -24,6 +25,10 @@ import plotly.express as px
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from st_supabase_connection import SupabaseConnection, execute_query
 
 # ============================================================
@@ -411,6 +416,198 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
         return True
     except Exception:
         return False
+
+
+def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy,
+                            personal_contribution, school_name_a, inflation_rate_a,
+                            grants_per_year_a, scenario_a, compare_mode=False,
+                            major_b=None, loan_amount_b=None, interest_rate_b=None,
+                            repayment_strategy_b=None, personal_contribution_b=None,
+                            school_name_b=None, inflation_rate_b=None,
+                            grants_per_year_b=None, scenario_b=None) -> dict:
+    """Flat {column_name: value} dict of Scenario A's (and, when compare_mode
+    is True, Scenario B's) inputs/outputs -- the exact shape both
+    survey_responses and pdf_downloads store, so the "Submit Feedback" form
+    and the "Download PDF Report" button always log identically-shaped rows
+    regardless of which one triggered the save. starting_salary/dti_ratio
+    are derived here (not passed in) since every caller needs the same
+    formula: the occupation's raw baseline wage from MAJOR_DATA, and the
+    loan amount literally divided by it -- no additional_training_debt."""
+    starting_salary = MAJOR_DATA[major]["starting_salary"]
+    dti_ratio = round(loan_amount / starting_salary, 4) if starting_salary else None
+    context = {
+        "scenario_a_school_name": school_name_a or None,
+        "scenario_a_major": major,
+        "scenario_a_loan_amount": loan_amount,
+        "scenario_a_interest_rate": interest_rate,
+        "scenario_a_repayment_strategy": repayment_strategy,
+        "scenario_a_starting_salary": starting_salary,
+        "scenario_a_dti_ratio": dti_ratio,
+        "scenario_a_monthly_payment": scenario_a["repayment_result"].get("monthly_payment"),
+        "scenario_a_payoff_years": scenario_a["repayment_result"]["payoff_years"],
+        "scenario_a_total_interest": scenario_a["repayment_result"]["total_interest"],
+        "scenario_a_earnings_premium": scenario_a["roi_result"]["earnings_premium"],
+        "scenario_a_roi_pct": scenario_a["roi_result"]["roi_pct"],
+        "scenario_a_personal_contribution": personal_contribution,
+        "scenario_a_coa_inflation_rate": inflation_rate_a,
+        "scenario_a_grants_per_year": grants_per_year_a,
+    }
+
+    # Scenario B / roi_pct_delta only exist when Compare Mode is on at
+    # save-time -- they stay absent (NULL in the database) otherwise, since
+    # there's no Scenario B to report.
+    if compare_mode:
+        starting_salary_b = MAJOR_DATA[major_b]["starting_salary"]
+        dti_ratio_b = round(loan_amount_b / starting_salary_b, 4) if starting_salary_b else None
+        context.update({
+            "scenario_b_school_name": school_name_b or None,
+            "scenario_b_major": major_b,
+            "scenario_b_loan_amount": loan_amount_b,
+            "scenario_b_interest_rate": interest_rate_b,
+            "scenario_b_repayment_strategy": repayment_strategy_b,
+            "scenario_b_starting_salary": starting_salary_b,
+            "scenario_b_dti_ratio": dti_ratio_b,
+            "scenario_b_monthly_payment": scenario_b["repayment_result"].get("monthly_payment"),
+            "scenario_b_payoff_years": scenario_b["repayment_result"]["payoff_years"],
+            "scenario_b_total_interest": scenario_b["repayment_result"]["total_interest"],
+            "scenario_b_earnings_premium": scenario_b["roi_result"]["earnings_premium"],
+            "scenario_b_roi_pct": scenario_b["roi_result"]["roi_pct"],
+            "scenario_b_personal_contribution": personal_contribution_b,
+            "scenario_b_coa_inflation_rate": inflation_rate_b,
+            "scenario_b_grants_per_year": grants_per_year_b,
+        })
+        roi_a = scenario_a["roi_result"]["roi_pct"]
+        roi_b = scenario_b["roi_result"]["roi_pct"]
+        context["roi_pct_delta"] = round(abs(roi_a - roi_b), 2) if roi_a is not None and roi_b is not None else None
+
+    return context
+
+
+def build_share_params(career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+                        coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+                        interest_rate, repayment_strategy, compare_mode, major_b=None, school_name_b=None,
+                        in_state_b=None, coa_per_year_b=None, personal_contribution_per_year_b=None,
+                        grants_per_year_b=None, interest_rate_b=None, repayment_strategy_b=None) -> dict:
+    """Every Scenario A (and, when compare_mode, Scenario B) input as a flat
+    {query_param_name: value} dict of strings -- the exact shape
+    get_shared_default() reads back on a fresh visit, so a "Share Scenario"
+    link recreates every selection currently on screen, not just the ones
+    Part A's plain defaults happen to cover.
+
+    Takes the *resolved* school_name_a/b (not the raw search text) so a
+    school with 2+ substring matches (e.g. every "University of Michigan"
+    campus) shares the exact campus that was picked, not whichever one the
+    disambiguation picker happens to default to on a fresh visit -- the
+    resolved name is specific enough that searching it again resolves back
+    to that single school directly, no picker shown."""
+    params = {
+        "career_source": career_data_source,
+        "major": major,
+        "city": city,
+        "school": school_name_a,
+        "in_state": "1" if in_state_a else "0",
+        "stage": career_stage_label,
+        "coa": str(coa_per_year_a),
+        "pc": str(personal_contribution_per_year_a),
+        "grants": str(grants_per_year_a),
+        "rate": str(interest_rate),
+        "strategy": repayment_strategy,
+        "compare": "1" if compare_mode else "0",
+    }
+    if compare_mode:
+        params.update({
+            "major_b": major_b,
+            "school_b": school_name_b,
+            "in_state_b": "1" if in_state_b else "0",
+            "coa_b": str(coa_per_year_b),
+            "pc_b": str(personal_contribution_per_year_b),
+            "grants_b": str(grants_per_year_b),
+            "rate_b": str(interest_rate_b),
+            "strategy_b": repayment_strategy_b,
+        })
+    return params
+
+
+# The Clipboard API (navigator.clipboard.writeText) silently fails inside
+# the sandboxed iframe components.html renders into -- Streamlit doesn't
+# grant that iframe a "clipboard-write" Permissions-Policy, so it always
+# rejects there (confirmed via a live browser test). document.execCommand
+# ("copy") on a temporary textarea, run against window.parent.document
+# (the iframe has allow-same-origin, so this is reachable), is the
+# pre-Permissions-Policy fallback that still works in this sandboxed
+# context -- try the modern API first in case a given deployment does
+# allow it, then fall back.
+COPY_URL_TO_CLIPBOARD_JS = """
+<script>
+(function() {
+    const url = window.parent.location.href;
+    function legacyCopy(text) {
+        const doc = window.parent.document;
+        const textarea = doc.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        doc.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try { doc.execCommand("copy"); } catch (e) {}
+        doc.body.removeChild(textarea);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).catch(() => legacyCopy(url));
+    } else {
+        legacyCopy(url);
+    }
+})();
+</script>
+"""
+
+
+def save_pdf_download(context: dict) -> bool:
+    """Insert one row into the pdf_downloads table -- same scenario-context
+    shape as save_survey_response's `context` (see build_scenario_context),
+    but with no respondent/demographic fields, since this isn't the feedback
+    survey. Fired from st.download_button's on_click, which (like
+    st.button) only runs on an actual click, not on every rerun. Returns
+    True on success, False on any failure, matching save_survey_response's
+    contract."""
+    try:
+        conn = get_supabase_connection()
+        row = {"timestamp": datetime.now().isoformat(), **context}
+        execute_query(
+            conn.table("pdf_downloads").insert([row], count="None"),
+            ttl=0,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def save_scenario_share(context: dict) -> bool:
+    """Insert one row into the scenario_shares table -- same scenario-context
+    shape as save_pdf_download/save_survey_response (see
+    build_scenario_context). Fired when "Share Scenario" is clicked, right
+    after the shareable URL is generated. Returns True on success, False on
+    any failure, matching the other save_* helpers' contract."""
+    try:
+        conn = get_supabase_connection()
+        row = {"timestamp": datetime.now().isoformat(), **context}
+        execute_query(
+            conn.table("scenario_shares").insert([row], count="None"),
+            ttl=0,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def get_shared_default(param_name: str, fallback: str) -> str:
+    """A Scenario field's value from the URL's query params, set by a
+    previous "Share Scenario" click -- so opening a shared link recreates
+    the exact same selections instead of landing on the plain defaults.
+    Falls back to `fallback` on a normal, unshared visit. Query params are
+    always strings; callers cast to int/float/bool themselves."""
+    return st.query_params.get(param_name, fallback)
 
 
 def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
@@ -1061,6 +1258,210 @@ def build_takehome_pie_chart(take_home: dict):
     return fig
 
 
+# ---- 2k. PDF Report Generation --------------------------------------------
+# Reuses the same compute_scenario_results dicts and build_*_chart figures
+# as the on-screen views, exported to PNG via kaleido (Plotly's static-image
+# engine) and laid out with reportlab. @st.cache_data means repeated reruns
+# that don't change the scenario (most reruns -- e.g. toggling Admin
+# Analytics View) reuse the same bytes instead of re-rendering chart images
+# from scratch every time.
+
+def _pdf_table(rows: list, header: bool = True) -> Table:
+    """A simple bordered reportlab Table -- `header=True` bolds/shades row 0
+    (tabular data with column headers), `header=False` bolds column 0
+    instead (a plain key/value table, e.g. the profile summary)."""
+    table = Table(rows, hAlign="LEFT")
+    style = [
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    if header:
+        style += [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f2f6")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ]
+    else:
+        style.append(("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"))
+    table.setStyle(TableStyle(style))
+    return table
+
+
+def _pdf_chart_image(fig, width: float = 460) -> Image:
+    """Export a Plotly figure to PNG (via kaleido) and wrap it as a
+    width-constrained reportlab Image flowable, preserving aspect ratio."""
+    png_bytes = fig.to_image(format="png", width=900, height=550, scale=2)
+    img = Image(io.BytesIO(png_bytes))
+    aspect_ratio = img.imageHeight / img.imageWidth
+    img.drawWidth = width
+    img.drawHeight = width * aspect_ratio
+    return img
+
+
+def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
+                       personal_contribution_per_year, grants_per_year,
+                       interest_rate_pct, repayment_strategy_label,
+                       career_stage=None, city_name=None) -> list:
+    rows = [
+        ["Profession", major_name],
+        ["School", school_name or "(not entered)"],
+        ["In-State", "Yes" if in_state else "No"],
+    ]
+    if city_name is not None:
+        rows.append(["City / Metro Area", city_name])
+    if career_stage is not None:
+        rows.append(["Career Stage Snapshot", career_stage])
+    rows += [
+        ["Cost of Attendance (per year)", fmt_money(coa_per_year)],
+        ["Personal Contribution (per year)", fmt_money(personal_contribution_per_year)],
+        ["Grants & Scholarships (per year)", fmt_money(grants_per_year)],
+        ["Average Loan Interest Rate", fmt_pct(interest_rate_pct)],
+        ["Repayment Strategy", repayment_strategy_label],
+    ]
+    return rows
+
+
+@st.cache_data(show_spinner=False)
+def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_stage_label,
+                                coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+                                interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
+                                scenario, take_home, gross, disposable_nominal,
+                                disposable_col_adjusted) -> bytes:
+    """PDF mirroring the on-screen single-scenario view: profile summary,
+    Loan Information (+ per-year table + balance chart), Real-World
+    Take-Home (+ pie chart), 10-Year Financial Position (+ ROI bar chart)."""
+    styles = getSampleStyleSheet()
+    repayment_result = scenario["repayment_result"]
+    roi_result = scenario["roi_result"]
+
+    story = [
+        Paragraph("🎓 Student Loan Payoff & Major ROI Report", styles["Title"]),
+        Paragraph(
+            "Educational estimate tool — salary and cost figures are illustrative, not financial advice.",
+            styles["Italic"],
+        ),
+        Spacer(1, 12),
+        Paragraph("Your Profile", styles["Heading2"]),
+        _pdf_table(
+            _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
+                               personal_contribution_per_year_a, grants_per_year_a,
+                               interest_rate, repayment_strategy, career_stage_label, city),
+            header=False,
+        ),
+        Spacer(1, 12),
+        Paragraph(f"💳 Loan Information — {scenario['strategy_label']}", styles["Heading2"]),
+        _pdf_table([
+            ["Year", "Cost of Attendance", "Loan Amount This Year"],
+            *[[row["year"], fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
+        ]),
+        Spacer(1, 6),
+        Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["Normal"]),
+        Spacer(1, 6),
+        _pdf_table([
+            ["Monthly Payment", "Payoff Timeline", "Total Interest Paid"],
+            [
+                fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+                f"{repayment_result['payoff_years']:.1f} yrs",
+                fmt_money(repayment_result["total_interest"]),
+            ],
+        ]),
+        Spacer(1, 8),
+        _pdf_chart_image(build_balance_chart(repayment_result["schedule"], scenario["strategy_label"])),
+        Spacer(1, 12),
+        Paragraph(f"🏙️ Real-World Take-Home — {career_stage_label} in {city}", styles["Heading2"]),
+        _pdf_table([
+            ["Gross Salary", "Take-Home Pay (annual)", "Monthly Disposable", "COL-Adjusted Disposable"],
+            [fmt_money(gross), fmt_money(take_home["net_take_home"]),
+             fmt_money(disposable_nominal), fmt_money(disposable_col_adjusted)],
+        ]),
+    ]
+    if gross > 0:
+        story += [Spacer(1, 8), _pdf_chart_image(build_takehome_pie_chart(take_home))]
+    story += [
+        Spacer(1, 12),
+        Paragraph("📊 10-Year Financial Position", styles["Heading2"]),
+        _pdf_table([
+            ["High School Grad — 10-Yr Net Position", f"{major} — 10-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
+            [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
+             fmt_money(roi_result["earnings_premium"])],
+        ]),
+        Spacer(1, 8),
+        _pdf_chart_image(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major)),
+    ]
+
+    buffer = io.BytesIO()
+    SimpleDocTemplate(buffer, pagesize=letter).build(story)
+    return buffer.getvalue()
+
+
+def _pdf_scenario_metrics_table(scenario: dict) -> Table:
+    repayment_result = scenario["repayment_result"]
+    roi_result = scenario["roi_result"]
+    return _pdf_table([
+        ["Monthly Payment", "Payoff Timeline", "Total Interest Paid", "10-Yr Earnings Premium (COL-Adj.)"],
+        [
+            fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+            f"{repayment_result['payoff_years']:.1f} yrs",
+            fmt_money(repayment_result["total_interest"]),
+            fmt_money(roi_result["earnings_premium"]),
+        ],
+    ])
+
+
+@st.cache_data(show_spinner=False)
+def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_year_a,
+                                 personal_contribution_per_year_a, grants_per_year_a, interest_rate,
+                                 repayment_strategy, scenario_a, major_b, school_name_b, in_state_b,
+                                 coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b,
+                                 interest_rate_b, repayment_strategy_b, scenario_b) -> bytes:
+    """PDF mirroring the on-screen Compare Mode view: both scenarios'
+    profile summaries + metric tables, then the two comparison charts."""
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("🎓 Student Loan Payoff & Major ROI Report — Scenario Comparison", styles["Title"]),
+        Paragraph(
+            "Educational estimate tool — salary and cost figures are illustrative, not financial advice.",
+            styles["Italic"],
+        ),
+        Spacer(1, 12),
+        Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']}", styles["Heading2"]),
+        _pdf_table(
+            _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
+                               personal_contribution_per_year_a, grants_per_year_a,
+                               interest_rate, repayment_strategy, city_name=city),
+            header=False,
+        ),
+        Spacer(1, 6),
+        _pdf_scenario_metrics_table(scenario_a),
+        Spacer(1, 12),
+        Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["Heading2"]),
+        _pdf_table(
+            _pdf_profile_rows(major_b, school_name_b, in_state_b, coa_per_year_b,
+                               personal_contribution_per_year_b, grants_per_year_b,
+                               interest_rate_b, repayment_strategy_b, city_name=city),
+            header=False,
+        ),
+        Spacer(1, 6),
+        _pdf_scenario_metrics_table(scenario_b),
+        Spacer(1, 12),
+        _pdf_chart_image(build_comparison_balance_chart(
+            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
+            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
+        )),
+        Spacer(1, 8),
+        _pdf_chart_image(build_scenario_comparison_roi_chart(
+            scenario_a["roi_result"]["hs_net_position"],
+            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
+            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+        )),
+    ]
+
+    buffer = io.BytesIO()
+    SimpleDocTemplate(buffer, pagesize=letter).build(story)
+    return buffer.getvalue()
+
+
 def build_survey_pie_chart(survey_df: pd.DataFrame):
     counts = survey_df["perception_change"].value_counts().reset_index()
     counts.columns = ["Response", "Count"]
@@ -1102,28 +1503,13 @@ if "pageview_logged" not in st.session_state:
     log_usage_event("pageview")
     st.session_state.pageview_logged = True
 
-if "has_calculated" not in st.session_state:
-    st.session_state.has_calculated = False
-
-if "has_compared" not in st.session_state:
-    st.session_state.has_compared = False
-
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
-
-# Read here (before the checkbox widget below it is even drawn) so the
-# button's label/click-handling -- which sits ABOVE the "Compare Two
-# Scenarios" checkbox on the page -- always reflects the checkbox's
-# current value. Streamlit persists key="compare_mode" in session_state
-# across reruns, so toggling the checkbox (further down) updates this
-# same slot and the button picks it up correctly on the next rerun.
-if "compare_mode" not in st.session_state:
-    st.session_state.compare_mode = False
 
 # Admin Analytics View starts hidden -- Ctrl+Shift+A reveals the checkbox
 # that controls it (see the hidden trigger button + injected JS near the
 # bottom of the sidebar). Stays revealed for the rest of the session once
-# triggered, matching the has_calculated/has_compared one-way-flag pattern.
+# triggered.
 if "admin_revealed" not in st.session_state:
     st.session_state.admin_revealed = False
 
@@ -1188,8 +1574,13 @@ st.sidebar.subheader("💼 Career")
 # e.g. tech and healthcare). Affects every curated-major lookup too, since
 # MAJOR_DATA is rebuilt from this choice on every rerun -- picking a source
 # here is a data-source preference for the whole session, not per-scenario.
+career_source_options = ["National", "California"]
+shared_career_source = get_shared_default("career_source", "National")
+default_career_source_index = (
+    career_source_options.index(shared_career_source) if shared_career_source in career_source_options else 0
+)
 career_data_source = st.sidebar.radio(
-    "Career Salary Data", ["National", "California"],
+    "Career Salary Data", career_source_options, index=default_career_source_index,
     help="National: nationwide BLS OEWS wage estimates (cleaned_careers.csv). "
          "California: that state's own BLS OEWS wage estimates "
          "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`.",
@@ -1197,16 +1588,32 @@ career_data_source = st.sidebar.radio(
 careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
 MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
 
+# Defaults below assume a popular, concrete profile (Software Developer in
+# San Francisco, in-state at UC Berkeley, 10 years in) instead of generic
+# empty/first-alphabetical values, so there's something real on screen
+# before a visitor touches anything -- see get_suggested_coa_per_year()
+# usage further down for how Cost of Attendance's default is derived from
+# the same school/in-state choice rather than a flat placeholder.
+major_options = sorted(MAJOR_DATA.keys())
+shared_major = get_shared_default("major", "Software Developers")
+default_major_index = major_options.index(shared_major) if shared_major in major_options else (
+    major_options.index("Software Developers") if "Software Developers" in major_options else 0
+)
 major = st.sidebar.selectbox(
-    "Target Major", sorted(MAJOR_DATA.keys()),
+    "Target Profession", major_options, index=default_major_index,
     help="Pick the career you're evaluating -- this determines the salary "
          "numbers used everywhere else in the app. There are hundreds of "
          "options, so instead of scrolling, click the box and type part of "
          "your major or career to jump straight to it.",
 )
 
+city_options = list(CITY_DATA.keys())
+shared_city = get_shared_default("city", "San Francisco, CA")
+default_city_index = city_options.index(shared_city) if shared_city in city_options else (
+    city_options.index("San Francisco, CA") if "San Francisco, CA" in city_options else 0
+)
 city = st.sidebar.selectbox(
-    "City / Metro Area", list(CITY_DATA.keys()),
+    "City / Metro Area", city_options, index=default_city_index,
     help="Where you plan to live and work after graduating. Adjusts your "
          "take-home pay and the 10-year comparison for how expensive that "
          "area is to live in.",
@@ -1225,7 +1632,7 @@ city_info = CITY_DATA[city]
 # shows a picker instead of silently guessing which one was meant.
 school_search_a = st.sidebar.text_input(
     "Target Undergraduate School", placeholder="e.g. University of Michigan",
-    key="school_search_a",
+    value=get_shared_default("school", "UC Berkeley"), key="school_search_a",
     on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
     help="Type a school name to auto-fill Cost of Attendance below from "
          "real government data, if we have it on file. If your school "
@@ -1241,7 +1648,7 @@ if len(matching_schools_a) >= 2:
 school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
 
 in_state_a = st.sidebar.checkbox(
-    "In-State Student?", key="in_state_a",
+    "In-State Student?", value=get_shared_default("in_state", "1") == "1", key="in_state_a",
     on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
     help="Check this if you'd pay in-state tuition at the school above. "
          "Changes the auto-filled Cost of Attendance and how fast tuition "
@@ -1256,16 +1663,32 @@ if coa_caption_a:
 # (5d) snapshots -- has no functional dependency on School/In-State above
 # or Financing/City below, so its position here is purely about profile
 # layout, not calculation order.
+career_stage_options = list(CAREER_STAGE_OPTIONS.keys())
+shared_career_stage = get_shared_default("stage", "Mid-Career (Year 10)")
+default_career_stage_index = career_stage_options.index(shared_career_stage) if shared_career_stage in career_stage_options else (
+    career_stage_options.index("Mid-Career (Year 10)") if "Mid-Career (Year 10)" in career_stage_options else 0
+)
 career_stage_label = st.sidebar.radio(
-    "Career Stage Snapshot", list(CAREER_STAGE_OPTIONS.keys()),
+    "Career Stage Snapshot", career_stage_options, index=default_career_stage_index,
     help="Preview your income right after graduating (Year 1) or 10 years "
          "into this career, in the Real-World Take-Home section below.",
 )
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
 st.sidebar.subheader("💰 Financing")
+shared_coa_a = get_shared_default("coa", None)
+if shared_coa_a is not None:
+    # A shared link's explicit COA wins over auto-fill -- it may reflect a
+    # manual override the original sharer typed in, not just whatever the
+    # school+in-state lookup would recompute.
+    default_coa_per_year_a = float(shared_coa_a)
+else:
+    default_coa_per_year_a = get_suggested_coa_per_year(school_name_a, in_state_a)
+    if default_coa_per_year_a is None:
+        default_coa_per_year_a = 7500
 coa_per_year_a = st.sidebar.number_input(
-    "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
+    "Cost of Attendance (per year, $)", min_value=0, max_value=100000,
+    value=int(default_coa_per_year_a), step=500,
     key="coa_per_year_a",
     help="The full sticker price for one year at this school -- tuition, "
          "fees, room & board, books, everything -- before subtracting "
@@ -1273,7 +1696,8 @@ coa_per_year_a = st.sidebar.number_input(
          "your school above.",
 )
 personal_contribution_per_year_a = st.sidebar.number_input(
-    "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+    "Personal Contribution (per year, $)", min_value=0, max_value=100000,
+    value=int(get_shared_default("pc", "0")), step=500,
     key="personal_contribution_per_year_a",
     help="Also called the Student Aid Index (SAI) -- the amount your family "
          "is expected to contribute. Savings or family money toward this "
@@ -1283,7 +1707,8 @@ personal_contribution_per_year_a = st.sidebar.number_input(
          "you're actually repaying (no interest accrues on it).",
 )
 grants_per_year_a = st.sidebar.number_input(
-    "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+    "Grants & Scholarships (per year, $)", min_value=0, max_value=100000,
+    value=int(get_shared_default("grants", "0")), step=500,
     key="grants_per_year_a",
     help="Grant or scholarship aid that reduces what you need to borrow. "
          "Unlike Personal Contribution, this is NOT counted as part of your "
@@ -1305,14 +1730,20 @@ st.sidebar.caption((
     f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
 interest_rate = st.sidebar.number_input(
-    "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0, value=5.5, step=0.1,
+    "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
+    value=float(get_shared_default("rate", "5.5")), step=0.1,
     help="The interest rate on your student loan. 5.50% is a reasonable "
          "placeholder for recent federal undergraduate loan rates -- check "
          "your school's financial aid offer for your real rate.",
 )
+repayment_strategy_options = ["Standard 10-Year", "Income-Driven Repayment (IDR)"]
+shared_repayment_strategy = get_shared_default("strategy", "Standard 10-Year")
+default_repayment_strategy_index = (
+    repayment_strategy_options.index(shared_repayment_strategy)
+    if shared_repayment_strategy in repayment_strategy_options else 0
+)
 repayment_strategy = st.sidebar.selectbox(
-    "Repayment Strategy",
-    ["Standard 10-Year", "Income-Driven Repayment (IDR)"],
+    "Repayment Strategy", repayment_strategy_options, index=default_repayment_strategy_index,
     help="Standard 10-Year: a fixed payment every month for 10 years. "
          "Income-Driven Repayment (IDR): your payment is based on your "
          "income instead, and whatever's left is forgiven after 20 years.",
@@ -1363,39 +1794,27 @@ components.html(
 
 admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View") if st.session_state.admin_revealed else False
 
-# Read from session_state (not a bare compare_mode variable, which doesn't
-# exist yet at this point in the script -- see the "Compare Two Scenarios"
-# checkbox below, now positioned after this button per request) so the
-# label/click-handling still reflect the checkbox's current value.
-button_label = "⚖️ Compare Scenarios" if st.session_state.compare_mode else "🚀 Calculate My Payoff Plan & ROI"
-action_clicked = st.sidebar.button(button_label, use_container_width=True)
-if action_clicked:
-    if st.session_state.compare_mode:
-        log_usage_event("comparison")
-        st.session_state.has_compared = True
-    else:
-        log_usage_event("calculation")
-        st.session_state.has_calculated = True
-
 # Compare Mode adds a second scenario (Scenario B) rather than hiding the
 # widgets above -- those always represent Scenario A, in both modes. This
 # means toggling Compare Mode on/off never loses a tuned value (there's
 # only ever one copy of Scenario A's inputs) and the survey section below
-# never needs to guess which scenario's context to save. Positioned below
-# the Calculate/Compare button (unlike every other input, which sits above
-# it) per request -- key="compare_mode" keeps this checkbox's value in
-# sync with the session_state read the button above needs before this
-# checkbox is even drawn.
+# never needs to guess which scenario's context to save. Results below
+# render live off whatever this (and every other sidebar input) is
+# currently set to -- there's no Calculate/Compare button to click.
 compare_mode = st.sidebar.checkbox(
-    "🔀 Compare Two Scenarios", key="compare_mode",
+    "🔀 Compare Two Scenarios", value=get_shared_default("compare", "0") == "1", key="compare_mode",
     help="Turn this on to compare two different majors, schools, or loan "
          "setups side by side instead of looking at just one.",
 )
 
 if compare_mode:
     with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
+        shared_major_b = get_shared_default("major_b", "Humanities")
+        default_major_b_index = major_options.index(shared_major_b) if shared_major_b in major_options else (
+            major_options.index("Humanities") if "Humanities" in major_options else 0
+        )
         major_b = st.selectbox(
-            "Target Major", sorted(MAJOR_DATA.keys()), key="major_b",
+            "Target Profession", major_options, index=default_major_b_index, key="major_b",
             help="Pick the career you're evaluating -- this determines the "
                  "salary numbers used everywhere else in the app. There are "
                  "hundreds of options, so instead of scrolling, click the "
@@ -1405,7 +1824,7 @@ if compare_mode:
 
         school_search_b = st.text_input(
             "Target Undergraduate School", placeholder="e.g. Ohio State University",
-            key="school_search_b",
+            value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
             on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
             help="Type a school name to auto-fill Cost of Attendance below "
                  "from real government data, if we have it on file. If "
@@ -1422,7 +1841,7 @@ if compare_mode:
         school_name_b = _resolve_school_name("school_search_b", "school_pick_b")
 
         in_state_b = st.checkbox(
-            "In-State Student?", key="in_state_b",
+            "In-State Student?", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
             on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
             help="Check this if you'd pay in-state tuition at the school "
                  "above. Changes the auto-filled Cost of Attendance and how "
@@ -1434,8 +1853,16 @@ if compare_mode:
             st.caption(coa_caption_b)
 
         st.subheader("💰 Financing")
+        shared_coa_b = get_shared_default("coa_b", None)
+        if shared_coa_b is not None:
+            default_coa_per_year_b = float(shared_coa_b)
+        else:
+            default_coa_per_year_b = get_suggested_coa_per_year(school_name_b, in_state_b)
+            if default_coa_per_year_b is None:
+                default_coa_per_year_b = 7500
         coa_per_year_b = st.number_input(
-            "Cost of Attendance (per year, $)", min_value=0, max_value=100000, value=7500, step=500,
+            "Cost of Attendance (per year, $)", min_value=0, max_value=100000,
+            value=int(default_coa_per_year_b), step=500,
             key="coa_per_year_b",
             help="The full sticker price for one year at this school -- "
                  "tuition, fees, room & board, books, everything -- before "
@@ -1443,7 +1870,8 @@ if compare_mode:
                  "Auto-fills if we found your school above.",
         )
         personal_contribution_per_year_b = st.number_input(
-            "Personal Contribution (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+            "Personal Contribution (per year, $)", min_value=0, max_value=100000,
+            value=int(get_shared_default("pc_b", "0")), step=500,
             key="personal_contribution_per_year_b",
             help="Also called the Student Aid Index (SAI) -- the amount your "
                  "family is expected to contribute. Savings or family money "
@@ -1452,7 +1880,8 @@ if compare_mode:
                  "& Scholarships.",
         )
         grants_per_year_b = st.number_input(
-            "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, value=0, step=500,
+            "Grants & Scholarships (per year, $)", min_value=0, max_value=100000,
+            value=int(get_shared_default("grants_b", "0")), step=500,
             key="grants_per_year_b",
             help="Grant or scholarship aid that reduces what you need to "
                  "borrow. Not counted as part of your own investment for ROI "
@@ -1469,16 +1898,21 @@ if compare_mode:
             f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
         interest_rate_b = st.number_input(
-            "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0, value=5.5, step=0.1,
+            "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
+            value=float(get_shared_default("rate_b", "5.5")), step=0.1,
             key="interest_rate_b",
             help="The interest rate on your student loan. 5.50% is a "
                  "reasonable placeholder for recent federal undergraduate "
                  "loan rates -- check your school's financial aid offer "
                  "for your real rate.",
         )
+        shared_repayment_strategy_b = get_shared_default("strategy_b", "Standard 10-Year")
+        default_repayment_strategy_b_index = (
+            repayment_strategy_options.index(shared_repayment_strategy_b)
+            if shared_repayment_strategy_b in repayment_strategy_options else 0
+        )
         repayment_strategy_b = st.selectbox(
-            "Repayment Strategy",
-            ["Standard 10-Year", "Income-Driven Repayment (IDR)"],
+            "Repayment Strategy", repayment_strategy_options, index=default_repayment_strategy_b_index,
             key="repayment_strategy_b",
             help="Standard 10-Year: a fixed payment every month for 10 "
                  "years. Income-Driven Repayment (IDR): your payment is "
@@ -1673,34 +2107,74 @@ def render_scenario_panel(column, scenario: dict, label: str):
 
 if compare_mode:
     st.subheader("⚖️ Scenario Comparison")
-    if st.session_state.has_compared:
-        scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                               personal_contribution, city_info["col_index"])
-        scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
-                                               personal_contribution_b, city_info["col_index"])
+    scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
+                                           personal_contribution, city_info["col_index"])
+    scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
+                                           personal_contribution_b, city_info["col_index"])
 
-        col_a, col_b = st.columns(2)
-        render_scenario_panel(col_a, scenario_a, "A")
-        render_scenario_panel(col_b, scenario_b, "B")
+    col_a, col_b = st.columns(2)
+    render_scenario_panel(col_a, scenario_a, "A")
+    render_scenario_panel(col_b, scenario_b, "B")
 
-        st.plotly_chart(
-            build_comparison_balance_chart(
-                scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
-                scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
-            ),
-            use_container_width=True,
-        )
-        st.plotly_chart(
-            build_scenario_comparison_roi_chart(
-                scenario_a["roi_result"]["hs_net_position"],
-                scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
-                scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
-            ),
-            use_container_width=True,
-        )
-    else:
-        st.info("Configure Scenario B in the sidebar, then click **Compare Scenarios**.")
-elif st.session_state.has_calculated:
+    st.plotly_chart(
+        build_comparison_balance_chart(
+            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
+            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
+        ),
+        use_container_width=True,
+    )
+    st.plotly_chart(
+        build_scenario_comparison_roi_chart(
+            scenario_a["roi_result"]["hs_net_position"],
+            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
+            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+        ),
+        use_container_width=True,
+    )
+
+    compare_pdf_bytes = generate_pdf_report_compare(
+        city, major, school_name_a, in_state_a, coa_per_year_a, personal_contribution_per_year_a,
+        grants_per_year_a, interest_rate, repayment_strategy, scenario_a,
+        major_b, school_name_b, in_state_b, coa_per_year_b, personal_contribution_per_year_b,
+        grants_per_year_b, interest_rate_b, repayment_strategy_b, scenario_b,
+    )
+    compare_pdf_col, compare_share_col = st.columns(2)
+    compare_pdf_col.download_button(
+        "📄 Download PDF Report", data=compare_pdf_bytes,
+        file_name=f"{major.replace(' ', '_')}_vs_{major_b.replace(' ', '_')}_comparison_report.pdf",
+        mime="application/pdf", use_container_width=True, key="download_pdf_compare",
+        on_click=lambda: save_pdf_download(build_scenario_context(
+            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+            school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+            compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+            interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+            personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+            inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+            scenario_b=scenario_b,
+        )),
+    )
+    if compare_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_compare"):
+        st.query_params.from_dict(build_share_params(
+            career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+            coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+            interest_rate, repayment_strategy, True, major_b=major_b, school_name_b=school_name_b,
+            in_state_b=in_state_b, coa_per_year_b=coa_per_year_b,
+            personal_contribution_per_year_b=personal_contribution_per_year_b,
+            grants_per_year_b=grants_per_year_b, interest_rate_b=interest_rate_b,
+            repayment_strategy_b=repayment_strategy_b,
+        ))
+        save_scenario_share(build_scenario_context(
+            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+            school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+            compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+            interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+            personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+            inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+            scenario_b=scenario_b,
+        ))
+        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+        st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact comparison.")
+else:
     scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                          personal_contribution, city_info["col_index"])
     effective_principal = scenario["effective_principal"]
@@ -1817,8 +2291,35 @@ elif st.session_state.has_calculated:
     )
 
     st.plotly_chart(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major), use_container_width=True)
-else:
-    st.info("Set your profile in the sidebar, then click **Calculate My Payoff Plan & ROI** to see results.")
+
+    single_pdf_bytes = generate_pdf_report_single(
+        major, city, school_name_a, in_state_a, career_stage_label,
+        coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+        interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
+        scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
+    )
+    single_pdf_col, single_share_col = st.columns(2)
+    single_pdf_col.download_button(
+        "📄 Download PDF Report", data=single_pdf_bytes,
+        file_name=f"{major.replace(' ', '_')}_payoff_report.pdf", mime="application/pdf",
+        use_container_width=True, key="download_pdf_single",
+        on_click=lambda: save_pdf_download(build_scenario_context(
+            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+            school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+        )),
+    )
+    if single_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_single"):
+        st.query_params.from_dict(build_share_params(
+            career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+            coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+            interest_rate, repayment_strategy, False,
+        ))
+        save_scenario_share(build_scenario_context(
+            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+            school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+        ))
+        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+        st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact scenario.")
 
 st.divider()
 
@@ -1839,70 +2340,32 @@ if not st.session_state.survey_submitted:
         submitted = st.form_submit_button("Submit Feedback")
 
         if submitted:
-            # Baseline starting_salary is read straight from MAJOR_DATA (not
-            # get_annual_salary_for_year), matching the requested "baseline"
-            # framing -- it's the occupation's raw entry-level wage, not the
-            # training-delay-adjusted figure Medicine/Law/Athletic Training
-            # use elsewhere in the app.
-            starting_salary = MAJOR_DATA[major]["starting_salary"]
-            # DTI here is the literal loan slider divided by starting salary,
-            # per the requested formula -- it intentionally does NOT use
-            # get_effective_principal(), so Medicine/Law's additional
-            # training debt is not included in this particular ratio.
-            dti_ratio = round(loan_amount / starting_salary, 4) if starting_salary else None
             # Recomputed fresh (cheap, pure functions, no API calls) rather
             # than reused from st.session_state, so the survey reflects
-            # exact click-time state even if the user never pressed
-            # Calculate/Compare before submitting.
+            # exact click-time state.
             scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                                    personal_contribution, city_info["col_index"])
-
-            context = {
-                "scenario_a_school_name": school_name_a or None,
-                "scenario_a_major": major,
-                "scenario_a_loan_amount": loan_amount,
-                "scenario_a_interest_rate": interest_rate,
-                "scenario_a_repayment_strategy": repayment_strategy,
-                "scenario_a_starting_salary": starting_salary,
-                "scenario_a_dti_ratio": dti_ratio,
-                "scenario_a_monthly_payment": scenario_a["repayment_result"].get("monthly_payment"),
-                "scenario_a_payoff_years": scenario_a["repayment_result"]["payoff_years"],
-                "scenario_a_total_interest": scenario_a["repayment_result"]["total_interest"],
-                "scenario_a_earnings_premium": scenario_a["roi_result"]["earnings_premium"],
-                "scenario_a_roi_pct": scenario_a["roi_result"]["roi_pct"],
-                "scenario_a_personal_contribution": personal_contribution,
-                "scenario_a_coa_inflation_rate": inflation_rate_a,
-                "scenario_a_grants_per_year": grants_per_year_a,
-            }
-
-            # Scenario B / roi_pct_delta only exist when Compare Mode is on
-            # at the moment of submission -- they stay absent (NULL in the
-            # database) otherwise, since there's no Scenario B to report.
+            # major_b/loan_amount_b/etc. only exist as script variables when
+            # compare_mode is on (they're assigned inside that sidebar
+            # expander) -- referencing them outside an "if compare_mode:"
+            # guard would raise NameError, so Scenario B's args are only
+            # ever built when there's a Scenario B to build them from.
+            compare_mode_kwargs = {}
             if compare_mode:
-                starting_salary_b = MAJOR_DATA[major_b]["starting_salary"]
-                dti_ratio_b = round(loan_amount_b / starting_salary_b, 4) if starting_salary_b else None
                 scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                                        personal_contribution_b, city_info["col_index"])
-                context.update({
-                    "scenario_b_school_name": school_name_b or None,
-                    "scenario_b_major": major_b,
-                    "scenario_b_loan_amount": loan_amount_b,
-                    "scenario_b_interest_rate": interest_rate_b,
-                    "scenario_b_repayment_strategy": repayment_strategy_b,
-                    "scenario_b_starting_salary": starting_salary_b,
-                    "scenario_b_dti_ratio": dti_ratio_b,
-                    "scenario_b_monthly_payment": scenario_b["repayment_result"].get("monthly_payment"),
-                    "scenario_b_payoff_years": scenario_b["repayment_result"]["payoff_years"],
-                    "scenario_b_total_interest": scenario_b["repayment_result"]["total_interest"],
-                    "scenario_b_earnings_premium": scenario_b["roi_result"]["earnings_premium"],
-                    "scenario_b_roi_pct": scenario_b["roi_result"]["roi_pct"],
-                    "scenario_b_personal_contribution": personal_contribution_b,
-                    "scenario_b_coa_inflation_rate": inflation_rate_b,
-                    "scenario_b_grants_per_year": grants_per_year_b,
-                })
-                roi_a = scenario_a["roi_result"]["roi_pct"]
-                roi_b = scenario_b["roi_result"]["roi_pct"]
-                context["roi_pct_delta"] = round(abs(roi_a - roi_b), 2) if roi_a is not None and roi_b is not None else None
+                compare_mode_kwargs = dict(
+                    compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+                    interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+                    personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+                    inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+                    scenario_b=scenario_b,
+                )
+            context = build_scenario_context(
+                major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                **compare_mode_kwargs,
+            )
 
             saved = save_survey_response(respondent_role, hs_graduation_year, perception_change, feedback_text, context)
             if saved:
