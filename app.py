@@ -1508,10 +1508,11 @@ if "survey_submitted" not in st.session_state:
 
 # Admin Analytics View starts hidden -- Ctrl+Shift+A reveals the checkbox
 # that controls it (see the hidden trigger button + injected JS near the
-# bottom of the sidebar). Stays revealed for the rest of the session once
-# triggered.
+# bottom of the sidebar), or visiting the app with ?admin=1 in the URL,
+# for anyone whose OS/browser/extensions already claim that shortcut.
+# Stays revealed for the rest of the session once triggered either way.
 if "admin_revealed" not in st.session_state:
-    st.session_state.admin_revealed = False
+    st.session_state.admin_revealed = get_shared_default("admin", "0") == "1"
 
 
 # ============================================================
