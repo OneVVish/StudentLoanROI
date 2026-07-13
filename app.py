@@ -16,6 +16,7 @@ Architecture:
                                 and the impact survey.
 """
 
+import re
 from datetime import datetime
 
 import pandas as pd
@@ -463,18 +464,71 @@ def find_school_coa(school_name: str, coa_df: pd.DataFrame):
     return partial.iloc[0] if not partial.empty else None
 
 
+# Common abbreviations that don't literally appear inside the real College
+# Scorecard institution name they refer to -- verified against the actual
+# dataset, not guessed. E.g. "UCLA"/"MIT"/"NYU" have zero substring matches
+# at all; "USC" and "MIT" as plain substrings wrongly match unrelated
+# schools instead (e.g. "USC" matches "Tuscarawas", "MIT" matches "Paul
+# Mitchell the School"). Checked as a whole-string match on the query
+# (after stripping/lowercasing) and expanded before the substring search
+# in find_matching_schools below.
+SCHOOL_NAME_ALIASES = {
+    "ucla": "university of california-los angeles",
+    "ucsd": "university of california-san diego",
+    "ucsb": "university of california-santa barbara",
+    "ucsc": "university of california-santa cruz",
+    "virginia tech": "virginia polytechnic institute and state university",
+    "georgia tech": "georgia institute of technology",
+    "mit": "massachusetts institute of technology",
+    "nyu": "new york university",
+    "usc": "university of southern california",
+    "byu": "brigham young university",
+}
+
+# Matches "UC <campus>" (e.g. "UC Berkeley", "UC San Diego") -- a single
+# rule instead of one alias per campus, since every UC campus follows the
+# same real-name pattern: "University of California-<Campus>".
+_UC_CAMPUS_PATTERN = re.compile(r"^uc[\s-]+(\w[\w\s]*)$")
+
+
+def _expand_school_query(school_name: str) -> str:
+    """Expand a common abbreviation to a fragment of the school's real
+    College Scorecard name (e.g. "UC Berkeley" -> "university of
+    california-berkeley"), so it can be substring-matched like any other
+    query. Returns the original (lowercased, stripped) query unchanged if
+    it isn't a known abbreviation."""
+    normalized = school_name.strip().lower()
+    if normalized in SCHOOL_NAME_ALIASES:
+        return SCHOOL_NAME_ALIASES[normalized]
+    uc_match = _UC_CAMPUS_PATTERN.match(normalized)
+    if uc_match:
+        return f"university of california-{uc_match.group(1).strip()}"
+    return normalized
+
+
 def find_matching_schools(school_name: str, coa_df: pd.DataFrame, limit: int = 25) -> list:
     """Every institution name containing school_name (case-insensitive
-    substring), sorted alphabetically and capped at `limit`. Used so a
-    search like "University of California" surfaces all 9+ real UC
-    campuses for the user to pick from, instead of find_school_coa
-    silently guessing one arbitrary match. Returns [] for an empty query
-    or an empty dataset."""
+    substring) -- or, when the query is a known abbreviation (see
+    _expand_school_query), every name containing its expanded form
+    instead. E.g. "UC Berkeley" resolves to the real "University of
+    California-Berkeley" even though that abbreviation never appears in
+    the official name. A known abbreviation deliberately skips the plain
+    substring search rather than adding to it -- some acronyms are
+    literal substrings of unrelated schools (e.g. "MIT" also matches
+    every "Paul Mitchell the School" campus, "USC" matches "Tuscarawas"),
+    and trusting the expansion avoids burying the real match in that
+    noise. Sorted alphabetically and capped at `limit`. Used so a search
+    like "University of California" surfaces all 9+ real UC campuses for
+    the user to pick from, instead of find_school_coa silently guessing
+    one arbitrary match. Returns [] for an empty query or an empty
+    dataset."""
     if not school_name or coa_df.empty:
         return []
     query_lower = school_name.strip().lower()
+    expanded_query = _expand_school_query(school_name)
     names_lower = coa_df["INSTNM"].str.lower()
-    matches = coa_df.loc[names_lower.str.contains(query_lower, regex=False), "INSTNM"]
+    search_term = expanded_query if expanded_query != query_lower else query_lower
+    matches = coa_df.loc[names_lower.str.contains(search_term, regex=False), "INSTNM"]
     return sorted(matches.unique())[:limit]
 
 
