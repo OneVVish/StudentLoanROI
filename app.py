@@ -1961,6 +1961,10 @@ st.title("🎓 Student Loan Payoff & Major ROI Calculator")
 st.caption(
     "Educational estimate tool — salary and cost figures are illustrative, not financial advice."
 )
+st.info(
+    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
+    "anything. Everything below updates instantly as you change it, no button to click."
+)
 
 # ---- 5a. Admin Analytics Dashboard (hidden behind sidebar checkbox) ------
 
