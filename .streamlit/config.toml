@@ -1,0 +1,8 @@
+[client]
+# Hides the hamburger "☰" dev menu (Settings/About/Report a bug/Record a
+# screencast) from regular visitors -- "minimal" only shows options set
+# externally (e.g. via st.set_page_config or Streamlit Community Cloud).
+# Does NOT affect the Deploy button or GitHub/Star badge, which are
+# injected by the Community Cloud platform itself and can't be hidden
+# from app-level config while the repo is public.
+toolbarMode = "minimal"
