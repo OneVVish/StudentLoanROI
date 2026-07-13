@@ -1714,9 +1714,16 @@ if default_coa_per_year_a is None:
     default_coa_per_year_a = get_suggested_coa_per_year(school_name_a, in_state_a)
     if default_coa_per_year_a is None:
         default_coa_per_year_a = 7500
+# Seed session_state instead of passing value= directly: coa_per_year_a's
+# session_state can already be set by _autofill_coa's on_change callback
+# (fired from school_search_a/in_state_a) before this line ever runs, and
+# passing value= for a key that already has a session_state entry is
+# exactly the combination Streamlit's widget policy warns about. setdefault
+# is a no-op once anything -- the callback or a prior render -- has already
+# populated it, so this only ever supplies the very first render's default.
+st.session_state.setdefault("coa_per_year_a", int(default_coa_per_year_a))
 coa_per_year_a = st.sidebar.number_input(
-    "Cost of Attendance (per year, $)", min_value=0, max_value=100000,
-    value=int(default_coa_per_year_a), step=500,
+    "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
     key="coa_per_year_a",
     help="The full sticker price for one year at this school -- tuition, "
          "fees, room & board, books, everything -- before subtracting "
@@ -1892,9 +1899,9 @@ if compare_mode:
             default_coa_per_year_b = get_suggested_coa_per_year(school_name_b, in_state_b)
             if default_coa_per_year_b is None:
                 default_coa_per_year_b = 7500
+        st.session_state.setdefault("coa_per_year_b", int(default_coa_per_year_b))
         coa_per_year_b = st.number_input(
-            "Cost of Attendance (per year, $)", min_value=0, max_value=100000,
-            value=int(default_coa_per_year_b), step=500,
+            "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
             key="coa_per_year_b",
             help="The full sticker price for one year at this school -- "
                  "tuition, fees, room & board, books, everything -- before "
