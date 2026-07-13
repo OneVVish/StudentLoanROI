@@ -1095,6 +1095,10 @@ def build_perception_by_major_chart(survey_df: pd.DataFrame):
 
 st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page_icon="🎓", layout="wide")
 
+# Hides Streamlit's default toolbar GitHub icon (auto-added when the app
+# is deployed from a public repo) -- purely cosmetic, no functional effect.
+st.markdown("<style>#GithubIcon { visibility: hidden; }</style>", unsafe_allow_html=True)
+
 # Log exactly one "pageview" per browser session. This check runs before any
 # widgets are drawn, so later reruns triggered by moving a slider or opening
 # an expander see "pageview_logged" already set and skip logging again.
