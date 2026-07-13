@@ -55,28 +55,28 @@ COLLEGE_SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.jso
 # salary always matches this median exactly.
 CURATED_MAJOR_DATA = {
     # Software Developers, SOC 15-1252: 25th pct $101,200 / median $132,270
-    "Computer Science": {"starting_salary": 101200, "median_salary": 132270},
+    "Computer Science": {"starting_salary": 101200, "median_salary": 132270, "soc_major_group": "15"},
     # Registered Nurses, SOC 29-1141: 25th pct $75,990 / median $86,070
-    "Nursing": {"starting_salary": 75990, "median_salary": 86070},
+    "Nursing": {"starting_salary": 75990, "median_salary": 86070, "soc_major_group": "29"},
     # Business Operations Specialists, All Other, SOC 13-1199: 25th pct $59,010 / median $79,590
-    "Business": {"starting_salary": 59010, "median_salary": 79590},
+    "Business": {"starting_salary": 59010, "median_salary": 79590, "soc_major_group": "13"},
     # Financial and Investment Analysts, SOC 13-2051: 25th pct $76,880 / median $99,010
-    "Finance": {"starting_salary": 76880, "median_salary": 99010},
+    "Finance": {"starting_salary": 76880, "median_salary": 99010, "soc_major_group": "13"},
     # Market Research Analysts and Marketing Specialists, SOC 13-1161: 25th pct $52,840 / median $74,680
-    "Humanities": {"starting_salary": 52840, "median_salary": 74680},
+    "Humanities": {"starting_salary": 52840, "median_salary": 74680, "soc_major_group": "13"},
     # Fine Artists, Including Painters, Sculptors, and Illustrators, SOC 27-1013: 25th pct $38,160 / median $59,300
-    "Arts": {"starting_salary": 38160, "median_salary": 59300},
+    "Arts": {"starting_salary": 38160, "median_salary": 59300, "soc_major_group": "27"},
     # Coaches and Scouts, SOC 27-2022: 25th pct $32,440 / median $45,910
-    "Sports Management": {"starting_salary": 32440, "median_salary": 45910},
+    "Sports Management": {"starting_salary": 32440, "median_salary": 45910, "soc_major_group": "27"},
     # Exercise Physiologists, SOC 29-1128: 25th pct $45,870 / median $54,860
-    "Exercise Science": {"starting_salary": 45870, "median_salary": 54860},
+    "Exercise Science": {"starting_salary": 45870, "median_salary": 54860, "soc_major_group": "29"},
     # Athletic Trainers, SOC 29-9091: 25th pct $49,750 / median $57,930. BLS
     # now lists a master's as the typical entry-level education, so this
     # major has a 2-year unpaid training delay (the accredited master's
     # program) before the salary above applies -- see get_annual_salary_for_year.
     "Athletic Training": {
         "starting_salary": 49750, "median_salary": 57930,
-        "unpaid_training_years": 2,
+        "unpaid_training_years": 2, "soc_major_group": "29",
     },
     # Family Medicine Physicians, SOC 29-1215: 25th pct $152,810 / median
     # $224,640. 4 unpaid years (med school) + 3 stipend years (residency;
@@ -91,6 +91,7 @@ CURATED_MAJOR_DATA = {
         "starting_salary": 152810, "median_salary": 224640,
         "unpaid_training_years": 4, "stipend_training_years": 3,
         "stipend_salary": 65000, "additional_training_debt": 205000,
+        "soc_major_group": "29",
     },
     # Lawyers, SOC 23-1011: 25th pct $98,030 / median $145,760. 3 unpaid
     # years (law school, no paid-training equivalent). additional_training_
@@ -99,6 +100,7 @@ CURATED_MAJOR_DATA = {
     "Law": {
         "starting_salary": 98030, "median_salary": 145760,
         "unpaid_training_years": 3, "additional_training_debt": 130000,
+        "soc_major_group": "23",
     },
 }
 
@@ -120,7 +122,13 @@ def load_bls_careers(csv_path: str) -> dict:
     except (FileNotFoundError, pd.errors.EmptyDataError):
         return {}
     return {
-        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median}
+        row.occ_title: {
+            "starting_salary": row.a_pct25, "median_salary": row.a_median,
+            # First 2 digits of the 6-digit SOC code (e.g. "15-1252" -> "15")
+            # -- the SOC "major group" level, used to look up AI_EXPOSURE_BY_
+            # SOC_GROUP for the optional AI Employability Risk module.
+            "soc_major_group": str(row.occ_code).split("-")[0],
+        }
         for row in careers_df.itertuples()
     }
 
@@ -303,6 +311,107 @@ CAREER_STAGE_OPTIONS = {
     "Mid-Career (Year 10)": 9,
 }
 
+# ---- College Prestige & Cost Estimator (optional "Advanced Analysis" mode) --
+# Cost per tier is a straightforward sticker-price bucketing. The salary
+# multiplier is the part that needs care: real research on a "prestige
+# premium" is genuinely contested. Chetty et al. (Opportunity Insights,
+# "Mobility Report Cards" / "Diversifying Society's Leaders?",
+# opportunityinsights.org) find real, observable mid-career earnings
+# differences by college selectivity tier. But Dale & Krueger (2002, NBER
+# Working Paper 7322; 2011 update) found that gap shrinks toward zero once
+# you control for the *student's own* ability/motivation -- i.e. the kind of
+# student who gets admitted to and attends an Ivy-plus school would likely
+# have earned close to the same wage regardless of where they went. These
+# multipliers are set well below the raw observational gap Chetty et al.
+# report, as a deliberately conservative middle ground between the two
+# findings -- and are always surfaced as a modeled estimate, not a causal
+# claim about any specific school, in the UI, PDF, and Methodology footer.
+COLLEGE_PRESTIGE_TIERS = {
+    "Tier 1: Elite Private (Ivy+ / Top 15)": {"coa_per_year": 85000, "salary_multiplier": 1.10},
+    "Tier 2: Top Public / Public Ivy (In-State)": {"coa_per_year": 35000, "salary_multiplier": 1.05},
+    "Tier 3: Standard Regional Public (In-State)": {"coa_per_year": 22000, "salary_multiplier": 1.00},
+    "Tier 4: Out-of-State Public / Mid-Tier Private": {"coa_per_year": 55000, "salary_multiplier": 1.03},
+}
+
+# ---- AI Employability Risk Analysis (optional "Advanced Analysis" mode) -----
+# A per-major "AI Exposure Score" is only as credible as its source -- so
+# rather than inventing a unique 0-100 number per major, this is modeled at
+# the SOC "major group" level (the first 2 digits of a 6-digit BLS SOC code,
+# e.g. 15-xxxx = Computer & Mathematical), the level real published AI
+# task-exposure research actually operates at: Felten, Raj & Seamans, "AI
+# Occupational Exposure" (AIOE) index (nber.org/papers/w28959), and Eloundou,
+# Manning, Mishkin & Rock, "GPTs are GPTs" (arXiv:2303.10130, 2023), both of
+# which consistently find office/administrative-support and business/
+# financial-operations tasks among the most LLM-exposed, and hands-on/
+# in-person occupations (healthcare support, food service, construction,
+# personal care, protective service) among the least. risk_level/score here
+# are banded (Low=20, Medium=50, High=80), not a unique precision figure, to
+# avoid implying false precision from a single detailed occupation title.
+# "Exposure" measures task overlap with current AI tools, not certainty of
+# job loss or automation -- see the Methodology footer for that distinction.
+AI_EXPOSURE_BY_SOC_GROUP = {
+    "11": {"label": "Management", "risk_level": "Medium", "score": 50,
+           "rationale": "Judgment and people-management are hard to automate, but reporting/analysis tasks are increasingly AI-assisted."},
+    "13": {"label": "Business & Financial Operations", "risk_level": "High", "score": 80,
+           "rationale": "Analysis, reporting, and document-drafting tasks overlap heavily with current AI tool capabilities."},
+    "15": {"label": "Computer & Mathematical", "risk_level": "Medium", "score": 55,
+           "rationale": "Mixed evidence: some coding/analysis tasks are heavily AI-assisted, but system design and judgment stay human-led."},
+    "17": {"label": "Architecture & Engineering", "risk_level": "Medium", "score": 45,
+           "rationale": "Design/drafting tasks show moderate exposure; physical and safety judgment remain human-led."},
+    "19": {"label": "Life, Physical & Social Science", "risk_level": "Medium", "score": 45,
+           "rationale": "Data analysis is AI-assisted, but experimental/field work and domain judgment are not."},
+    "21": {"label": "Community & Social Service", "risk_level": "Low", "score": 20,
+           "rationale": "Relies on in-person trust and judgment that current AI systems can't substitute for."},
+    "23": {"label": "Legal", "risk_level": "High", "score": 80,
+           "rationale": "Document review and legal research are among the most-cited high-exposure task categories in the literature."},
+    "25": {"label": "Educational Instruction & Library", "risk_level": "Medium", "score": 45,
+           "rationale": "Content preparation is AI-assisted, but live instruction and mentorship are not."},
+    "27": {"label": "Arts, Design, Entertainment, Sports & Media", "risk_level": "Medium", "score": 55,
+           "rationale": "Writing/design tasks show real exposure; performance- and reputation-driven work much less so."},
+    "29": {"label": "Healthcare Practitioners & Technical", "risk_level": "Low", "score": 30,
+           "rationale": "Direct patient care and hands-on procedures remain largely outside current AI capability."},
+    "31": {"label": "Healthcare Support", "risk_level": "Low", "score": 20,
+           "rationale": "Hands-on, in-person care tasks with little task overlap with current AI systems."},
+    "33": {"label": "Protective Service", "risk_level": "Low", "score": 15,
+           "rationale": "Physical presence and split-second judgment dominate this work."},
+    "35": {"label": "Food Preparation & Serving", "risk_level": "Low", "score": 10,
+           "rationale": "Manual, in-person tasks with minimal overlap with current AI systems."},
+    "37": {"label": "Building & Grounds Cleaning & Maintenance", "risk_level": "Low", "score": 10,
+           "rationale": "Physical, in-person labor with minimal task overlap with current AI systems."},
+    "39": {"label": "Personal Care & Service", "risk_level": "Low", "score": 15,
+           "rationale": "In-person, relationship-driven work with minimal AI task overlap."},
+    "41": {"label": "Sales & Related", "risk_level": "Medium", "score": 50,
+           "rationale": "Research/outreach drafting is AI-assisted; relationship-building and negotiation are not."},
+    "43": {"label": "Office & Administrative Support", "risk_level": "High", "score": 85,
+           "rationale": "Consistently identified in the literature as the most AI-exposed occupational category."},
+    "45": {"label": "Farming, Fishing & Forestry", "risk_level": "Low", "score": 10,
+           "rationale": "Physical, outdoor labor with minimal overlap with current AI systems."},
+    "47": {"label": "Construction & Extraction", "risk_level": "Low", "score": 10,
+           "rationale": "Physical, hands-on labor with minimal overlap with current AI systems."},
+    "49": {"label": "Installation, Maintenance & Repair", "risk_level": "Low", "score": 15,
+           "rationale": "Physical, hands-on troubleshooting with minimal overlap with current AI systems."},
+    "51": {"label": "Production", "risk_level": "Low", "score": 25,
+           "rationale": "Physical assembly/manufacturing tasks with limited current AI (as opposed to separate robotics) task overlap."},
+    "53": {"label": "Transportation & Material Moving", "risk_level": "Low", "score": 20,
+           "rationale": "Physical operation tasks with limited current AI (as opposed to separate autonomy/robotics) task overlap."},
+    "55": {"label": "Military Specific", "risk_level": "Low", "score": 20,
+           "rationale": "Not covered in detail by the civilian occupational-exposure research this feature is based on."},
+}
+
+# ---- 2026 Regulatory & Macro Forecasting (optional "Advanced Analysis" mode) -
+# Real, enacted federal law: the One Big Beautiful Bill Act (H.R. 1, 2025)
+# replaces existing IDR plans with the Repayment Assistance Plan (RAP) and
+# introduces a Tiered Standard Plan, both effective for new federal loan
+# borrowers July 1, 2026 (existing borrowers transition by July 1, 2028).
+# Source: U.S. Dept. of Education, "Fact Sheet: The Trump Administration Is
+# Simplifying Student Loan Repayment" (ed.gov), corroborated by CRS In Focus
+# IF13075. Figures below are administratively simplified, like this app's
+# existing IDR model -- see the Methodology footer for the same caveat.
+RAP_DEPENDENT_REDUCTION = 50  # $/month per dependent
+RAP_MIN_PAYMENT = 10  # $/month floor for AGI <= $10,000
+RAP_MAX_TERM_YEARS = 30  # forgiveness after 360 on-time payments
+RAP_PRINCIPAL_MATCH_CAP = 50  # $/month government principal-match subsidy
+
 
 # ============================================================
 # 2. HELPER FUNCTIONS
@@ -355,6 +464,55 @@ def get_effective_principal(major_name: str, loan_amount: float) -> float:
     Medicine's median medical school debt). Used as the actual loan
     principal AND the ROI% denominator -- see calculate_roi."""
     return loan_amount + MAJOR_DATA[major_name].get("additional_training_debt", 0)
+
+
+def get_prestige_adjusted_major_name(major_name: str, tier_label: str) -> str:
+    """Registers a synthetic MAJOR_DATA entry combining major_name's real
+    BLS/curated salary data with tier_label's salary_multiplier (see
+    COLLEGE_PRESTIGE_TIERS), under a synthetic key -- so every existing
+    lookup (get_annual_salary_for_year, compute_scenario_results, the PDF/
+    survey context, etc.) keeps reading MAJOR_DATA[major_name] completely
+    unmodified, with no new multiplier parameter to thread through every
+    function. Returns major_name unchanged when the tier applies no
+    multiplier (Tier 3's 1.00x baseline)."""
+    multiplier = COLLEGE_PRESTIGE_TIERS[tier_label]["salary_multiplier"]
+    if multiplier == 1.0:
+        return major_name
+    synthetic_name = f"{major_name} ({tier_label.split(':')[0]})"
+    base = MAJOR_DATA[major_name]
+    MAJOR_DATA[synthetic_name] = {
+        **base,
+        "starting_salary": base["starting_salary"] * multiplier,
+        "median_salary": base["median_salary"] * multiplier,
+    }
+    return synthetic_name
+
+
+def get_ai_exposure_for_major(major_name: str) -> dict:
+    """AI_EXPOSURE_BY_SOC_GROUP entry for major_name's SOC major group, or a
+    graceful "Unclassified" placeholder if this major/career isn't mapped to
+    one -- never a fabricated guess."""
+    soc_group = MAJOR_DATA[major_name].get("soc_major_group")
+    return AI_EXPOSURE_BY_SOC_GROUP.get(soc_group, {
+        "label": "Unclassified", "risk_level": "Unknown", "score": None,
+        "rationale": "This major/career isn't mapped to a BLS occupation group in this dataset.",
+    })
+
+
+def get_lower_risk_alternative_major(major_name: str) -> str:
+    """For a Medium/High AI-exposure major, the closest-starting-salary major
+    in the currently loaded MAJOR_DATA whose SOC major group is Low risk --
+    or None if the dataset has no Low-risk alternative, rather than
+    inventing a plausible-sounding one that isn't actually in the data."""
+    current_salary = MAJOR_DATA[major_name].get("starting_salary", 0)
+    candidates = [
+        (name, data) for name, data in MAJOR_DATA.items()
+        if name != major_name
+        and AI_EXPOSURE_BY_SOC_GROUP.get(data.get("soc_major_group"), {}).get("risk_level") == "Low"
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: abs(item[1].get("starting_salary", 0) - current_salary))[0]
 
 
 # ---- 2b. Usage / Survey Logging (Supabase) -------------------------------
@@ -1025,6 +1183,84 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
     }
 
 
+# ---- 2e-2. Financial Math: 2026 Regulatory Forecasting (RAP & Tiered Standard) --
+# Real, enacted federal law -- see the RAP_* constants' comment (section 1)
+# for sourcing. Modeled with the same "administratively simplified, not an
+# exact copy of federal rules" scope as the existing IDR model above.
+
+def calculate_tiered_standard_term(principal: float) -> int:
+    """2026 Tiered Standard Plan: fixed repayment term by loan balance."""
+    if principal < 25000:
+        return 10
+    if principal < 50000:
+        return 15
+    if principal < 100000:
+        return 20
+    return 25
+
+
+def calculate_rap_payment(agi: float, dependents: int = 0) -> dict:
+    """One month's Repayment Assistance Plan (RAP) payment: a flat $10/month
+    floor for AGI <= $10,000, otherwise 1% of AGI per $10,000 AGI band above
+    $10,000 (so $10k-20k -> 1%, $20k-30k -> 2%, ... $90k-100k -> 9%), capped
+    at 10% for AGI >= $100,000 -- then reduced by $50/month per dependent,
+    floored at $0."""
+    if agi <= 10000:
+        base_payment = float(RAP_MIN_PAYMENT)
+        applied_pct = None
+    else:
+        band = min(int(agi // 10000), 10)
+        applied_pct = band / 100
+        base_payment = agi * applied_pct / 12
+    payment = max(base_payment - dependents * RAP_DEPENDENT_REDUCTION, 0.0)
+    return {"monthly_payment": payment, "applied_pct": applied_pct, "base_payment": base_payment}
+
+
+def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: str,
+                           dependents: int = 0, max_term_years: int = RAP_MAX_TERM_YEARS) -> dict:
+    """Year-by-year RAP amortization: payment = calculate_rap_payment against
+    that year's real salary (get_annual_salary_for_year), with RAP's real
+    interest-waiver + up to $50/month government principal-match provisions
+    applied whenever the borrower's own payment doesn't reduce principal by
+    at least $50 that month -- so the balance never grows from unpaid
+    interest. Any balance remaining after max_term_years (30 real years /
+    360 payments) is forgiven."""
+    monthly_rate = annual_rate_pct / 100 / 12
+    balance = principal
+    total_paid_in_roi_window = 0.0
+    forgiven_amount = 0.0
+    schedule_rows = []
+    max_months = max_term_years * 12
+
+    for month in range(1, max_months + 1):
+        year_index = (month - 1) // 12
+        agi = get_annual_salary_for_year(major_name, year_index)
+        payment = calculate_rap_payment(agi, dependents)["monthly_payment"]
+        interest = balance * monthly_rate
+        principal_reduction = payment - interest
+        if principal_reduction < RAP_PRINCIPAL_MATCH_CAP:
+            principal_reduction = min(balance, RAP_PRINCIPAL_MATCH_CAP)
+        balance = max(balance - principal_reduction, 0.0)
+        if month <= ROI_WINDOW_YEARS * 12:
+            total_paid_in_roi_window += payment
+        schedule_rows.append({"month": month, "year": month / 12, "balance": balance})
+        if balance <= 0:
+            break
+    else:
+        forgiven_amount = balance
+        balance = 0.0
+        schedule_rows.append({"month": max_months, "year": max_months / 12, "balance": 0.0})
+
+    schedule_df = pd.DataFrame(schedule_rows)
+    return {
+        "total_interest": 0.0,  # waived under RAP's real interest-subsidy provision
+        "payoff_years": schedule_df["month"].iloc[-1] / 12,
+        "schedule": schedule_df,
+        "total_paid_in_roi_window": total_paid_in_roi_window,
+        "forgiven_amount": forgiven_amount,
+    }
+
+
 # ---- 2f. 10-Year ROI ------------------------------------------------------
 
 def calculate_roi(major_name: str, total_loan_payments_in_window: float,
@@ -1410,11 +1646,46 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     return rows
 
 
+def _pdf_module_sections(module_context: dict) -> list:
+    """Optional PDF section(s) for whichever advanced modules were active --
+    guarded per-module (see build_module_context) so a PDF generated with
+    every module off is unchanged from before these modules existed."""
+    if not module_context:
+        return []
+    styles = getSampleStyleSheet()
+    elements = []
+    if module_context.get("prestige_mode_active"):
+        rows = [["Scenario", "Selected College Tier"], ["A", module_context.get("scenario_a_prestige_tier", "")]]
+        if "scenario_b_prestige_tier" in module_context:
+            rows.append(["B", module_context["scenario_b_prestige_tier"]])
+        elements += [
+            Spacer(1, 12), Paragraph("College Prestige & Cost Estimator", styles["Heading2"]),
+            _pdf_table(rows),
+        ]
+    if module_context.get("ai_mode_active"):
+        rows = [["Scenario", "AI Task Exposure Risk Level"], ["A", module_context.get("scenario_a_ai_risk_level", "")]]
+        if "scenario_b_ai_risk_level" in module_context:
+            rows.append(["B", module_context["scenario_b_ai_risk_level"]])
+        elements += [
+            Spacer(1, 12), Paragraph("AI Employability Risk Analysis", styles["Heading2"]),
+            _pdf_table(rows),
+        ]
+    if module_context.get("future_forecasting_active"):
+        rows = [["Scenario", "2026 Plan Selected"], ["A", module_context.get("future_plan_selected", "")]]
+        if "scenario_b_future_plan_selected" in module_context:
+            rows.append(["B", module_context["scenario_b_future_plan_selected"]])
+        elements += [
+            Spacer(1, 12), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["Heading2"]),
+            _pdf_table(rows),
+        ]
+    return elements
+
+
 def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_stage_label,
                                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
                                 scenario, take_home, gross, disposable_nominal,
-                                disposable_col_adjusted) -> bytes:
+                                disposable_col_adjusted, module_context: dict = None) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table), Real-World Take-Home, and
     10-Year Financial Position -- tables/metrics only, no chart images
@@ -1469,6 +1740,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
              fmt_money(roi_result["earnings_premium"])],
         ]),
     ]
+    story += _pdf_module_sections(module_context)
 
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=letter).build(
@@ -1495,7 +1767,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  personal_contribution_per_year_a, grants_per_year_a, interest_rate,
                                  repayment_strategy, scenario_a, major_b, school_name_b, in_state_b,
                                  coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b,
-                                 interest_rate_b, repayment_strategy_b, scenario_b) -> bytes:
+                                 interest_rate_b, repayment_strategy_b, scenario_b,
+                                 module_context: dict = None) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables (no chart images -- see the section
     comment above for why)."""
@@ -1527,6 +1800,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_b),
     ]
+    story += _pdf_module_sections(module_context)
 
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=letter).build(
@@ -1736,76 +2010,128 @@ career_stage_label = st.sidebar.radio(
 )
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
+# Three independent, optional modules -- each defaults off, and the app
+# behaves exactly as it did before any of them existed when left off. See
+# the Methodology footer for what each one models and, just as importantly,
+# what it deliberately does NOT claim.
+with st.sidebar.expander("🧪 Advanced Analysis Settings"):
+    enable_prestige_mode = st.checkbox(
+        "Enable College Prestige & Cost Estimator", value=False, key="enable_prestige_mode",
+        help="Replace the manual school/Cost of Attendance fields below with "
+             "a college-tier picker that also applies a modeled (not "
+             "guaranteed) salary premium by tier -- see Methodology for "
+             "sourcing and caveats.",
+    )
+    enable_ai_mode = st.checkbox(
+        "Enable AI Employability Risk Analysis", value=False, key="enable_ai_mode",
+        help="Show a modeled AI task-exposure estimate for your chosen "
+             "major's occupation group, based on published research -- see "
+             "Methodology.",
+    )
+    enable_future_proofing = st.checkbox(
+        "Enable 2026 Regulatory & Macro Forecasting", value=False, key="enable_future_proofing",
+        help="Preview the real 2026 federal repayment plans (Repayment "
+             "Assistance Plan and Tiered Standard Plan) and a real "
+             "cost-of-living comparison across cities -- see Methodology.",
+    )
+prestige_tier_a = None
+prestige_tier_b = None
+
 st.sidebar.subheader("💰 Financing")
 
-# School first: entering it immediately shows Cost of Attendance below, and
-# (if it matches the local dataset) auto-fills the per-year COA field --
-# everything else in this section builds on that number, which is why the
-# school/in-state choice lives here rather than up in Career. Many real
-# school names collide on a simple substring search (e.g. every
-# "University of California" campus), so a search matching 2+ schools
-# shows a picker instead of silently guessing which one was meant.
-school_search_a = st.sidebar.text_input(
-    "Target Undergraduate School", placeholder="e.g. University of Michigan",
-    value=get_shared_default("school", "UC Berkeley"), key="school_search_a",
-    on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
-    help="Type a school name to auto-fill Cost of Attendance below from "
-         "real government data, if we have it on file. If your school "
-         "isn't found, just enter Cost of Attendance yourself.",
-)
-matching_schools_a = find_matching_schools(school_search_a, load_coa_dataset())
-if len(matching_schools_a) >= 2:
-    st.sidebar.selectbox(
-        f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
-        matching_schools_a, key="school_pick_a",
-        on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+if enable_prestige_mode:
+    # College Prestige & Cost Estimator: replaces the school lookup with a
+    # fixed-cost tier -- see COLLEGE_PRESTIGE_TIERS (section 1) for sourcing
+    # of both the per-tier cost and the (deliberately conservative) salary
+    # premium applied further below.
+    prestige_tier_options = list(COLLEGE_PRESTIGE_TIERS.keys())
+    shared_tier_a = get_shared_default("prestige_tier", prestige_tier_options[0])
+    default_tier_a_index = (
+        prestige_tier_options.index(shared_tier_a) if shared_tier_a in prestige_tier_options else 0
     )
-school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
+    prestige_tier_a = st.sidebar.selectbox(
+        "College Tier Selection", prestige_tier_options, index=default_tier_a_index, key="prestige_tier_a",
+        help="A modeled college-tier cost + salary-premium estimate, in "
+             "place of entering a specific school -- see Methodology for "
+             "how the salary premium is sourced and why it's kept "
+             "conservative.",
+    )
+    school_name_a = prestige_tier_a
+    in_state_a = True
+    coa_per_year_a = COLLEGE_PRESTIGE_TIERS[prestige_tier_a]["coa_per_year"]
+    coa_match_a = None
+    st.sidebar.caption(
+        f"Annual Cost of Attendance for this tier: {fmt_money(coa_per_year_a)}".replace("$", r"\$")
+    )
+else:
+    # School first: entering it immediately shows Cost of Attendance below, and
+    # (if it matches the local dataset) auto-fills the per-year COA field --
+    # everything else in this section builds on that number, which is why the
+    # school/in-state choice lives here rather than up in Career. Many real
+    # school names collide on a simple substring search (e.g. every
+    # "University of California" campus), so a search matching 2+ schools
+    # shows a picker instead of silently guessing which one was meant.
+    school_search_a = st.sidebar.text_input(
+        "Target Undergraduate School", placeholder="e.g. University of Michigan",
+        value=get_shared_default("school", "UC Berkeley"), key="school_search_a",
+        on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+        help="Type a school name to auto-fill Cost of Attendance below from "
+             "real government data, if we have it on file. If your school "
+             "isn't found, just enter Cost of Attendance yourself.",
+    )
+    matching_schools_a = find_matching_schools(school_search_a, load_coa_dataset())
+    if len(matching_schools_a) >= 2:
+        st.sidebar.selectbox(
+            f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
+            matching_schools_a, key="school_pick_a",
+            on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+        )
+    school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
 
-in_state_a = st.sidebar.checkbox(
-    "In-State Student?", value=get_shared_default("in_state", "1") == "1", key="in_state_a",
-    on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
-    help="Check this if you'd pay in-state tuition at the school above. "
-         "Changes the auto-filled Cost of Attendance and how fast tuition "
-         "is estimated to grow each year.",
-)
-coa_match_a = find_school_coa(school_name_a, load_coa_dataset()) if school_name_a else None
-coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
-if coa_caption_a:
-    st.sidebar.caption(coa_caption_a)
+    in_state_a = st.sidebar.checkbox(
+        "In-State Student?", value=get_shared_default("in_state", "1") == "1", key="in_state_a",
+        on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+        help="Check this if you'd pay in-state tuition at the school above. "
+             "Changes the auto-filled Cost of Attendance and how fast tuition "
+             "is estimated to grow each year.",
+    )
+    coa_match_a = find_school_coa(school_name_a, load_coa_dataset()) if school_name_a else None
+    coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
+    if coa_caption_a:
+        st.sidebar.caption(coa_caption_a)
 
-shared_coa_a = get_shared_default("coa", None)
-default_coa_per_year_a = None
-if shared_coa_a is not None:
-    # A shared link's explicit COA wins over auto-fill -- it may reflect a
-    # manual override the original sharer typed in, not just whatever the
-    # school+in-state lookup would recompute. A malformed value (e.g. a
-    # hand-edited link) falls through to auto-fill below instead of
-    # crashing the page.
-    try:
-        default_coa_per_year_a = float(shared_coa_a)
-    except (ValueError, TypeError):
-        pass
-if default_coa_per_year_a is None:
-    default_coa_per_year_a = get_suggested_coa_per_year(school_name_a, in_state_a)
+    shared_coa_a = get_shared_default("coa", None)
+    default_coa_per_year_a = None
+    if shared_coa_a is not None:
+        # A shared link's explicit COA wins over auto-fill -- it may reflect a
+        # manual override the original sharer typed in, not just whatever the
+        # school+in-state lookup would recompute. A malformed value (e.g. a
+        # hand-edited link) falls through to auto-fill below instead of
+        # crashing the page.
+        try:
+            default_coa_per_year_a = float(shared_coa_a)
+        except (ValueError, TypeError):
+            pass
     if default_coa_per_year_a is None:
-        default_coa_per_year_a = 7500
-# Seed session_state instead of passing value= directly: coa_per_year_a's
-# session_state can already be set by _autofill_coa's on_change callback
-# (fired from school_search_a/in_state_a) before this line ever runs, and
-# passing value= for a key that already has a session_state entry is
-# exactly the combination Streamlit's widget policy warns about. setdefault
-# is a no-op once anything -- the callback or a prior render -- has already
-# populated it, so this only ever supplies the very first render's default.
-st.session_state.setdefault("coa_per_year_a", int(default_coa_per_year_a))
-coa_per_year_a = st.sidebar.number_input(
-    "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
-    key="coa_per_year_a",
-    help="The full sticker price for one year at this school -- tuition, "
-         "fees, room & board, books, everything -- before subtracting "
-         "scholarships or what you pay yourself. Auto-fills if we found "
-         "your school above.",
-)
+        default_coa_per_year_a = get_suggested_coa_per_year(school_name_a, in_state_a)
+        if default_coa_per_year_a is None:
+            default_coa_per_year_a = 7500
+    # Seed session_state instead of passing value= directly: coa_per_year_a's
+    # session_state can already be set by _autofill_coa's on_change callback
+    # (fired from school_search_a/in_state_a) before this line ever runs, and
+    # passing value= for a key that already has a session_state entry is
+    # exactly the combination Streamlit's widget policy warns about. setdefault
+    # is a no-op once anything -- the callback or a prior render -- has already
+    # populated it, so this only ever supplies the very first render's default.
+    st.session_state.setdefault("coa_per_year_a", int(default_coa_per_year_a))
+    coa_per_year_a = st.sidebar.number_input(
+        "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
+        key="coa_per_year_a",
+        help="The full sticker price for one year at this school -- tuition, "
+             "fees, room & board, books, everything -- before subtracting "
+             "scholarships or what you pay yourself. Auto-fills if we found "
+             "your school above.",
+    )
 personal_contribution_per_year_a = st.sidebar.number_input(
     "Personal Contribution (per year, $)", min_value=0, max_value=100000,
     value=get_shared_int("pc", 0), step=500,
@@ -1831,7 +2157,10 @@ grants_per_year_a = st.sidebar.number_input(
 # -- then summed to the total every downstream calculation
 # (effective_principal, ROI, take-home) operates on.
 control_type_a = coa_match_a["control_type"] if coa_match_a is not None else None
-inflation_rate_a = estimate_coa_inflation_rate(school_name_a, scorecard_api_key, control_type_a)
+inflation_rate_a = (
+    DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
+    else estimate_coa_inflation_rate(school_name_a, scorecard_api_key, control_type_a)
+)
 loan_amount = compute_total_loan_amount(coa_per_year_a, personal_contribution_per_year_a,
                                          grants_per_year_a, inflation_rate_a)
 personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
@@ -1840,6 +2169,11 @@ st.sidebar.caption((
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
     f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
+if enable_prestige_mode:
+    # Apply the tier's salary premium to Scenario A's major -- see
+    # get_prestige_adjusted_major_name for why this is a synthetic MAJOR_DATA
+    # entry rather than a new parameter threaded through every calculation.
+    major = get_prestige_adjusted_major_name(major, prestige_tier_a)
 interest_rate = st.sidebar.number_input(
     "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
     value=get_shared_float("rate", 5.5), step=0.1,
@@ -1934,56 +2268,76 @@ if compare_mode:
         )
 
         st.subheader("💰 Financing")
-        school_search_b = st.text_input(
-            "Target Undergraduate School", placeholder="e.g. Ohio State University",
-            value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
-            on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
-            help="Type a school name to auto-fill Cost of Attendance below "
-                 "from real government data, if we have it on file. If "
-                 "your school isn't found, just enter Cost of Attendance "
-                 "yourself.",
-        )
-        matching_schools_b = find_matching_schools(school_search_b, load_coa_dataset())
-        if len(matching_schools_b) >= 2:
-            st.selectbox(
-                f"Multiple schools matched \"{school_search_b}\" -- pick yours:",
-                matching_schools_b, key="school_pick_b",
-                on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+        if enable_prestige_mode:
+            shared_tier_b = get_shared_default("prestige_tier_b", prestige_tier_options[0])
+            default_tier_b_index = (
+                prestige_tier_options.index(shared_tier_b) if shared_tier_b in prestige_tier_options else 0
             )
-        school_name_b = _resolve_school_name("school_search_b", "school_pick_b")
+            prestige_tier_b = st.selectbox(
+                "College Tier Selection", prestige_tier_options, index=default_tier_b_index, key="prestige_tier_b",
+                help="A modeled college-tier cost + salary-premium estimate, "
+                     "in place of entering a specific school -- see "
+                     "Methodology for how the salary premium is sourced and "
+                     "why it's kept conservative.",
+            )
+            school_name_b = prestige_tier_b
+            in_state_b = True
+            coa_per_year_b = COLLEGE_PRESTIGE_TIERS[prestige_tier_b]["coa_per_year"]
+            coa_match_b = None
+            st.caption(
+                f"Annual Cost of Attendance for this tier: {fmt_money(coa_per_year_b)}".replace("$", r"\$")
+            )
+        else:
+            school_search_b = st.text_input(
+                "Target Undergraduate School", placeholder="e.g. Ohio State University",
+                value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
+                on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+                help="Type a school name to auto-fill Cost of Attendance below "
+                     "from real government data, if we have it on file. If "
+                     "your school isn't found, just enter Cost of Attendance "
+                     "yourself.",
+            )
+            matching_schools_b = find_matching_schools(school_search_b, load_coa_dataset())
+            if len(matching_schools_b) >= 2:
+                st.selectbox(
+                    f"Multiple schools matched \"{school_search_b}\" -- pick yours:",
+                    matching_schools_b, key="school_pick_b",
+                    on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+                )
+            school_name_b = _resolve_school_name("school_search_b", "school_pick_b")
 
-        in_state_b = st.checkbox(
-            "In-State Student?", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
-            on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
-            help="Check this if you'd pay in-state tuition at the school "
-                 "above. Changes the auto-filled Cost of Attendance and how "
-                 "fast tuition is estimated to grow each year.",
-        )
-        coa_match_b = find_school_coa(school_name_b, load_coa_dataset()) if school_name_b else None
-        coa_caption_b = get_coa_confirmation_caption(school_name_b, coa_match_b, in_state_b)
-        if coa_caption_b:
-            st.caption(coa_caption_b)
+            in_state_b = st.checkbox(
+                "In-State Student?", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
+                on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+                help="Check this if you'd pay in-state tuition at the school "
+                     "above. Changes the auto-filled Cost of Attendance and how "
+                     "fast tuition is estimated to grow each year.",
+            )
+            coa_match_b = find_school_coa(school_name_b, load_coa_dataset()) if school_name_b else None
+            coa_caption_b = get_coa_confirmation_caption(school_name_b, coa_match_b, in_state_b)
+            if coa_caption_b:
+                st.caption(coa_caption_b)
 
-        shared_coa_b = get_shared_default("coa_b", None)
-        default_coa_per_year_b = None
-        if shared_coa_b is not None:
-            try:
-                default_coa_per_year_b = float(shared_coa_b)
-            except (ValueError, TypeError):
-                pass
-        if default_coa_per_year_b is None:
-            default_coa_per_year_b = get_suggested_coa_per_year(school_name_b, in_state_b)
+            shared_coa_b = get_shared_default("coa_b", None)
+            default_coa_per_year_b = None
+            if shared_coa_b is not None:
+                try:
+                    default_coa_per_year_b = float(shared_coa_b)
+                except (ValueError, TypeError):
+                    pass
             if default_coa_per_year_b is None:
-                default_coa_per_year_b = 7500
-        st.session_state.setdefault("coa_per_year_b", int(default_coa_per_year_b))
-        coa_per_year_b = st.number_input(
-            "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
-            key="coa_per_year_b",
-            help="The full sticker price for one year at this school -- "
-                 "tuition, fees, room & board, books, everything -- before "
-                 "subtracting scholarships or what you pay yourself. "
-                 "Auto-fills if we found your school above.",
-        )
+                default_coa_per_year_b = get_suggested_coa_per_year(school_name_b, in_state_b)
+                if default_coa_per_year_b is None:
+                    default_coa_per_year_b = 7500
+            st.session_state.setdefault("coa_per_year_b", int(default_coa_per_year_b))
+            coa_per_year_b = st.number_input(
+                "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
+                key="coa_per_year_b",
+                help="The full sticker price for one year at this school -- "
+                     "tuition, fees, room & board, books, everything -- before "
+                     "subtracting scholarships or what you pay yourself. "
+                     "Auto-fills if we found your school above.",
+            )
         personal_contribution_per_year_b = st.number_input(
             "Personal Contribution (per year, $)", min_value=0, max_value=100000,
             value=get_shared_int("pc_b", 0), step=500,
@@ -2003,7 +2357,10 @@ if compare_mode:
                  "purposes -- it was never your money.",
         )
         control_type_b = coa_match_b["control_type"] if coa_match_b is not None else None
-        inflation_rate_b = estimate_coa_inflation_rate(school_name_b, scorecard_api_key, control_type_b)
+        inflation_rate_b = (
+            DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
+            else estimate_coa_inflation_rate(school_name_b, scorecard_api_key, control_type_b)
+        )
         loan_amount_b = compute_total_loan_amount(coa_per_year_b, personal_contribution_per_year_b,
                                                    grants_per_year_b, inflation_rate_b)
         personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
@@ -2012,6 +2369,8 @@ if compare_mode:
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
             f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
+        if enable_prestige_mode:
+            major_b = get_prestige_adjusted_major_name(major_b, prestige_tier_b)
         interest_rate_b = st.number_input(
             "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
             value=get_shared_float("rate_b", 5.5), step=0.1,
@@ -2109,12 +2468,16 @@ def render_school_lookup(container, school_name: str, label: str):
             )
 
 
-if compare_mode:
-    lookup_col_a, lookup_col_b = st.columns(2)
-    render_school_lookup(lookup_col_a, school_name_a, "A")
-    render_school_lookup(lookup_col_b, school_name_b, "B")
-else:
-    render_school_lookup(st.container(), school_name_a, "A")
+# Prestige Mode has no real school to look up (school_name_a/b hold a tier
+# label, not a school name) -- skip the lookup entirely rather than firing a
+# pointless College Scorecard API call for a nonsense query.
+if not enable_prestige_mode:
+    if compare_mode:
+        lookup_col_a, lookup_col_b = st.columns(2)
+        render_school_lookup(lookup_col_a, school_name_a, "A")
+        render_school_lookup(lookup_col_b, school_name_b, "B")
+    else:
+        render_school_lookup(st.container(), school_name_a, "A")
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
@@ -2182,6 +2545,168 @@ def render_scenario_panel(column, scenario: dict, label: str):
             )
 
 
+def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
+    """AI Employability Risk Analysis container (only rendered when
+    enable_ai_mode is True). Returns the {column_name: value} fields for
+    build_module_context -- see AI_EXPOSURE_BY_SOC_GROUP for sourcing."""
+    st.subheader("🤖 Future Labor Market & AI Impact Analysis")
+    st.caption(
+        "Modeled at the occupation-group level from published AI-exposure "
+        "research (Felten, Raj & Seamans; Eloundou et al. 2023), not a "
+        "personalized prediction -- \"exposure\" measures task overlap with "
+        "current AI tools, not certainty of job loss. See Methodology."
+    )
+
+    def _render_one(name):
+        info = get_ai_exposure_for_major(name)
+        st.markdown(f"**{name}** — {info['label']}")
+        st.metric(
+            "AI Task Exposure",
+            f"{info['score']}/100" if info["score"] is not None else "N/A",
+            info["risk_level"],
+        )
+        st.caption(info["rationale"])
+        if info["risk_level"] in ("Medium", "High"):
+            alt = get_lower_risk_alternative_major(name)
+            st.info(
+                f"Lower-exposure alternative in this dataset: **{alt}**" if alt
+                else "No clear lower-exposure alternative found in the current dataset."
+            )
+        return info["risk_level"]
+
+    if major_name_b:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.caption("Scenario A")
+            risk_a = _render_one(major_name)
+        with col_b:
+            st.caption("Scenario B")
+            risk_b = _render_one(major_name_b)
+        return {"ai_mode_active": True, "scenario_a_ai_risk_level": risk_a, "scenario_b_ai_risk_level": risk_b}
+    risk_a = _render_one(major_name)
+    return {"ai_mode_active": True, "scenario_a_ai_risk_level": risk_a}
+
+
+def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest_rate_a: float,
+                                    scenario_b: dict = None, major_name_b: str = None,
+                                    interest_rate_b: float = None) -> dict:
+    """2026 Federal Loan Framework & Macro Forecasting container (only
+    rendered when enable_future_proofing is True). Returns the
+    {column_name: value} fields for build_module_context. See the RAP_*
+    constants and calculate_tiered_standard_term/calculate_rap_payment/
+    simulate_rap_schedule (section 2e-2) for the real, cited mechanics
+    behind these numbers."""
+    st.subheader("⚖️ 2026 Federal Loan Framework & Macro Forecasting")
+    st.caption(
+        "Models the Repayment Assistance Plan (RAP) and Tiered Standard Plan "
+        "created by the One Big Beautiful Bill Act (H.R. 1, 2025), effective "
+        "for new federal loan borrowers July 1, 2026 -- see Methodology for "
+        "sourcing and important caveats before relying on these numbers."
+    )
+
+    def _render_plan(scenario, major_name, interest_rate, key_suffix):
+        effective_principal = scenario["effective_principal"]
+        plan_options = ["2026 Tiered Standard Plan", "2026 Repayment Assistance Plan (RAP)"]
+        future_plan = st.selectbox("2026 Repayment Plan", plan_options, key=f"future_plan_{key_suffix}")
+        if future_plan == plan_options[0]:
+            term_years = calculate_tiered_standard_term(effective_principal)
+            result = calculate_standard_repayment(effective_principal, interest_rate, term_years)
+            cols = st.columns(3)
+            cols[0].metric("Fixed Term (by balance)", f"{term_years} yrs")
+            cols[1].metric("Monthly Payment", fmt_money(result["monthly_payment"]))
+            cols[2].metric("Total Interest Paid", fmt_money(result["total_interest"]))
+        else:
+            dependents = st.number_input(
+                "Dependents", min_value=0, max_value=10, value=0, key=f"rap_dependents_{key_suffix}",
+                help="Reduces your RAP payment by $50/month per dependent (real OBBBA provision).",
+            )
+            gross_year1 = get_annual_salary_for_year(major_name, 0)
+            rap = calculate_rap_payment(gross_year1, dependents)
+            result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents)
+            cols = st.columns(3)
+            cols[0].metric("Monthly Payment (Year 1 income)", fmt_money(rap["monthly_payment"]))
+            cols[1].metric("Payoff / Forgiveness Timeline", f"{result['payoff_years']:.1f} yrs")
+            cols[2].metric("Forgiven After 30 Years", fmt_money(result["forgiven_amount"]))
+            st.caption(
+                "Under RAP, unpaid monthly interest is waived and the "
+                "government matches up to $50/month toward your principal if "
+                "your own payment doesn't cover that much -- so your balance "
+                "never grows from unpaid interest (real OBBBA provisions)."
+            )
+        return future_plan
+
+    if scenario_b is not None:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown(f"**Scenario A: {major_name_a}**")
+            plan_a = _render_plan(scenario_a, major_name_a, interest_rate_a, "a")
+        with col_b:
+            st.markdown(f"**Scenario B: {major_name_b}**")
+            plan_b = _render_plan(scenario_b, major_name_b, interest_rate_b, "b")
+        context = {
+            "future_forecasting_active": True, "future_plan_selected": plan_a,
+            "scenario_b_future_plan_selected": plan_b,
+        }
+        macro_major = major_name_a
+    else:
+        plan_a = _render_plan(scenario_a, major_name_a, interest_rate_a, "single")
+        context = {"future_forecasting_active": True, "future_plan_selected": plan_a}
+        macro_major = major_name_a
+
+    st.divider()
+    st.markdown("**Spatial Cost-of-Living Comparison**")
+    st.caption(
+        "Reuses this app's real per-city cost-of-living data (BEA Regional "
+        "Price Parities, via CITY_DATA), not a flat percentage assumption, "
+        "across a Low/Moderate/High sample."
+    )
+    sample_cities = ["Columbus, OH", "National Average", "San Francisco, CA"]
+    gross = get_annual_salary_for_year(macro_major, 9)
+    col_rows = []
+    for c in sample_cities:
+        info = CITY_DATA[c]
+        take_home = calculate_take_home_pay(gross, info["state_key"], info["local_tax_rate"])
+        disposable = adjust_for_cost_of_living(take_home["net_take_home"], info["col_index"])
+        col_rows.append({
+            "City": c, "CoL Index": info["col_index"],
+            "COL-Adjusted Disposable Income (annual)": fmt_money(disposable),
+        })
+    st.dataframe(pd.DataFrame(col_rows), hide_index=True, use_container_width=True)
+
+    st.divider()
+    st.markdown("**Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)**")
+    st.caption(
+        "Illustrative benchmark based on typical U.S. Dept. of Labor "
+        "registered apprenticeship reporting, not this app's per-major BLS "
+        "data -- see Methodology."
+    )
+    apprentice_cols = st.columns(3)
+    apprentice_cols[0].metric("Typical Total Debt", "$10,000")
+    apprentice_cols[1].metric("Typical Starting Salary", "$52,000")
+    apprentice_cols[2].metric("Typical Training Time", "1 year")
+
+    return context
+
+
+def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
+                          ai_context: dict = None, future_context: dict = None) -> dict:
+    """Flat {column_name: value} dict of whichever optional advanced modules
+    are active, in the same shape build_scenario_context already uses --
+    merged into every save_survey_response/save_pdf_download/
+    save_scenario_share call and the PDF's optional module sections."""
+    context = {}
+    if prestige_tier_a is not None:
+        context["prestige_mode_active"] = True
+        context["scenario_a_prestige_tier"] = prestige_tier_a
+        if prestige_tier_b is not None:
+            context["scenario_b_prestige_tier"] = prestige_tier_b
+    if ai_context:
+        context.update(ai_context)
+    if future_context:
+        context.update(future_context)
+    return context
+
+
 if compare_mode:
     st.subheader("⚖️ Scenario Comparison")
     scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
@@ -2209,18 +2734,34 @@ if compare_mode:
         use_container_width=True,
     )
 
+    ai_context = {}
+    if enable_ai_mode:
+        ai_context = render_ai_risk_section(major, major_b)
+
+    future_context = {}
+    if enable_future_proofing:
+        future_context = render_future_proofing_section(scenario_a, major, interest_rate,
+                                                          scenario_b, major_b, interest_rate_b)
+
+    module_context = build_module_context(
+        prestige_tier_a if enable_prestige_mode else None,
+        prestige_tier_b if enable_prestige_mode else None,
+        ai_context, future_context,
+    )
+
     compare_pdf_bytes = generate_pdf_report_compare(
         city, major, school_name_a, in_state_a, coa_per_year_a, personal_contribution_per_year_a,
         grants_per_year_a, interest_rate, repayment_strategy, scenario_a,
         major_b, school_name_b, in_state_b, coa_per_year_b, personal_contribution_per_year_b,
         grants_per_year_b, interest_rate_b, repayment_strategy_b, scenario_b,
+        module_context=module_context,
     )
     compare_pdf_col, compare_share_col = st.columns(2)
     compare_pdf_col.download_button(
         "📄 Download PDF Report", data=compare_pdf_bytes,
         file_name=f"{major.replace(' ', '_')}_vs_{major_b.replace(' ', '_')}_comparison_report.pdf",
         mime="application/pdf", use_container_width=True, key="download_pdf_compare",
-        on_click=lambda: save_pdf_download(build_scenario_context(
+        on_click=lambda: save_pdf_download({**build_scenario_context(
             major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
             school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
             compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
@@ -2228,7 +2769,7 @@ if compare_mode:
             personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
             inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
             scenario_b=scenario_b,
-        )),
+        ), **module_context}),
     )
     if compare_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_compare"):
         st.query_params.from_dict(build_share_params(
@@ -2240,7 +2781,7 @@ if compare_mode:
             grants_per_year_b=grants_per_year_b, interest_rate_b=interest_rate_b,
             repayment_strategy_b=repayment_strategy_b,
         ))
-        save_scenario_share(build_scenario_context(
+        save_scenario_share({**build_scenario_context(
             major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
             school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
             compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
@@ -2248,7 +2789,7 @@ if compare_mode:
             personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
             inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
             scenario_b=scenario_b,
-        ))
+        ), **module_context})
         components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
         st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact comparison.")
 else:
@@ -2372,21 +2913,34 @@ else:
 
     st.plotly_chart(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major), use_container_width=True)
 
+    ai_context = {}
+    if enable_ai_mode:
+        ai_context = render_ai_risk_section(major)
+
+    future_context = {}
+    if enable_future_proofing:
+        future_context = render_future_proofing_section(scenario, major, interest_rate)
+
+    module_context = build_module_context(
+        prestige_tier_a if enable_prestige_mode else None, None, ai_context, future_context,
+    )
+
     single_pdf_bytes = generate_pdf_report_single(
         major, city, school_name_a, in_state_a, career_stage_label,
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
         interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
         scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
+        module_context=module_context,
     )
     single_pdf_col, single_share_col = st.columns(2)
     single_pdf_col.download_button(
         "📄 Download PDF Report", data=single_pdf_bytes,
         file_name=f"{major.replace(' ', '_')}_payoff_report.pdf", mime="application/pdf",
         use_container_width=True, key="download_pdf_single",
-        on_click=lambda: save_pdf_download(build_scenario_context(
+        on_click=lambda: save_pdf_download({**build_scenario_context(
             major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
             school_name_a, inflation_rate_a, grants_per_year_a, scenario,
-        )),
+        ), **module_context}),
     )
     if single_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_single"):
         st.query_params.from_dict(build_share_params(
@@ -2394,10 +2948,10 @@ else:
             coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
             interest_rate, repayment_strategy, False,
         ))
-        save_scenario_share(build_scenario_context(
+        save_scenario_share({**build_scenario_context(
             major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
             school_name_a, inflation_rate_a, grants_per_year_a, scenario,
-        ))
+        ), **module_context})
         components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
         st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact scenario.")
 
@@ -2441,11 +2995,14 @@ if not st.session_state.survey_submitted:
                     inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
                     scenario_b=scenario_b,
                 )
-            context = build_scenario_context(
-                major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
-                school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
-                **compare_mode_kwargs,
-            )
+            context = {
+                **build_scenario_context(
+                    major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                    school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                    **compare_mode_kwargs,
+                ),
+                **module_context,
+            }
 
             saved = save_survey_response(respondent_role, hs_graduation_year, perception_change, feedback_text, context)
             if saved:
@@ -2718,6 +3275,72 @@ between the two scenarios' ROI%. None of this is tied to your name or
 any personal identifying information — it's used to help a companion
 research paper understand how tools like this one affect students'
 thinking about college and careers.
+
+**Advanced Analysis Settings (optional, off by default).** Three extra
+modules live in a sidebar expander. Each one is opt-in, and the calculator
+behaves exactly as described above when all three are left off.
+
+- **College Prestige & Cost Estimator.** Replaces the school lookup with a
+  fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard
+  Regional Public, Out-of-State Public/Mid-Tier Private). The *cost* side is
+  just a sticker-price bucket. The *salary* side applies a modeled premium
+  (Tier 1: 1.10x, Tier 2: 1.05x, Tier 4: 1.03x, Tier 3: 1.00x baseline) to
+  your major's starting/median salary — and this number is genuinely
+  contested in real research, so we've been deliberately conservative about
+  it. Chetty et al. (Opportunity Insights, "Mobility Report Cards" /
+  "Diversifying Society's Leaders?", [opportunityinsights.org](https://opportunityinsights.org/))
+  find a real, observable earnings gap by college selectivity tier. But Dale
+  & Krueger (NBER Working Paper 7322, 2002; 2011 update) found that gap
+  shrinks toward zero once you control for the student's *own* ability and
+  motivation — the kind of student admitted to and attending an Ivy-plus
+  school likely would have earned close to the same wage regardless of where
+  they went. These multipliers sit well below the raw observational gap
+  Chetty et al. report, as a deliberate middle ground between the two
+  findings. **This is a modeled estimate, not a causal claim about any
+  specific school** — attending a "Tier 1" school does not guarantee this
+  salary bump.
+- **AI Employability Risk Analysis.** Rather than inventing a precise
+  0-100 score for your specific major (which no one could actually back up),
+  this models AI "task exposure" at the SOC *occupation group* level — the
+  same real classification level published research on this topic actually
+  uses. Sources: Felten, Raj & Seamans, "AI Occupational Exposure" ([NBER
+  Working Paper 28959](https://www.nber.org/papers/w28959)), and Eloundou,
+  Manning, Mishkin & Rock, "GPTs are GPTs" ([arXiv:2303.10130](https://arxiv.org/abs/2303.10130),
+  2023). Both consistently find office/administrative-support and
+  business/financial-operations tasks among the most exposed to current AI
+  tools, and hands-on/in-person occupations (healthcare support, food
+  service, construction, personal care, protective service) among the
+  least. Risk Level and score are banded (Low≈20, Medium≈50, High≈80), not a
+  unique number per major, to avoid implying false precision. **Important:
+  "exposure" measures task overlap with current AI tools, not a prediction
+  that a job will disappear** — high exposure often means parts of a job get
+  AI-assisted, not that the whole job is automated. Any "lower-exposure
+  alternative" suggested is picked from majors already in this app's own
+  dataset by closest starting salary — never invented.
+- **2026 Regulatory & Macro Forecasting.** Models two *real, enacted* federal
+  loan repayment plans created by the One Big Beautiful Bill Act (H.R. 1,
+  2025): the **Repayment Assistance Plan (RAP)** and the **Tiered Standard
+  Plan**, both effective for new federal loan borrowers starting July 1,
+  2026 (existing borrowers transition by July 1, 2028). Source: U.S. Dept.
+  of Education, ["Fact Sheet: The Trump Administration Is Simplifying
+  Student Loan Repayment"](https://www.ed.gov/about/news/press-release/fact-sheet-trump-administration-simplifying-student-loan-repayment),
+  corroborated by Congressional Research Service In Focus IF13075. RAP
+  payments are 1% of AGI per $10,000 AGI band (capped at 10% for AGI ≥
+  $100,000, with a flat $10/month floor below $10,000 AGI), minus $50/month
+  per dependent — with unpaid interest waived and up to a $50/month
+  government principal-match, so your balance never grows from unpaid
+  interest, and any remainder forgiven after 30 years. The Tiered Standard
+  Plan is a fixed term of 10/15/20/25 years depending on loan balance. Like
+  this app's existing IDR model, these are **administratively simplified,
+  not an exact copy of federal rules** — confirm current terms at
+  [studentaid.gov](https://studentaid.gov/) before relying on them for a
+  real decision, since administrative details can still shift before the
+  2026/2028 effective dates. The cost-of-living comparison in this section
+  reuses this app's own real per-city data (BEA Regional Price Parities, see
+  above) — not a separate, flat percentage assumption. The trade-apprenticeship
+  benchmark card is a single illustrative reference point based on typical
+  U.S. Dept. of Labor registered-apprenticeship reporting, not this app's
+  per-major BLS pipeline.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
