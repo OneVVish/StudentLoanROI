@@ -19,6 +19,7 @@ Architecture:
 import io
 import re
 from datetime import datetime, timezone
+from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -28,7 +29,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from st_supabase_connection import SupabaseConnection, execute_query
 
@@ -211,8 +214,8 @@ SOCIAL_SECURITY_WAGE_BASE_2024 = 168600
 SOCIAL_SECURITY_RATE = 0.062
 MEDICARE_RATE = 0.0145
 
-# Loan-to-income risk-tier thresholds for the "Loan Payment / Take-Home"
-# metric (5d). Both real, commonly-cited guidelines are expressed as a
+# Loan-to-income risk-tier thresholds for the "Loan Payment / Take-Home
+# Ratio" metric (5d). Both real, commonly-cited guidelines are expressed as a
 # percentage of GROSS income, not the net/take-home figure this app's ratio
 # actually uses -- see get_loan_to_income_risk_tier for how they're
 # converted onto a net basis using the scenario's own effective tax rate,
@@ -1510,14 +1513,19 @@ def adjust_for_cost_of_living(amount: float, col_index: float) -> float:
 
 # ---- 2j. Chart Builders ----------------------------------------------------
 
+# Passed to every st.plotly_chart(...) call below. The modebar (camera/zoom/
+# pan/autoscale icons) is tiny, touch-unfriendly, and irrelevant for a
+# read-only report chart -- hiding it declutters both mobile and desktop.
+PLOTLY_CHART_CONFIG = {"displayModeBar": False}
+
 def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
     fig = px.line(
         schedule_df, x="year", y="balance",
-        title=f"Loan Balance Over Time — {strategy_label}",
+        title="Loan Balance Over Time",
         labels={"year": "Years", "balance": "Remaining Balance ($)"},
     )
     fig.update_traces(line=dict(width=3))
-    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified")
+    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified", title_font_size=14)
     return fig
 
 
@@ -1528,10 +1536,12 @@ def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major
     })
     fig = px.bar(
         comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
-        title=f"10-Year Net Financial Position (COL-Adjusted): {major_name} vs. High School Baseline",
+        title="10-Year Net Position vs. High School Baseline",
         text_auto=".2s",
     )
-    fig.update_layout(yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center")
+    fig.update_layout(
+        yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center", title_font_size=14,
+    )
     return fig
 
 
@@ -1545,10 +1555,10 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     ])
     fig = px.line(
         combined, x="year", y="balance", color="Scenario",
-        title="Loan Balance Over Time: Scenario A vs. Scenario B",
+        title="Loan Balance Over Time",
         labels={"year": "Years", "balance": "Remaining Balance ($)"},
     )
-    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified")
+    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified", title_font_size=14)
     return fig
 
 
@@ -1563,24 +1573,30 @@ def build_scenario_comparison_roi_chart(hs_net_position: float,
     })
     fig = px.bar(
         comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
-        title="10-Year Net Financial Position (COL-Adjusted): Scenario Comparison",
+        title="10-Year Net Position: Scenario Comparison",
         text_auto=".2s",
     )
-    fig.update_layout(yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center")
+    fig.update_layout(
+        yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center", title_font_size=14,
+    )
     return fig
 
 
 def build_takehome_pie_chart(take_home: dict):
     """Pie chart of how gross salary splits between take-home pay and each
     tax category -- "slices of a whole" is a more intuitive framing for a
-    high-school audience than a waterfall's running subtraction."""
+    high-school audience than a waterfall's running subtraction. No legend:
+    each slice already labels itself (textinfo="percent+label"), and an
+    external legend has nowhere to go on a narrow screen without pushing
+    the pie itself out of the visible frame."""
     fig = px.pie(
-        names=["Take-Home Pay", "Federal Tax", "State + Local Tax", "FICA (Social Security/Medicare)"],
+        names=["Take-Home Pay", "Federal Tax", "State Tax", "FICA"],
         values=[take_home["net_take_home"], take_home["federal_tax"],
                  take_home["state_tax"], take_home["fica_tax"]],
         title="Where Your Salary Actually Goes",
     )
     fig.update_traces(textinfo="percent+label")
+    fig.update_layout(showlegend=False, title_font_size=14)
     return fig
 
 
@@ -1590,22 +1606,29 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
     take-home pay. A pie chart can't represent a payment that *exceeds*
     take-home pay (no valid slice set sums past 100%), so in that case this
     returns a simple 2-bar comparison of Take-Home Pay vs. Required Loan
-    Payment instead, which can show the overage naturally."""
+    Payment instead, which can show the overage naturally. No legend, same
+    reasoning as build_takehome_pie_chart -- each slice already labels
+    itself."""
     if monthly_payment <= monthly_net_take_home:
         remaining = monthly_net_take_home - monthly_payment
         fig = px.pie(
             names=["Loan Payment", "Remaining Disposable Income"],
             values=[monthly_payment, remaining],
-            title="Monthly Take-Home Pay: Loan Payment vs. Disposable Income",
+            title="Loan Payment vs. Disposable Income",
         )
         fig.update_traces(textinfo="percent+label")
+        # automargin lets Plotly expand the figure's own margins to fit a
+        # small slice's outside-pulled label instead of clipping it -- the
+        # small fixed left margin is a fallback for older Plotly behavior.
+        fig.update_traces(automargin=True)
+        fig.update_layout(showlegend=False, title_font_size=14, margin=dict(l=40, r=10, t=40, b=10))
         return fig
     fig = px.bar(
         x=["Take-Home Pay", "Required Loan Payment"],
         y=[monthly_net_take_home, monthly_payment],
         title="Monthly Loan Payment Exceeds Take-Home Pay",
     )
-    fig.update_layout(yaxis_title="Monthly $", xaxis_title=None)
+    fig.update_layout(yaxis_title="Monthly $", xaxis_title=None, title_font_size=14)
     return fig
 
 
@@ -1666,24 +1689,76 @@ def _strip_emoji(text: str) -> str:
     return _EMOJI_PATTERN.sub("", text).strip()
 
 
+# Matches SimpleDocTemplate(pagesize=letter)'s default 1-inch margins on
+# every side -- no _pdf_table below is ever allowed to exceed this width, so
+# a table can never spill past the page edge regardless of how long its
+# header/cell text is.
+PDF_CONTENT_WIDTH = letter[0] - 2 * inch
+PDF_CELL_FONT_SIZE = 9
+PDF_CELL_MIN_WIDTH = 60  # floor per column, so a short table's cells never get unreadably cramped
+PDF_CELL_H_PADDING = 12  # matches the 6pt LEFTPADDING + 6pt RIGHTPADDING applied below
+
+_PDF_CELL_STYLE = ParagraphStyle("pdf_cell", fontName="Helvetica", fontSize=PDF_CELL_FONT_SIZE, leading=11)
+_PDF_CELL_BOLD_STYLE = ParagraphStyle("pdf_cell_bold", fontName="Helvetica-Bold", fontSize=PDF_CELL_FONT_SIZE, leading=11)
+
+
 def _pdf_table(rows: list, header: bool = True) -> Table:
-    """A simple bordered reportlab Table -- `header=True` bolds/shades row 0
-    (tabular data with column headers), `header=False` bolds column 0
-    instead (a plain key/value table, e.g. the profile summary)."""
-    table = Table(rows, hAlign="LEFT")
+    """A bordered reportlab Table, centered on the page. Each column is
+    sized to its own widest cell's natural text width (so a short table --
+    e.g. a 2-column module summary -- stays compact and visibly centered,
+    not stretched edge-to-edge); if the natural total would exceed
+    PDF_CONTENT_WIDTH, every column is scaled down proportionally to fit
+    exactly within it instead, so a table can never spill past the page
+    edge no matter how long its header/cell text is. Each cell is wrapped
+    in a Paragraph (rather than left as a bare string) so text that no
+    longer fits after scaling wraps onto a second line instead of
+    overflowing. `header=True` bolds/shades row 0 (tabular data with column
+    headers), `header=False` bolds column 0 instead (a plain key/value
+    table, e.g. the profile summary). Cell text is XML-escaped since
+    Paragraph parses its content as markup -- a school name like "Texas
+    A&M" would otherwise break Paragraph's parser."""
+    num_cols = len(rows[0]) if rows else 1
+
+    def _is_bold(r, c):
+        return (header and r == 0) or (not header and c == 0)
+
+    def _cell(value, bold):
+        style = _PDF_CELL_BOLD_STYLE if bold else _PDF_CELL_STYLE
+        return Paragraph(xml_escape(str(value)), style)
+
+    wrapped_rows = [
+        [_cell(cell, bold=_is_bold(r, c)) for c, cell in enumerate(row)]
+        for r, row in enumerate(rows)
+    ]
+
+    natural_widths = [
+        max(
+            (stringWidth(xml_escape(str(row[c])), "Helvetica-Bold" if _is_bold(r, c) else "Helvetica",
+                         PDF_CELL_FONT_SIZE)
+             for r, row in enumerate(rows)),
+            default=0,
+        ) + PDF_CELL_H_PADDING
+        for c in range(num_cols)
+    ]
+    natural_widths = [max(w, PDF_CELL_MIN_WIDTH) for w in natural_widths]
+    total_natural = sum(natural_widths)
+    if total_natural > PDF_CONTENT_WIDTH:
+        scale = PDF_CONTENT_WIDTH / total_natural
+        col_widths = [w * scale for w in natural_widths]
+    else:
+        col_widths = natural_widths
+
+    table = Table(wrapped_rows, colWidths=col_widths, hAlign="CENTER")
     style = [
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), PDF_CELL_H_PADDING / 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), PDF_CELL_H_PADDING / 2),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]
     if header:
-        style += [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f2f6")),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ]
-    else:
-        style.append(("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"))
+        style.append(("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f2f6")))
     table.setStyle(TableStyle(style))
     return table
 
@@ -1845,7 +1920,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             styles["Italic"],
         ),
         Spacer(1, 12),
-        Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']}", styles["Heading2"]),
+        Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']} ({now_local().year})", styles["Heading2"]),
         _pdf_table(
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
@@ -1855,7 +1930,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_a),
         Spacer(1, 12),
-        Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["Heading2"]),
+        Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']} ({now_local().year})", styles["Heading2"]),
         _pdf_table(
             _pdf_profile_rows(major_b, school_name_b, in_state_b, coa_per_year_b,
                                personal_contribution_per_year_b, grants_per_year_b,
@@ -2108,10 +2183,12 @@ else:
     coa_per_year_a = st.sidebar.number_input(
         "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
         key="coa_per_year_a",
-        help="The full sticker price for one year at this school -- tuition, "
-             "fees, room & board, books, everything -- before subtracting "
-             "scholarships or what you pay yourself. Auto-fills if we found "
-             "your school above.",
+        help="The full sticker price for your first year (Year 1) at this "
+             "school -- tuition, fees, room & board, books, everything -- "
+             "before subtracting scholarships or what you pay yourself. "
+             "Years 2-4 are projected from this using the estimated COA "
+             "inflation rate below. Auto-fills if we found your school "
+             "above.",
     )
 personal_contribution_per_year_a = st.sidebar.number_input(
     "Personal Contribution (per year, $)", min_value=0, max_value=100000,
@@ -2129,8 +2206,7 @@ grants_per_year_a = st.sidebar.number_input(
     value=get_shared_int("grants", 0), step=500,
     key="grants_per_year_a",
     help="Grant or scholarship aid that reduces what you need to borrow. "
-         "Unlike Personal Contribution, this is NOT counted as part of your "
-         "own investment for ROI purposes -- it was never your money.",
+         "This amount does not need to be repaid back to the grantor.",
 )
 # Loan amount is derived, not entered: Cost of Attendance minus whatever
 # isn't borrowed, per year, growing COA by an estimated inflation rate each
@@ -2142,14 +2218,37 @@ inflation_rate_a = (
     DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
     else estimate_coa_inflation_rate(school_name_a, scorecard_api_key, control_type_a)
 )
-loan_amount = compute_total_loan_amount(coa_per_year_a, personal_contribution_per_year_a,
-                                         grants_per_year_a, inflation_rate_a)
+computed_loan_amount_a = compute_total_loan_amount(coa_per_year_a, personal_contribution_per_year_a,
+                                                    grants_per_year_a, inflation_rate_a)
 personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
 st.sidebar.caption((
     f"Year 1: {fmt_money(coa_per_year_a)} COA − {fmt_money(personal_contribution_per_year_a)} personal "
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
-    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount)}** loan, **{fmt_money(personal_contribution)}** personal"
+    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_a)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
+# Pre-fills with the calculated total above, but the user can type any other
+# amount to override it (e.g. the real total from a financial aid offer,
+# which won't match this simplified per-year model exactly). Refreshes back
+# to the calculated total whenever that total itself changes -- detected by
+# comparing against the last calculated total this box was filled with, so
+# a manual override survives reruns that don't touch COA/Personal
+# Contribution/Grants/school, but not one that does -- matching how the
+# Cost of Attendance field's own school auto-fill behaves (see
+# _autofill_coa).
+if st.session_state.get("computed_loan_amount_a_seen") != computed_loan_amount_a:
+    st.session_state["computed_loan_amount_a_seen"] = computed_loan_amount_a
+    st.session_state["loan_amount_a"] = int(computed_loan_amount_a)
+st.session_state.setdefault("loan_amount_a", int(computed_loan_amount_a))
+loan_amount = st.sidebar.number_input(
+    "Total Loan Amount ($)", min_value=0, max_value=1000000, step=500,
+    key="loan_amount_a",
+    help="Pre-filled with the calculated total above (Cost of Attendance "
+         "minus Personal Contribution and Grants & Scholarships, summed "
+         "over 4 years). You can override this with any other amount -- "
+         "for example, the real total from a financial aid offer -- and "
+         "that amount is used for every calculation below instead of the "
+         "calculated total.",
+)
 interest_rate = st.sidebar.number_input(
     "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
     value=get_shared_float("rate", 5.5), step=0.1,
@@ -2427,9 +2526,11 @@ if compare_mode:
             coa_per_year_b = st.number_input(
                 "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
                 key="coa_per_year_b",
-                help="The full sticker price for one year at this school -- "
-                     "tuition, fees, room & board, books, everything -- before "
-                     "subtracting scholarships or what you pay yourself. "
+                help="The full sticker price for your first year (Year 1) at "
+                     "this school -- tuition, fees, room & board, books, "
+                     "everything -- before subtracting scholarships or what "
+                     "you pay yourself. Years 2-4 are projected from this "
+                     "using the estimated COA inflation rate below. "
                      "Auto-fills if we found your school above.",
             )
         personal_contribution_per_year_b = st.number_input(
@@ -2447,22 +2548,39 @@ if compare_mode:
             value=get_shared_int("grants_b", 0), step=500,
             key="grants_per_year_b",
             help="Grant or scholarship aid that reduces what you need to "
-                 "borrow. Not counted as part of your own investment for ROI "
-                 "purposes -- it was never your money.",
+                 "borrow. This amount does not need to be repaid back to "
+                 "the grantor.",
         )
         control_type_b = coa_match_b["control_type"] if coa_match_b is not None else None
         inflation_rate_b = (
             DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
             else estimate_coa_inflation_rate(school_name_b, scorecard_api_key, control_type_b)
         )
-        loan_amount_b = compute_total_loan_amount(coa_per_year_b, personal_contribution_per_year_b,
-                                                   grants_per_year_b, inflation_rate_b)
+        computed_loan_amount_b = compute_total_loan_amount(coa_per_year_b, personal_contribution_per_year_b,
+                                                            grants_per_year_b, inflation_rate_b)
         personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
         st.caption((
             f"Year 1: {fmt_money(coa_per_year_b)} COA − {fmt_money(personal_contribution_per_year_b)} personal "
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
-            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
+            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
+        # See Scenario A's identical pattern (above) for why this compares
+        # against the last-seen calculated total rather than always
+        # resetting or never resetting.
+        if st.session_state.get("computed_loan_amount_b_seen") != computed_loan_amount_b:
+            st.session_state["computed_loan_amount_b_seen"] = computed_loan_amount_b
+            st.session_state["loan_amount_b"] = int(computed_loan_amount_b)
+        st.session_state.setdefault("loan_amount_b", int(computed_loan_amount_b))
+        loan_amount_b = st.number_input(
+            "Total Loan Amount ($)", min_value=0, max_value=1000000, step=500,
+            key="loan_amount_b",
+            help="Pre-filled with the calculated total above (Cost of "
+                 "Attendance minus Personal Contribution and Grants & "
+                 "Scholarships, summed over 4 years). You can override this "
+                 "with any other amount -- for example, the real total from "
+                 "a financial aid offer -- and that amount is used for "
+                 "every calculation below instead of the calculated total.",
+        )
         if enable_prestige_mode:
             major_b = get_prestige_adjusted_major_name(major_b, prestige_tier_b)
         interest_rate_b = st.number_input(
@@ -2615,7 +2733,7 @@ def render_scenario_panel(column, scenario: dict, label: str):
     hand-copied -- this is the same card layout section 5c uses for the
     single-scenario view, just parameterized and column-scoped."""
     with column:
-        st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']}**")
+        st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']} ({now_local().year})**")
 
         for caption in get_investment_captions(scenario):
             st.caption(caption)
@@ -2730,7 +2848,7 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
 
         st.plotly_chart(
             build_balance_chart(result["schedule"], future_plan),
-            use_container_width=True, key=f"future_balance_chart_{key_suffix}",
+            use_container_width=True, key=f"future_balance_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
         )
 
         roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
@@ -2753,7 +2871,7 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
         )
         st.plotly_chart(
             build_roi_bar_chart(roi_result_2026["hs_net_position"], roi_result_2026["major_net_position"], major_name),
-            use_container_width=True, key=f"future_roi_chart_{key_suffix}",
+            use_container_width=True, key=f"future_roi_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
         )
         return future_plan
 
@@ -2845,7 +2963,7 @@ if compare_mode:
             scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
             scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
         ),
-        use_container_width=True,
+        use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
     st.plotly_chart(
         build_scenario_comparison_roi_chart(
@@ -2853,7 +2971,7 @@ if compare_mode:
             scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
             scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
         ),
-        use_container_width=True,
+        use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
 
     ai_context = {}
@@ -2948,6 +3066,12 @@ else:
         hide_index=True, use_container_width=True,
     )
     st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
+    if abs(loan_amount - computed_loan_amount_a) >= 1:
+        st.caption((
+            f"You overrode the calculated total ({fmt_money(computed_loan_amount_a)}) in the "
+            "sidebar -- the table above still shows the calculated year-by-year breakdown, "
+            "but every calculation below uses your overridden total instead."
+        ).replace("$", r"\$"))
 
     loan_metric_cols = st.columns(3)
     loan_metric_cols[0].metric(
@@ -2963,7 +3087,10 @@ else:
             f"unpaid after {IDR_MAX_TERM_YEARS} years and is forgiven."
         )
 
-    st.plotly_chart(build_balance_chart(repayment_result["schedule"], strategy_label), use_container_width=True)
+    st.plotly_chart(
+        build_balance_chart(repayment_result["schedule"], strategy_label),
+        use_container_width=True, config=PLOTLY_CHART_CONFIG,
+    )
 
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
 
@@ -2998,7 +3125,7 @@ else:
         st.warning("At this salary, city, and loan combination, disposable income is negative.")
 
     if gross > 0:
-        st.plotly_chart(build_takehome_pie_chart(take_home), use_container_width=True)
+        st.plotly_chart(build_takehome_pie_chart(take_home), use_container_width=True, config=PLOTLY_CHART_CONFIG)
         monthly_net_take_home = take_home["net_take_home"] / 12
         # Loan Payment ÷ Take-Home Pay -- the same split the chart's slices
         # (or bars, if the payment exceeds take-home pay) already encode
@@ -3008,29 +3135,16 @@ else:
         loan_to_disposable_ratio = (
             monthly_payment / monthly_net_take_home * 100 if monthly_net_take_home > 0 else None
         )
-        chart_col, ratio_col = st.columns([3, 1])
-        chart_col.plotly_chart(
+        st.plotly_chart(
             build_takehome_vs_loan_chart(monthly_net_take_home, monthly_payment),
-            use_container_width=True,
+            use_container_width=True, config=PLOTLY_CHART_CONFIG,
         )
         if loan_to_disposable_ratio is not None:
             risk = get_loan_to_income_risk_tier(loan_to_disposable_ratio, take_home["effective_tax_rate"])
-            tooltip = (
-                f"{risk['tier']} -- your monthly loan payment as a percentage of your "
-                "monthly take-home pay (the same split shown in the chart). Industry "
-                "guideline (converted to your take-home basis using this scenario's own "
-                f"effective tax rate): under {fmt_pct(risk['manageable_threshold'])} is "
-                "considered manageable (common student-loan-budgeting guidance -- e.g. "
-                "SoFi); over "
-                f"{fmt_pct(risk['caution_threshold'])} matches the standard 36%-of-gross-"
-                "income \"qualified borrower\" debt-to-income ceiling mortgage lenders use "
-                "for ALL debts combined. Over 100% means the payment exceeds your take-home "
-                "pay."
-            )
-            ratio_col.markdown(
+            st.markdown(
                 f"""
-                <div title="{tooltip}" style="cursor: help;">
-                    <div style="font-size: 0.875rem; color: #808495;">Loan Payment / Take-Home</div>
+                <div>
+                    <div style="font-size: 0.875rem; color: #808495;">Loan Payment / Take-Home Ratio</div>
                     <div style="font-size: 2rem; font-weight: 600; color: {risk['color']}; line-height: 1.2;">
                         {fmt_pct(loan_to_disposable_ratio)}
                     </div>
@@ -3039,8 +3153,24 @@ else:
                 """,
                 unsafe_allow_html=True,
             )
+            # A hover title="..." tooltip is invisible on touch devices (no
+            # hover state, and most mobile browsers don't show it on tap) --
+            # shown as a permanent caption instead, matching every other
+            # explanation in this app.
+            st.caption((
+                f"This is a ratio: your monthly loan payment as a percentage of your "
+                "monthly take-home pay (the same split shown in the chart above). "
+                "Industry guideline (converted to your take-home basis using this "
+                f"scenario's own effective tax rate): under "
+                f"{fmt_pct(risk['manageable_threshold'])} is considered manageable "
+                "(common student-loan-budgeting guidance -- e.g. SoFi); over "
+                f"{fmt_pct(risk['caution_threshold'])} matches the standard 36%-of-gross-"
+                "income \"qualified borrower\" debt-to-income ceiling mortgage lenders use "
+                "for ALL debts combined. Over 100% means the payment exceeds your take-home "
+                "pay."
+            ))
         else:
-            ratio_col.metric("Loan Payment / Take-Home", "N/A")
+            st.metric("Loan Payment / Take-Home Ratio", "N/A")
 
     # ---- 5e. 10-Year Financial Position -------------------------------------
 
@@ -3076,7 +3206,10 @@ else:
              "comparison no matter where you live.",
     )
 
-    st.plotly_chart(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major), use_container_width=True)
+    st.plotly_chart(
+        build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major),
+        use_container_width=True, config=PLOTLY_CHART_CONFIG,
+    )
 
     ai_context = {}
     if enable_ai_mode:
@@ -3359,8 +3492,8 @@ path starting from year 1 no matter which snapshot you're looking at.
 Think of it as a window into one moment of a story that's always the same
 story — not a way to start the story over from a different point.
 
-**How the "Loan Payment / Take-Home" color coding works.** The percentage
-next to the take-home chart is color-coded against two real, commonly-cited
+**How the "Loan Payment / Take-Home Ratio" color coding works.** This
+percentage (shown below the take-home chart) is color-coded against two real, commonly-cited
 guidelines — Green ("Manageable") means your loan payment is at or under 10%
 of gross monthly income, a widely-cited student-loan budgeting guideline
 (e.g. [SoFi](https://www.sofi.com/learn/content/percentage-of-income-towards-student-loans/)).
@@ -3414,6 +3547,19 @@ and the total loan is those four years added together:
 added up for all 4 years of an assumed bachelor's degree. Because tuition
 keeps rising while your personal contribution and any scholarships don't,
 the gap — and your loan — tends to grow a bit each year.
+
+**Overriding the Total Loan Amount.** The "Total Loan Amount ($)" field
+right above Average Loan Interest Rate is pre-filled with that calculated
+total, but you can type over it with any other number — for example, the
+real total from an actual financial aid offer letter, which won't match
+this simplified per-year model exactly. Once you do, every calculation on
+this page uses your typed number instead of the calculated one (the
+per-year table above it still shows the calculated breakdown, for
+reference). Your override sticks across reruns, but refreshes back to the
+newly calculated total the next time you change Cost of Attendance,
+Personal Contribution, Grants & Scholarships, or your school -- the same
+way the Cost of Attendance field itself auto-fills from a school lookup
+until you type over it.
 
 **Why Grants & Scholarships and Personal Contribution are treated
 differently.** Personal Contribution counts toward your "total
