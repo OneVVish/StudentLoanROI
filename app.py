@@ -1369,7 +1369,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         Spacer(1, 8),
         _pdf_chart_image(build_balance_chart(repayment_result["schedule"], scenario["strategy_label"])),
         Spacer(1, 12),
-        Paragraph(f"🏙️ Real-World Take-Home — {career_stage_label} in {city}", styles["Heading2"]),
+        Paragraph(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}", styles["Heading2"]),
         _pdf_table([
             ["Gross Salary", "Take-Home Pay (annual)", "Monthly Disposable", "COL-Adjusted Disposable"],
             [fmt_money(gross), fmt_money(take_home["net_take_home"]),
@@ -1575,7 +1575,7 @@ st.sidebar.subheader("💼 Career")
 # MAJOR_DATA is rebuilt from this choice on every rerun -- picking a source
 # here is a data-source preference for the whole session, not per-scenario.
 career_source_options = ["National", "California"]
-shared_career_source = get_shared_default("career_source", "National")
+shared_career_source = get_shared_default("career_source", "California")
 default_career_source_index = (
     career_source_options.index(shared_career_source) if shared_career_source in career_source_options else 0
 )
@@ -1624,10 +1624,29 @@ city = st.sidebar.selectbox(
 # section that used to be the only place this was computed.
 city_info = CITY_DATA[city]
 
-# School next: entering it immediately shows Cost of Attendance below, and
+# Which point in this major's career the Real-World Take-Home section
+# (5d) snapshots -- has no functional dependency on School/In-State or
+# Financing below, so its position here is purely about profile layout
+# (career-identity fields together), not calculation order.
+career_stage_options = list(CAREER_STAGE_OPTIONS.keys())
+shared_career_stage = get_shared_default("stage", "Mid-Career (Year 10)")
+default_career_stage_index = career_stage_options.index(shared_career_stage) if shared_career_stage in career_stage_options else (
+    career_stage_options.index("Mid-Career (Year 10)") if "Mid-Career (Year 10)" in career_stage_options else 0
+)
+career_stage_label = st.sidebar.radio(
+    "Career Stage Snapshot", career_stage_options, index=default_career_stage_index,
+    help="Preview your income right after graduating (Year 1) or 10 years "
+         "into this career, in the Real-World Take-Home section below.",
+)
+career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
+
+st.sidebar.subheader("💰 Financing")
+
+# School first: entering it immediately shows Cost of Attendance below, and
 # (if it matches the local dataset) auto-fills the per-year COA field --
-# everything in the Financing section below builds on that number. Many
-# real school names collide on a simple substring search (e.g. every
+# everything else in this section builds on that number, which is why the
+# school/in-state choice lives here rather than up in Career. Many real
+# school names collide on a simple substring search (e.g. every
 # "University of California" campus), so a search matching 2+ schools
 # shows a picker instead of silently guessing which one was meant.
 school_search_a = st.sidebar.text_input(
@@ -1659,23 +1678,6 @@ coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_stat
 if coa_caption_a:
     st.sidebar.caption(coa_caption_a)
 
-# Which point in this major's career the Real-World Take-Home section
-# (5d) snapshots -- has no functional dependency on School/In-State above
-# or Financing/City below, so its position here is purely about profile
-# layout, not calculation order.
-career_stage_options = list(CAREER_STAGE_OPTIONS.keys())
-shared_career_stage = get_shared_default("stage", "Mid-Career (Year 10)")
-default_career_stage_index = career_stage_options.index(shared_career_stage) if shared_career_stage in career_stage_options else (
-    career_stage_options.index("Mid-Career (Year 10)") if "Mid-Career (Year 10)" in career_stage_options else 0
-)
-career_stage_label = st.sidebar.radio(
-    "Career Stage Snapshot", career_stage_options, index=default_career_stage_index,
-    help="Preview your income right after graduating (Year 1) or 10 years "
-         "into this career, in the Real-World Take-Home section below.",
-)
-career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
-
-st.sidebar.subheader("💰 Financing")
 shared_coa_a = get_shared_default("coa", None)
 if shared_coa_a is not None:
     # A shared link's explicit COA wins over auto-fill -- it may reflect a
@@ -1822,6 +1824,7 @@ if compare_mode:
                  "straight to it.",
         )
 
+        st.subheader("💰 Financing")
         school_search_b = st.text_input(
             "Target Undergraduate School", placeholder="e.g. Ohio State University",
             value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
@@ -1852,7 +1855,6 @@ if compare_mode:
         if coa_caption_b:
             st.caption(coa_caption_b)
 
-        st.subheader("💰 Financing")
         shared_coa_b = get_shared_default("coa_b", None)
         if shared_coa_b is not None:
             default_coa_per_year_b = float(shared_coa_b)
@@ -2226,7 +2228,7 @@ else:
 
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
 
-    st.subheader(f"🏙️ Real-World Take-Home — {career_stage_label} in {city}")
+    st.subheader(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}")
 
     gross = get_annual_salary_for_year(major, career_stage_key)
     take_home = calculate_take_home_pay(gross, city_info["state_key"], city_info["local_tax_rate"])
@@ -2286,8 +2288,11 @@ else:
         "Earnings Premium (COL-Adjusted)",
         fmt_money(roi_result["earnings_premium"]),
         delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
-        help="Earnings Premium = your 10-Yr Net Position minus the High School Grad's. "
-             "COL-Adjusted = adjusted for cost of living, so cities are compared fairly.",
+        help="How much more money you'd have after 10 years by going into this "
+             "career instead of skipping college and working right away -- "
+             "bigger is better. \"COL-Adjusted\" means we've factored in how "
+             "expensive it is to live in your chosen city, so this is a fair "
+             "comparison no matter where you live.",
     )
 
     st.plotly_chart(build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major), use_container_width=True)
