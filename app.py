@@ -373,7 +373,8 @@ def log_usage_event(action: str):
     )
 
 
-def save_survey_response(perception_change: str, feedback_text: str, context: dict) -> bool:
+def save_survey_response(respondent_role: str, hs_graduation_year: str,
+                          perception_change: str, feedback_text: str, context: dict) -> bool:
     """Insert one anonymous survey submission into the survey_responses
     table. `context` is a flat {column_name: value} dict carrying every
     simulation-context field: school name, Scenario A's inputs/outputs, and
@@ -396,6 +397,8 @@ def save_survey_response(perception_change: str, feedback_text: str, context: di
         conn = get_supabase_connection()
         row = {
             "timestamp": datetime.now().isoformat(),
+            "respondent_role": respondent_role,
+            "hs_graduation_year": hs_graduation_year,
             "perception_change": perception_change,
             "feedback_text": feedback_text,
             **context,
@@ -444,9 +447,11 @@ def load_coa_dataset() -> pd.DataFrame:
 
 def find_school_coa(school_name: str, coa_df: pd.DataFrame):
     """Case-insensitive lookup by institution name: exact match first, then
-    falls back to a substring match so e.g. "Michigan" still finds
-    "University of Michigan-Ann Arbor". Returns None if nothing matches --
-    expected while the local dataset only covers a small sample of schools."""
+    falls back to a substring match. By the time this is called, school_name
+    is already a disambiguated single name (see find_matching_schools /
+    _resolve_school_name below), so the substring fallback only really
+    matters for the 1-match case; it's kept as a safety net. Returns None
+    if nothing matches -- expected for a school outside the local dataset."""
     if not school_name or coa_df.empty:
         return None
     names_lower = coa_df["INSTNM"].str.lower()
@@ -458,30 +463,60 @@ def find_school_coa(school_name: str, coa_df: pd.DataFrame):
     return partial.iloc[0] if not partial.empty else None
 
 
+def find_matching_schools(school_name: str, coa_df: pd.DataFrame, limit: int = 25) -> list:
+    """Every institution name containing school_name (case-insensitive
+    substring), sorted alphabetically and capped at `limit`. Used so a
+    search like "University of California" surfaces all 9+ real UC
+    campuses for the user to pick from, instead of find_school_coa
+    silently guessing one arbitrary match. Returns [] for an empty query
+    or an empty dataset."""
+    if not school_name or coa_df.empty:
+        return []
+    query_lower = school_name.strip().lower()
+    names_lower = coa_df["INSTNM"].str.lower()
+    matches = coa_df.loc[names_lower.str.contains(query_lower, regex=False), "INSTNM"]
+    return sorted(matches.unique())[:limit]
+
+
+def _resolve_school_name(search_key: str, pick_key: str) -> str:
+    """The effectively-selected school right now: the picker's current
+    choice if the search text matched 2+ schools (a picker is showing),
+    the single match if there's exactly one, or the raw search text
+    otherwise (no match -- the student's free-typed entry, used as-is)."""
+    search_text = st.session_state.get(search_key, "")
+    matches = find_matching_schools(search_text, load_coa_dataset())
+    if len(matches) >= 2:
+        return st.session_state.get(pick_key, matches[0])
+    if len(matches) == 1:
+        return matches[0]
+    return search_text
+
+
 def get_suggested_coa_per_year(school_name: str, in_state: bool):
     """Cost of Attendance (in-state or out-of-state, per `in_state`) for a
     school in the local COA dataset, for auto-filling a scenario's per-year
-    cost -- or None if the school has no match (expected while the dataset
-    only covers a small sample; see find_school_coa)."""
+    cost -- or None if the school has no match in the dataset."""
     match = find_school_coa(school_name, load_coa_dataset())
     if match is None:
         return None
     return float(match["in_state_coa"] if in_state else match["out_of_state_coa"])
 
 
-def _autofill_coa(school_key: str, in_state_key: str, coa_key: str):
-    """on_change callback for a school text_input or its In-State checkbox:
-    suggests a per-year Cost of Attendance into the paired number_input's
-    session_state key when the school matches the local COA dataset. A
-    no-match (or the field being cleared) is a no-op -- it never resets a
-    manually-entered COA estimate just because the lookup came up empty.
-    Must write to st.session_state directly (not return a value) since
-    callbacks run before the script reruns, and a number_input's value=
-    argument only sets its first-render default, not later reruns, once it
-    has a key."""
+def _autofill_coa(search_key: str, pick_key: str, in_state_key: str, coa_key: str):
+    """on_change callback for the school search text_input, its disambiguation
+    picker (when the search matched 2+ schools), or the In-State checkbox:
+    resolves whichever school is effectively selected right now (see
+    _resolve_school_name) and suggests a per-year Cost of Attendance into
+    the paired number_input's session_state key when it matches the local
+    COA dataset. A no-match (or the field being cleared) is a no-op -- it
+    never resets a manually-entered COA estimate just because the lookup
+    came up empty. Must write to st.session_state directly (not return a
+    value) since callbacks run before the script reruns, and a
+    number_input's value= argument only sets its first-render default, not
+    later reruns, once it has a key."""
+    resolved_school_name = _resolve_school_name(search_key, pick_key)
     suggested = get_suggested_coa_per_year(
-        st.session_state.get(school_key, ""),
-        st.session_state.get(in_state_key, False),
+        resolved_school_name, st.session_state.get(in_state_key, False),
     )
     if suggested is not None:
         st.session_state[coa_key] = suggested
@@ -1130,17 +1165,30 @@ city_info = CITY_DATA[city]
 
 # School next: entering it immediately shows Cost of Attendance below, and
 # (if it matches the local dataset) auto-fills the per-year COA field --
-# everything in the Financing section below builds on that number.
-school_name_a = st.sidebar.text_input(
+# everything in the Financing section below builds on that number. Many
+# real school names collide on a simple substring search (e.g. every
+# "University of California" campus), so a search matching 2+ schools
+# shows a picker instead of silently guessing which one was meant.
+school_search_a = st.sidebar.text_input(
     "Target Undergraduate School", placeholder="e.g. University of Michigan",
-    key="school_name_a", on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
+    key="school_search_a",
+    on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
     help="Type a school name to auto-fill Cost of Attendance below from "
          "real government data, if we have it on file. If your school "
          "isn't found, just enter Cost of Attendance yourself.",
 )
+matching_schools_a = find_matching_schools(school_search_a, load_coa_dataset())
+if len(matching_schools_a) >= 2:
+    st.sidebar.selectbox(
+        f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
+        matching_schools_a, key="school_pick_a",
+        on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+    )
+school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
+
 in_state_a = st.sidebar.checkbox(
     "In-State Student?", key="in_state_a",
-    on_change=lambda: _autofill_coa("school_name_a", "in_state_a", "coa_per_year_a"),
+    on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
     help="Check this if you'd pay in-state tuition at the school above. "
          "Changes the auto-filled Cost of Attendance and how fast tuition "
          "is estimated to grow each year.",
@@ -1301,17 +1349,27 @@ if compare_mode:
                  "straight to it.",
         )
 
-        school_name_b = st.text_input(
+        school_search_b = st.text_input(
             "Target Undergraduate School", placeholder="e.g. Ohio State University",
-            key="school_name_b", on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
+            key="school_search_b",
+            on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
             help="Type a school name to auto-fill Cost of Attendance below "
                  "from real government data, if we have it on file. If "
                  "your school isn't found, just enter Cost of Attendance "
                  "yourself.",
         )
+        matching_schools_b = find_matching_schools(school_search_b, load_coa_dataset())
+        if len(matching_schools_b) >= 2:
+            st.selectbox(
+                f"Multiple schools matched \"{school_search_b}\" -- pick yours:",
+                matching_schools_b, key="school_pick_b",
+                on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+            )
+        school_name_b = _resolve_school_name("school_search_b", "school_pick_b")
+
         in_state_b = st.checkbox(
             "In-State Student?", key="in_state_b",
-            on_change=lambda: _autofill_coa("school_name_b", "in_state_b", "coa_per_year_b"),
+            on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
             help="Check this if you'd pay in-state tuition at the school "
                  "above. Changes the auto-filled Cost of Attendance and how "
                  "fast tuition is estimated to grow each year.",
@@ -1391,7 +1449,7 @@ if admin_enabled:
 
     usage_df = load_table_safe("usage_logs", columns=["timestamp", "action"])
     survey_df = load_table_safe("survey_responses", columns=[
-        "timestamp", "perception_change", "feedback_text",
+        "timestamp", "respondent_role", "hs_graduation_year", "perception_change", "feedback_text",
         "scenario_a_school_name", "scenario_a_major", "scenario_a_loan_amount", "scenario_a_interest_rate",
         "scenario_a_repayment_strategy", "scenario_a_starting_salary", "scenario_a_dti_ratio",
         "scenario_a_monthly_payment", "scenario_a_payoff_years", "scenario_a_total_interest",
@@ -1715,6 +1773,10 @@ st.divider()
 if not st.session_state.survey_submitted:
     with st.form("survey_form", clear_on_submit=True):
         st.subheader("📋 Help Us Measure Impact")
+        respondent_role = st.selectbox("I am a...", ["Parent", "Student", "Teacher", "Other"])
+        hs_graduation_year = st.selectbox(
+            "Expected High School Graduation Year", ["2027", "2028", "2029", "2030"],
+        )
         perception_change = st.radio(
             "Did this tool change how you view your target major or university choice?",
             ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
@@ -1788,7 +1850,7 @@ if not st.session_state.survey_submitted:
                 roi_b = scenario_b["roi_result"]["roi_pct"]
                 context["roi_pct_delta"] = round(abs(roi_a - roi_b), 2) if roi_a is not None and roi_b is not None else None
 
-            saved = save_survey_response(perception_change, feedback_text, context)
+            saved = save_survey_response(respondent_role, hs_graduation_year, perception_change, feedback_text, context)
             if saved:
                 st.session_state.survey_submitted = True
                 st.rerun()
@@ -2044,8 +2106,10 @@ not a number we found in a report. If we don't even know what type of
 school it is, we default to the public-school rate.
 
 **What we save when you submit the survey.** Each anonymous response
-saves your exact inputs and results at that moment: school, major, loan
-amount, personal contribution, interest rate, repayment strategy, your
+saves who's answering (Parent/Student/Teacher/Other) and an expected high
+school graduation year (2027-2030), plus your exact inputs and results at
+that moment: school, major, loan amount, personal contribution, interest
+rate, repayment strategy, your
 major's starting salary, and something called `dti_ratio` — short for
 "debt-to-income ratio," which just means your loan amount divided by your
 starting salary, a common way to describe how big a loan is relative to
