@@ -211,6 +211,25 @@ SOCIAL_SECURITY_WAGE_BASE_2024 = 168600
 SOCIAL_SECURITY_RATE = 0.062
 MEDICARE_RATE = 0.0145
 
+# Loan-to-income risk-tier thresholds for the "Loan Payment / Take-Home"
+# metric (5d). Both real, commonly-cited guidelines are expressed as a
+# percentage of GROSS income, not the net/take-home figure this app's ratio
+# actually uses -- see get_loan_to_income_risk_tier for how they're
+# converted onto a net basis using the scenario's own effective tax rate,
+# rather than assuming a generic conversion factor.
+# MANAGEABLE: student loan payments at or below 10% of gross monthly income
+# are widely cited as leaving room for other budget priorities (e.g. SoFi,
+# "What Percentage of Your Income Should Go to Student Loans?",
+# sofi.com/learn/content/percentage-of-income-towards-student-loans/).
+# CAUTION: 36% of gross income is the standard "back-end" total
+# debt-to-income ceiling mortgage lenders use to consider a borrower
+# well-qualified (Bankrate/CFPB-aligned guidance); above it is treated here
+# as high-risk, since that's the point at which this loan payment ALONE
+# already consumes the share of income normally budgeted for ALL debts
+# combined.
+LOAN_TO_INCOME_GROSS_MANAGEABLE_PCT = 10.0
+LOAN_TO_INCOME_GROSS_CAUTION_PCT = 36.0
+
 # State income tax, 2024. Source: Tax Foundation state income tax tables
 # (taxfoundation.org/data/all/state/state-income-tax-rates-2024/). NY, CA,
 # and OH are modeled as real marginal brackets (a flat top-marginal-rate
@@ -1447,6 +1466,27 @@ def calculate_take_home_pay(gross_annual_income: float, state_key, local_tax_rat
     }
 
 
+def get_loan_to_income_risk_tier(loan_to_takehome_pct: float, effective_tax_rate: float) -> dict:
+    """Classifies a "Loan Payment / Take-Home" ratio (already expressed as
+    % of NET/take-home pay) against the real, gross-income-based guidelines
+    in LOAN_TO_INCOME_GROSS_*_PCT, converted onto this scenario's own net
+    basis: `gross_pct / (1 - effective_tax_rate)` -- e.g. a person paying an
+    effective_tax_rate of 30% who's at the 10%-of-gross "manageable" line is
+    also at 10%/0.70 ≈ 14.3% of their OWN take-home pay, not a generic
+    assumed conversion factor. Returns the tier label, a hex color for the
+    on-screen number, and the two converted thresholds (for the tooltip)."""
+    net_basis = max(1.0 - effective_tax_rate, 0.01)  # floor avoids a div-by-~0 blowup at unrealistic tax rates
+    manageable_threshold = LOAN_TO_INCOME_GROSS_MANAGEABLE_PCT / net_basis
+    caution_threshold = LOAN_TO_INCOME_GROSS_CAUTION_PCT / net_basis
+    if loan_to_takehome_pct <= manageable_threshold:
+        tier, color = "Manageable", "#1a7f37"
+    elif loan_to_takehome_pct <= caution_threshold:
+        tier, color = "Elevated", "#b35900"
+    else:
+        tier, color = "High", "#c0392b"
+    return {"tier": tier, "color": color, "manageable_threshold": manageable_threshold, "caution_threshold": caution_threshold}
+
+
 def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_month: int) -> float:
     """The loan payment at a given career-stage snapshot. If the loan is
     already paid off or forgiven by target_month, the payment is $0 for
@@ -1962,31 +2002,20 @@ st.markdown(
 scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 
 # Three independent, optional modules -- each defaults off, and the app
-# behaves exactly as it did before any of them existed when left off. See
-# the Methodology footer for what each one models and, just as importantly,
-# what it deliberately does NOT claim. Placed before Financing since
-# enable_prestige_mode decides whether Financing shows a school lookup or a
-# college-tier picker.
-with st.sidebar.expander("🧪 Advanced Analysis Settings"):
-    enable_prestige_mode = st.checkbox(
-        "Enable College Prestige & Cost Estimator", value=False, key="enable_prestige_mode",
-        help="Replace the manual school/Cost of Attendance fields below with "
-             "a college-tier picker that also applies a modeled (not "
-             "guaranteed) salary premium by tier -- see Methodology for "
-             "sourcing and caveats.",
-    )
-    enable_ai_mode = st.checkbox(
-        "Enable AI Employability Risk Analysis", value=False, key="enable_ai_mode",
-        help="Show a modeled AI task-exposure estimate for your chosen "
-             "major's occupation group, based on published research -- see "
-             "Methodology.",
-    )
-    enable_future_proofing = st.checkbox(
-        "Enable 2026 Regulatory & Macro Forecasting", value=False, key="enable_future_proofing",
-        help="Preview the real 2026 federal repayment plans (Repayment "
-             "Assistance Plan and Tiered Standard Plan) and a real "
-             "cost-of-living comparison across cities -- see Methodology.",
-    )
+# behaves exactly as it did before any of them existed when left off. Their
+# widgets render at the bottom of the sidebar (after Career), but Financing
+# below needs to know enable_prestige_mode before that point to decide
+# whether to show a school lookup or a college-tier picker -- so each
+# flag's current value is read from session_state here, before its widget
+# exists, exactly like Career Salary Data's radio further down. See the
+# Methodology footer for what each module models and, just as importantly,
+# what it deliberately does NOT claim.
+st.session_state.setdefault("enable_prestige_mode", False)
+st.session_state.setdefault("enable_ai_mode", False)
+st.session_state.setdefault("enable_future_proofing", False)
+enable_prestige_mode = st.session_state["enable_prestige_mode"]
+enable_ai_mode = st.session_state["enable_ai_mode"]
+enable_future_proofing = st.session_state["enable_future_proofing"]
 prestige_tier_a = None
 prestige_tier_b = None
 
@@ -2232,6 +2261,32 @@ career_data_source = st.sidebar.radio(
          "California: that state's own BLS OEWS wage estimates "
          "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`.",
 )
+
+# Rendered last in the sidebar: each flag's current value was already read
+# from session_state above (before Financing) so Financing could branch on
+# it in time -- see that comment for why. No value= here since
+# session_state already holds each widget's value (seeded via setdefault
+# above) -- passing both would trigger Streamlit's widget-policy warning.
+with st.sidebar.expander("🧪 Advanced Analysis Settings"):
+    enable_prestige_mode = st.checkbox(
+        "Enable College Prestige & Cost Estimator", key="enable_prestige_mode",
+        help="Replace the manual school/Cost of Attendance fields above with "
+             "a college-tier picker that also applies a modeled (not "
+             "guaranteed) salary premium by tier -- see Methodology for "
+             "sourcing and caveats.",
+    )
+    enable_ai_mode = st.checkbox(
+        "Enable AI Employability Risk Analysis", key="enable_ai_mode",
+        help="Show a modeled AI task-exposure estimate for your chosen "
+             "major's occupation group, based on published research -- see "
+             "Methodology.",
+    )
+    enable_future_proofing = st.checkbox(
+        "Enable 2026 Regulatory & Macro Forecasting", key="enable_future_proofing",
+        help="Preview the real 2026 federal repayment plans (Repayment "
+             "Assistance Plan and Tiered Standard Plan) and a real "
+             "cost-of-living comparison across cities -- see Methodology.",
+    )
 
 st.sidebar.divider()
 
@@ -2945,10 +3000,47 @@ else:
     if gross > 0:
         st.plotly_chart(build_takehome_pie_chart(take_home), use_container_width=True)
         monthly_net_take_home = take_home["net_take_home"] / 12
-        st.plotly_chart(
+        # Loan Payment ÷ Take-Home Pay -- the same split the chart's slices
+        # (or bars, if the payment exceeds take-home pay) already encode
+        # visually, surfaced here as an explicit number. Guarded against a
+        # $0 take-home edge case rather than assuming gross > 0 always
+        # implies a positive net_take_home.
+        loan_to_disposable_ratio = (
+            monthly_payment / monthly_net_take_home * 100 if monthly_net_take_home > 0 else None
+        )
+        chart_col, ratio_col = st.columns([3, 1])
+        chart_col.plotly_chart(
             build_takehome_vs_loan_chart(monthly_net_take_home, monthly_payment),
             use_container_width=True,
         )
+        if loan_to_disposable_ratio is not None:
+            risk = get_loan_to_income_risk_tier(loan_to_disposable_ratio, take_home["effective_tax_rate"])
+            tooltip = (
+                f"{risk['tier']} -- your monthly loan payment as a percentage of your "
+                "monthly take-home pay (the same split shown in the chart). Industry "
+                "guideline (converted to your take-home basis using this scenario's own "
+                f"effective tax rate): under {fmt_pct(risk['manageable_threshold'])} is "
+                "considered manageable (common student-loan-budgeting guidance -- e.g. "
+                "SoFi); over "
+                f"{fmt_pct(risk['caution_threshold'])} matches the standard 36%-of-gross-"
+                "income \"qualified borrower\" debt-to-income ceiling mortgage lenders use "
+                "for ALL debts combined. Over 100% means the payment exceeds your take-home "
+                "pay."
+            )
+            ratio_col.markdown(
+                f"""
+                <div title="{tooltip}" style="cursor: help;">
+                    <div style="font-size: 0.875rem; color: #808495;">Loan Payment / Take-Home</div>
+                    <div style="font-size: 2rem; font-weight: 600; color: {risk['color']}; line-height: 1.2;">
+                        {fmt_pct(loan_to_disposable_ratio)}
+                    </div>
+                    <div style="font-size: 0.8rem; color: {risk['color']};">{risk['tier']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            ratio_col.metric("Loan Payment / Take-Home", "N/A")
 
     # ---- 5e. 10-Year Financial Position -------------------------------------
 
@@ -3266,6 +3358,22 @@ your 10-Year ROI numbers, which always simulate a full, real year-by-year
 path starting from year 1 no matter which snapshot you're looking at.
 Think of it as a window into one moment of a story that's always the same
 story — not a way to start the story over from a different point.
+
+**How the "Loan Payment / Take-Home" color coding works.** The percentage
+next to the take-home chart is color-coded against two real, commonly-cited
+guidelines — Green ("Manageable") means your loan payment is at or under 10%
+of gross monthly income, a widely-cited student-loan budgeting guideline
+(e.g. [SoFi](https://www.sofi.com/learn/content/percentage-of-income-towards-student-loans/)).
+Red ("High") means it's over 36% of gross income — the standard "back-end"
+debt-to-income ceiling mortgage lenders use for a well-qualified borrower's
+*total* debt, meaning this loan payment alone already consumes the share of
+income normally budgeted for every debt combined. Orange ("Elevated") is
+everything in between. Both guidelines are normally expressed as a
+percentage of *gross* income, but this app's ratio uses *take-home* (net)
+pay — so both thresholds are converted onto your own take-home basis using
+this scenario's actual effective tax rate (`gross_threshold / (1 −
+effective_tax_rate)`), not a generic assumed conversion factor. Hover over
+the percentage to see the exact converted thresholds for your scenario.
 
 **How "Compare Two Scenarios" works.** Comparing two scenarios runs the
 exact same calculations described above, just twice — once for each
