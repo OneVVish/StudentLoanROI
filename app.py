@@ -1205,7 +1205,7 @@ def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major
         title=f"10-Year Net Financial Position (COL-Adjusted): {major_name} vs. High School Baseline",
         text_auto=".2s",
     )
-    fig.update_layout(yaxis_tickprefix="$", showlegend=False, title_x=0.5)
+    fig.update_layout(yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center")
     return fig
 
 
@@ -1240,7 +1240,7 @@ def build_scenario_comparison_roi_chart(hs_net_position: float,
         title="10-Year Net Financial Position (COL-Adjusted): Scenario Comparison",
         text_auto=".2s",
     )
-    fig.update_layout(yaxis_tickprefix="$", showlegend=False)
+    fig.update_layout(yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center")
     return fig
 
 
@@ -1269,9 +1269,37 @@ def build_takehome_pie_chart(take_home: dict):
 # on the very first page load, taking the app down for every visitor, not
 # just the PDF feature. Every number a chart would show is already in a
 # table below it, so dropping the images trades a bit of visual polish for
-# an actually-reliable deployment. @st.cache_data means repeated reruns that
-# don't change the scenario (most reruns -- e.g. toggling Admin Analytics
-# View) reuse the same bytes instead of rebuilding the PDF every time.
+# an actually-reliable deployment. No longer @st.cache_data'd either -- that
+# existed only to avoid re-rendering kaleido chart images on every rerun,
+# which no longer applies now that there are none; a table-only reportlab
+# build is cheap, and skipping the cache keeps the footer's "Generated on"
+# timestamp (below) accurate to the actual download instead of frozen at
+# whenever this exact scenario was first cached.
+
+# Streamlit Community Cloud doesn't expose the app's own public URL to
+# server-side code, so this is hardcoded -- update it here if the app ever
+# moves to a different URL/custom domain.
+APP_URL = "https://studentloanroi.streamlit.app"
+
+
+def _draw_pdf_header_footer(canvas, doc):
+    """Page decoration for every page of every generated PDF: the app's URL
+    in a header at the top, the generation date/time in a footer at the
+    bottom -- passed to SimpleDocTemplate.build() as onFirstPage/
+    onLaterPages, which reportlab calls once per page with the low-level
+    canvas (flowables like _pdf_table can't draw outside their own frame,
+    so headers/footers always go through this canvas-level hook instead)."""
+    canvas.saveState()
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.grey)
+    page_width, page_height = doc.pagesize
+    canvas.drawString(doc.leftMargin, page_height - 30, APP_URL)
+    canvas.drawRightString(
+        page_width - doc.rightMargin, 30,
+        f"Generated {datetime.now().strftime('%B %d, %Y at %I:%M %p')}",
+    )
+    canvas.restoreState()
+
 
 def _pdf_table(rows: list, header: bool = True) -> Table:
     """A simple bordered reportlab Table -- `header=True` bolds/shades row 0
@@ -1318,7 +1346,6 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     return rows
 
 
-@st.cache_data(show_spinner=False)
 def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_stage_label,
                                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
@@ -1380,7 +1407,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
     ]
 
     buffer = io.BytesIO()
-    SimpleDocTemplate(buffer, pagesize=letter).build(story)
+    SimpleDocTemplate(buffer, pagesize=letter).build(
+        story, onFirstPage=_draw_pdf_header_footer, onLaterPages=_draw_pdf_header_footer,
+    )
     return buffer.getvalue()
 
 
@@ -1398,7 +1427,6 @@ def _pdf_scenario_metrics_table(scenario: dict) -> Table:
     ])
 
 
-@st.cache_data(show_spinner=False)
 def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_year_a,
                                  personal_contribution_per_year_a, grants_per_year_a, interest_rate,
                                  repayment_strategy, scenario_a, major_b, school_name_b, in_state_b,
@@ -1437,7 +1465,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     ]
 
     buffer = io.BytesIO()
-    SimpleDocTemplate(buffer, pagesize=letter).build(story)
+    SimpleDocTemplate(buffer, pagesize=letter).build(
+        story, onFirstPage=_draw_pdf_header_footer, onLaterPages=_draw_pdf_header_footer,
+    )
     return buffer.getvalue()
 
 
