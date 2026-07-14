@@ -15,3 +15,8 @@ requests==2.34.2
 st-supabase-connection==2.1.3
 openpyxl==3.1.5
 reportlab==5.0.0
+# For PDF chart images, rendered with the Agg backend -- unlike the
+# kaleido export this app used and removed (see app.py's PDF section
+# comment), Agg is pure Python/C rasterization with no headless-browser
+# subprocess dependency, so it doesn't carry kaleido's segfault risk.
+matplotlib==3.11.0

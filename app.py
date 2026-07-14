@@ -22,17 +22,22 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
 
+import matplotlib
+matplotlib.use("Agg")  # must precede importing pyplot -- no display/browser needed
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+from PIL import Image as PILImage
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from st_supabase_connection import SupabaseConnection, execute_query
 
 # ============================================================
@@ -1814,6 +1819,115 @@ PDF_CELL_H_PADDING = 12  # matches the 6pt LEFTPADDING + 6pt RIGHTPADDING applie
 _PDF_CELL_STYLE = ParagraphStyle("pdf_cell", fontName="Helvetica", fontSize=PDF_CELL_FONT_SIZE, leading=11)
 _PDF_CELL_BOLD_STYLE = ParagraphStyle("pdf_cell_bold", fontName="Helvetica-Bold", fontSize=PDF_CELL_FONT_SIZE, leading=11)
 
+_PDF_MONEY_FORMATTER = mticker.FuncFormatter(lambda value, _pos: f"${value:,.0f}")
+
+
+def _pdf_image_from_figure(fig, max_width: float = PDF_CONTENT_WIDTH) -> Image:
+    """Rasterize a matplotlib figure to a reportlab Image flowable, scaled
+    to fit the PDF's content width while preserving aspect ratio. Always
+    closes the figure afterward -- this runs inside a long-lived Streamlit
+    server process, so leaked open figures would accumulate across every
+    PDF download instead of being garbage collected like a short-lived
+    script's would."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    width_px, height_px = PILImage.open(io.BytesIO(buf.getvalue())).size
+    return Image(buf, width=max_width, height=max_width * height_px / width_px)
+
+
+def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> Image:
+    """PDF counterpart to build_balance_chart -- simplified redraw for
+    print, not required to be pixel-identical to the on-screen interactive
+    version."""
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
+    ax.set_title("Loan Balance Over Time")
+    ax.set_xlabel("Years")
+    ax.set_ylabel("Remaining Balance ($)")
+    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.grid(True, alpha=0.3)
+    return _pdf_image_from_figure(fig)
+
+
+def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
+                                        schedule_b: pd.DataFrame, label_b: str) -> Image:
+    """PDF counterpart to build_comparison_balance_chart."""
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    ax.plot(schedule_a["year"], schedule_a["balance"], linewidth=2.5, label=label_a)
+    ax.plot(schedule_b["year"], schedule_b["balance"], linewidth=2.5, label=label_b)
+    ax.set_title("Loan Balance Over Time")
+    ax.set_xlabel("Years")
+    ax.set_ylabel("Remaining Balance ($)")
+    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    return _pdf_image_from_figure(fig)
+
+
+def build_pdf_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str) -> Image:
+    """PDF counterpart to build_roi_bar_chart."""
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    groups = ["High School Graduate", major_name]
+    values = [hs_net_position, major_net_position]
+    ax.bar(groups, values, color=["#636EFA", "#EF553B"])
+    ax.set_title("10-Year Net Position vs. High School Baseline")
+    ax.set_ylabel("10-Year Net Position ($)")
+    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.tick_params(axis="x", labelsize=9)
+    fig.autofmt_xdate(rotation=10, ha="center")
+    return _pdf_image_from_figure(fig)
+
+
+def build_pdf_scenario_comparison_roi_chart(hs_net_position: float,
+                                             net_a: float, label_a: str,
+                                             net_b: float, label_b: str) -> Image:
+    """PDF counterpart to build_scenario_comparison_roi_chart."""
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    groups = ["High School Graduate", label_a, label_b]
+    values = [hs_net_position, net_a, net_b]
+    ax.bar(groups, values, color=["#636EFA", "#EF553B", "#00CC96"])
+    ax.set_title("10-Year Net Position: Scenario Comparison")
+    ax.set_ylabel("10-Year Net Position ($)")
+    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.tick_params(axis="x", labelsize=9)
+    fig.autofmt_xdate(rotation=10, ha="center")
+    return _pdf_image_from_figure(fig)
+
+
+def build_pdf_takehome_pie_chart(take_home: dict) -> Image:
+    """PDF counterpart to build_takehome_pie_chart."""
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    labels = ["Take-Home Pay", "Federal Tax", "State Tax", "FICA"]
+    values = [take_home["net_take_home"], take_home["federal_tax"],
+              take_home["state_tax"], take_home["fica_tax"]]
+    ax.pie(values, labels=labels, autopct="%1.0f%%", startangle=90)
+    ax.set_title("Where Your Salary Actually Goes")
+    return _pdf_image_from_figure(fig)
+
+
+def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: float) -> Image:
+    """PDF counterpart to build_takehome_vs_loan_chart -- same pie-or-bar-
+    fallback branch condition (a pie can't represent a payment that
+    exceeds take-home pay)."""
+    fig, ax = plt.subplots(figsize=(6, 3.5))
+    if monthly_payment <= monthly_net_take_home:
+        remaining = monthly_net_take_home - monthly_payment
+        ax.pie(
+            [monthly_payment, remaining],
+            labels=["Student Loan Payment", "Remaining Disposable Income"],
+            autopct="%1.0f%%", startangle=90,
+        )
+        ax.set_title("Student Loan Payment vs. Disposable Income")
+    else:
+        ax.bar(["Take-Home Pay", "Required Student Loan Payment"],
+               [monthly_net_take_home, monthly_payment], color=["#636EFA", "#EF553B"])
+        ax.set_title("Monthly Student Loan Payment Exceeds Take-Home Pay")
+        ax.set_ylabel("Monthly $")
+        ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    return _pdf_image_from_figure(fig)
+
 
 def _pdf_table(rows: list, header: bool = True) -> Table:
     """A bordered reportlab Table, centered on the page. Each column is
@@ -1951,11 +2065,11 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
                                 scenario, take_home, gross, disposable_nominal,
                                 disposable_col_adjusted, module_context: dict = None,
-                                start_year_a=None) -> bytes:
+                                start_year_a=None, monthly_payment=None) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
-    Loan Information (+ per-year table), Real-World Take-Home, and
-    10-Year Financial Position -- tables/metrics only, no chart images
-    (see the section comment above for why)."""
+    Loan Information (+ per-year table + balance chart), Real-World
+    Take-Home (+ take-home charts), and 10-Year Financial Position (+ ROI
+    chart)."""
     styles = getSampleStyleSheet()
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
@@ -1994,12 +2108,23 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             ],
         ]),
         Spacer(1, 12),
+        build_pdf_balance_chart(repayment_result["schedule"], scenario["strategy_label"]),
+        Spacer(1, 12),
         Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}"), styles["Heading2"]),
         _pdf_table([
             ["Gross Salary", "Take-Home Pay (annual)", "Monthly Disposable", "COL-Adjusted Disposable"],
             [fmt_money(gross), fmt_money(take_home["net_take_home"]),
              fmt_money(disposable_nominal), fmt_money(disposable_col_adjusted)],
         ]),
+    ]
+    if gross > 0 and monthly_payment is not None:
+        story += [
+            Spacer(1, 12),
+            build_pdf_takehome_pie_chart(take_home),
+            Spacer(1, 12),
+            build_pdf_takehome_vs_loan_chart(take_home["net_take_home"] / 12, monthly_payment),
+        ]
+    story += [
         Spacer(1, 12),
         Paragraph(_strip_emoji("📊 10-Year Financial Position"), styles["Heading2"]),
         _pdf_table([
@@ -2007,6 +2132,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
              fmt_money(roi_result["earnings_premium"])],
         ]),
+        Spacer(1, 12),
+        build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major),
     ]
     story += _pdf_module_sections(module_context)
 
@@ -2038,8 +2165,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  interest_rate_b, repayment_strategy_b, scenario_b,
                                  module_context: dict = None, start_year_a=None, start_year_b=None) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
-    profile summaries + metric tables (no chart images -- see the section
-    comment above for why)."""
+    profile summaries + metric tables, plus the loan-balance and
+    10-year-net-position comparison charts."""
     styles = getSampleStyleSheet()
     story = [
         Paragraph(_strip_emoji("🎓 Student Loan Payoff & Major ROI Report — Scenario Comparison"), styles["Title"]),
@@ -2069,6 +2196,17 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         ),
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_b),
+        Spacer(1, 12),
+        build_pdf_comparison_balance_chart(
+            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
+            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
+        ),
+        Spacer(1, 12),
+        build_pdf_scenario_comparison_roi_chart(
+            scenario_a["roi_result"]["hs_net_position"],
+            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
+            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+        ),
     ]
     story += _pdf_module_sections(module_context)
 
@@ -3533,7 +3671,7 @@ else:
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
         interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
         scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
-        module_context=module_context, start_year_a=start_year_a,
+        module_context=module_context, start_year_a=start_year_a, monthly_payment=monthly_payment,
     )
     with top_actions_container:
         single_pdf_col, single_share_col = st.columns(2)
