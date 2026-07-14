@@ -803,17 +803,24 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
 # the sandboxed iframe components.html renders into -- Streamlit doesn't
 # grant that iframe a "clipboard-write" Permissions-Policy, so it always
 # rejects there (confirmed via a live browser test). document.execCommand
-# ("copy") on a temporary textarea, run against window.parent.document
+# ("copy") on a temporary textarea, run against window.top.document
 # (the iframe has allow-same-origin, so this is reachable), is the
 # pre-Permissions-Policy fallback that still works in this sandboxed
 # context -- try the modern API first in case a given deployment does
-# allow it, then fall back.
+# allow it, then fall back. window.top, not window.parent: Streamlit
+# Community Cloud nests this component inside an additional wrapping
+# iframe, so window.parent only reaches that intermediate frame (with its
+# own internal /~/+/ URL) instead of the real page -- window.top always
+# reaches the actual outermost browsing context regardless of how many
+# iframe layers exist in between (confirmed via a live browser test
+# against the deployed app, where window.parent.location.href returned
+# the wrapper iframe's own URL, not the page the visitor actually sees).
 COPY_URL_TO_CLIPBOARD_JS = """
 <script>
 (function() {
-    const url = window.parent.location.href;
+    const url = window.top.location.href;
     function legacyCopy(text) {
-        const doc = window.parent.document;
+        const doc = window.top.document;
         const textarea = doc.createElement("textarea");
         textarea.value = text;
         textarea.style.position = "fixed";
@@ -2278,6 +2285,16 @@ st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page
 # one extra rerun and never loops. The very first "pageview" log below still
 # can't benefit -- there's no timezone to read until this round-trip
 # completes -- so it's the one timestamp that may land in UTC regardless.
+# Uses window.top, not window.parent -- Streamlit Community Cloud nests this
+# component inside an additional wrapping iframe, so window.parent only
+# reaches that intermediate frame (with its own internal /~/+/ URL) instead
+# of the real page. That's exactly why this always fell back to UTC on the
+# deployed app regardless of the visitor's actual timezone: the "tz" query
+# param below was being written to the wrapper iframe's own address, never
+# to the page's real URL that get_shared_default() actually reads. window.top
+# always reaches the real outermost browsing context no matter how many
+# iframe layers exist in between (confirmed via a live browser test against
+# the deployed app).
 with st.container(key="tz_trigger_wrap"):
     st.button("Set Timezone", key="tz_trigger")
 st.markdown(
@@ -2289,7 +2306,7 @@ components.html(
     <script>
     (function() {
         function findTzButton() {
-            const doc = window.parent.document;
+            const doc = window.top.document;
             const buttons = doc.querySelectorAll("button");
             for (const b of buttons) {
                 if (b.textContent.trim() === "Set Timezone") return b;
@@ -2297,11 +2314,11 @@ components.html(
             return null;
         }
         const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        const params = new URLSearchParams(window.parent.location.search);
+        const params = new URLSearchParams(window.top.location.search);
         if (params.get("tz") !== detected) {
             params.set("tz", detected);
-            const newUrl = window.parent.location.pathname + "?" + params.toString();
-            window.parent.history.replaceState(null, "", newUrl);
+            const newUrl = window.top.location.pathname + "?" + params.toString();
+            window.top.history.replaceState(null, "", newUrl);
             const btn = findTzButton();
             if (btn) btn.click();
         }
@@ -2752,7 +2769,14 @@ st.sidebar.divider()
 # machinery instead of trying to fake session state from raw JS. The
 # injected script below just finds this button by its exact text and
 # calls .click() on it when Ctrl+Shift+A is pressed; the CSS block hides
-# its wrapping container so it's never visible or in the way.
+# its wrapping container so it's never visible or in the way. Listens on
+# window.top, not window.parent -- Streamlit Community Cloud nests this
+# component inside an additional wrapping iframe, so a listener on
+# window.parent.document only ever sees keydown events that occur inside
+# that intermediate frame, never the ones the visitor's browser actually
+# dispatches on the real page. window.top always reaches the real
+# outermost browsing context no matter how many iframe layers exist in
+# between.
 with st.sidebar.container(key="admin_reveal_trigger_wrap"):
     admin_reveal_clicked = st.button("Reveal Admin Panel", key="admin_reveal_trigger")
 if admin_reveal_clicked:
@@ -2767,14 +2791,14 @@ components.html(
     <script>
     (function() {
         function findRevealButton() {
-            const doc = window.parent.document;
+            const doc = window.top.document;
             const buttons = doc.querySelectorAll("button");
             for (const b of buttons) {
                 if (b.textContent.trim() === "Reveal Admin Panel") return b;
             }
             return null;
         }
-        window.parent.document.addEventListener("keydown", function (e) {
+        window.top.document.addEventListener("keydown", function (e) {
             if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
                 e.preventDefault();
                 const btn = findRevealButton();
