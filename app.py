@@ -131,6 +131,12 @@ def load_bls_careers(csv_path: str) -> dict:
             # -- the SOC "major group" level, used to look up AI_EXPOSURE_BY_
             # SOC_GROUP for the optional AI Employability Risk module.
             "soc_major_group": str(row.occ_code).split("-")[0],
+            # BLS's own "Typical Education Needed for Entry" category for
+            # this occupation (see add_education_field.py), e.g. "Bachelor's
+            # degree" -- "" if the cleaned CSV predates this column or the
+            # occupation had no match, so this never crashes on an
+            # older/unregenerated CSV. See SUB_BACHELORS_EDUCATION_LEVELS.
+            "typical_education": getattr(row, "typical_education", "") or "",
         }
         for row in careers_df.itertuples()
     }
@@ -146,6 +152,41 @@ def load_bls_careers(csv_path: str) -> dict:
 # for a decade.
 HS_GRAD_SALARY = 49192
 HS_GRAD_GROWTH_RATE = 0.02
+
+# Registered Apprenticeship benchmark for the "Alternative Pathway" card.
+# Year-1 training wage ($52,000) and average starting salary upon
+# completion ($86,000) bookend a two-phase illustrative wage curve: pay
+# ramps from the training wage up to the completion salary via a constant
+# growth rate across the typical training period (BLS notes apprentices
+# "earn about half of what a fully qualified worker makes" early on,
+# ramping up as they progress), then grows at this app's existing
+# HS_GRAD_GROWTH_RATE after completion, since no BLS per-occupation
+# trajectory exists past that point. Completion salary is
+# apprenticeship.gov's own published "Did You Know?" statistic (footnoted
+# there as sourced from Kansas Dept. of Commerce CRIS reporting -- not a
+# national census figure, but DOL's own current national benchmark
+# reference). Typical program length (~4 years, range 1-6) and the
+# "apprentices are paid wages, not charged tuition" framing are both from
+# BLS Career Outlook, "Apprenticeships: Outlook and wages in selected
+# occupations" (2019).
+APPRENTICESHIP_YEAR1_SALARY = 52000
+APPRENTICESHIP_COMPLETION_SALARY = 86000
+APPRENTICESHIP_TYPICAL_DEBT = 0
+APPRENTICESHIP_TRAINING_YEARS = 4
+
+# BLS Employment Projections' 8-category "Typical Education Needed for
+# Entry" taxonomy (see add_education_field.py / bls.gov/oes/additional.htm)
+# -- these five are below a bachelor's degree. Target Profession keeps
+# every occupation regardless (removing real careers a student might be
+# evaluating would be worse than disclosing the mismatch), but flags a
+# disclosure and swaps the Alternative Pathway module's comparison data
+# whenever the selected profession matches one of these, since this app's
+# Cost of Attendance/loan model otherwise assumes a 4-year undergraduate
+# program (UNDERGRAD_YEARS) for every major.
+SUB_BACHELORS_EDUCATION_LEVELS = {
+    "No formal educational credential", "High school diploma or equivalent",
+    "Some college, no degree", "Postsecondary nondegree award", "Associate's degree",
+}
 
 # Income-Driven Repayment (IDR) assumptions, modeled after undergraduate
 # REPAYE/SAVE-style plans: 10% of discretionary income, where discretionary
@@ -1377,6 +1418,43 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     }
 
 
+def get_apprenticeship_salary_for_year(year_index: int) -> float:
+    """Two-phase illustrative wage curve for the Registered Apprenticeship
+    benchmark -- ramps from the year-1 training wage to the completion
+    salary via a constant growth rate across the training period (BLS:
+    apprentices "earn about half of what a fully qualified worker makes"
+    early on, ramping up as they progress), then grows at
+    HS_GRAD_GROWTH_RATE after completion, since no BLS per-occupation
+    trajectory exists past that point. See APPRENTICESHIP_* constants for
+    sourcing."""
+    training_periods = APPRENTICESHIP_TRAINING_YEARS - 1
+    training_growth_rate = (
+        (APPRENTICESHIP_COMPLETION_SALARY / APPRENTICESHIP_YEAR1_SALARY) ** (1 / training_periods) - 1
+    )
+    if year_index < training_periods:
+        return APPRENTICESHIP_YEAR1_SALARY * (1 + training_growth_rate) ** year_index
+    return APPRENTICESHIP_COMPLETION_SALARY * (1 + HS_GRAD_GROWTH_RATE) ** (year_index - training_periods)
+
+
+def calculate_apprenticeship_roi(hs_net_position: float, col_index: float = 100.0,
+                                  years: int = ROI_WINDOW_YEARS) -> dict:
+    """Illustrative Registered Apprenticeship benchmark, computed the same
+    way calculate_roi computes a major's ROI, but from the two-phase wage
+    curve above instead of a MAJOR_DATA lookup. hs_net_position is passed
+    in (not recomputed) so this always compares against the exact same
+    HS-grad baseline already shown elsewhere on the page."""
+    apprentice_cumulative_earnings = sum(get_apprenticeship_salary_for_year(y) for y in range(years))
+    apprentice_net_position_nominal = apprentice_cumulative_earnings - APPRENTICESHIP_TYPICAL_DEBT
+    apprentice_net_position = adjust_for_cost_of_living(apprentice_net_position_nominal, col_index)
+    earnings_premium = apprentice_net_position - hs_net_position
+    roi_pct = (earnings_premium / APPRENTICESHIP_TYPICAL_DEBT * 100) if APPRENTICESHIP_TYPICAL_DEBT > 0 else None
+    return {
+        "apprentice_net_position": apprentice_net_position,
+        "earnings_premium": earnings_premium,
+        "roi_pct": roi_pct,
+    }
+
+
 def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per_year: float,
                                    grants_per_year: float, inflation_rate: float,
                                    years: int = UNDERGRAD_YEARS) -> list:
@@ -1854,6 +1932,16 @@ def _pdf_module_sections(module_context: dict) -> list:
         elements += [
             Spacer(1, 12), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["Heading2"]),
             _pdf_table(rows),
+        ]
+    if module_context.get("apprenticeship_active"):
+        elements += [
+            Spacer(1, 12),
+            Paragraph("Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)", styles["Heading2"]),
+            _pdf_table([
+                ["10-Yr Net Position (COL-Adjusted)", "Earnings Premium vs. HS Grad"],
+                [fmt_money(module_context["apprenticeship_net_position"]),
+                 fmt_money(module_context["apprenticeship_earnings_premium"])],
+            ]),
         ]
     return elements
 
@@ -2381,6 +2469,16 @@ major = st.sidebar.selectbox(
          "options, so instead of scrolling, click the box and type part of "
          "your major or career to jump straight to it.",
 )
+typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
+if typical_education_a in SUB_BACHELORS_EDUCATION_LEVELS:
+    st.sidebar.caption((
+        f"ℹ️ {major}'s typical entry-level education (BLS: "
+        f"\"{typical_education_a}\") is below a bachelor's degree. This "
+        "app's Cost of Attendance/loan model below still assumes 4 years "
+        "of undergraduate cost -- see Alternative Pathway: Trade "
+        "Apprenticeship (if enabled) for a comparison using this "
+        "profession's real path instead."
+    ).replace("$", r"\$"))
 if enable_prestige_mode:
     # Apply the tier's salary premium (chosen above, in Financing) to
     # Scenario A's major -- see get_prestige_adjusted_major_name for why
@@ -2458,6 +2556,12 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "Assistance Plan and Tiered Standard Plan) and a real "
              "cost-of-living comparison across cities -- see Methodology.",
     )
+    enable_apprenticeship = st.checkbox(
+        "Enable Trade Apprenticeship Comparison", key="enable_apprenticeship",
+        help="Show a real DOL/BLS-sourced benchmark comparing a registered "
+             "apprenticeship's 10-year financial position against your "
+             "chosen major and a high school graduate -- see Methodology.",
+    )
 
 st.sidebar.divider()
 
@@ -2531,6 +2635,16 @@ if compare_mode:
                  "box and type part of your major or career to jump "
                  "straight to it.",
         )
+        typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
+        if typical_education_b in SUB_BACHELORS_EDUCATION_LEVELS:
+            st.caption((
+                f"ℹ️ {major_b}'s typical entry-level education (BLS: "
+                f"\"{typical_education_b}\") is below a bachelor's degree. "
+                "This app's Cost of Attendance/loan model below still "
+                "assumes 4 years of undergraduate cost -- see Alternative "
+                "Pathway: Trade Apprenticeship (if enabled) for a "
+                "comparison using this profession's real path instead."
+            ).replace("$", r"\$"))
 
         st.subheader("💰 Financing")
         if enable_prestige_mode:
@@ -3019,23 +3133,96 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
         })
     render_centered_table(pd.DataFrame(col_rows))
 
-    st.divider()
-    st.markdown("**Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)**")
-    st.caption(
-        "Illustrative benchmark based on typical U.S. Dept. of Labor "
-        "registered apprenticeship reporting, not this app's per-major BLS "
-        "data -- see Methodology."
-    )
-    apprentice_cols = st.columns(3)
-    apprentice_cols[0].metric("Typical Total Debt", "$10,000")
-    apprentice_cols[1].metric("Typical Starting Salary", "$52,000")
-    apprentice_cols[2].metric("Typical Training Time", "1 year")
-
     return context
 
 
+def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index: float = 100.0) -> dict:
+    """Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark) --
+    independent module. When major_name_a itself typically requires less
+    than a bachelor's degree (per BLS's typical-entry-level-education data,
+    see SUB_BACHELORS_EDUCATION_LEVELS), shows that profession's own real
+    BLS earnings without this app's usual 4-year-loan assumption instead of
+    the generic national trade benchmark -- a more specific, more accurate
+    comparison for that exact path. See APPRENTICESHIP_* constants and
+    calculate_apprenticeship_roi for the generic benchmark's sourcing."""
+    st.subheader("🔨 Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)")
+    typical_education = MAJOR_DATA.get(major_name_a, {}).get("typical_education", "")
+    uses_own_profession_data = typical_education in SUB_BACHELORS_EDUCATION_LEVELS
+
+    if uses_own_profession_data:
+        st.caption(
+            f"{major_name_a}'s typical entry-level education (BLS: "
+            f"\"{typical_education}\") is below a bachelor's degree, so this "
+            "shows YOUR chosen profession's own real BLS earnings without "
+            "the 4-year loan this app otherwise assumes -- not the generic "
+            "national trade benchmark. See Methodology for citations."
+        )
+        quick_facts = st.columns(2)
+        quick_facts[0].metric("Starting Salary (BLS)", fmt_money(MAJOR_DATA[major_name_a]["starting_salary"]))
+        quick_facts[1].metric("Assumed Loan for This Path", fmt_money(0))
+        alt_result = calculate_roi(major_name_a, 0, 0, col_index=col_index)
+        alt_net_position = alt_result["major_net_position"]
+        alt_earnings_premium = alt_result["earnings_premium"]
+        alt_label = f"{major_name_a} (No 4-Yr Loan)"
+    else:
+        st.caption(
+            "A single national reference point from U.S. Dept. of Labor sources "
+            "-- not this app's per-major BLS pipeline -- for comparing college "
+            "against not going. Typical program length ranges 1-6 years "
+            "depending on the trade. See Methodology for exact citations and "
+            "caveats."
+        )
+        quick_facts = st.columns(4)
+        quick_facts[0].metric("Year 1 Training Wage", fmt_money(APPRENTICESHIP_YEAR1_SALARY))
+        quick_facts[1].metric("Starting Salary After Completion", fmt_money(APPRENTICESHIP_COMPLETION_SALARY))
+        quick_facts[2].metric("Typical Program Length", f"~{APPRENTICESHIP_TRAINING_YEARS} yrs")
+        quick_facts[3].metric("Typical Training Debt", fmt_money(APPRENTICESHIP_TYPICAL_DEBT))
+        apprenticeship_result = calculate_apprenticeship_roi(
+            scenario_a["roi_result"]["hs_net_position"], col_index=col_index,
+        )
+        alt_net_position = apprenticeship_result["apprentice_net_position"]
+        alt_earnings_premium = apprenticeship_result["earnings_premium"]
+        alt_label = "Trade Apprenticeship"
+
+    st.markdown(f"**10-Year Financial Position: {alt_label} vs. Your Path**")
+    st.caption(
+        "Same High School Graduate baseline and cost-of-living adjustment "
+        "used everywhere else on this page." if uses_own_profession_data else
+        "Same High School Graduate baseline and cost-of-living adjustment "
+        "used everywhere else on this page -- apprenticeship earnings ramp "
+        "from the training wage to the completion salary above, then grow "
+        "at this app's existing high-school-grad wage-growth assumption "
+        "(no BLS per-occupation trajectory exists past completion)."
+    )
+    pos_cols = st.columns(3)
+    pos_cols[0].metric(
+        "High School Grad — 10-Yr Net Position (No Loan)",
+        fmt_money(scenario_a["roi_result"]["hs_net_position"]),
+    )
+    pos_cols[1].metric(
+        f"{major_name_a} — 10-Yr Net Position", fmt_money(scenario_a["roi_result"]["major_net_position"]),
+    )
+    pos_cols[2].metric(f"{alt_label} — 10-Yr Net Position", fmt_money(alt_net_position))
+    st.plotly_chart(
+        build_scenario_comparison_roi_chart(
+            scenario_a["roi_result"]["hs_net_position"],
+            scenario_a["roi_result"]["major_net_position"], major_name_a,
+            alt_net_position, alt_label,
+        ),
+        use_container_width=True, key="apprenticeship_roi_chart", config=PLOTLY_CHART_CONFIG,
+    )
+
+    return {
+        "apprenticeship_active": True,
+        "apprenticeship_net_position": alt_net_position,
+        "apprenticeship_earnings_premium": alt_earnings_premium,
+        "apprenticeship_used_profession_data": uses_own_profession_data,
+    }
+
+
 def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
-                          ai_context: dict = None, future_context: dict = None) -> dict:
+                          ai_context: dict = None, future_context: dict = None,
+                          apprenticeship_context: dict = None) -> dict:
     """Flat {column_name: value} dict of whichever optional advanced modules
     are active, in the same shape build_scenario_context already uses --
     merged into every save_survey_response/save_pdf_download/
@@ -3050,6 +3237,8 @@ def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
         context.update(ai_context)
     if future_context:
         context.update(future_context)
+    if apprenticeship_context:
+        context.update(apprenticeship_context)
     return context
 
 
@@ -3090,10 +3279,14 @@ if compare_mode:
                                                           scenario_b, major_b, interest_rate_b,
                                                           col_index=city_info["col_index"])
 
+    apprenticeship_context = {}
+    if enable_apprenticeship:
+        apprenticeship_context = render_apprenticeship_section(scenario_a, major, col_index=city_info["col_index"])
+
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None,
         prestige_tier_b if enable_prestige_mode else None,
-        ai_context, future_context,
+        ai_context, future_context, apprenticeship_context,
     )
 
     compare_pdf_bytes = generate_pdf_report_compare(
@@ -3326,8 +3519,13 @@ else:
         future_context = render_future_proofing_section(scenario, major, interest_rate,
                                                           col_index=city_info["col_index"])
 
+    apprenticeship_context = {}
+    if enable_apprenticeship:
+        apprenticeship_context = render_apprenticeship_section(scenario, major, col_index=city_info["col_index"])
+
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None, None, ai_context, future_context,
+        apprenticeship_context,
     )
 
     single_pdf_bytes = generate_pdf_report_single(
@@ -3482,6 +3680,17 @@ half was unusable). If a BLS career happens to share a name with one of
 the 11 hand-picked majors above, the hand-picked version always wins,
 since it has extra detail (like training delays) the generic BLS data
 doesn't capture.
+
+Target Profession also surfaces each occupation's typical entry-level
+education, per BLS Employment Projections' "Typical Education Needed for
+Entry" data ([bls.gov/oes/additional.htm](https://www.bls.gov/oes/additional.htm)):
+selecting a profession that typically requires less than a bachelor's
+degree shows a disclosure, since this app's Cost of Attendance/loan model
+otherwise assumes 4 years of undergraduate cost for every major. It's
+kept in the dropdown rather than removed -- it's still a real career a
+student might be evaluating. See Alternative Pathway: Trade Apprenticeship
+below, which uses that profession's own real BLS earnings instead of the
+generic national trade benchmark whenever this applies.
 
 The **"Career Salary Data" sidebar selector** lets you pick
 whether these extra careers use *National* average wages or
@@ -3727,9 +3936,9 @@ any personal identifying information — it's used to help a companion
 research paper understand how tools like this one affect students'
 thinking about college and careers.
 
-**Advanced Analysis Settings (optional, off by default).** Three extra
+**Advanced Analysis Settings (optional, off by default).** Four extra
 modules live in a sidebar expander. Each one is opt-in, and the calculator
-behaves exactly as described above when all three are left off.
+behaves exactly as described above when all four are left off.
 
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
   fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard
@@ -3788,10 +3997,25 @@ behaves exactly as described above when all three are left off.
   real decision, since administrative details can still shift before the
   2026/2028 effective dates. The cost-of-living comparison in this section
   reuses this app's own real per-city data (BEA Regional Price Parities, see
-  above) — not a separate, flat percentage assumption. The trade-apprenticeship
-  benchmark card is a single illustrative reference point based on typical
-  U.S. Dept. of Labor registered-apprenticeship reporting, not this app's
-  per-major BLS pipeline.
+  above) — not a separate, flat percentage assumption.
+- **Alternative Pathway: Trade Apprenticeship.** A single national
+  reference point, not this app's per-major BLS pipeline. Year-1 training
+  wage ($52,000) and average starting salary upon completion ($86,000) are
+  apprenticeship.gov's own published statistics (the completion figure is
+  footnoted there as sourced from Kansas Dept. of Commerce CRIS reporting —
+  a single state's data, not a national census, though it's DOL's own
+  current national benchmark reference). Between those two points, pay is
+  modeled as ramping up at a constant rate across the typical training
+  period — real registered-apprenticeship pay schedules do step up as
+  apprentices progress, per BLS Career Outlook, ["Apprenticeships: Outlook
+  and wages in selected occupations"](https://www.bls.gov/careeroutlook/2019/article/apprenticeships-outlook-wages-update.htm)
+  (2019), which also documents typical program length (~4 years, range 1-6)
+  and that apprentices are paid wages during training rather than charged
+  tuition — hence $0 typical training debt. After completion, earnings grow
+  at this app's existing high-school-graduate wage-growth assumption (see
+  above), since no BLS per-occupation trajectory exists past that point.
+  **This is one illustrative national benchmark, not a personalized
+  estimate for any specific trade or apprenticeship program.**
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
