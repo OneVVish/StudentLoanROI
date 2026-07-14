@@ -505,14 +505,19 @@ def render_centered_table(df: pd.DataFrame) -> None:
     Plain HTML with inline CSS is the only way to control both. This loses
     st.dataframe's sort/hide-columns/download-as-CSV toolbar, an acceptable
     trade for these small, purely-for-display summary tables."""
+    # Semi-transparent grey (not an opaque hex like #f0f2f6) so the header
+    # tints whatever the real background is instead of hardcoding a
+    # light-mode-only color -- an opaque light background combined with
+    # dark mode's light inherited text color made the header text nearly
+    # unreadable there.
     header_cells = "".join(
-        f'<th style="padding:8px 12px; text-align:center; background:#f0f2f6; '
-        f'border:1px solid #e6e6e6; font-weight:600;">{xml_escape(str(col))}</th>'
+        f'<th style="padding:8px 12px; text-align:center; background:rgba(128,128,128,0.16); '
+        f'border:1px solid rgba(128,128,128,0.4); font-weight:600;">{xml_escape(str(col))}</th>'
         for col in df.columns
     )
     body_rows = "".join(
         "<tr>" + "".join(
-            f'<td style="padding:8px 12px; text-align:center; border:1px solid #e6e6e6;">'
+            f'<td style="padding:8px 12px; text-align:center; border:1px solid rgba(128,128,128,0.4);">'
             f'{xml_escape(str(value))}</td>'
             for value in row
         ) + "</tr>"
