@@ -2015,10 +2015,19 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     return rows
 
 
-def _pdf_module_sections(module_context: dict) -> list:
+def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_name_a: str = None,
+                          interest_rate_a: float = None, scenario_b: dict = None, major_name_b: str = None,
+                          interest_rate_b: float = None, col_index: float = 100.0,
+                          key_suffix_a: str = "a", key_suffix_b: str = "b") -> list:
     """Optional PDF section(s) for whichever advanced modules were active --
     guarded per-module (see build_module_context) so a PDF generated with
-    every module off is unchanged from before these modules existed."""
+    every module off is unchanged from before these modules existed.
+    scenario_a/b, major_name_a/b, interest_rate_a/b, col_index, and
+    key_suffix_a/b are only used to redraw the 2026-forecasting and
+    Trade-Apprenticeship modules' chart images (recomputed here, never
+    stored in module_context -- that dict is also spread directly into
+    Supabase inserts elsewhere, so it must stay JSON-serializable
+    scalars only, never a DataFrame or chart object)."""
     if not module_context:
         return []
     styles = getSampleStyleSheet()
@@ -2047,6 +2056,23 @@ def _pdf_module_sections(module_context: dict) -> list:
             Spacer(1, 12), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["Heading2"]),
             _pdf_table(rows),
         ]
+        if scenario_a is not None:
+            for suffix, scenario, major_name, rate, plan_key in [
+                (key_suffix_a, scenario_a, major_name_a, interest_rate_a, "future_plan_selected"),
+                (key_suffix_b, scenario_b, major_name_b, interest_rate_b, "scenario_b_future_plan_selected"),
+            ]:
+                if scenario is None or plan_key not in module_context:
+                    continue
+                dependents = st.session_state.get(f"rap_dependents_{suffix}", 0)
+                result, roi_2026 = compute_future_plan_result(
+                    scenario, major_name, rate, module_context[plan_key], dependents, col_index=col_index,
+                )
+                elements += [
+                    Spacer(1, 12),
+                    build_pdf_balance_chart(result["schedule"], module_context[plan_key]),
+                    Spacer(1, 12),
+                    build_pdf_roi_bar_chart(roi_2026["hs_net_position"], roi_2026["major_net_position"], major_name),
+                ]
     if module_context.get("apprenticeship_active"):
         elements += [
             Spacer(1, 12),
@@ -2057,6 +2083,15 @@ def _pdf_module_sections(module_context: dict) -> list:
                  fmt_money(module_context["apprenticeship_earnings_premium"])],
             ]),
         ]
+        if scenario_a is not None:
+            elements += [
+                Spacer(1, 12),
+                build_pdf_scenario_comparison_roi_chart(
+                    scenario_a["roi_result"]["hs_net_position"],
+                    scenario_a["roi_result"]["major_net_position"], major_name_a,
+                    module_context["apprenticeship_net_position"], module_context["apprenticeship_label"],
+                ),
+            ]
     return elements
 
 
@@ -2065,7 +2100,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
                                 scenario, take_home, gross, disposable_nominal,
                                 disposable_col_adjusted, module_context: dict = None,
-                                start_year_a=None, monthly_payment=None) -> bytes:
+                                start_year_a=None, monthly_payment=None, col_index: float = 100.0) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
     Take-Home (+ take-home charts), and 10-Year Financial Position (+ ROI
@@ -2135,7 +2170,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         Spacer(1, 12),
         build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major),
     ]
-    story += _pdf_module_sections(module_context)
+    story += _pdf_module_sections(
+        module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
+        col_index=col_index, key_suffix_a="single",
+    )
 
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=letter).build(
@@ -2163,7 +2201,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  repayment_strategy, scenario_a, major_b, school_name_b, in_state_b,
                                  coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b,
                                  interest_rate_b, repayment_strategy_b, scenario_b,
-                                 module_context: dict = None, start_year_a=None, start_year_b=None) -> bytes:
+                                 module_context: dict = None, start_year_a=None, start_year_b=None,
+                                 col_index: float = 100.0) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, plus the loan-balance and
     10-year-net-position comparison charts."""
@@ -2208,7 +2247,11 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
         ),
     ]
-    story += _pdf_module_sections(module_context)
+    story += _pdf_module_sections(
+        module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
+        scenario_b=scenario_b, major_name_b=major_b, interest_rate_b=interest_rate_b,
+        col_index=col_index,
+    )
 
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=letter).build(
@@ -3157,6 +3200,26 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
     return {"ai_mode_active": True, "scenario_a_ai_risk_level": risk_a}
 
 
+def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: float,
+                                future_plan: str, dependents: int, col_index: float = 100.0) -> tuple:
+    """Recomputes a 2026 plan's repayment schedule + ROI position -- shared
+    by the on-screen render (_render_plan, inside
+    render_future_proofing_section) and the PDF's module-section chart
+    building, so both call the exact same numbers instead of risking
+    drift between two copies of this logic. Pure function, no Streamlit
+    widget calls, safe to call a second time outside the on-screen
+    closure with the same inputs."""
+    effective_principal = scenario["effective_principal"]
+    if future_plan == "2026 Tiered Standard Plan":
+        term_years = calculate_tiered_standard_term(effective_principal)
+        result = calculate_standard_repayment(effective_principal, interest_rate, term_years)
+    else:
+        result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents)
+    roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
+                                     scenario["total_investment"], col_index=col_index)
+    return result, roi_result_2026
+
+
 def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest_rate_a: float,
                                     scenario_b: dict = None, major_name_b: str = None,
                                     interest_rate_b: float = None, col_index: float = 100.0) -> dict:
@@ -3178,9 +3241,12 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
         effective_principal = scenario["effective_principal"]
         plan_options = ["2026 Tiered Standard Plan", "2026 Repayment Assistance Plan (RAP)"]
         future_plan = st.selectbox("2026 Repayment Plan", plan_options, key=f"future_plan_{key_suffix}")
+        dependents = 0
         if future_plan == plan_options[0]:
+            result, roi_result_2026 = compute_future_plan_result(
+                scenario, major_name, interest_rate, future_plan, dependents, col_index=col_index,
+            )
             term_years = calculate_tiered_standard_term(effective_principal)
-            result = calculate_standard_repayment(effective_principal, interest_rate, term_years)
             cols = st.columns(3)
             cols[0].metric("Fixed Term (by balance)", f"{term_years} yrs")
             cols[1].metric("Monthly Payment", fmt_money(result["monthly_payment"]))
@@ -3190,9 +3256,11 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
                 "Dependents", min_value=0, max_value=10, value=0, key=f"rap_dependents_{key_suffix}",
                 help="Reduces your RAP payment by $50/month per dependent (real OBBBA provision).",
             )
+            result, roi_result_2026 = compute_future_plan_result(
+                scenario, major_name, interest_rate, future_plan, dependents, col_index=col_index,
+            )
             gross_year1 = get_annual_salary_for_year(major_name, 0)
             rap = calculate_rap_payment(gross_year1, dependents)
-            result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents)
             cols = st.columns(3)
             cols[0].metric("Monthly Payment (Year 1 income)", fmt_money(rap["monthly_payment"]))
             cols[1].metric("Payoff / Forgiveness Timeline", f"{result['payoff_years']:.1f} yrs")
@@ -3209,8 +3277,6 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
             use_container_width=True, key=f"future_balance_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
         )
 
-        roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
-                                         scenario["total_investment"], col_index=col_index)
         st.markdown("**10-Year Financial Position Under This Plan**")
         st.caption(
             "Recomputed using this 2026 plan's actual payments, instead of "
@@ -3355,6 +3421,7 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
         "apprenticeship_net_position": alt_net_position,
         "apprenticeship_earnings_premium": alt_earnings_premium,
         "apprenticeship_used_profession_data": uses_own_profession_data,
+        "apprenticeship_label": alt_label,
     }
 
 
@@ -3433,6 +3500,7 @@ if compare_mode:
         major_b, school_name_b, in_state_b, coa_per_year_b, personal_contribution_per_year_b,
         grants_per_year_b, interest_rate_b, repayment_strategy_b, scenario_b,
         module_context=module_context, start_year_a=start_year_a, start_year_b=start_year_b,
+        col_index=city_info["col_index"],
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
@@ -3672,6 +3740,7 @@ else:
         interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
         scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
         module_context=module_context, start_year_a=start_year_a, monthly_payment=monthly_payment,
+        col_index=city_info["col_index"],
     )
     with top_actions_container:
         single_pdf_col, single_share_col = st.columns(2)
