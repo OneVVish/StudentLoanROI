@@ -449,13 +449,34 @@ def fmt_pct(value):
     return f"{value:.1f}%"
 
 
-def centered_columns(df: pd.DataFrame) -> dict:
-    """`column_config` for st.dataframe that center-aligns every column --
-    st.dataframe otherwise left-aligns text and right-aligns numbers by
-    default, which looks inconsistent across this app's tables (all of
-    which are small, formatted-string summaries, not data to scan
-    numerically)."""
-    return {col: st.column_config.Column(alignment="center") for col in df.columns}
+def render_centered_table(df: pd.DataFrame) -> None:
+    """Renders df as a plain HTML table with every column -- including the
+    header row -- center-aligned. st.dataframe's own column_config has an
+    `alignment` option, but it only affects cell values, never the header
+    text (confirmed visually: st.dataframe(..., column_config={col:
+    st.column_config.Column(alignment="center")}) still left-aligns every
+    header label), so it can't satisfy a "center the headers too" request.
+    Plain HTML with inline CSS is the only way to control both. This loses
+    st.dataframe's sort/hide-columns/download-as-CSV toolbar, an acceptable
+    trade for these small, purely-for-display summary tables."""
+    header_cells = "".join(
+        f'<th style="padding:8px 12px; text-align:center; background:#f0f2f6; '
+        f'border:1px solid #e6e6e6; font-weight:600;">{xml_escape(str(col))}</th>'
+        for col in df.columns
+    )
+    body_rows = "".join(
+        "<tr>" + "".join(
+            f'<td style="padding:8px 12px; text-align:center; border:1px solid #e6e6e6;">'
+            f'{xml_escape(str(value))}</td>'
+            for value in row
+        ) + "</tr>"
+        for row in df.itertuples(index=False)
+    )
+    st.markdown(
+        f'<table style="width:100%; border-collapse:collapse;">'
+        f"<thead><tr>{header_cells}</tr></thead><tbody>{body_rows}</tbody></table>",
+        unsafe_allow_html=True,
+    )
 
 
 def get_major_growth_rate(major_name: str) -> float:
@@ -622,7 +643,8 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
                             major_b=None, loan_amount_b=None, interest_rate_b=None,
                             repayment_strategy_b=None, personal_contribution_b=None,
                             school_name_b=None, inflation_rate_b=None,
-                            grants_per_year_b=None, scenario_b=None) -> dict:
+                            grants_per_year_b=None, scenario_b=None,
+                            start_year_a=None, start_year_b=None) -> dict:
     """Flat {column_name: value} dict of Scenario A's (and, when compare_mode
     is True, Scenario B's) inputs/outputs -- the exact shape both
     survey_responses and pdf_downloads store, so the "Submit Feedback" form
@@ -649,6 +671,7 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         "scenario_a_personal_contribution": personal_contribution,
         "scenario_a_coa_inflation_rate": inflation_rate_a,
         "scenario_a_grants_per_year": grants_per_year_a,
+        "scenario_a_start_year": start_year_a,
     }
 
     # Scenario B / roi_pct_delta only exist when Compare Mode is on at
@@ -673,6 +696,7 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
             "scenario_b_personal_contribution": personal_contribution_b,
             "scenario_b_coa_inflation_rate": inflation_rate_b,
             "scenario_b_grants_per_year": grants_per_year_b,
+            "scenario_b_start_year": start_year_b,
         })
         roi_a = scenario_a["roi_result"]["roi_pct"]
         roi_b = scenario_b["roi_result"]["roi_pct"]
@@ -685,7 +709,8 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
                         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                         interest_rate, repayment_strategy, compare_mode, major_b=None, school_name_b=None,
                         in_state_b=None, coa_per_year_b=None, personal_contribution_per_year_b=None,
-                        grants_per_year_b=None, interest_rate_b=None, repayment_strategy_b=None) -> dict:
+                        grants_per_year_b=None, interest_rate_b=None, repayment_strategy_b=None,
+                        start_year_a=None, start_year_b=None) -> dict:
     """Every Scenario A (and, when compare_mode, Scenario B) input as a flat
     {query_param_name: value} dict of strings -- the exact shape
     get_shared_default() reads back on a fresh visit, so a "Share Scenario"
@@ -711,6 +736,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "rate": str(interest_rate),
         "strategy": repayment_strategy,
         "compare": "1" if compare_mode else "0",
+        "start_year": str(start_year_a),
     }
     if compare_mode:
         params.update({
@@ -722,6 +748,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
             "grants_b": str(grants_per_year_b),
             "rate_b": str(interest_rate_b),
             "strategy_b": repayment_strategy_b,
+            "start_year_b": str(start_year_b),
         })
     return params
 
@@ -1774,7 +1801,7 @@ def _pdf_table(rows: list, header: bool = True) -> Table:
 def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
                        personal_contribution_per_year, grants_per_year,
                        interest_rate_pct, repayment_strategy_label,
-                       career_stage=None, city_name=None) -> list:
+                       career_stage=None, city_name=None, start_year=None) -> list:
     rows = [
         ["Profession", major_name],
         ["School", school_name or "(not entered)"],
@@ -1784,6 +1811,8 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
         rows.append(["City / Metro Area", city_name])
     if career_stage is not None:
         rows.append(["Career Stage Snapshot", career_stage])
+    if start_year is not None:
+        rows.append(["Year Starting Undergraduate School", str(start_year)])
     rows += [
         ["Cost of Attendance (per year)", fmt_money(coa_per_year)],
         ["Personal Contribution (per year)", fmt_money(personal_contribution_per_year)],
@@ -1833,7 +1862,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
                                 scenario, take_home, gross, disposable_nominal,
-                                disposable_col_adjusted, module_context: dict = None) -> bytes:
+                                disposable_col_adjusted, module_context: dict = None,
+                                start_year_a=None) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table), Real-World Take-Home, and
     10-Year Financial Position -- tables/metrics only, no chart images
@@ -1853,14 +1883,16 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         _pdf_table(
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
-                               interest_rate, repayment_strategy, career_stage_label, city),
+                               interest_rate, repayment_strategy, career_stage_label, city,
+                               start_year=start_year_a),
             header=False,
         ),
         Spacer(1, 12),
         Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["Heading2"]),
         _pdf_table([
             ["Year", "Cost of Attendance", "Loan Amount This Year"],
-            *[[row["year"], fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
+            *[[f"{row['year']} ({start_year_a + row['year'] - 1})" if start_year_a is not None else row["year"],
+               fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
         ]),
         Spacer(1, 6),
         Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["Normal"]),
@@ -1916,7 +1948,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  repayment_strategy, scenario_a, major_b, school_name_b, in_state_b,
                                  coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b,
                                  interest_rate_b, repayment_strategy_b, scenario_b,
-                                 module_context: dict = None) -> bytes:
+                                 module_context: dict = None, start_year_a=None, start_year_b=None) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables (no chart images -- see the section
     comment above for why)."""
@@ -1928,21 +1960,23 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             styles["Italic"],
         ),
         Spacer(1, 12),
-        Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']} ({now_local().year})", styles["Heading2"]),
+        Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']}", styles["Heading2"]),
         _pdf_table(
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
-                               interest_rate, repayment_strategy, city_name=city),
+                               interest_rate, repayment_strategy, city_name=city,
+                               start_year=start_year_a),
             header=False,
         ),
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_a),
         Spacer(1, 12),
-        Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']} ({now_local().year})", styles["Heading2"]),
+        Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["Heading2"]),
         _pdf_table(
             _pdf_profile_rows(major_b, school_name_b, in_state_b, coa_per_year_b,
                                personal_contribution_per_year_b, grants_per_year_b,
-                               interest_rate_b, repayment_strategy_b, city_name=city),
+                               interest_rate_b, repayment_strategy_b, city_name=city,
+                               start_year=start_year_b),
             header=False,
         ),
         Spacer(1, 6),
@@ -2198,6 +2232,19 @@ else:
              "inflation rate below. Auto-fills if we found your school "
              "above.",
     )
+start_year_options_a = list(range(now_local().year, now_local().year + 8))
+shared_start_year_a = get_shared_int("start_year", now_local().year)
+default_start_year_a_index = (
+    start_year_options_a.index(shared_start_year_a) if shared_start_year_a in start_year_options_a else 0
+)
+start_year_a = st.sidebar.selectbox(
+    "Year Starting Undergraduate School", start_year_options_a, index=default_start_year_a_index,
+    key="start_year_a",
+    help="If you won't start college right away, Cost of Attendance above "
+         "gets projected forward to this year using the estimated COA "
+         "inflation rate below, before growing further across all 4 years "
+         "of enrollment. Leave at the current year for no adjustment.",
+)
 personal_contribution_per_year_a = st.sidebar.number_input(
     "Personal Contribution (per year, $)", min_value=0, max_value=100000,
     value=get_shared_int("pc", 0), step=500,
@@ -2226,11 +2273,28 @@ inflation_rate_a = (
     DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
     else estimate_coa_inflation_rate(school_name_a, scorecard_api_key, control_type_a)
 )
-computed_loan_amount_a = compute_total_loan_amount(coa_per_year_a, personal_contribution_per_year_a,
+# Projects today's Cost of Attendance forward to the year enrollment
+# actually starts, using the same real inflation estimate that already
+# grows COA across the 4 undergrad years below -- a no-op (multiplier of
+# exactly 1.0) when start_year_a is the current year, so this changes
+# nothing for the common case of starting right away.
+years_until_start_a = max(start_year_a - now_local().year, 0)
+effective_coa_per_year_a = coa_per_year_a * (1 + inflation_rate_a) ** years_until_start_a
+computed_loan_amount_a = compute_total_loan_amount(effective_coa_per_year_a, personal_contribution_per_year_a,
                                                     grants_per_year_a, inflation_rate_a)
 personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
+if years_until_start_a > 0:
+    coa_projection_note = (
+        f"Today's Year 1 COA: {fmt_money(coa_per_year_a)} → projected to "
+        f"{fmt_money(effective_coa_per_year_a)} by {start_year_a} "
+        f"(est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr × {years_until_start_a} yrs). "
+    )
+else:
+    coa_projection_note = ""
 st.sidebar.caption((
-    f"Year 1: {fmt_money(coa_per_year_a)} COA − {fmt_money(personal_contribution_per_year_a)} personal "
+    f"{coa_projection_note}"
+    f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
+    f"{fmt_money(personal_contribution_per_year_a)} personal "
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
     f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_a)}** loan, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
@@ -2541,6 +2605,19 @@ if compare_mode:
                      "using the estimated COA inflation rate below. "
                      "Auto-fills if we found your school above.",
             )
+        start_year_options_b = list(range(now_local().year, now_local().year + 8))
+        shared_start_year_b = get_shared_int("start_year_b", now_local().year)
+        default_start_year_b_index = (
+            start_year_options_b.index(shared_start_year_b) if shared_start_year_b in start_year_options_b else 0
+        )
+        start_year_b = st.selectbox(
+            "Year Starting Undergraduate School", start_year_options_b, index=default_start_year_b_index,
+            key="start_year_b",
+            help="If you won't start college right away, Cost of Attendance above "
+                 "gets projected forward to this year using the estimated COA "
+                 "inflation rate below, before growing further across all 4 years "
+                 "of enrollment. Leave at the current year for no adjustment.",
+        )
         personal_contribution_per_year_b = st.number_input(
             "Personal Contribution (per year, $)", min_value=0, max_value=100000,
             value=get_shared_int("pc_b", 0), step=500,
@@ -2564,11 +2641,23 @@ if compare_mode:
             DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
             else estimate_coa_inflation_rate(school_name_b, scorecard_api_key, control_type_b)
         )
-        computed_loan_amount_b = compute_total_loan_amount(coa_per_year_b, personal_contribution_per_year_b,
+        years_until_start_b = max(start_year_b - now_local().year, 0)
+        effective_coa_per_year_b = coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
+        computed_loan_amount_b = compute_total_loan_amount(effective_coa_per_year_b, personal_contribution_per_year_b,
                                                             grants_per_year_b, inflation_rate_b)
         personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
+        if years_until_start_b > 0:
+            coa_projection_note_b = (
+                f"Today's Year 1 COA: {fmt_money(coa_per_year_b)} → projected to "
+                f"{fmt_money(effective_coa_per_year_b)} by {start_year_b} "
+                f"(est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr × {years_until_start_b} yrs). "
+            )
+        else:
+            coa_projection_note_b = ""
         st.caption((
-            f"Year 1: {fmt_money(coa_per_year_b)} COA − {fmt_money(personal_contribution_per_year_b)} personal "
+            f"{coa_projection_note_b}"
+            f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
+            f"{fmt_money(personal_contribution_per_year_b)} personal "
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
             f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
@@ -2628,6 +2717,14 @@ st.info(
     "anything. Everything below updates instantly as you change it, no button to click."
 )
 
+# Reserved here, at the top of the page, so the Download PDF Report / Share
+# Scenario buttons render in this position even though the code that fills
+# them in runs much later (after the PDF bytes and share params are actually
+# computed) -- st.container() is position-anchored: content written into a
+# container later in the script still renders wherever the container was
+# first created, not wherever that code physically executes.
+top_actions_container = st.container()
+
 # ---- 5a. Admin Analytics Dashboard (hidden behind sidebar checkbox) ------
 
 if admin_enabled:
@@ -2670,7 +2767,8 @@ def render_school_lookup(container, school_name: str, label: str):
             coa_text = (
                 f"**Scenario {label}: {coa_match['INSTNM']}** ({coa_match['control_type']}) — "
                 f"In-state Cost of Attendance: {fmt_money(coa_match['in_state_coa'])} | "
-                f"Out-of-state Cost of Attendance: {fmt_money(coa_match['out_of_state_coa'])}"
+                f"Out-of-state Cost of Attendance: {fmt_money(coa_match['out_of_state_coa'])} "
+                f"({now_local().year})"
             ).replace("$", r"\$")
             st.info(coa_text)
         else:
@@ -2741,7 +2839,7 @@ def render_scenario_panel(column, scenario: dict, label: str):
     hand-copied -- this is the same card layout section 5c uses for the
     single-scenario view, just parameterized and column-scoped."""
     with column:
-        st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']} ({now_local().year})**")
+        st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']}**")
 
         for caption in get_investment_captions(scenario):
             st.caption(caption)
@@ -2919,10 +3017,7 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
             "City": c, "CoL Index": info["col_index"],
             "COL-Adjusted Disposable Income (annual)": fmt_money(disposable),
         })
-    col_rows_df = pd.DataFrame(col_rows)
-    st.dataframe(
-        col_rows_df, hide_index=True, use_container_width=True, column_config=centered_columns(col_rows_df),
-    )
+    render_centered_table(pd.DataFrame(col_rows))
 
     st.divider()
     st.markdown("**Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)**")
@@ -3006,44 +3101,46 @@ if compare_mode:
         grants_per_year_a, interest_rate, repayment_strategy, scenario_a,
         major_b, school_name_b, in_state_b, coa_per_year_b, personal_contribution_per_year_b,
         grants_per_year_b, interest_rate_b, repayment_strategy_b, scenario_b,
-        module_context=module_context,
+        module_context=module_context, start_year_a=start_year_a, start_year_b=start_year_b,
     )
-    compare_pdf_col, compare_share_col = st.columns(2)
-    compare_pdf_col.download_button(
-        "📄 Download PDF Report", data=compare_pdf_bytes,
-        file_name=f"{major.replace(' ', '_')}_vs_{major_b.replace(' ', '_')}_comparison_report.pdf",
-        mime="application/pdf", use_container_width=True, key="download_pdf_compare",
-        on_click=lambda: save_pdf_download({**build_scenario_context(
-            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
-            school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
-            compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
-            interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
-            personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
-            inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
-            scenario_b=scenario_b,
-        ), **module_context}),
-    )
-    if compare_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_compare"):
-        st.query_params.from_dict(build_share_params(
-            career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
-            coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
-            interest_rate, repayment_strategy, True, major_b=major_b, school_name_b=school_name_b,
-            in_state_b=in_state_b, coa_per_year_b=coa_per_year_b,
-            personal_contribution_per_year_b=personal_contribution_per_year_b,
-            grants_per_year_b=grants_per_year_b, interest_rate_b=interest_rate_b,
-            repayment_strategy_b=repayment_strategy_b,
-        ))
-        save_scenario_share({**build_scenario_context(
-            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
-            school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
-            compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
-            interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
-            personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
-            inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
-            scenario_b=scenario_b,
-        ), **module_context})
-        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
-        st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact comparison.")
+    with top_actions_container:
+        compare_pdf_col, compare_share_col = st.columns(2)
+        compare_pdf_col.download_button(
+            "📄 Download PDF Report", data=compare_pdf_bytes,
+            file_name=f"{major.replace(' ', '_')}_vs_{major_b.replace(' ', '_')}_comparison_report.pdf",
+            mime="application/pdf", use_container_width=True, key="download_pdf_compare",
+            on_click=lambda: save_pdf_download({**build_scenario_context(
+                major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+                interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+                personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+                inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+                scenario_b=scenario_b, start_year_a=start_year_a, start_year_b=start_year_b,
+            ), **module_context}),
+        )
+        if compare_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_compare"):
+            st.query_params.from_dict(build_share_params(
+                career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+                coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+                interest_rate, repayment_strategy, True, major_b=major_b, school_name_b=school_name_b,
+                in_state_b=in_state_b, coa_per_year_b=coa_per_year_b,
+                personal_contribution_per_year_b=personal_contribution_per_year_b,
+                grants_per_year_b=grants_per_year_b, interest_rate_b=interest_rate_b,
+                repayment_strategy_b=repayment_strategy_b,
+                start_year_a=start_year_a, start_year_b=start_year_b,
+            ))
+            save_scenario_share({**build_scenario_context(
+                major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+                interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+                personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+                inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+                scenario_b=scenario_b, start_year_a=start_year_a, start_year_b=start_year_b,
+            ), **module_context})
+            components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+            st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact comparison.")
 else:
     scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                          personal_contribution, city_info["col_index"])
@@ -3061,22 +3158,19 @@ else:
         st.caption(loan_caption)
 
     loan_schedule_a = compute_loan_schedule_by_year(
-        coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a
+        effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a
     )
     st.caption(
         "Here's how your loan builds up year by year -- Cost of Attendance "
         "grows by the estimated inflation rate each year, while Personal "
         "Contribution and Grants & Scholarships stay the same."
     )
-    loan_schedule_df = pd.DataFrame([
-        {"Year": row["year"], "Cost of Attendance": fmt_money(row["coa"]),
+    render_centered_table(pd.DataFrame([
+        {"Year": f"{row['year']} ({start_year_a + row['year'] - 1})",
+         "Cost of Attendance": fmt_money(row["coa"]),
          "Loan Amount This Year": fmt_money(row["loan_amount"])}
         for row in loan_schedule_a
-    ])
-    st.dataframe(
-        loan_schedule_df, hide_index=True, use_container_width=True,
-        column_config=centered_columns(loan_schedule_df),
-    )
+    ]))
     st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
     if abs(loan_amount - computed_loan_amount_a) >= 1:
         st.caption((
@@ -3241,30 +3335,33 @@ else:
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
         interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
         scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
-        module_context=module_context,
+        module_context=module_context, start_year_a=start_year_a,
     )
-    single_pdf_col, single_share_col = st.columns(2)
-    single_pdf_col.download_button(
-        "📄 Download PDF Report", data=single_pdf_bytes,
-        file_name=f"{major.replace(' ', '_')}_payoff_report.pdf", mime="application/pdf",
-        use_container_width=True, key="download_pdf_single",
-        on_click=lambda: save_pdf_download({**build_scenario_context(
-            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
-            school_name_a, inflation_rate_a, grants_per_year_a, scenario,
-        ), **module_context}),
-    )
-    if single_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_single"):
-        st.query_params.from_dict(build_share_params(
-            career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
-            coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
-            interest_rate, repayment_strategy, False,
-        ))
-        save_scenario_share({**build_scenario_context(
-            major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
-            school_name_a, inflation_rate_a, grants_per_year_a, scenario,
-        ), **module_context})
-        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
-        st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact scenario.")
+    with top_actions_container:
+        single_pdf_col, single_share_col = st.columns(2)
+        single_pdf_col.download_button(
+            "📄 Download PDF Report", data=single_pdf_bytes,
+            file_name=f"{major.replace(' ', '_')}_payoff_report.pdf", mime="application/pdf",
+            use_container_width=True, key="download_pdf_single",
+            on_click=lambda: save_pdf_download({**build_scenario_context(
+                major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+                start_year_a=start_year_a,
+            ), **module_context}),
+        )
+        if single_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_single"):
+            st.query_params.from_dict(build_share_params(
+                career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+                coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+                interest_rate, repayment_strategy, False, start_year_a=start_year_a,
+            ))
+            save_scenario_share({**build_scenario_context(
+                major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+                start_year_a=start_year_a,
+            ), **module_context})
+            components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+            st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact scenario.")
 
 st.divider()
 
@@ -3304,13 +3401,13 @@ if not st.session_state.survey_submitted:
                     interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
                     personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
                     inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
-                    scenario_b=scenario_b,
+                    scenario_b=scenario_b, start_year_b=start_year_b,
                 )
             context = {
                 **build_scenario_context(
                     major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                     school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
-                    **compare_mode_kwargs,
+                    start_year_a=start_year_a, **compare_mode_kwargs,
                 ),
                 **module_context,
             }
@@ -3559,6 +3656,20 @@ and the total loan is those four years added together:
 added up for all 4 years of an assumed bachelor's degree. Because tuition
 keeps rising while your personal contribution and any scholarships don't,
 the gap — and your loan — tends to grow a bit each year.
+
+**Accounting for a delayed start.** "Year Starting Undergraduate School"
+lets you model not starting college right away. If you pick a future year,
+the Cost of Attendance you entered (today's price) is first projected
+forward to that year using the same estimated COA inflation rate described
+above, *before* it's grown further across the 4 years of enrollment —
+`Effective Year-1 COA = Cost of Attendance × (1 + inflation rate)^(years
+until start)`. Leaving it at the current year changes nothing. Note that
+only Cost of Attendance is projected this way — starting/mid-career
+salaries, taxes, take-home pay, and cost-of-living figures throughout this
+tool are intentionally kept in **today's real dollars**, not projected
+forward, since there's no equally well-sourced wage-inflation estimate to
+apply the same way. This makes every dollar figure here a real (inflation-
+adjusted), apples-to-apples comparison rather than a nominal one.
 
 **Overriding the Total Loan Amount.** The "Total Loan Amount ($)" field
 right above Average Loan Interest Rate is pre-filled with that calculated
