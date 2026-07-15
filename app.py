@@ -206,6 +206,19 @@ MAJORS_CSV_PATH = "data/nyfed_majors_clean.csv"
 # ($105,210) -- see build_major_data for why that matters.
 METRO_CAREERS_CSV_PATH = "data/metro_careers_clean.csv"
 
+# Each city's overall wage level vs the nation (BLS all-occupations median /
+# the national $49,500), from `data_pipeline.py --metros`. Does two jobs
+# neither the COL index nor the per-occupation metro file can:
+#   - Scales the national high-school-graduate baseline. Without it, giving
+#     the degree a San Francisco wage while the baseline stays national puts
+#     SF's premium on one side of the scale only, and the degree looks better
+#     purely for being in an expensive city.
+#   - Localises Major mode, whose NY Fed wages are national with no per-city
+#     equivalent. An all-occupations index suits a major's mixed-occupation
+#     population, though it's a poor stand-in for a single occupation --
+#     which is why Career mode uses real per-metro wages instead.
+METRO_WAGE_INDEX_CSV_PATH = "data/metro_wage_index.csv"
+
 # How many years separate starting_salary from median_salary in each dataset.
 # BLS: the 25th-percentile-to-median reading this app has always used. NY Fed
 # carries its own span per row (18), since its two figures are age-band
@@ -256,6 +269,26 @@ def load_bls_careers(csv_path: str) -> dict:
         }
         for row in careers_df.itertuples()
     }
+
+
+@st.cache_data
+def load_metro_wage_index(csv_path: str) -> dict:
+    """{city: wage_index} from data_pipeline.py --metros. Missing file or
+    unknown city means 1.0 -- i.e. national, no adjustment -- so a bad deploy
+    degrades to the previous behaviour rather than to nonsense."""
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return {}
+    return {row.city: float(row.wage_index) for row in df.itertuples()}
+
+
+def get_metro_wage_index(city: str) -> float:
+    """How far this city's overall wage level sits above or below the nation.
+    1.0 for the national average, or for any city with no published index."""
+    if not city or city == "National Average":
+        return 1.0
+    return load_metro_wage_index(METRO_WAGE_INDEX_CSV_PATH).get(city, 1.0)
 
 
 @st.cache_data
@@ -355,7 +388,23 @@ def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER, city: str =
     in Career mode (which models medical school properly).
     """
     if mode == DATASET_MODE_MAJOR:
-        return load_nyfed_majors(MAJORS_CSV_PATH)
+        data = load_nyfed_majors(MAJORS_CSV_PATH)
+        # The NY Fed publishes national figures only, so unlike Career mode
+        # there are no real per-city wages to use -- an index is the only way
+        # to localise them. It suits this data better than it would an
+        # occupation: a major's salary describes people spread across many
+        # jobs, which is the population an all-occupations index measures.
+        # Still an estimate, and labelled as one on the page.
+        index = get_metro_wage_index(city)
+        if index != 1.0:
+            data = {
+                name: {**d,
+                       "starting_salary": d["starting_salary"] * index,
+                       "median_salary": d["median_salary"] * index,
+                       "wage_geography": city, "wage_index": index}
+                for name, d in data.items()
+            }
+        return data
 
     data = {**load_bls_careers(csv_path), **CURATED_MAJOR_DATA}
 
@@ -1893,7 +1942,8 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
 def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    total_investment: float, col_index: float = 100.0,
-                   years: int = ROI_WINDOW_YEARS) -> dict:
+                   years: int = ROI_WINDOW_YEARS,
+                   hs_wage_index: float = 1.0) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window) compared against a debt-free high school graduate's
@@ -1922,8 +1972,15 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     major_cumulative_earnings = sum(
         get_annual_salary_for_year(major_name, y) for y in range(years)
     )
+    # The baseline has to live in the same city as the graduate it's being
+    # compared to. HS_GRAD_SALARY is a national BLS figure, so a city that
+    # pays its workers 1.49x the national rate must move the baseline too --
+    # otherwise the metro wage premium lands on the degree's side of the
+    # scale only, and expensive cities flatter the degree for no real reason.
+    # hs_wage_index is that city's all-occupations wage level (see
+    # get_metro_wage_index); 1.0 is the national average, i.e. a no-op.
     hs_cumulative_earnings = sum(
-        HS_GRAD_SALARY * (1 + HS_GRAD_GROWTH_RATE) ** y for y in range(years)
+        HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** y for y in range(years)
     )
 
     major_net_position_nominal = major_cumulative_earnings - total_loan_payments_in_window
@@ -2024,7 +2081,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               interest_rate: float, repayment_strategy: str,
                               personal_contribution: float = 0.0,
                               col_index: float = 100.0,
-                              roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
+                              roi_window_years: int = ROI_WINDOW_YEARS,
+                              hs_wage_index: float = 1.0) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -2062,7 +2120,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
             effective_principal, interest_rate, major_name, roi_window_years=roi_window_years)
         strategy_label = "Income-Driven Repayment"
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
-                                total_investment, col_index=col_index, years=roi_window_years)
+                                total_investment, col_index=col_index, years=roi_window_years,
+                                hs_wage_index=hs_wage_index)
     return {
         "major": major_name,
         "strategy_label": strategy_label,
@@ -3624,10 +3683,15 @@ city = st.session_state["city_select"]
 # Metro wages are Career mode only: the NY Fed publishes no geography, so
 # Major mode's salaries are national and only its cost-of-living adjustment
 # varies by city.
-MAJOR_DATA = build_major_data(
-    careers_csv_path, mode=dataset_mode,
-    city=(city if dataset_mode == DATASET_MODE_CAREER else None),
-)
+# city goes to BOTH modes. Career mode uses it to look up real per-metro
+# occupation wages; Major mode uses it to scale its national NY Fed figures
+# by the city's wage index. Passing it to only one was a bug: the HS baseline
+# in calculate_roi is scaled by that same index either way, so withholding it
+# here left Major mode comparing a NATIONAL graduate salary against a San
+# Francisco high-school baseline -- the mirror image of the asymmetry this
+# whole change exists to remove, and it drove Computer Science in SF to a
+# -$122,146 premium.
+MAJOR_DATA = build_major_data(careers_csv_path, mode=dataset_mode, city=city)
 
 # Major mode is a single national dataset -- the NY Fed doesn't publish
 # per-state figures -- so fall back to Career mode's data if the majors CSV
@@ -4535,10 +4599,12 @@ if compare_mode:
     st.subheader("⚖️ Scenario Comparison")
     scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                            personal_contribution, city_info["col_index"],
-                                           roi_window_years=roi_horizon_years)
+                                           roi_window_years=roi_horizon_years,
+                                           hs_wage_index=get_metro_wage_index(city))
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
-                                           roi_window_years=roi_horizon_years)
+                                           roi_window_years=roi_horizon_years,
+                                           hs_wage_index=get_metro_wage_index(city))
 
     col_a, col_b = st.columns(2)
     render_scenario_panel(col_a, scenario_a, "A")
@@ -4650,7 +4716,8 @@ if compare_mode:
 else:
     scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                          personal_contribution, city_info["col_index"],
-                                         roi_window_years=roi_horizon_years)
+                                         roi_window_years=roi_horizon_years,
+                                         hs_wage_index=get_metro_wage_index(city))
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -4952,7 +5019,8 @@ if not st.session_state.survey_submitted:
             # exact click-time state.
             scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                                    personal_contribution, city_info["col_index"],
-                                                   roi_window_years=roi_horizon_years)
+                                                   roi_window_years=roi_horizon_years,
+                                                   hs_wage_index=get_metro_wage_index(city))
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
             # expander) -- referencing them outside an "if compare_mode:"
@@ -4962,7 +5030,8 @@ if not st.session_state.survey_submitted:
             if compare_mode:
                 scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                                        personal_contribution_b, city_info["col_index"],
-                                                       roi_window_years=roi_horizon_years)
+                                                       roi_window_years=roi_horizon_years,
+                                                       hs_wage_index=get_metro_wage_index(city))
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                     interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,

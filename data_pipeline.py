@@ -73,6 +73,14 @@ TOP_CODE_ANNUAL_WAGE = 239200
 # hand-curated majors.
 GROWTH_WINDOW_YEARS = 10
 
+# BLS's own national all-occupations median annual wage, the denominator of
+# the metro wage index (see build_metro_wage_index). Read straight off the
+# National release's o_group == "total" row -- "All Occupations", 154,187,380
+# workers, May 2024. Update it in the same pass as any release bump, and from
+# the SAME release as the metro file: mixing vintages here would tilt every
+# city's index by whatever wage growth happened in between.
+NATIONAL_ALL_OCCUPATIONS_MEDIAN = 49500
+
 # The app's CITY_DATA keys mapped to their BLS OEWS metropolitan area
 # titles, for --metros. Hardcoded here rather than derived, because BLS's
 # area titles are long, change wording between releases ("Nashville-
@@ -309,6 +317,54 @@ def build_metro_dataframe(xlsx_path: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def build_metro_wage_index(xlsx_path: str) -> pd.DataFrame:
+    """Each app city's overall wage level relative to the nation, from BLS's
+    own all-occupations median (the o_group == "total" row per area).
+
+    Two jobs, both of which the per-occupation metro file can't do:
+
+     1. The high-school-graduate baseline every comparison runs against is a
+        single national figure. Give the DEGREE a San Francisco wage while
+        the baseline stays national and San Francisco's premium lands on one
+        side of the scale only -- the degree looks better purely for being
+        in an expensive city. A high school graduate in SF earns more too.
+        This index scales that baseline.
+
+     2. Major mode's NY Fed wages are national and have no per-city
+        equivalent, so an index is the only way to localise them at all.
+        It happens to suit them: a major's salary describes people spread
+        across many occupations, which is exactly the population an
+        all-occupations index describes. (It would be a poor stand-in for a
+        single occupation -- which is why Career mode uses real per-metro
+        occupation wages instead.)
+
+    Not the cost-of-living index, which measures prices, not pay: San
+    Francisco's wage index is 1.49 against a 1.18 price index, and the
+    occupation-level premiums cluster near 1.49. Using prices to stand in for
+    pay understates high-wage metros by a third.
+
+    The denominator is BLS's published national all-occupations median from
+    the SAME release, so the index is internally consistent rather than
+    mixing vintages.
+    """
+    raw = load_bls_data(xlsx_path)
+    if "area_title" not in raw.columns:
+        raise ValueError("No 'area_title' column -- this isn't the BLS Metropolitan release.")
+
+    totals = raw[raw["o_group"].astype(str).str.strip().str.lower() == "total"].copy()
+    totals["a_median"] = clean_wage_column(totals["a_median"])
+
+    rows = []
+    for city, area in METRO_AREA_BY_CITY.items():
+        match = totals[totals["area_title"].astype(str) == area]
+        if match.empty or pd.isna(match["a_median"].iloc[0]):
+            raise ValueError(f"No all-occupations median for {city} ({area!r}).")
+        median = float(match["a_median"].iloc[0])
+        rows.append({"city": city, "all_occupations_median": median,
+                     "wage_index": median / NATIONAL_ALL_OCCUPATIONS_MEDIAN})
+    return pd.DataFrame(rows).sort_values("wage_index", ascending=False).reset_index(drop=True)
+
+
 def print_summary(df: pd.DataFrame) -> None:
     print()
     print(f"Total occupations processed: {len(df)}")
@@ -348,6 +404,7 @@ if __name__ == "__main__":
         if args.metros:
             print(f"Extracting {len(METRO_AREA_BY_CITY)} metro areas:")
             clean_df = build_metro_dataframe(args.input_xlsx)
+            index_df = build_metro_wage_index(args.input_xlsx)
         else:
             clean_df = build_clean_dataframe(args.input_xlsx, state=args.state)
     except FileNotFoundError:
@@ -362,5 +419,11 @@ if __name__ == "__main__":
         print(f"{clean_df.city.nunique()} cities, "
               f"{clean_df.occ_title.nunique()} distinct occupations, "
               f"median {clean_df.groupby('city').size().median():.0f} per city.")
+        index_path = str(Path(output_path).with_name("metro_wage_index.csv"))
+        index_df.to_csv(index_path, index=False)
+        print(f"\nWrote {len(index_df)} rows to {index_path} "
+              f"(all-occupations wage level vs the national ${NATIONAL_ALL_OCCUPATIONS_MEDIAN:,} median):")
+        print(index_df.head(4).to_string(index=False))
+        print(index_df.tail(2).to_string(index=False))
     else:
         print_summary(clean_df)
