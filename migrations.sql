@@ -139,3 +139,29 @@ alter table survey_responses add column if not exists major_explicitly_selected 
 alter table pdf_downloads    add column if not exists major_explicitly_selected boolean;
 alter table scenario_shares  add column if not exists major_explicitly_selected boolean;
 alter table scenario_events  add column if not exists major_explicitly_selected boolean;
+
+
+-- 2026-07-15: roi_horizon_years.
+--
+-- The ROI window used to be a fixed 10 years, and that constant was quietly
+-- deciding outcomes rather than measuring them: Medicine spends 4 years in
+-- school and 3 in residency, so a 10-year view counts 3 years of attending
+-- salary against 7 of training while repaying med school inside the same
+-- window, and reports a doctor as ~$146k behind a high school graduate. At
+-- 15 years the same model says +$469k. It's now a visitor-selected sidebar
+-- control (10/15/20/30), so the horizon has to be recorded alongside every
+-- result it produced.
+--
+-- Without this column, scenario_a_roi_pct and scenario_a_earnings_premium
+-- are not comparable across rows -- a 30-year ROI and a 10-year ROI are
+-- different quantities sharing a column name, and pooling them silently
+-- averages incommensurable numbers. Any analysis that strata-fies on ROI
+-- (the paper's H1 does) must group by or filter on this.
+--
+-- Rows predating this are NULL and were all computed at 10 years; treat NULL
+-- as 10 rather than dropping them, unlike major_explicitly_selected where
+-- NULL genuinely means unknown.
+alter table survey_responses add column if not exists roi_horizon_years integer;
+alter table pdf_downloads    add column if not exists roi_horizon_years integer;
+alter table scenario_shares  add column if not exists roi_horizon_years integer;
+alter table scenario_events  add column if not exists roi_horizon_years integer;

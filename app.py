@@ -205,6 +205,13 @@ IDR_MAX_TERM_YEARS = 20
 STANDARD_TERM_YEARS = 10
 ROI_WINDOW_YEARS = 10
 
+# Horizons offered by the sidebar's ROI Horizon selector. ROI_WINDOW_YEARS
+# stays the default (and every model function's default argument), so an
+# unset horizon reproduces the original fixed-10-year behaviour exactly.
+# 30 is the ceiling because it's where RAP forgiveness lands and past where
+# BLS wage data can honestly support a projection.
+ROI_HORIZON_OPTIONS = [10, 15, 20, 30]
+
 # Assumed bachelor's degree length, for converting the per-year Cost of
 # Attendance / Personal Contribution sidebar inputs into 4-year totals (the
 # figures every downstream calculation -- effective_principal, ROI,
@@ -752,7 +759,8 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
 
 def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy,
                             personal_contribution, school_name_a, inflation_rate_a,
-                            grants_per_year_a, scenario_a, compare_mode=False,
+                            grants_per_year_a, scenario_a, roi_horizon_years=ROI_WINDOW_YEARS,
+                            compare_mode=False,
                             major_b=None, loan_amount_b=None, interest_rate_b=None,
                             repayment_strategy_b=None, personal_contribution_b=None,
                             school_name_b=None, inflation_rate_b=None,
@@ -769,6 +777,11 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
     starting_salary = MAJOR_DATA[major]["starting_salary"]
     dti_ratio = round(loan_amount / starting_salary, 4) if starting_salary else None
     context = {
+        # The horizon every roi_pct/earnings_premium below was computed over.
+        # Without it those columns aren't comparable across rows: a 30-year
+        # ROI and a 10-year ROI are different quantities wearing the same
+        # column name, and pooling them would be meaningless.
+        "roi_horizon_years": roi_horizon_years,
         "scenario_a_school_name": school_name_a or None,
         "scenario_a_major": major,
         "scenario_a_loan_amount": loan_amount,
@@ -823,7 +836,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
                         interest_rate, repayment_strategy, compare_mode, major_b=None, school_name_b=None,
                         in_state_b=None, coa_per_year_b=None, personal_contribution_per_year_b=None,
                         grants_per_year_b=None, interest_rate_b=None, repayment_strategy_b=None,
-                        start_year_a=None, start_year_b=None) -> dict:
+                        start_year_a=None, start_year_b=None, roi_horizon_years=None) -> dict:
     """Every Scenario A (and, when compare_mode, Scenario B) input as a flat
     {query_param_name: value} dict of strings -- the exact shape
     get_shared_default() reads back on a fresh visit, so a "Share Scenario"
@@ -850,6 +863,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "strategy": repayment_strategy,
         "compare": "1" if compare_mode else "0",
         "start_year": str(start_year_a),
+        "horizon": str(roi_horizon_years),
     }
     if compare_mode:
         params.update({
@@ -1327,11 +1341,18 @@ def estimate_coa_inflation_rate(school_name: str, api_key: str, control_type) ->
 # ---- 2d. Financial Math: Standard Amortization ---------------------------
 
 def calculate_standard_repayment(principal: float, annual_rate_pct: float,
-                                  term_years: int = STANDARD_TERM_YEARS) -> dict:
+                                  term_years: int = STANDARD_TERM_YEARS,
+                                  roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """
     Fixed-payment amortization: the classic loan formula where a constant
     monthly payment is split between interest (on the remaining balance)
     and principal, fully retiring the loan in exactly `term_years`.
+
+    `term_years` and `roi_window_years` are unrelated tens and must not be
+    conflated: term_years is how long the loan actually runs (the federal
+    Standard plan's real 10-year term), while roi_window_years is how far
+    the ROI comparison looks, which the visitor now chooses. Only
+    total_paid_in_roi_window depends on the latter.
     """
     monthly_rate = annual_rate_pct / 100 / 12
     n_months = term_years * 12
@@ -1362,7 +1383,7 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
         "total_interest": total_interest,
         "payoff_years": schedule_df["month"].iloc[-1] / 12,
         "schedule": schedule_df,
-        "total_paid_in_roi_window": min(total_paid, monthly_payment * min(len(schedule_df), ROI_WINDOW_YEARS * 12)),
+        "total_paid_in_roi_window": min(total_paid, monthly_payment * min(len(schedule_df), roi_window_years * 12)),
         "forgiven_amount": 0.0,
     }
 
@@ -1373,7 +1394,8 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              major_name: str,
                              living_adjustment: float = IDR_LIVING_ADJUSTMENT,
                              payment_rate: float = IDR_PAYMENT_RATE,
-                             max_term_years: int = IDR_MAX_TERM_YEARS) -> dict:
+                             max_term_years: int = IDR_MAX_TERM_YEARS,
+                             roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """
     Models a payment as 10% of discretionary income (salary above a flat
     living allowance). Salary each year comes from get_annual_salary_for_year,
@@ -1401,7 +1423,7 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         balance = max(balance + interest - payment, 0.0)
 
         total_interest += interest
-        if month <= ROI_WINDOW_YEARS * 12:
+        if month <= roi_window_years * 12:
             total_paid_in_roi_window += payment
 
         schedule_rows.append({"month": month, "year": month / 12, "balance": balance, "payment": payment})
@@ -1459,7 +1481,8 @@ def calculate_rap_payment(agi: float, dependents: int = 0) -> dict:
 
 
 def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: str,
-                           dependents: int = 0, max_term_years: int = RAP_MAX_TERM_YEARS) -> dict:
+                           dependents: int = 0, max_term_years: int = RAP_MAX_TERM_YEARS,
+                           roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """Year-by-year RAP amortization: payment = calculate_rap_payment against
     that year's real salary (get_annual_salary_for_year), with RAP's real
     interest-waiver + up to $50/month government principal-match provisions
@@ -1483,7 +1506,7 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
         if principal_reduction < RAP_PRINCIPAL_MATCH_CAP:
             principal_reduction = min(balance, RAP_PRINCIPAL_MATCH_CAP)
         balance = max(balance - principal_reduction, 0.0)
-        if month <= ROI_WINDOW_YEARS * 12:
+        if month <= roi_window_years * 12:
             total_paid_in_roi_window += payment
         schedule_rows.append({"month": month, "year": month / 12, "balance": balance})
         if balance <= 0:
@@ -1637,7 +1660,8 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
 def compute_scenario_results(major_name: str, loan_amount: float,
                               interest_rate: float, repayment_strategy: str,
                               personal_contribution: float = 0.0,
-                              col_index: float = 100.0) -> dict:
+                              col_index: float = 100.0,
+                              roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -1654,17 +1678,28 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     national average = no-op) is passed straight through to calculate_roi,
     which adjusts both sides of the ROI comparison -- see that function's
     docstring.
+
+    roi_window_years (the visitor's chosen ROI Horizon) goes to BOTH the
+    repayment simulation and calculate_roi, and they have to agree: the
+    repayment side decides how many payments land inside the window, the ROI
+    side decides how many years of earnings it counts. Pass it to only one
+    and you get a silent mismatch -- e.g. 30 years of a doctor's earnings
+    against 10 years of their payments -- that looks like a plausible number
+    and isn't. Note the repayment *strategy* named "Standard 10-Year" is a
+    real 10-year loan term and is unrelated to this window.
     """
     effective_principal = get_effective_principal(major_name, loan_amount)
     total_investment = effective_principal + personal_contribution
     if repayment_strategy == "Standard 10-Year":
-        repayment_result = calculate_standard_repayment(effective_principal, interest_rate)
+        repayment_result = calculate_standard_repayment(
+            effective_principal, interest_rate, roi_window_years=roi_window_years)
         strategy_label = "Standard 10-Year"
     else:
-        repayment_result = calculate_idr_repayment(effective_principal, interest_rate, major_name)
+        repayment_result = calculate_idr_repayment(
+            effective_principal, interest_rate, major_name, roi_window_years=roi_window_years)
         strategy_label = "Income-Driven Repayment"
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
-                                total_investment, col_index=col_index)
+                                total_investment, col_index=col_index, years=roi_window_years)
     return {
         "major": major_name,
         "strategy_label": strategy_label,
@@ -1786,14 +1821,16 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
     return fig
 
 
-def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str):
+def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str,
+                         roi_window_years: int):
+    y_label = f"{roi_window_years}-Year Net Position ($)"
     comparison_df = pd.DataFrame({
         "Group": ["High School Graduate", major_name],
-        "10-Year Net Position ($)": [hs_net_position, major_net_position],
+        y_label: [hs_net_position, major_net_position],
     })
     fig = px.bar(
-        comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
-        title="10-Year Net Position vs. High School Baseline",
+        comparison_df, x="Group", y=y_label, color="Group",
+        title=f"{roi_window_years}-Year Net Position vs. High School Baseline",
         text_auto=".2s",
     )
     fig.update_layout(
@@ -1821,16 +1858,18 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
 
 def build_scenario_comparison_roi_chart(hs_net_position: float,
                                          net_a: float, label_a: str,
-                                         net_b: float, label_b: str):
+                                         net_b: float, label_b: str,
+                                         roi_window_years: int):
     """3-bar version of build_roi_bar_chart: HS-grad baseline plus both
     scenarios, for comparing net financial position directly."""
+    y_label = f"{roi_window_years}-Year Net Position ($)"
     comparison_df = pd.DataFrame({
         "Group": ["High School Graduate", label_a, label_b],
-        "10-Year Net Position ($)": [hs_net_position, net_a, net_b],
+        y_label: [hs_net_position, net_a, net_b],
     })
     fig = px.bar(
-        comparison_df, x="Group", y="10-Year Net Position ($)", color="Group",
-        title="10-Year Net Position: Scenario Comparison",
+        comparison_df, x="Group", y=y_label, color="Group",
+        title=f"{roi_window_years}-Year Net Position: Scenario Comparison",
         text_auto=".2s",
     )
     fig.update_layout(
@@ -2004,14 +2043,15 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     return _pdf_image_from_figure(fig)
 
 
-def build_pdf_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str) -> Image:
+def build_pdf_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str,
+                             roi_window_years: int) -> Image:
     """PDF counterpart to build_roi_bar_chart."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
     groups = ["High School Graduate", major_name]
     values = [hs_net_position, major_net_position]
     ax.bar(groups, values, color=["#636EFA", "#EF553B"])
-    ax.set_title("10-Year Net Position vs. High School Baseline")
-    ax.set_ylabel("10-Year Net Position ($)")
+    ax.set_title(f"{roi_window_years}-Year Net Position vs. High School Baseline")
+    ax.set_ylabel(f"{roi_window_years}-Year Net Position ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
     ax.tick_params(axis="x", labelsize=9)
     fig.autofmt_xdate(rotation=10, ha="center")
@@ -2020,14 +2060,15 @@ def build_pdf_roi_bar_chart(hs_net_position: float, major_net_position: float, m
 
 def build_pdf_scenario_comparison_roi_chart(hs_net_position: float,
                                              net_a: float, label_a: str,
-                                             net_b: float, label_b: str) -> Image:
+                                             net_b: float, label_b: str,
+                                             roi_window_years: int) -> Image:
     """PDF counterpart to build_scenario_comparison_roi_chart."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
     groups = ["High School Graduate", label_a, label_b]
     values = [hs_net_position, net_a, net_b]
     ax.bar(groups, values, color=["#636EFA", "#EF553B", "#00CC96"])
-    ax.set_title("10-Year Net Position: Scenario Comparison")
-    ax.set_ylabel("10-Year Net Position ($)")
+    ax.set_title(f"{roi_window_years}-Year Net Position: Scenario Comparison")
+    ax.set_ylabel(f"{roi_window_years}-Year Net Position ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
     ax.tick_params(axis="x", labelsize=9)
     fig.autofmt_xdate(rotation=10, ha="center")
@@ -2156,7 +2197,8 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
 def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_name_a: str = None,
                           interest_rate_a: float = None, scenario_b: dict = None, major_name_b: str = None,
                           interest_rate_b: float = None, col_index: float = 100.0,
-                          key_suffix_a: str = "a", key_suffix_b: str = "b") -> list:
+                          key_suffix_a: str = "a", key_suffix_b: str = "b",
+                          roi_window_years: int = ROI_WINDOW_YEARS) -> list:
     """Optional PDF section(s) for whichever advanced modules were active --
     guarded per-module (see build_module_context) so a PDF generated with
     every module off is unchanged from before these modules existed.
@@ -2204,19 +2246,21 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
                 dependents = st.session_state.get(f"rap_dependents_{suffix}", 0)
                 result, roi_2026 = compute_future_plan_result(
                     scenario, major_name, rate, module_context[plan_key], dependents, col_index=col_index,
+                    roi_window_years=roi_window_years,
                 )
                 elements += [
                     Spacer(1, 12),
                     build_pdf_balance_chart(result["schedule"], module_context[plan_key]),
                     Spacer(1, 12),
-                    build_pdf_roi_bar_chart(roi_2026["hs_net_position"], roi_2026["major_net_position"], major_name),
+                    build_pdf_roi_bar_chart(roi_2026["hs_net_position"], roi_2026["major_net_position"], major_name,
+                                             roi_window_years),
                 ]
     if module_context.get("apprenticeship_active"):
         elements += [
             Spacer(1, 12),
             Paragraph("Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)", styles["Heading2"]),
             _pdf_table([
-                ["10-Yr Net Position (COL-Adjusted)", "Earnings Premium vs. HS Grad"],
+                [f"{roi_window_years}-Yr Net Position (COL-Adjusted)", "Earnings Premium vs. HS Grad"],
                 [fmt_money(module_context["apprenticeship_net_position"]),
                  fmt_money(module_context["apprenticeship_earnings_premium"])],
             ]),
@@ -2228,6 +2272,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
                     scenario_a["roi_result"]["hs_net_position"],
                     scenario_a["roi_result"]["major_net_position"], major_name_a,
                     module_context["apprenticeship_net_position"], module_context["apprenticeship_label"],
+                    roi_window_years,
                 ),
             ]
     return elements
@@ -2238,10 +2283,11 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
                                 scenario, take_home, gross, disposable_nominal,
                                 disposable_col_adjusted, module_context: dict = None,
-                                start_year_a=None, monthly_payment=None, col_index: float = 100.0) -> bytes:
+                                start_year_a=None, monthly_payment=None, col_index: float = 100.0,
+                                roi_window_years: int = ROI_WINDOW_YEARS) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
-    Take-Home (+ take-home charts), and 10-Year Financial Position (+ ROI
+    Take-Home (+ take-home charts), and the Financial Position section (+ ROI
     chart)."""
     styles = getSampleStyleSheet()
     repayment_result = scenario["repayment_result"]
@@ -2299,18 +2345,20 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         ]
     story += [
         Spacer(1, 12),
-        Paragraph(_strip_emoji("📊 10-Year Financial Position"), styles["Heading2"]),
+        Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["Heading2"]),
         _pdf_table([
-            ["High School Grad — 10-Yr Net Position", f"{major} — 10-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
+            [f"High School Grad — {roi_window_years}-Yr Net Position",
+             f"{major} — {roi_window_years}-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
             [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
              fmt_money(roi_result["earnings_premium"])],
         ]),
         Spacer(1, 12),
-        build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major),
+        build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
+                                 roi_window_years),
     ]
     story += _pdf_module_sections(
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
-        col_index=col_index, key_suffix_a="single",
+        col_index=col_index, key_suffix_a="single", roi_window_years=roi_window_years,
     )
 
     buffer = io.BytesIO()
@@ -2324,7 +2372,8 @@ def _pdf_scenario_metrics_table(scenario: dict) -> Table:
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
     return _pdf_table([
-        ["Monthly Payment", "Payoff Timeline", "Total Interest Paid", "10-Yr Earnings Premium (COL-Adj.)"],
+        ["Monthly Payment", "Payoff Timeline", "Total Interest Paid",
+         f"{roi_window_years}-Yr Earnings Premium (COL-Adj.)"],
         [
             fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
             f"{repayment_result['payoff_years']:.1f} yrs",
@@ -2340,7 +2389,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b,
                                  interest_rate_b, repayment_strategy_b, scenario_b,
                                  module_context: dict = None, start_year_a=None, start_year_b=None,
-                                 col_index: float = 100.0) -> bytes:
+                                 col_index: float = 100.0,
+                                 roi_window_years: int = ROI_WINDOW_YEARS) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, plus the loan-balance and
     10-year-net-position comparison charts."""
@@ -2383,12 +2433,13 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             scenario_a["roi_result"]["hs_net_position"],
             scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
             scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+            roi_window_years,
         ),
     ]
     story += _pdf_module_sections(
         module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
         scenario_b=scenario_b, major_name_b=major_b, interest_rate_b=interest_rate_b,
-        col_index=col_index,
+        col_index=col_index, roi_window_years=roi_window_years,
     )
 
     buffer = io.BytesIO()
@@ -2756,6 +2807,32 @@ repayment_strategy = st.sidebar.selectbox(
     help="Standard 10-Year: a fixed payment every month for 10 years. "
          "Income-Driven Repayment (IDR): your payment is based on your "
          "income instead, and whatever's left is forgiven after 20 years.",
+)
+
+# How far out every comparison on this page looks. Was a fixed 10 years, and
+# that horizon quietly decided the answer for any career that trains before
+# it earns: Medicine spends 4 years in school and 3 in residency, so a
+# 10-year view counts 3 years of an attending's salary against 7 of training
+# -- while repaying med school inside the same window -- and reports a doctor
+# as ~$146k BEHIND someone who skipped college. Stretch the window to 15 and
+# the same model says +$469k. The old fixed number wasn't measuring that
+# outcome so much as choosing it, which is the exact information asymmetry
+# this tool exists to attack. Only 3 of 836 occupations model a training
+# delay (Medicine, Law, Athletic Training), but they're the ones where the
+# horizon matters most.
+#
+# Not to be confused with the "Standard 10-Year" repayment strategy above:
+# that's a real 10-year loan term, and it doesn't move with this.
+roi_horizon_years = st.sidebar.selectbox(
+    "ROI Horizon", ROI_HORIZON_OPTIONS,
+    index=(ROI_HORIZON_OPTIONS.index(get_shared_int("horizon", ROI_WINDOW_YEARS))
+           if get_shared_int("horizon", ROI_WINDOW_YEARS) in ROI_HORIZON_OPTIONS
+           else ROI_HORIZON_OPTIONS.index(ROI_WINDOW_YEARS)),
+    format_func=lambda y: f"{y} years",
+    help="How far into the future every comparison on this page looks. "
+         "Careers that train before they earn (medicine, law) look worst at "
+         "10 years, because that's mostly training -- try 20 or 30 to see "
+         "the payoff those years are buying.",
 )
 
 st.sidebar.subheader("💼 Career")
@@ -3366,7 +3443,8 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
 
 
 def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: float,
-                                future_plan: str, dependents: int, col_index: float = 100.0) -> tuple:
+                                future_plan: str, dependents: int, col_index: float = 100.0,
+                                roi_window_years: int = ROI_WINDOW_YEARS) -> tuple:
     """Recomputes a 2026 plan's repayment schedule + ROI position -- shared
     by the on-screen render (_render_plan, inside
     render_future_proofing_section) and the PDF's module-section chart
@@ -3377,17 +3455,21 @@ def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: f
     effective_principal = scenario["effective_principal"]
     if future_plan == "2026 Tiered Standard Plan":
         term_years = calculate_tiered_standard_term(effective_principal)
-        result = calculate_standard_repayment(effective_principal, interest_rate, term_years)
+        result = calculate_standard_repayment(effective_principal, interest_rate, term_years,
+                                               roi_window_years=roi_window_years)
     else:
-        result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents)
+        result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents,
+                                        roi_window_years=roi_window_years)
     roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
-                                     scenario["total_investment"], col_index=col_index)
+                                     scenario["total_investment"], col_index=col_index,
+                                     years=roi_window_years)
     return result, roi_result_2026
 
 
 def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest_rate_a: float,
                                     scenario_b: dict = None, major_name_b: str = None,
-                                    interest_rate_b: float = None, col_index: float = 100.0) -> dict:
+                                    interest_rate_b: float = None, col_index: float = 100.0,
+                                    roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """2026 Federal Loan Framework & Macro Forecasting container (only
     rendered when enable_future_proofing is True). Returns the
     {column_name: value} fields for build_module_context. See the RAP_*
@@ -3410,6 +3492,7 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
         if future_plan == plan_options[0]:
             result, roi_result_2026 = compute_future_plan_result(
                 scenario, major_name, interest_rate, future_plan, dependents, col_index=col_index,
+                roi_window_years=roi_window_years,
             )
             term_years = calculate_tiered_standard_term(effective_principal)
             cols = st.columns(3)
@@ -3423,6 +3506,7 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
             )
             result, roi_result_2026 = compute_future_plan_result(
                 scenario, major_name, interest_rate, future_plan, dependents, col_index=col_index,
+                roi_window_years=roi_window_years,
             )
             gross_year1 = get_annual_salary_for_year(major_name, 0)
             rap = calculate_rap_payment(gross_year1, dependents)
@@ -3442,24 +3526,25 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
             use_container_width=True, key=f"future_balance_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
         )
 
-        st.markdown("**10-Year Financial Position Under This Plan**")
+        st.markdown(f"**{roi_window_years}-Year Financial Position Under This Plan**")
         st.caption(
             "Recomputed using this 2026 plan's actual payments, instead of "
             "your selected Repayment Strategy above -- same COL-adjusted "
-            "comparison as the main 10-Year Financial Position section."
+            f"comparison as the main {roi_window_years}-Year Financial Position section."
         )
         pos_cols = st.columns(3)
         pos_cols[0].metric(
-            "High School Grad — 10-Yr Net Position (No Loan)",
+            f"High School Grad — {roi_window_years}-Yr Net Position (No Loan)",
             fmt_money(roi_result_2026["hs_net_position"]),
         )
-        pos_cols[1].metric(f"{major_name} — 10-Yr Net Position", fmt_money(roi_result_2026["major_net_position"]))
+        pos_cols[1].metric(f"{major_name} — {roi_window_years}-Yr Net Position", fmt_money(roi_result_2026["major_net_position"]))
         pos_cols[2].metric(
             "Earnings Premium (COL-Adjusted)", fmt_money(roi_result_2026["earnings_premium"]),
             delta=fmt_pct(roi_result_2026["roi_pct"]) + " ROI" if roi_result_2026["roi_pct"] is not None else None,
         )
         st.plotly_chart(
-            build_roi_bar_chart(roi_result_2026["hs_net_position"], roi_result_2026["major_net_position"], major_name),
+            build_roi_bar_chart(roi_result_2026["hs_net_position"], roi_result_2026["major_net_position"], major_name,
+                                 roi_window_years),
             use_container_width=True, key=f"future_roi_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
         )
         return future_plan
@@ -3505,7 +3590,8 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
     return context
 
 
-def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index: float = 100.0) -> dict:
+def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index: float = 100.0,
+                                   roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark) --
     independent module. When major_name_a itself typically requires less
     than a bachelor's degree (per BLS's typical-entry-level-education data,
@@ -3529,7 +3615,7 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
         quick_facts = st.columns(2)
         quick_facts[0].metric("Starting Salary (BLS)", fmt_money(MAJOR_DATA[major_name_a]["starting_salary"]))
         quick_facts[1].metric("Assumed Loan for This Path", fmt_money(0))
-        alt_result = calculate_roi(major_name_a, 0, 0, col_index=col_index)
+        alt_result = calculate_roi(major_name_a, 0, 0, col_index=col_index, years=roi_window_years)
         alt_net_position = alt_result["major_net_position"]
         alt_earnings_premium = alt_result["earnings_premium"]
         alt_label = f"{major_name_a} (No 4-Yr Loan)"
@@ -3548,12 +3634,13 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
         quick_facts[3].metric("Typical Training Debt", fmt_money(APPRENTICESHIP_TYPICAL_DEBT))
         apprenticeship_result = calculate_apprenticeship_roi(
             scenario_a["roi_result"]["hs_net_position"], col_index=col_index,
+            years=roi_window_years,
         )
         alt_net_position = apprenticeship_result["apprentice_net_position"]
         alt_earnings_premium = apprenticeship_result["earnings_premium"]
         alt_label = "Trade Apprenticeship"
 
-    st.markdown(f"**10-Year Financial Position: {alt_label} vs. Your Path**")
+    st.markdown(f"**{roi_window_years}-Year Financial Position: {alt_label} vs. Your Path**")
     st.caption(
         "Same High School Graduate baseline and cost-of-living adjustment "
         "used everywhere else on this page." if uses_own_profession_data else
@@ -3565,18 +3652,18 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
     )
     pos_cols = st.columns(3)
     pos_cols[0].metric(
-        "High School Grad — 10-Yr Net Position (No Loan)",
+        f"High School Grad — {roi_window_years}-Yr Net Position (No Loan)",
         fmt_money(scenario_a["roi_result"]["hs_net_position"]),
     )
     pos_cols[1].metric(
-        f"{major_name_a} — 10-Yr Net Position", fmt_money(scenario_a["roi_result"]["major_net_position"]),
+        f"{major_name_a} — {roi_window_years}-Yr Net Position", fmt_money(scenario_a["roi_result"]["major_net_position"]),
     )
-    pos_cols[2].metric(f"{alt_label} — 10-Yr Net Position", fmt_money(alt_net_position))
+    pos_cols[2].metric(f"{alt_label} — {roi_window_years}-Yr Net Position", fmt_money(alt_net_position))
     st.plotly_chart(
         build_scenario_comparison_roi_chart(
             scenario_a["roi_result"]["hs_net_position"],
             scenario_a["roi_result"]["major_net_position"], major_name_a,
-            alt_net_position, alt_label,
+            alt_net_position, alt_label, roi_window_years,
         ),
         use_container_width=True, key="apprenticeship_roi_chart", config=PLOTLY_CHART_CONFIG,
     )
@@ -3615,9 +3702,11 @@ def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
 if compare_mode:
     st.subheader("⚖️ Scenario Comparison")
     scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                           personal_contribution, city_info["col_index"])
+                                           personal_contribution, city_info["col_index"],
+                                           roi_window_years=roi_horizon_years)
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
-                                           personal_contribution_b, city_info["col_index"])
+                                           personal_contribution_b, city_info["col_index"],
+                                           roi_window_years=roi_horizon_years)
 
     col_a, col_b = st.columns(2)
     render_scenario_panel(col_a, scenario_a, "A")
@@ -3635,6 +3724,7 @@ if compare_mode:
             scenario_a["roi_result"]["hs_net_position"],
             scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
             scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+            roi_horizon_years,
         ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
@@ -3647,11 +3737,12 @@ if compare_mode:
     if enable_future_proofing:
         future_context = render_future_proofing_section(scenario_a, major, interest_rate,
                                                           scenario_b, major_b, interest_rate_b,
-                                                          col_index=city_info["col_index"])
+                                                          col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
 
     apprenticeship_context = {}
     if enable_apprenticeship:
-        apprenticeship_context = render_apprenticeship_section(scenario_a, major, col_index=city_info["col_index"])
+        apprenticeship_context = render_apprenticeship_section(
+            scenario_a, major, col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
 
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None,
@@ -3667,6 +3758,7 @@ if compare_mode:
     maybe_log_scenario_event({**build_scenario_context(
         major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
         school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+        roi_horizon_years=roi_horizon_years,
         compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
         interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
         personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
@@ -3680,7 +3772,7 @@ if compare_mode:
         major_b, school_name_b, in_state_b, coa_per_year_b, personal_contribution_per_year_b,
         grants_per_year_b, interest_rate_b, repayment_strategy_b, scenario_b,
         module_context=module_context, start_year_a=start_year_a, start_year_b=start_year_b,
-        col_index=city_info["col_index"],
+        col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
@@ -3691,6 +3783,7 @@ if compare_mode:
             on_click=lambda: save_pdf_download({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                roi_horizon_years=roi_horizon_years,
                 compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                 interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
                 personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
@@ -3708,10 +3801,12 @@ if compare_mode:
                 grants_per_year_b=grants_per_year_b, interest_rate_b=interest_rate_b,
                 repayment_strategy_b=repayment_strategy_b,
                 start_year_a=start_year_a, start_year_b=start_year_b,
+                roi_horizon_years=roi_horizon_years,
             ))
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                roi_horizon_years=roi_horizon_years,
                 compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                 interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
                 personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
@@ -3722,7 +3817,8 @@ if compare_mode:
             st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact comparison.")
 else:
     scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                         personal_contribution, city_info["col_index"])
+                                         personal_contribution, city_info["col_index"],
+                                         roi_window_years=roi_horizon_years)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -3857,9 +3953,9 @@ else:
         else:
             st.metric("Student Loan Payment / Take-Home Ratio", "N/A")
 
-    # ---- 5e. 10-Year Financial Position -------------------------------------
+    # ---- 5e. Financial Position (horizon per the sidebar's ROI Horizon) -----
 
-    st.subheader("📊 10-Year Financial Position")
+    st.subheader(f"📊 {roi_horizon_years}-Year Financial Position")
     st.caption((
         f"This compares two paths over your first 10 years after high school: going into "
         f"**{major}** (paying off the loan above along the way) vs. skipping college and "
@@ -3877,9 +3973,9 @@ else:
 
     position_cols = st.columns(3)
     position_cols[0].metric(
-        "High School Grad — 10-Yr Net Position (No Loan)", fmt_money(roi_result["hs_net_position"]),
+        f"High School Grad — {roi_horizon_years}-Yr Net Position (No Loan)", fmt_money(roi_result["hs_net_position"]),
     )
-    position_cols[1].metric(f"{major} — 10-Yr Net Position", fmt_money(roi_result["major_net_position"]))
+    position_cols[1].metric(f"{major} — {roi_horizon_years}-Yr Net Position", fmt_money(roi_result["major_net_position"]))
     position_cols[2].metric(
         "Earnings Premium (COL-Adjusted)",
         fmt_money(roi_result["earnings_premium"]),
@@ -3892,7 +3988,8 @@ else:
     )
 
     st.plotly_chart(
-        build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major),
+        build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
+                             roi_horizon_years),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
 
@@ -3903,11 +4000,12 @@ else:
     future_context = {}
     if enable_future_proofing:
         future_context = render_future_proofing_section(scenario, major, interest_rate,
-                                                          col_index=city_info["col_index"])
+                                                          col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
 
     apprenticeship_context = {}
     if enable_apprenticeship:
-        apprenticeship_context = render_apprenticeship_section(scenario, major, col_index=city_info["col_index"])
+        apprenticeship_context = render_apprenticeship_section(
+            scenario, major, col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
 
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None, None, ai_context, future_context,
@@ -3919,6 +4017,7 @@ else:
     maybe_log_scenario_event({**build_scenario_context(
         major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
         school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+        roi_horizon_years=roi_horizon_years,
         start_year_a=start_year_a,
     ), **module_context})
 
@@ -3928,7 +4027,7 @@ else:
         interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
         scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
         module_context=module_context, start_year_a=start_year_a, monthly_payment=monthly_payment,
-        col_index=city_info["col_index"],
+        col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
     )
     with top_actions_container:
         single_pdf_col, single_share_col = st.columns(2)
@@ -3939,6 +4038,7 @@ else:
             on_click=lambda: save_pdf_download({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+                roi_horizon_years=roi_horizon_years,
                 start_year_a=start_year_a,
             ), **module_context}),
         )
@@ -3947,10 +4047,12 @@ else:
                 career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                 interest_rate, repayment_strategy, False, start_year_a=start_year_a,
+                roi_horizon_years=roi_horizon_years,
             ))
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+                roi_horizon_years=roi_horizon_years,
                 start_year_a=start_year_a,
             ), **module_context})
             components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
@@ -3979,7 +4081,8 @@ if not st.session_state.survey_submitted:
             # than reused from st.session_state, so the survey reflects
             # exact click-time state.
             scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                                   personal_contribution, city_info["col_index"])
+                                                   personal_contribution, city_info["col_index"],
+                                                   roi_window_years=roi_horizon_years)
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
             # expander) -- referencing them outside an "if compare_mode:"
@@ -3988,7 +4091,8 @@ if not st.session_state.survey_submitted:
             compare_mode_kwargs = {}
             if compare_mode:
                 scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
-                                                       personal_contribution_b, city_info["col_index"])
+                                                       personal_contribution_b, city_info["col_index"],
+                                                       roi_window_years=roi_horizon_years)
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                     interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
@@ -4000,6 +4104,7 @@ if not st.session_state.survey_submitted:
                 **build_scenario_context(
                     major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                     school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                    roi_horizon_years=roi_horizon_years,
                     start_year_a=start_year_a, **compare_mode_kwargs,
                 ),
                 **module_context,
