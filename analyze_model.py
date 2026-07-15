@@ -133,11 +133,23 @@ def build_breakeven_table(ns: dict, rate: float) -> pd.DataFrame:
     for i, major in enumerate(majors, 1):
         if i % 100 == 0:
             print(f"  ...{i}/{len(majors)} majors", file=sys.stderr)
+        info = ns["MAJOR_DATA"][major]
+        # An "extended-training track" delays earnings, carries professional
+        # -school debt, or both (Medicine: 4 unpaid years + 3 residency years
+        # + $205k; Athletic Training: 2 unpaid years, no debt). They fail the
+        # 10-year comparison for a categorically different reason than a
+        # low-wage occupation does, and must not be pooled with them.
         row = {
             "major": major,
-            "starting_salary": ns["MAJOR_DATA"][major]["starting_salary"],
-            "additional_training_debt": ns["MAJOR_DATA"][major].get("additional_training_debt", 0),
+            "starting_salary": info["starting_salary"],
+            "additional_training_debt": info.get("additional_training_debt", 0),
+            "unpaid_training_years": info.get("unpaid_training_years", 0),
+            "stipend_training_years": info.get("stipend_training_years", 0),
         }
+        row["extended_training_track"] = bool(
+            row["additional_training_debt"] or row["unpaid_training_years"]
+            or row["stipend_training_years"]
+        )
         for strategy in STRATEGIES:
             result = find_breakeven_loan(ns, major, rate, strategy)
             key = "standard" if strategy == STRATEGIES[0] else "idr"
@@ -147,6 +159,48 @@ def build_breakeven_table(ns: dict, rate: float) -> pd.DataFrame:
                 row["premium_at_zero_debt"] = round(result["premium_at_zero_debt"], 2)
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def ns_window_note() -> str:
+    return "WHAT THE 10-YEAR WINDOW DECIDES"
+
+
+def print_window_sensitivity(ns: dict, rate: float):
+    """How much of the verdict is the model's 10-year horizon rather than the
+    occupation?
+
+    ROI_WINDOW_YEARS is the single most consequential constant in the app: a
+    track that spends its early years in training (Medicine's 4 unpaid years
+    plus 3 at a $65k residency stipend) has barely started earning by year
+    10, while its debt is repaid inside it. The window doesn't just measure
+    the outcome, it largely determines it -- so the paper needs to say so
+    before reporting anything above as a property of the occupation.
+
+    This re-runs the same ROI math at other horizons. It's the honest
+    sensitivity check on the app's own headline number.
+    """
+    print(f"\n{'=' * 78}\n{ns_window_note()}\n"
+          f"How much of the verdict is the horizon, not the occupation?\n{'=' * 78}")
+    majors = ["Medicine", "Law", "Athletic Training", "Registered Nurses", "Software Developers"]
+    horizons = [10, 15, 20, 30]
+    print(f"10-yr premium vs a debt-free HS grad, at $0 undergrad loan, by horizon:\n")
+    header = f"{'major':22s}" + "".join(f"{h:>14}yr" for h in horizons)
+    print(header)
+    for m in majors:
+        if m not in ns["MAJOR_DATA"]:
+            continue
+        cells = ""
+        for h in horizons:
+            principal = ns["get_effective_principal"](m, 0.0)
+            repay = ns["calculate_standard_repayment"](principal, rate)
+            roi = ns["calculate_roi"](m, repay["total_paid_in_roi_window"], principal or 1, years=h)
+            cells += f"{roi['earnings_premium']:>16,.0f}"
+        print(f"{m[:22]:22s}{cells}")
+    print("\n  Medicine is negative at 10 years and strongly positive later: at year 10 it\n"
+          "  has had 3 years of attending salary against 7 of training, while its\n"
+          "  $205k of med-school debt was repaid inside the window regardless. That is\n"
+          "  a fact about the horizon, not about medicine. The app reports the 10-year\n"
+          "  number to prospective students as though it were the verdict.")
 
 
 def print_summary(df: pd.DataFrame, ns: dict, rate: float):
@@ -159,14 +213,36 @@ def print_summary(df: pd.DataFrame, ns: dict, rate: float):
     print(f"Occupations analyzed: {len(df)}")
 
     never = df[df["status_standard"] == "never_breaks_even"]
-    print(f"\nNever break even, even at $0 debt: {len(never)} "
+    print(f"\nNever break even, even at $0 undergrad loan: {len(never)} "
           f"({len(never)/len(df)*100:.1f}% of occupations)")
-    print("  -- these lose to a high school graduate on this model's terms no matter\n"
-          "     how they're financed, so no amount of scholarship changes the verdict.")
-    if not never.empty:
-        worst = never.nsmallest(10, "premium_at_zero_debt")[["major", "starting_salary", "premium_at_zero_debt"]]
-        print("\n  Worst 10 (10-yr premium at zero debt):")
-        print(worst.to_string(index=False))
+
+    # Two different phenomena get pooled here, and conflating them would
+    # misread the model badly. "$0 undergrad loan" is not "$0 debt" for a
+    # track carrying additional_training_debt (Medicine's $205k of med
+    # school, Law's $130k) -- get_effective_principal adds that on top of the
+    # slider, so it's still being repaid inside the window no matter what the
+    # loan is set to. A scholarship can't remove it in this model.
+    wage_limited = never[~never["extended_training_track"]]
+    extended = never[never["extended_training_track"]]
+
+    print(f"\n  {len(wage_limited)} are wage-limited: the occupation earns less over 10 years than\n"
+          "  a high school graduate does, so financing is irrelevant to the verdict and\n"
+          "  no scholarship changes it.")
+    if not wage_limited.empty:
+        print("\n  Worst 10 (10-yr premium at zero undergrad loan):")
+        print(wage_limited.nsmallest(10, "premium_at_zero_debt")[
+            ["major", "starting_salary", "premium_at_zero_debt"]].to_string(index=False))
+
+    if not extended.empty:
+        print(f"\n  {len(extended)} are extended-training tracks, losing for a categorically\n"
+              "  different reason: years spent training instead of earning, plus (where it\n"
+              "  applies) professional-school debt that a $0 undergrad loan does NOT zero\n"
+              "  out -- get_effective_principal adds it on top of the slider regardless.")
+        print(extended[["major", "starting_salary", "unpaid_training_years",
+                        "stipend_training_years", "additional_training_debt",
+                        "premium_at_zero_debt"]].to_string(index=False))
+        print("\n  Do not read these as 'the degree is not worth it'. Read the window:\n"
+              f"  see the {ns_window_note()} section below.")
 
     solved = df[df["status_standard"] == "ok"]
     if not solved.empty:
@@ -226,6 +302,7 @@ def main():
 
     df = build_breakeven_table(ns, args.rate)
     print_summary(df, ns, args.rate)
+    print_window_sensitivity(ns, args.rate)
 
     args.output.parent.mkdir(exist_ok=True)
     df.to_csv(args.output, index=False)
