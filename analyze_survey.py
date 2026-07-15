@@ -92,6 +92,28 @@ def bucket_roi(roi_pct):
     return "200%+"
 
 
+# The optional Advanced Analysis modules, as (flag_column, label). Each flag
+# is NULL unless that module was switched on at save-time, so notna() is the
+# "was this module used" test. apprenticeship_active is deliberately absent:
+# its columns don't exist in the live tables, so any session that enabled that
+# module fails its insert outright and never appears here at all -- see
+# ENGAGEMENT_CAVEAT.
+MODULE_FLAGS = [
+    ("prestige_mode_active", "College Prestige"),
+    ("ai_mode_active", "AI Employability Risk"),
+    ("future_forecasting_active", "2026 Regulatory Forecasting"),
+]
+
+ENGAGEMENT_CAVEAT = (
+    "CAVEAT: the apprenticeship_* columns build_module_context writes don't\n"
+    "  exist in these tables yet, so every save from a session with the Trade\n"
+    "  Apprenticeship module enabled is rejected outright (PGRST204) and is\n"
+    "  missing from this data entirely -- not recorded with blank fields, but\n"
+    "  absent. Module adoption below is therefore a floor, and these events\n"
+    "  are a biased sample until that migration is applied."
+)
+
+
 def print_section(title: str, subtitle: str = ""):
     print("\n" + "=" * 78)
     print(title)
@@ -115,13 +137,122 @@ def crosstab_pct(df: pd.DataFrame, index_col: str, perception_col: str = "percep
     print(ct.to_string())
 
 
+def build_engagement_frame(pdf_df: pd.DataFrame, shares_df: pd.DataFrame) -> pd.DataFrame:
+    """pdf_downloads + scenario_shares unioned into one frame with an
+    event_type column. Both tables store the identical scenario-context shape
+    (see build_scenario_context in app.py -- pdf_downloads and scenario_shares
+    are the same columns as survey_responses minus the four respondent
+    fields), so they concat cleanly and every cross-tab below works across
+    both at once while still splitting by event_type where that matters.
+
+    These are the app's two "commitment" actions: bothering to download a
+    report or share a link is a stronger signal than a pageview, and together
+    they carry several times more scenario rows than the survey does.
+
+    Note there is no session/user id on any table, so these events cannot be
+    joined to survey_responses -- an engagement event and a survey response
+    from the same visitor are unlinkable. Everything here describes what gets
+    modeled, not who modeled it.
+    """
+    frames = []
+    for df, event_type in [(pdf_df, "pdf_download"), (shares_df, "scenario_share")]:
+        if df.empty:
+            continue
+        tagged = df.copy()
+        tagged["event_type"] = event_type
+        frames.append(tagged)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+def analyze_engagement(events: pd.DataFrame):
+    """Everything the combined pdf_downloads + scenario_shares data can
+    actually answer: what scenarios people commit to, at what financial
+    profile, with which optional modules on."""
+    print_section(
+        "ENGAGEMENT EVENTS: PDF DOWNLOADS + SCENARIO SHARES",
+        "What scenarios do people care enough about to take away or send on?",
+    )
+    if events.empty:
+        print("  (no engagement events yet)")
+        return
+    print(f"Total engagement events: {len(events)}")
+    print(events["event_type"].value_counts().to_string())
+    print("\n" + ENGAGEMENT_CAVEAT)
+
+    print_section("ENGAGEMENT: TOP MAJORS MODELED")
+    print(events["scenario_a_major"].value_counts().head(10).to_string())
+
+    print_section("ENGAGEMENT: TOP SCHOOLS MODELED")
+    schools = events["scenario_a_school_name"].dropna()
+    print(schools.value_counts().head(10).to_string() if not schools.empty else "  (none entered)")
+
+    print_section(
+        "ENGAGEMENT: FINANCIAL PROFILE OF MODELED SCENARIOS",
+        "Are people taking away good-news scenarios or bad-news ones?",
+    )
+    events = events.copy()
+    events["dti_bucket"] = events["scenario_a_dti_ratio"].apply(bucket_dti)
+    events["roi_bucket"] = events["scenario_a_roi_pct"].apply(bucket_roi)
+    for col, order, label in [
+        ("dti_bucket", ["<0.5x", "0.5-1x", "1-1.5x", "1.5-2x", "2x+"], "Debt-to-income ratio"),
+        ("roi_bucket", ["Negative", "0-50%", "50-100%", "100-200%", "200%+"], "10-year ROI %"),
+    ]:
+        counts = events[col].value_counts().reindex(order).dropna()
+        print(f"\n{label}:")
+        print(counts.to_string() if not counts.empty else "  (not enough data yet)")
+    for col, label in [("scenario_a_roi_pct", "ROI %"), ("scenario_a_dti_ratio", "DTI ratio"),
+                       ("scenario_a_loan_amount", "Loan amount")]:
+        vals = pd.to_numeric(events[col], errors="coerce").dropna()
+        if not vals.empty:
+            print(f"\n{label}: median {vals.median():,.2f} (min {vals.min():,.2f}, max {vals.max():,.2f})")
+
+    print_section(
+        "ENGAGEMENT: COMPARE MODE USE, BY EVENT TYPE",
+        "Do people who compare two scenarios commit differently than single-scenario users?",
+    )
+    events["used_compare_mode"] = events["scenario_b_major"].notna()
+    ct = pd.crosstab(events["event_type"], events["used_compare_mode"])
+    print(ct.to_string())
+    compare_users = events[events["used_compare_mode"]]
+    if not compare_users.empty and compare_users["roi_pct_delta"].notna().any():
+        deltas = pd.to_numeric(compare_users["roi_pct_delta"], errors="coerce").dropna()
+        print(f"\nAmong Compare Mode engagement events, average |ROI % delta|: "
+              f"{deltas.mean():.1f} points (median {deltas.median():.1f}, n={len(deltas)})")
+
+    print_section(
+        "ENGAGEMENT: OPTIONAL MODULE ADOPTION",
+        "Which Advanced Analysis modules are people actually turning on?",
+    )
+    rows = []
+    for flag, label in MODULE_FLAGS:
+        if flag not in events.columns:
+            continue
+        used = events[flag].notna()
+        rows.append({
+            "Module": label,
+            "Events": int(used.sum()),
+            "% of events": round(used.mean() * 100, 1),
+        })
+    print(pd.DataFrame(rows).to_string(index=False) if rows else "  (no module columns present)")
+
+
 def main():
     client = load_supabase_client()
     survey_df = fetch_table(client, "survey_responses")
     usage_df = fetch_table(client, "usage_logs")
+    pdf_df = fetch_table(client, "pdf_downloads")
+    shares_df = fetch_table(client, "scenario_shares")
+
+    events = build_engagement_frame(pdf_df, shares_df)
 
     if survey_df.empty:
-        print("No survey responses yet -- nothing to analyze.")
+        # The engagement tables stand on their own -- they carry the same
+        # scenario context and (so far) several times more rows, so an empty
+        # survey is no reason to skip them.
+        print("No survey responses yet -- skipping the perception-change analysis.")
+        analyze_engagement(events)
         return
 
     df = survey_df.copy()
@@ -194,6 +325,8 @@ def main():
             top = Counter(words).most_common(8)
             print(f"\n{group} (n={len(group_df)} with written feedback):")
             print("  " + (", ".join(f"{w} ({c})" for w, c in top) if top else "(no notable words)"))
+
+    analyze_engagement(events)
 
     try:
         import matplotlib

@@ -18,6 +18,7 @@ Architecture:
 
 import io
 import re
+import uuid
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
@@ -629,6 +630,31 @@ def get_supabase_connection():
     return st.connection("supabase_connection", type=SupabaseConnection)
 
 
+def get_session_id() -> str:
+    """A random id for this browser session, stamped on every row this file
+    writes (usage_logs, survey_responses, pdf_downloads, scenario_shares).
+
+    Without it those tables are four disconnected piles of rows: you can
+    count PDF downloads and count survey responses, but never tell that a
+    given response came from someone who had just downloaded one -- which is
+    precisely the behavioral question the companion research paper asks. A
+    shared id per session makes those joinable.
+
+    Still anonymous, and deliberately so: this is a per-visit random UUID
+    with nothing derived from the visitor (no IP, no fingerprint, no
+    cookie). It cannot identify a person or link two separate visits by the
+    same person -- a refresh starts a brand-new session with a brand-new id,
+    since st.session_state doesn't survive it. It only links events *within*
+    one visit, which is all the join needs.
+
+    Lives in st.session_state rather than being regenerated per call, so
+    every event in a session shares one id across Streamlit's rerun model.
+    """
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
+    return st.session_state.session_id
+
+
 def log_usage_event(action: str):
     """Insert a single usage event into the usage_logs table. Tolerates any
     connection/query failure (matching every other save_*/log_* helper in
@@ -640,7 +666,7 @@ def log_usage_event(action: str):
         conn = get_supabase_connection()
         execute_query(
             conn.table("usage_logs").insert(
-                [{"timestamp": now_local().isoformat(), "action": action}],
+                [{"timestamp": now_local().isoformat(), "session_id": get_session_id(), "action": action}],
                 count="None",
             ),
             ttl=0,
@@ -673,6 +699,7 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
         conn = get_supabase_connection()
         row = {
             "timestamp": now_local().isoformat(),
+            "session_id": get_session_id(),
             "respondent_role": respondent_role,
             "hs_graduation_year": hs_graduation_year,
             "perception_change": perception_change,
@@ -856,7 +883,7 @@ def save_pdf_download(context: dict) -> bool:
     contract."""
     try:
         conn = get_supabase_connection()
-        row = {"timestamp": now_local().isoformat(), **context}
+        row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(), **context}
         execute_query(
             conn.table("pdf_downloads").insert([row], count="None"),
             ttl=0,
@@ -874,7 +901,7 @@ def save_scenario_share(context: dict) -> bool:
     any failure, matching the other save_* helpers' contract."""
     try:
         conn = get_supabase_connection()
-        row = {"timestamp": now_local().isoformat(), **context}
+        row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(), **context}
         execute_query(
             conn.table("scenario_shares").insert([row], count="None"),
             ttl=0,
