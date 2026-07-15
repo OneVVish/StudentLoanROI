@@ -3517,11 +3517,24 @@ st.sidebar.subheader("💼 Career")
 # Stage Snapshot) -- its value is read from session_state here, before that
 # widget exists, so Target Profession's options below can be built from the
 # right MAJOR_DATA even on the very first render.
+#
+# Career mode only: Major mode's NY Fed data is national, since the NY Fed
+# publishes no state breakdown. The radio is disabled rather than hidden in
+# Major mode, so the sidebar doesn't reflow on every toggle.
+#
+# Defaults to National, for three reasons. It's a publicly shared tool, so
+# most visitors aren't Californian. It's the only geography Major mode can
+# offer, so a National default means the two modes are comparable out of the
+# box rather than differing by both dataset AND geography -- comparing them
+# at a California default mixes the two, which overstates the major-vs-career
+# gap by more than 2x. And the companion paper's simulation study is
+# national, so this keeps the app's default figures and the paper's figures
+# the same numbers.
 career_source_options = ["National", "California"]
-shared_career_source = get_shared_default("career_source", "California")
+shared_career_source = get_shared_default("career_source", "National")
 st.session_state.setdefault(
     "career_source_radio",
-    shared_career_source if shared_career_source in career_source_options else "California",
+    shared_career_source if shared_career_source in career_source_options else "National",
 )
 career_data_source = st.session_state["career_source_radio"]
 careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
