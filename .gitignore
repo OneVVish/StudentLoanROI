@@ -18,3 +18,8 @@ research_paper_draft.md
 
 # Slide deck for counselor/teacher outreach -- kept local, not part of the app codebase
 presentation/
+
+# Scope/limitations write-up feeding the research paper -- kept local, same as
+# the draft above. Ignored (not merely untracked) so a `git add -A` can't
+# sweep it in by accident.
+SCOPE.md
