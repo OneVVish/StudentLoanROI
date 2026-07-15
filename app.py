@@ -195,6 +195,38 @@ for _title in ["Oral and Maxillofacial Surgeons", "Prosthodontists", "Dentists, 
 CAREERS_CSV_PATH_NATIONAL = "cleaned_careers.csv"
 CAREERS_CSV_PATH_CA = "cleaned_careers_ca.csv"
 
+# Per-MAJOR wages from the NY Fed, via nyfed_pipeline.py. The counterpart to
+# the BLS per-OCCUPATION files above, and the basis of the sidebar's "Choose
+# by: Major" mode -- see build_major_data.
+MAJORS_CSV_PATH = "data/nyfed_majors_clean.csv"
+
+# How many years separate starting_salary from median_salary in each dataset.
+# BLS: the 25th-percentile-to-median reading this app has always used. NY Fed
+# carries its own span per row (18), since its two figures are age-band
+# medians rather than percentiles -- see get_major_growth_rate.
+WAGE_GROWTH_SPAN_YEARS_BLS = 10
+
+# The two things a visitor can pick from. Distinct datasets, deliberately not
+# merged: see build_major_data.
+DATASET_MODE_MAJOR = "Major"
+DATASET_MODE_CAREER = "Career"
+
+# The landing selection per mode, and Scenario B's counterpart -- the pairing
+# the randomised contrast arm shows (see get_experiment_arm). Career mode's
+# pair is the long-standing Software Developers vs Humanities; Major mode's
+# is its nearest honest equivalent in the NY Fed's list, which has no
+# "Humanities" row. Both are high-return-technical vs lower-return-
+# exploratory, which is what the contrast manipulation requires.
+DEFAULT_SELECTION_A = {DATASET_MODE_MAJOR: "Computer Science",
+                       DATASET_MODE_CAREER: "Software Developers"}
+DEFAULT_SELECTION_B = {DATASET_MODE_MAJOR: "Liberal Arts",
+                       DATASET_MODE_CAREER: "Humanities"}
+
+# What the dropdown is called in each mode. "Target Profession" is a lie in
+# Major mode -- the visitor is picking what to study, not what to become.
+SELECTION_LABEL = {DATASET_MODE_MAJOR: "Intended Major",
+                   DATASET_MODE_CAREER: "Target Profession"}
+
 
 @st.cache_data
 def load_bls_careers(csv_path: str) -> dict:
@@ -220,7 +252,39 @@ def load_bls_careers(csv_path: str) -> dict:
     }
 
 
-def build_major_data(csv_path: str) -> dict:
+@st.cache_data
+def load_nyfed_majors(csv_path: str) -> dict:
+    """Per-major wages/outcomes from nyfed_pipeline.py's output, in the same
+    {name: {starting_salary, median_salary, ...}} shape load_bls_careers
+    returns, so every downstream calculation works on them unchanged.
+
+    Extra fields the BLS data has no equivalent for: wage_growth_span_years
+    (18 rather than the BLS 10 -- see get_major_growth_rate), and the NY
+    Fed's underemployment / unemployment / graduate-degree shares, which are
+    per-major facts that simply don't exist per-occupation.
+
+    No typical_education: every one of these is a bachelor's major by
+    construction, which is why Major mode has no sub-baccalaureate problem to
+    guard against (see breakeven_summary).
+    """
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return {}
+    return {
+        row.major: {
+            "starting_salary": row.starting_salary,
+            "median_salary": row.median_salary,
+            "wage_growth_span_years": row.wage_growth_span_years,
+            "underemployment_rate": row.underemployment_rate,
+            "unemployment_rate": row.unemployment_rate,
+            "share_with_graduate_degree": row.share_with_graduate_degree,
+        }
+        for row in df.itertuples()
+    }
+
+
+def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER) -> dict:
     """The app's full {major_name: {...}} dataset: BLS wages, overridden by
     the hand-curated entries, with training structure overlaid on the
     doctoral/professional occupations.
@@ -236,7 +300,33 @@ def build_major_data(csv_path: str) -> dict:
     section 4 because analyze_model.py builds the same dataset outside a
     Streamlit session; one function means the paper's numbers can't drift
     from the app's (the same reasoning as CLAUDE.md's chart-twin warning).
+
+    mode selects which of two datasets the app is asking about, and they are
+    deliberately NOT merged:
+
+      Career (BLS): ~836 occupations. "What if I become a Software
+        Developer?" Salaries are OEWS percentiles for people already doing
+        the job.
+      Major (NY Fed): 73 majors. "What if I study Computer Science?" Salaries
+        are what people who studied it actually earn -- including the ones
+        who ended up doing something else.
+
+    Merging them is what the app did before, and it produced contradictions
+    it had no way to resolve: the curated "Nursing" and the BLS "Registered
+    Nurses" sat in one dropdown and disagreed about the same life path by 12x,
+    with nothing on screen saying which to believe. Keeping the datasets
+    apart makes that structurally impossible rather than merely unlikely.
+
+    CURATED_MAJOR_DATA and the training overlay apply to Career mode only.
+    Medicine and Law aren't undergraduate majors -- nobody majors in
+    Medicine -- so their absence from Major mode is correct, not a gap. A
+    prospective doctor picks Biology in Major mode (and sees that 64% of
+    Biology majors go on to a graduate degree), or Family Medicine Physicians
+    in Career mode (which models medical school properly).
     """
+    if mode == DATASET_MODE_MAJOR:
+        return load_nyfed_majors(MAJORS_CSV_PATH)
+
     data = {**load_bls_careers(csv_path), **CURATED_MAJOR_DATA}
     for major_name, training_fields in ADVANCED_TRAINING_OVERLAY.items():
         if major_name in data:
@@ -287,19 +377,40 @@ UNDEREMPLOYMENT_MAJOR_COUNT = 73
 UNDEREMPLOYMENT_SOURCE_URL = "https://www.newyorkfed.org/research/college-labor-market"
 
 
-def underemployment_disclosure() -> str:
-    """One sentence naming the assumption behind every salary on the page.
+def underemployment_disclosure(major_name: str = None) -> str:
+    """One sentence about underemployment, framed for whichever dataset is
+    driving the page. Shared by the on-screen render, the PDF and the
+    Methodology section so the number and its framing can't drift.
 
-    Shared by the on-screen render, the PDF and the Methodology section so
-    the number and its framing can't drift between them.
+    The two modes need genuinely different sentences, because the salaries
+    mean different things:
+
+    Career mode (BLS) shows what people already doing a job earn, so
+    underemployment is an unmodelled risk sitting outside the figures — the
+    honest move is to name the assumption and give the national spread,
+    since this data is per-major and can't be mapped onto an occupation.
+
+    Major mode (NY Fed) shows what everyone who studied that subject earns,
+    underemployed or not. The rate is already inside the number, so quoting
+    it as a warning would be wrong twice over: it's not an unmodelled risk,
+    and it's this major's own published figure rather than a national one.
     """
+    if major_name is not None:
+        rate = MAJOR_DATA.get(major_name, {}).get("underemployment_rate")
+        if rate is not None:
+            return (
+                f"These salaries already account for underemployment: **{rate:.0f}% of {major_name} "
+                f"graduates** work in jobs that don't require a degree, and they're included in the "
+                f"figures above rather than filtered out. That's what makes this different from asking "
+                f"about a specific job — it's what everyone who studied this actually earns."
+            )
     return (
         f"Every salary here assumes you work in the field you picked. Nationally, "
         f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of college graduates are *underemployed* — working a job "
         f"that doesn't require a degree — ranging from {UNDEREMPLOYMENT_MIN_PCT:.0f}% "
         f"({UNDEREMPLOYMENT_MIN_MAJOR}) to {UNDEREMPLOYMENT_MAX_PCT:.0f}% ({UNDEREMPLOYMENT_MAX_MAJOR}) "
         f"depending on major. This calculator assumes you're in the {100 - UNDEREMPLOYMENT_OVERALL_PCT:.0f}% "
-        f"who aren't."
+        f"who aren't. Switch **Choose by** to *Major* for figures that include them."
     )
 
 # Registered Apprenticeship benchmark for the "Alternative Pathway" card.
@@ -682,11 +793,22 @@ def render_centered_table(df: pd.DataFrame) -> None:
 
 
 def get_major_growth_rate(major_name: str) -> float:
-    """CAGR from a major's starting_salary to its median_salary over 10 years
-    of actually practicing (excludes any training delay -- see
-    get_annual_salary_for_year)."""
+    """CAGR from a major's starting_salary to its median_salary, over however
+    many years actually separate those two figures (excludes any training
+    delay -- see get_annual_salary_for_year).
+
+    The span is per-entry rather than a constant because the two datasets
+    measure different things. BLS OEWS gives a 25th-percentile and a median
+    wage, which this app has always read as "entry level" and "~10 years in"
+    -- so 10. The NY Fed's per-major data gives a median for ages 22-27 and
+    one for 35-45; nyfed_pipeline.py back-extrapolates the first to year 0,
+    leaving 18 years to the second. Applying 10 to that data would overstate
+    every major's annual growth by ~55%, compounding over a 30-year horizon
+    into a $226k rather than $161k year-30 salary for Computer Science.
+    """
     data = MAJOR_DATA[major_name]
-    return (data["median_salary"] / data["starting_salary"]) ** (1 / 10) - 1
+    span_years = data.get("wage_growth_span_years", WAGE_GROWTH_SPAN_YEARS_BLS)
+    return (data["median_salary"] / data["starting_salary"]) ** (1 / span_years) - 1
 
 
 def get_annual_salary_for_year(major_name: str, year_index: int) -> float:
@@ -952,6 +1074,14 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
     starting_salary = MAJOR_DATA[major]["starting_salary"]
     dti_ratio = round(loan_amount / starting_salary, 4) if starting_salary else None
     context = {
+        # Which dataset produced every salary-derived figure below. Without
+        # it these columns pool two incompatible questions: a Major-mode row
+        # is "what people who studied X earn" (underemployed included), a
+        # Career-mode row is "what people doing X earn". For Computer
+        # Science vs Software Developers that's a $526k difference in the
+        # same column. Any analysis stratifying on ROI or salary must group
+        # by this, exactly as it must for roi_horizon_years.
+        "dataset_mode": dataset_mode,
         # The horizon every roi_pct/earnings_premium below was computed over.
         # Without it those columns aren't comparable across rows: a 30-year
         # ROI and a 10-year ROI are different quantities wearing the same
@@ -1025,6 +1155,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     resolved name is specific enough that searching it again resolves back
     to that single school directly, no picker shown."""
     params = {
+        "mode": dataset_mode,
         "career_source": career_data_source,
         "major": major,
         "city": city,
@@ -2340,7 +2471,8 @@ def _pdf_styles() -> dict:
     }
 
 
-def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False) -> list:
+def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False,
+                          major_for_underemployment: str = None) -> list:
     """A "where these numbers come from" section, closing every report.
 
     The app's on-screen Methodology section already carries this, and the
@@ -2387,7 +2519,9 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
     # table, not a row inside it -- the report is read detached from the app,
     # and "assumes you work in your field" is the assumption every figure on
     # every preceding page rests on.
-    disclosure = underemployment_disclosure().replace("*underemployed*", "<i>underemployed</i>")
+    disclosure = underemployment_disclosure(
+        major_for_underemployment
+    ).replace("*underemployed*", "<i>underemployed</i>").replace("**", "")
     return [
         Spacer(1, 14),
         Paragraph("What these numbers assume", styles["section"]),
@@ -2874,6 +3008,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         styles, roi_window_years,
         uses_training_debt=bool(MAJOR_DATA.get(major, {}).get("additional_training_debt")
                                 or MAJOR_DATA.get(major, {}).get("unpaid_training_years")),
+        major_for_underemployment=(major if dataset_mode == DATASET_MODE_MAJOR else None),
     )
 
     buffer = io.BytesIO()
@@ -2974,6 +3109,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             or MAJOR_DATA.get(m, {}).get("unpaid_training_years")
             for m in (major, major_b)
         ),
+        major_for_underemployment=(major if dataset_mode == DATASET_MODE_MAJOR else None),
     )
 
     buffer = io.BytesIO()
@@ -3389,7 +3525,33 @@ st.session_state.setdefault(
 )
 career_data_source = st.session_state["career_source_radio"]
 careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
-MAJOR_DATA = build_major_data(careers_csv_path)
+
+# Which question the visitor is asking: "what if I study X?" (Major, NY Fed's
+# 73 majors) or "what if I become X?" (Career, BLS's 836 occupations). Read
+# from session_state before its own widget renders, same as the career source
+# above, so the Target Profession dropdown below can be built from the right
+# dataset on the very first pass.
+#
+# Defaults to Major because that's the choice a 17-year-old is actually
+# making -- they pick a major and a school, and the occupation is a
+# consequence they're guessing at. Career mode is the richer dataset and
+# stays one click away for anyone who does have a specific job in mind.
+dataset_mode_options = [DATASET_MODE_MAJOR, DATASET_MODE_CAREER]
+shared_dataset_mode = get_shared_default("mode", DATASET_MODE_MAJOR)
+st.session_state.setdefault(
+    "dataset_mode_radio",
+    shared_dataset_mode if shared_dataset_mode in dataset_mode_options else DATASET_MODE_MAJOR,
+)
+dataset_mode = st.session_state["dataset_mode_radio"]
+MAJOR_DATA = build_major_data(careers_csv_path, mode=dataset_mode)
+
+# Major mode is a single national dataset -- the NY Fed doesn't publish
+# per-state figures -- so fall back to Career mode's data if the majors CSV
+# is missing rather than rendering an empty dropdown.
+if not MAJOR_DATA:
+    MAJOR_DATA = build_major_data(careers_csv_path, mode=DATASET_MODE_CAREER)
+    dataset_mode = DATASET_MODE_CAREER
+    st.session_state["dataset_mode_radio"] = DATASET_MODE_CAREER
 
 # Defaults below assume a popular, concrete profile (Software Developer in
 # San Francisco, in-state at UC Berkeley, 10 years in) instead of generic
@@ -3398,9 +3560,13 @@ MAJOR_DATA = build_major_data(careers_csv_path)
 # usage further up for how Cost of Attendance's default is derived from
 # the same school/in-state choice rather than a flat placeholder.
 major_options = sorted(MAJOR_DATA.keys())
-shared_major = get_shared_default("major", "Software Developers")
+_default_a = DEFAULT_SELECTION_A[dataset_mode]
+shared_major = get_shared_default("major", _default_a)
+# A shared link made in one mode can name a selection the other mode doesn't
+# have ("Software Developers" simply isn't a major), so fall back through the
+# mode's own default before giving up on index 0.
 default_major_index = major_options.index(shared_major) if shared_major in major_options else (
-    major_options.index("Software Developers") if "Software Developers" in major_options else 0
+    major_options.index(_default_a) if _default_a in major_options else 0
 )
 # on_change records that this visitor picked the major themselves, rather
 # than being shown the default above. Without it a student whose profession
@@ -3412,12 +3578,11 @@ default_major_index = major_options.index(shared_major) if shared_major in major
 # blank-page-until-you-pick friction this app exists to avoid. See
 # get_major_explicitly_selected (section 2b).
 major = st.sidebar.selectbox(
-    "Target Profession", major_options, index=default_major_index,
+    SELECTION_LABEL[dataset_mode], major_options, index=default_major_index,
     on_change=mark_major_explicitly_selected,
-    help="Pick the career you're evaluating -- this determines the salary "
-         "numbers used everywhere else in the app. There are hundreds of "
-         "options, so instead of scrolling, click the box and type part of "
-         "your major or career to jump straight to it.",
+    help="Pick what you're evaluating -- this determines the salary numbers "
+         "used everywhere else in the app. Instead of scrolling, click the "
+         "box and type part of the name to jump straight to it.",
 )
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
 if typical_education_a in SUB_BACHELORS_EDUCATION_LEVELS:
@@ -3474,11 +3639,35 @@ career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 # built in time. No index= here since session_state already holds this
 # widget's value (seeded via setdefault above) -- passing both would
 # trigger Streamlit's widget-policy warning.
+# Same read-before-render pattern as Career Salary Data below: the value was
+# taken from session_state up in Financing so the dropdown's options could be
+# built from the right dataset on the first pass.
+dataset_mode = st.sidebar.radio(
+    "Choose by", dataset_mode_options, key="dataset_mode_radio",
+    help="Major: what people who studied that subject actually earn, "
+         "including those who ended up working outside it (NY Fed, 73 "
+         "majors). This is the choice you're actually making at 17. "
+         "Career: what people already doing a specific job earn (BLS, 836 "
+         "occupations) -- richer, but it assumes you get that job.",
+)
+if dataset_mode == DATASET_MODE_MAJOR:
+    st.sidebar.caption(
+        "Salaries reflect everyone who studied this — including the "
+        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
+    )
+else:
+    st.sidebar.caption(
+        "Salaries assume you land this job. Switch to **Major** to see what "
+        "everyone who studied a subject earns, not just those working in it."
+    )
+
 career_data_source = st.sidebar.radio(
     "Career Salary Data", career_source_options, key="career_source_radio",
+    disabled=(dataset_mode == DATASET_MODE_MAJOR),
     help="National: nationwide BLS OEWS wage estimates (cleaned_careers.csv). "
          "California: that state's own BLS OEWS wage estimates "
-         "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`.",
+         "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`. "
+         "Applies to Career mode only -- the NY Fed's per-major data is national.",
 )
 
 # Rendered last in the sidebar: each flag's current value was already read
@@ -3604,12 +3793,13 @@ compare_mode = st.sidebar.checkbox(
 
 if compare_mode:
     with st.sidebar.expander("⚖️ Scenario B (for comparison)", expanded=True):
-        shared_major_b = get_shared_default("major_b", "Humanities")
+        _default_b = DEFAULT_SELECTION_B[dataset_mode]
+        shared_major_b = get_shared_default("major_b", _default_b)
         default_major_b_index = major_options.index(shared_major_b) if shared_major_b in major_options else (
-            major_options.index("Humanities") if "Humanities" in major_options else 0
+            major_options.index(_default_b) if _default_b in major_options else 0
         )
         major_b = st.selectbox(
-            "Target Profession", major_options, index=default_major_b_index, key="major_b",
+            SELECTION_LABEL[dataset_mode], major_options, index=default_major_b_index, key="major_b",
             help="Pick the career you're evaluating -- this determines the "
                  "salary numbers used everywhere else in the app. There are "
                  "hundreds of options, so instead of scrolling, click the "
@@ -4569,7 +4759,7 @@ else:
     # Sits directly under the position/premium numbers on purpose: this is the
     # assumption those numbers rest on, and it belongs beside them rather than
     # buried in Methodology where nobody reads it.
-    st.info(underemployment_disclosure())
+    st.info(underemployment_disclosure(major if dataset_mode == DATASET_MODE_MAJOR else None))
 
     ai_context = {}
     if enable_ai_mode:

@@ -202,3 +202,29 @@ alter table scenario_shares  add column if not exists experiment_arm text;
 alter table scenario_events  add column if not exists experiment_arm text;
 
 create index if not exists survey_responses_experiment_arm_idx on survey_responses (experiment_arm);
+
+
+-- 2026-07-15: dataset_mode -- which question the visitor was asking.
+--
+-- 'Major' = NY Fed per-major data ("what if I study Computer Science?"),
+-- 'Career' = BLS per-occupation data ("what if I become a Software
+-- Developer?"). Selected by the sidebar's "Choose by" control.
+--
+-- These are not two views of one number, they are different quantities. A
+-- Major-mode salary is what everyone who studied that subject earns,
+-- underemployed graduates included. A Career-mode salary is what people
+-- already doing that job earn, and assumes the visitor becomes one. At the
+-- landing defaults that's a $103,034 vs $629,578 ten-year premium for
+-- Computer Science vs Software Developers -- a $526k gap in a column called
+-- scenario_a_earnings_premium.
+--
+-- So: GROUP BY OR FILTER ON THIS in any analysis touching salary, ROI,
+-- earnings premium or break-even, exactly as with roi_horizon_years.
+-- Pooling the two modes averages incommensurable numbers.
+--
+-- Rows predating this are NULL and were all Career-mode (the only dataset
+-- that existed).
+alter table survey_responses add column if not exists dataset_mode text;
+alter table pdf_downloads    add column if not exists dataset_mode text;
+alter table scenario_shares  add column if not exists dataset_mode text;
+alter table scenario_events  add column if not exists dataset_mode text;
