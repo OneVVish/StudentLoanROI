@@ -255,6 +255,53 @@ def build_major_data(csv_path: str) -> dict:
 HS_GRAD_SALARY = 49192
 HS_GRAD_GROWTH_RATE = 0.02
 
+# Underemployment: the share of college graduates working in jobs that don't
+# require a degree at all. From the Federal Reserve Bank of New York's "The
+# Labor Market for Recent College Graduates" (updated February 4, 2026;
+# sources: U.S. Census Bureau American Community Survey via IPUMS, and U.S.
+# Department of Labor O*NET), covering 73 majors.
+#
+# Why this is here rather than in the model: every salary this app shows
+# assumes the graduate actually works in the field they chose. Nationally
+# that's true for only about 6 in 10 of them. The app was therefore making
+# precisely the error it exists to correct -- section 1 of the companion
+# paper argues students overestimate their own odds of landing above-median
+# outcomes in their field, and then the calculator quietly assumed a 100%
+# placement rate on their behalf.
+#
+# These are deliberately NOT applied to the salary math. Doing that would
+# need a per-major rate, and this data is keyed by MAJOR (Psychology) while
+# MAJOR_DATA is keyed by OCCUPATION (Clinical and Counseling Psychologists);
+# only 3 of the 11 curated majors even match a NY Fed name exactly, and
+# bridging the rest needs the NCES CIP-SOC crosswalk, whose own
+# documentation calls it conceptual rather than empirical. So this is a
+# disclosure of the model's assumption, at national scale, with the spread
+# shown so the reader can see how much it varies -- not a fabricated
+# per-occupation probability.
+UNDEREMPLOYMENT_OVERALL_PCT = 39.35
+UNDEREMPLOYMENT_MIN_PCT = 12.8
+UNDEREMPLOYMENT_MIN_MAJOR = "Nursing"
+UNDEREMPLOYMENT_MAX_PCT = 65.8
+UNDEREMPLOYMENT_MAX_MAJOR = "Criminal Justice"
+UNDEREMPLOYMENT_MAJOR_COUNT = 73
+UNDEREMPLOYMENT_SOURCE_URL = "https://www.newyorkfed.org/research/college-labor-market"
+
+
+def underemployment_disclosure() -> str:
+    """One sentence naming the assumption behind every salary on the page.
+
+    Shared by the on-screen render, the PDF and the Methodology section so
+    the number and its framing can't drift between them.
+    """
+    return (
+        f"Every salary here assumes you work in the field you picked. Nationally, "
+        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of college graduates are *underemployed* — working a job "
+        f"that doesn't require a degree — ranging from {UNDEREMPLOYMENT_MIN_PCT:.0f}% "
+        f"({UNDEREMPLOYMENT_MIN_MAJOR}) to {UNDEREMPLOYMENT_MAX_PCT:.0f}% ({UNDEREMPLOYMENT_MAX_MAJOR}) "
+        f"depending on major. This calculator assumes you're in the {100 - UNDEREMPLOYMENT_OVERALL_PCT:.0f}% "
+        f"who aren't."
+    )
+
 # Registered Apprenticeship benchmark for the "Alternative Pathway" card.
 # Year-1 training wage ($52,000) and average starting salary upon
 # completion ($86,000) bookend a two-phase illustrative wage curve: pay
@@ -2317,25 +2364,37 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
          "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
          "for full-time workers age 25+ with a high school diploma and no college ($946/week, Q3 2024), "
          "annualised. Wage growth of 2%/yr is an assumption, not a BLS figure."],
-        ["Cost of attendance &amp; college debt",
+        ["Cost of attendance & college debt",
          "U.S. Department of Education, College Scorecard."],
-        ["Federal &amp; state income tax",
+        ["Federal & state income tax",
          "IRS 2024 federal brackets and standard deduction; published 2024 state brackets."],
         ["Cost-of-living adjustment",
          "U.S. Bureau of Economic Analysis, Regional Price Parities (2023)."],
+        ["Underemployment",
+         "Federal Reserve Bank of New York, The Labor Market for Recent College Graduates "
+         "(updated February 2026), from Census ACS/IPUMS and DOL O*NET, covering "
+         f"{UNDEREMPLOYMENT_MAJOR_COUNT} majors."],
     ]
     if uses_training_debt:
         rows.append([
-            "Professional-school debt &amp; training",
+            "Professional-school debt & training",
             "AAMC (median medical school debt and resident stipend, 2024); "
             "ABA Young Lawyers Division (average law school debt, 2024); "
             "ADA/ADEA Survey of Dental School Seniors (average debt among indebted graduates, 2024). "
             "Residency is modelled as a representative 3 years; real programmes run 3–7.",
         ])
+    # The single most important caveat gets its own paragraph above the
+    # table, not a row inside it -- the report is read detached from the app,
+    # and "assumes you work in your field" is the assumption every figure on
+    # every preceding page rests on.
+    disclosure = underemployment_disclosure().replace("*underemployed*", "<i>underemployed</i>")
     return [
         Spacer(1, 14),
+        Paragraph("What these numbers assume", styles["section"]),
+        Paragraph(disclosure, styles["body"]),
+        Spacer(1, 10),
         Paragraph("Where these numbers come from", styles["section"]),
-        _pdf_table(rows, full_width=True),
+        _pdf_table(rows, col_ratios=[0.24, 0.76]),
         Spacer(1, 6),
         Paragraph(
             f"All figures are modelled estimates over {roi_window_years} years, not predictions, and "
@@ -2504,7 +2563,8 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
     return _pdf_image_from_figure(fig)
 
 
-def _pdf_table(rows: list, header: bool = True, full_width: bool = False) -> Table:
+def _pdf_table(rows: list, header: bool = True, full_width: bool = False,
+                col_ratios: list = None) -> Table:
     """A bordered reportlab Table, centered on the page. Each column is
     sized to its own widest cell's natural text width (so a short table --
     e.g. a 2-column module summary -- stays compact and visibly centered,
@@ -2548,7 +2608,9 @@ def _pdf_table(rows: list, header: bool = True, full_width: bool = False) -> Tab
     ]
     natural_widths = [max(w, PDF_CELL_MIN_WIDTH) for w in natural_widths]
     total_natural = sum(natural_widths)
-    if total_natural > PDF_CONTENT_WIDTH or full_width:
+    if col_ratios:
+        col_widths = [PDF_CONTENT_WIDTH * r for r in col_ratios]
+    elif total_natural > PDF_CONTENT_WIDTH or full_width:
         # Scale to fit exactly: down when the natural width would overflow,
         # up when the caller asked for a full-width table.
         scale = PDF_CONTENT_WIDTH / total_natural
@@ -4504,6 +4566,11 @@ else:
         st.markdown(f"**🎯 {breakeven['headline']}**".replace("$", r"\$"))
         st.caption(breakeven["detail"].replace("$", r"\$"))
 
+    # Sits directly under the position/premium numbers on purpose: this is the
+    # assumption those numbers rest on, and it belongs beside them rather than
+    # buried in Methodology where nobody reads it.
+    st.info(underemployment_disclosure())
+
     ai_context = {}
     if enable_ai_mode:
         ai_context = render_ai_risk_section(major)
@@ -4735,6 +4802,24 @@ you've taken out is still quietly racking up interest the whole time,
 since you're not making payments yet. That's on purpose, not a bug: it's
 the whole point of showing this stuff honestly. A first-year med student
 really does earn $0, not a doctor's salary.
+
+**The biggest assumption here: that you work in your field.** Every salary
+on this page is what someone in that career actually earns — and it assumes
+you become one of them. Nationally, that's true for only about 6 in 10
+college graduates. The Federal Reserve Bank of New York tracks
+*underemployment* — graduates working jobs that don't require a degree at
+all — and finds **39% overall**, ranging from **13% (Nursing)** to **66%
+(Criminal Justice)** across 73 majors
+([Source: NY Fed](https://www.newyorkfed.org/research/college-labor-market),
+updated February 2026, from Census ACS and DOL O*NET data).
+
+We show that as a disclosure rather than folding it into the math, and the
+reason is worth being straight about. That data is organized by *major*
+(Psychology), while this calculator is organized by *career* (Clinical and
+Counseling Psychologists) — so applying a per-career underemployment rate
+would mean guessing at which majors feed which careers. We'd rather tell
+you the assumption than invent a number to hide it. Read every figure below
+as "if you land the job," not "you will land the job."
 
 **What if you skip college? The high school graduate baseline.** We
 compare every major against $49,192/year — real median pay for full-time
