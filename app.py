@@ -655,6 +655,40 @@ def get_session_id() -> str:
     return st.session_state.session_id
 
 
+def mark_major_explicitly_selected():
+    """Record that the visitor chose the Target Profession themselves.
+
+    Wired to that selectbox's on_change (section 4), which Streamlit fires
+    only on a real interaction -- never on the initial render, and never on
+    the reruns other widgets trigger. So this flips exactly once, the first
+    time a visitor picks a major, and stays flipped for the session.
+    """
+    st.session_state.major_explicitly_selected = True
+
+
+def get_major_explicitly_selected() -> bool:
+    """Whether the major on screen is the visitor's own pick or the app's
+    default, stamped on every row alongside session_id.
+
+    The sidebar lands pre-filled with a concrete profile (Software Developers
+    at UC Berkeley) so there are real numbers on screen immediately, which is
+    the point of the tool. The cost is that a student whose intended
+    profession genuinely is the default never touches the dropdown, and their
+    session becomes indistinguishable from one where the visitor ignored the
+    calculator entirely: both leave a single row reading "Software
+    Developers". Without this flag the research cannot separate an answer
+    from an absence, and every default-major row is uninterpretable.
+
+    False does NOT mean the visitor disagreed with the default -- it means we
+    don't know, and analysis should exclude those rows from anything that
+    treats the major as a choice rather than drop them into the Software
+    Developers bucket. Arriving via a share link with ?major= set also leaves
+    this False: the major came from whoever built the link, which is equally
+    not this visitor's pick.
+    """
+    return bool(st.session_state.get("major_explicitly_selected", False))
+
+
 def log_usage_event(action: str):
     """Insert a single usage event into the usage_logs table. Tolerates any
     connection/query failure (matching every other save_*/log_* helper in
@@ -700,6 +734,7 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
         row = {
             "timestamp": now_local().isoformat(),
             "session_id": get_session_id(),
+            "major_explicitly_selected": get_major_explicitly_selected(),
             "respondent_role": respondent_role,
             "hs_graduation_year": hs_graduation_year,
             "perception_change": perception_change,
@@ -883,7 +918,8 @@ def save_pdf_download(context: dict) -> bool:
     contract."""
     try:
         conn = get_supabase_connection()
-        row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(), **context}
+        row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
+               "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
             conn.table("pdf_downloads").insert([row], count="None"),
             ttl=0,
@@ -901,7 +937,8 @@ def save_scenario_share(context: dict) -> bool:
     any failure, matching the other save_* helpers' contract."""
     try:
         conn = get_supabase_connection()
-        row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(), **context}
+        row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
+               "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
             conn.table("scenario_shares").insert([row], count="None"),
             ttl=0,
@@ -960,6 +997,7 @@ def maybe_log_scenario_event(context: dict) -> bool:
         row = {
             "timestamp": now_local().isoformat(),
             "session_id": get_session_id(),
+            "major_explicitly_selected": get_major_explicitly_selected(),
             "event_seq": seq,
             **context,
         }
@@ -2753,8 +2791,18 @@ shared_major = get_shared_default("major", "Software Developers")
 default_major_index = major_options.index(shared_major) if shared_major in major_options else (
     major_options.index("Software Developers") if "Software Developers" in major_options else 0
 )
+# on_change records that this visitor picked the major themselves, rather
+# than being shown the default above. Without it a student whose profession
+# genuinely IS the default looks identical in the data to one who never
+# touched the dropdown at all -- same single row saying "Software
+# Developers" -- and the research can't tell an answer from an absence. This
+# is deliberately instrumentation rather than a forced choice: making the
+# selectbox start empty would observe the same thing, at the cost of the
+# blank-page-until-you-pick friction this app exists to avoid. See
+# get_major_explicitly_selected (section 2b).
 major = st.sidebar.selectbox(
     "Target Profession", major_options, index=default_major_index,
+    on_change=mark_major_explicitly_selected,
     help="Pick the career you're evaluating -- this determines the salary "
          "numbers used everywhere else in the app. There are hundreds of "
          "options, so instead of scrolling, click the box and type part of "

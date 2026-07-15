@@ -113,3 +113,29 @@ create index if not exists scenario_events_session_id_idx on scenario_events (se
 -- exactly like a missing column does -- silently. Explicit and idempotent,
 -- matching the access the other four tables already have.
 grant select, insert on scenario_events to anon;
+
+
+-- 2026-07-15: major_explicitly_selected.
+--
+-- The sidebar lands pre-filled with a concrete profile (Software Developers
+-- at UC Berkeley) so there are real numbers on screen before a visitor
+-- touches anything. The cost: a student whose intended profession genuinely
+-- IS the default never opens the dropdown, and their session is
+-- indistinguishable from one where the visitor ignored the calculator --
+-- both leave a row reading "Software Developers". This flag separates an
+-- answer from an absence.
+--
+-- FALSE means "we don't know", not "the visitor disagreed with the default".
+-- Rows with major_explicitly_selected = false must be excluded from any
+-- analysis treating the major as a choice (the paper's H1 DTI stratification
+-- and Table 4 switch rate both qualify) rather than counted as Software
+-- Developers, which would manufacture a finding out of the app's own
+-- default. Arriving via a share link with ?major= set also leaves this
+-- false: that major came from whoever built the link.
+--
+-- Not added to usage_logs, which records only pageviews and carries no
+-- scenario at all.
+alter table survey_responses add column if not exists major_explicitly_selected boolean;
+alter table pdf_downloads    add column if not exists major_explicitly_selected boolean;
+alter table scenario_shares  add column if not exists major_explicitly_selected boolean;
+alter table scenario_events  add column if not exists major_explicitly_selected boolean;

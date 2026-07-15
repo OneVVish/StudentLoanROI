@@ -256,14 +256,12 @@ def analyze_switch_rate(events_df: pd.DataFrame):
     Two things make this weaker than it looks, and both belong in the paper
     rather than in a footnote:
 
-    1. The first event of a session is the app's own default (Software
-       Developers at UC Berkeley), not the visitor's choice -- the sidebar
-       arrives pre-filled. So a session's event_seq=1 major is the
-       researcher's selection, and its switch rate mostly measures "people
-       moved off the default", which is not a behavioral finding. Reported
-       separately below for exactly that reason. The construct H1 calls the
-       student's "initial selection" is therefore not currently observed at
-       all; only a shared link (?major=...) makes event_seq=1 meaningful.
+    1. The sidebar lands pre-filled, so a major the visitor never chose is
+       still recorded. major_explicitly_selected separates the two, and rows
+       where it's false are dropped below: false means "we don't know",
+       not "they agreed with the default", and counting them as Software
+       Developers would manufacture a finding out of the app's own default.
+       Rows predating that flag are NULL and are dropped for the same reason.
 
     2. The last major in a session can never be recorded as switched away
        from, since nothing follows it. Sessions with a single event
@@ -280,10 +278,25 @@ def analyze_switch_rate(events_df: pd.DataFrame):
         print("  (scenario_events has no event_seq -- migration incomplete?)")
         return
 
-    df = events_df.dropna(subset=["session_id", "scenario_a_major"]).copy()
-    df = df.sort_values(["session_id", "event_seq"])
+    all_events = events_df.dropna(subset=["session_id", "scenario_a_major"]).copy()
+    all_events = all_events.sort_values(["session_id", "event_seq"])
+
+    # Keep only majors the visitor actually picked -- see caveat 1 above.
+    if "major_explicitly_selected" in all_events.columns:
+        df = all_events[all_events.major_explicitly_selected == True]  # noqa: E712
+    else:
+        print("  (no major_explicitly_selected column -- migration incomplete?)")
+        return
+    dropped = len(all_events) - len(df)
     print(f"Sessions with a recorded path: {df.session_id.nunique()}  "
           f"(events: {len(df)})")
+    if dropped:
+        print(f"Excluded {dropped} event(s) where the major was the app's default, "
+              f"not the visitor's pick.")
+    if df.empty:
+        print("  (every recorded event was a landing default -- nothing to rank. "
+              "This is what the data looks like when nobody engaged the dropdown.)")
+        return
 
     multi = df.groupby("session_id").filter(lambda g: g.scenario_a_major.nunique() > 1)
     print(f"Sessions that tried more than one major: {multi.session_id.nunique()}")
@@ -301,9 +314,6 @@ def analyze_switch_rate(events_df: pd.DataFrame):
             later = path[path.event_seq > first_at]
             if not later.empty and (later.scenario_a_major != major).any():
                 switched.add(sid)
-        was_default_start = bool(
-            (df[(df.scenario_a_major == major) & (df.event_seq == 1)]).shape[0]
-        )
         rows.append({
             "major": major,
             "sessions_seen": len(sessions_seen),
@@ -311,20 +321,14 @@ def analyze_switch_rate(events_df: pd.DataFrame):
             "switch_rate_pct": round(len(switched) / len(sessions_seen) * 100, 1),
             "median_dti_when_seen": round(pd.to_numeric(seen.scenario_a_dti_ratio,
                                                         errors="coerce").median(), 3),
-            "appeared_as_landing_default": was_default_start,
         })
 
     table = pd.DataFrame(rows).sort_values("median_dti_when_seen", ascending=False)
-    chosen = table[~table.appeared_as_landing_default]
-    print("\nDeliberately-selected majors, ranked by DTI when seen "
-          "(excludes any major that was ever a session's landing default):")
-    print(chosen.to_string(index=False) if not chosen.empty
-          else "  (none yet -- every major so far was a landing default)")
-
-    default_rows = table[table.appeared_as_landing_default]
-    if not default_rows.empty:
-        print("\nLanding-default majors -- NOT a behavioral result, see docstring:")
-        print(default_rows.to_string(index=False))
+    print("\nRanked by DTI when seen (visitor-selected majors only):")
+    print(table.to_string(index=False))
+    print("\n  A major that is only ever a session's LAST selection shows 0% by\n"
+          "  construction -- nothing follows it to switch to. Read alongside\n"
+          "  sessions_seen; a 0% on n=1 is not a result.")
 
 
 def main():
