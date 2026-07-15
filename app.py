@@ -1842,6 +1842,140 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     }
 
 
+# Bisection bounds for the break-even search, in dollars of undergrad loan.
+# The upper bound sits far past any realistic undergraduate debt on purpose:
+# a major whose break-even lies beyond it is reported as such rather than
+# clipped to the bound, so an implausible number never reads as a real one.
+BREAKEVEN_SEARCH_MAX_LOAN = 1_000_000.0
+BREAKEVEN_SEARCH_TOLERANCE = 50.0  # dollars; well under the precision the model claims
+
+
+@st.cache_data(show_spinner=False)
+def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strategy: str,
+                         roi_window_years: int = ROI_WINDOW_YEARS,
+                         col_index: float = 100.0,
+                         career_data_source: str = "National") -> dict:
+    """The undergraduate loan at which `major_name` stops beating a debt-free
+    high school graduate — i.e. where earnings_premium crosses zero.
+
+    Found by bisection because the repayment engines aren't invertible:
+    IDR/RAP payments are income-driven with forgiveness, so "what was repaid
+    inside the window" is the output of a simulation rather than a formula.
+    Bisection is valid because earnings_premium is monotonically decreasing
+    in loan size — more debt strictly means more repaid inside the window,
+    and nothing else in the model depends on the loan.
+
+    Returns a dict, not a float, because the interesting answers aren't
+    numbers. A major can already be behind at zero debt ("never"), or still
+    ahead at an absurd one ("beyond_search_max" — which is most majors under
+    IDR, where the income-driven payment cap makes the principal nearly
+    irrelevant within the window). Rendering either as "your break-even is
+    $X" would print a falsehood.
+
+    personal_contribution is deliberately not a parameter: it moves the ROI%
+    denominator but not the earnings premium, so it cannot move the crossing.
+    col_index can't move it either — the cost-of-living adjustment divides
+    both sides of the comparison by the same index, scaling the premium
+    without relocating its zero. It's threaded through anyway so this always
+    calls compute_scenario_results exactly as the rest of the page does.
+
+    Cached because the on-screen render calls it on every Streamlit rerun and
+    a bisection is ~15 full amortisation simulations.
+
+    career_data_source is never read in the body — it exists purely to key
+    the cache. st.cache_data hashes arguments, but the work here depends on
+    the MAJOR_DATA global, which is rebuilt when the visitor switches the
+    Career Salary Data source (a Software Developer earns differently in
+    California than nationally). Without this parameter the cache would
+    happily serve a national break-even to someone who just switched to
+    California.
+    """
+    def premium_at(loan: float) -> float:
+        return compute_scenario_results(
+            major_name, loan, interest_rate, repayment_strategy,
+            col_index=col_index, roi_window_years=roi_window_years,
+        )["roi_result"]["earnings_premium"]
+
+    if premium_at(0.0) <= 0:
+        return {"status": "never", "breakeven_loan": None}
+    if premium_at(BREAKEVEN_SEARCH_MAX_LOAN) > 0:
+        return {"status": "beyond_search_max", "breakeven_loan": None}
+
+    lo, hi = 0.0, BREAKEVEN_SEARCH_MAX_LOAN
+    while hi - lo > BREAKEVEN_SEARCH_TOLERANCE:
+        mid = (lo + hi) / 2
+        if premium_at(mid) > 0:
+            lo = mid
+        else:
+            hi = mid
+    return {"status": "ok", "breakeven_loan": round((lo + hi) / 2, 2)}
+
+
+def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
+                       repayment_strategy: str, roi_window_years: int = ROI_WINDOW_YEARS,
+                       col_index: float = 100.0,
+                       career_data_source: str = "National") -> dict:
+    """find_breakeven_loan framed against what this visitor is actually
+    borrowing, shared by the on-screen section and its PDF counterpart so
+    the two can't drift.
+
+    Returns None for `headline` when the break-even shouldn't be shown at
+    all. That's the sub-baccalaureate case: for an occupation BLS says needs
+    less than a bachelor's, "this degree stops paying off at $X" is not
+    unfavourable, it's malformed — the model charged four financed years to
+    reach a job that never asked for them. The apprenticeship module already
+    makes that point properly (see SUB_BACHELORS_EDUCATION_LEVELS), so this
+    defers to it rather than printing a number that answers no question.
+    """
+    typical_education = MAJOR_DATA.get(major_name, {}).get("typical_education", "")
+    if typical_education in SUB_BACHELORS_EDUCATION_LEVELS:
+        return {"headline": None, "detail": None, "status": "not_applicable"}
+
+    result = find_breakeven_loan(major_name, interest_rate, repayment_strategy,
+                                  roi_window_years, col_index,
+                                  career_data_source=career_data_source)
+    years = roi_window_years
+    if result["status"] == "never":
+        return {
+            "headline": f"{major_name} doesn't break even at any loan amount",
+            "detail": (
+                f"Over {years} years, this path earns less than a high school graduate does — "
+                f"even with no loan at all. Borrowing less doesn't change that; only a longer "
+                f"horizon or a different path would."
+            ),
+            "status": "never", "breakeven_loan": None, "headroom": None,
+        }
+    if result["status"] == "beyond_search_max":
+        return {
+            "headline": f"{major_name} stays ahead at any realistic loan amount",
+            "detail": (
+                f"Over {years} years this path beats a high school graduate even past "
+                f"{fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven Repayment "
+                f"that's usually because the payment is capped by your income rather than your "
+                f"balance — the debt outlives this window rather than disappearing."
+            ),
+            "status": "beyond_search_max", "breakeven_loan": None, "headroom": None,
+        }
+
+    breakeven = result["breakeven_loan"]
+    headroom = breakeven - loan_amount
+    if headroom >= 0:
+        headline = f"You could borrow {fmt_money(headroom)} more before this stops paying off"
+        detail = (
+            f"You're borrowing {fmt_money(loan_amount)}. Over {years} years, {major_name} stops "
+            f"beating a debt-free high school graduate at {fmt_money(breakeven)} of undergraduate debt."
+        )
+    else:
+        headline = f"You're {fmt_money(abs(headroom))} past the point where this pays off"
+        detail = (
+            f"You're borrowing {fmt_money(loan_amount)}. Over {years} years, {major_name} stops "
+            f"beating a debt-free high school graduate at {fmt_money(breakeven)} of undergraduate "
+            f"debt. A longer horizon, a cheaper school, or Income-Driven Repayment can each move this line."
+        )
+    return {"headline": headline, "detail": detail, "status": "ok",
+            "breakeven_loan": breakeven, "headroom": headroom}
+
+
 # ---- 2h. Taxes & Take-Home Pay --------------------------------------------
 
 def _apply_marginal_brackets(taxable_income: float, brackets: list) -> float:
@@ -2652,6 +2786,22 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
                                  roi_window_years),
     ]
+
+    # Mirrors the on-screen break-even block -- same breakeven_summary call,
+    # so the report and the page cannot disagree about the number. Silent for
+    # sub-bachelor's occupations, exactly as on screen.
+    breakeven = breakeven_summary(
+        major, loan_amount, interest_rate, repayment_strategy,
+        roi_window_years=roi_window_years, col_index=col_index,
+        career_data_source=career_data_source,
+    )
+    if breakeven["headline"]:
+        story += [
+            Spacer(1, 10),
+            Paragraph(xml_escape(breakeven["headline"]), styles["section"]),
+            Paragraph(xml_escape(breakeven["detail"]), styles["body"]),
+        ]
+
     story += _pdf_module_sections(
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
         col_index=col_index, key_suffix_a="single", roi_window_years=roi_window_years,
@@ -4303,14 +4453,14 @@ else:
 
     st.subheader(f"📊 {roi_horizon_years}-Year Financial Position")
     st.caption((
-        f"This compares two paths over your first 10 years after high school: going into "
+        f"This compares two paths over your first {roi_horizon_years} years after high school: going into "
         f"**{major}** (paying off the loan above along the way) vs. skipping college and "
         f"working right away as a high school graduate who takes on **no loan of their own**. "
         f"Both numbers are adjusted for the cost of living in **{city}** -- that's what "
         f"**\"COL-Adjusted\"** means -- so it's a fair, apples-to-apples comparison of real "
         f"spending power, not just which raw number is bigger. **Earnings Premium** is simply "
-        f"the difference between the two: how much more (or less) you'd have after 10 years "
-        f"by choosing {major} instead of skipping college."
+        f"the difference between the two: how much more (or less) you'd have after "
+        f"{roi_horizon_years} years by choosing {major} instead of skipping college."
     ).replace("$", r"\$"))
 
     investment_caption = get_total_investment_caption(scenario)
@@ -4338,6 +4488,21 @@ else:
                              roi_horizon_years),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
+
+    # The break-even: how much debt this path can carry before it stops
+    # beating a high school graduate, framed against what's actually being
+    # borrowed. Everything above answers "how did this turn out?"; this
+    # answers "how much room do I have?", which is the question a student
+    # can still act on. Returns headline=None for sub-bachelor's occupations,
+    # where the whole comparison is malformed -- see breakeven_summary.
+    breakeven = breakeven_summary(
+        major, loan_amount, interest_rate, repayment_strategy,
+        roi_window_years=roi_horizon_years, col_index=city_info["col_index"],
+        career_data_source=career_data_source,
+    )
+    if breakeven["headline"]:
+        st.markdown(f"**🎯 {breakeven['headline']}**".replace("$", r"\$"))
+        st.caption(breakeven["detail"].replace("$", r"\$"))
 
     ai_context = {}
     if enable_ai_mode:

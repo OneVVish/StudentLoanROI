@@ -37,9 +37,6 @@ DEFAULT_OUTPUT = Path(__file__).parent / "analysis_output" / "breakeven_by_major
 # major whose break-even sits above it is reported as ">$1M" rather than
 # clipped to the bound, so an implausible number never silently reads as a
 # real one.
-SEARCH_MAX_LOAN = 1_000_000.0
-SEARCH_TOLERANCE = 50.0  # dollars; well below the precision the model claims
-
 STRATEGIES = ["Standard 10-Year", "Income-Driven Repayment"]
 
 # BLS's "typical education needed for entry" (see add_education_field.py),
@@ -113,51 +110,24 @@ def load_model_layer(state: str = None) -> dict:
     return ns
 
 
-def earnings_premium_at(ns: dict, major: str, loan: float, rate: float, strategy: str) -> float:
-    """The major's COL-adjusted 10-year advantage over a high school grad at
-    this debt level. Positive = the degree is ahead; the break-even is where
-    this crosses zero."""
-    result = ns["compute_scenario_results"](major, loan, rate, strategy)
-    return result["roi_result"]["earnings_premium"]
-
-
 def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str) -> dict:
-    """The undergrad loan amount at which `major` stops beating a debt-free
-    high school graduate, found by bisection.
+    """The undergrad loan at which `major` stops beating a debt-free high
+    school graduate.
 
-    Bisection is valid here because earnings_premium is monotonically
-    decreasing in loan size -- more debt means strictly more repaid inside
-    the 10-year window, and nothing else in the model depends on the loan.
-    It is not a closed-form solve because the repayment engines aren't
-    invertible: IDR/RAP payments are income-driven with forgiveness, so
-    "payments made in 10 years" is a simulation, not a formula.
+    Delegates to app.py's own find_breakeven_loan rather than reimplementing
+    the bisection here. This script used to own that logic, which meant the
+    paper's break-even and the app's break-even were two functions free to
+    disagree -- the same trap CLAUDE.md flags for the chart twins. The app
+    now shows a break-even to every visitor, so they must be the same number.
 
-    Returns a dict rather than a float because the interesting cases aren't
-    numbers: a major can lose at zero debt (never_breaks_even), or still be
-    ahead at an absurd debt level (breakeven_above_search_max).
+    Normalises the status names to the ones this script's table already uses.
     """
-    premium_at_zero = earnings_premium_at(ns, major, 0.0, rate, strategy)
-    if premium_at_zero <= 0:
-        # Loses to a high school grad even fully funded. For most majors this
-        # means low wages; for Medicine/Law it can also mean the professional
-        # -school debt get_effective_principal adds on top of the slider, plus
-        # the years of delayed earnings those tracks model.
-        return {"status": "never_breaks_even", "breakeven_loan": None,
-                "premium_at_zero_debt": premium_at_zero}
-
-    premium_at_max = earnings_premium_at(ns, major, SEARCH_MAX_LOAN, rate, strategy)
-    if premium_at_max > 0:
-        return {"status": "breakeven_above_search_max", "breakeven_loan": None,
-                "premium_at_zero_debt": premium_at_zero}
-
-    lo, hi = 0.0, SEARCH_MAX_LOAN
-    while hi - lo > SEARCH_TOLERANCE:
-        mid = (lo + hi) / 2
-        if earnings_premium_at(ns, major, mid, rate, strategy) > 0:
-            lo = mid
-        else:
-            hi = mid
-    return {"status": "ok", "breakeven_loan": round((lo + hi) / 2, 2),
+    result = ns["find_breakeven_loan"](major, rate, strategy)
+    status = {"never": "never_breaks_even",
+              "beyond_search_max": "breakeven_above_search_max"}.get(result["status"], "ok")
+    premium_at_zero = ns["compute_scenario_results"](
+        major, 0.0, rate, strategy)["roi_result"]["earnings_premium"]
+    return {"status": status, "breakeven_loan": result["breakeven_loan"],
             "premium_at_zero_debt": premium_at_zero}
 
 
@@ -369,7 +339,7 @@ def print_summary(df: pd.DataFrame, ns: dict, rate: float):
     idr_unbounded = df[(df["status_standard"] == "ok") & (df["status_idr"] == "breakeven_above_search_max")]
     if not idr_unbounded.empty:
         print(f"\n  {len(idr_unbounded)} majors break even under Standard but stay ahead past "
-              f"${SEARCH_MAX_LOAN:,.0f} under IDR --")
+              f"${ns['BREAKEVEN_SEARCH_MAX_LOAN']:,.0f} under IDR --")
         print("  i.e. within this window IDR's payment cap makes debt size nearly irrelevant.")
 
     print(f"\n{line}\nWHY CITY ISN'T A VARIABLE HERE\n{line}")
