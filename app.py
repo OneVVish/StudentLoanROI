@@ -2159,6 +2159,59 @@ def _pdf_styles() -> dict:
     }
 
 
+def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False) -> list:
+    """A "where these numbers come from" section, closing every report.
+
+    The app's on-screen Methodology section already carries this, and the
+    project's rule is that every number shown should be traceable to a
+    citation there -- but the PDF was the one surface that broke it. That
+    matters most for this artifact specifically: the report is what a
+    student hands to a parent, detached from the app, and "$56,743
+    take-home" with no attribution is just an assertion. A parent's first
+    reasonable question is "says who?", and the answer shouldn't require
+    going back to the website.
+
+    Kept to the sources actually used to produce the figures on the page,
+    with the full methodology one URL away rather than reproduced here.
+    """
+    rows = [
+        ["Figure", "Source"],
+        ["Salaries by occupation",
+         "U.S. Bureau of Labor Statistics, Occupational Employment and Wage Statistics (OEWS). "
+         "Starting salary uses the 25th-percentile wage; mid-career uses the median."],
+        ["High school graduate baseline",
+         "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
+         "for full-time workers age 25+ with a high school diploma and no college ($946/week, Q3 2024), "
+         "annualised. Wage growth of 2%/yr is an assumption, not a BLS figure."],
+        ["Cost of attendance &amp; college debt",
+         "U.S. Department of Education, College Scorecard."],
+        ["Federal &amp; state income tax",
+         "IRS 2024 federal brackets and standard deduction; published 2024 state brackets."],
+        ["Cost-of-living adjustment",
+         "U.S. Bureau of Economic Analysis, Regional Price Parities (2023)."],
+    ]
+    if uses_training_debt:
+        rows.append([
+            "Professional-school debt &amp; training",
+            "AAMC (median medical school debt and resident stipend, 2024); "
+            "ABA Young Lawyers Division (average law school debt, 2024); "
+            "ADA/ADEA Survey of Dental School Seniors (average debt among indebted graduates, 2024). "
+            "Residency is modelled as a representative 3 years; real programmes run 3–7.",
+        ])
+    return [
+        Spacer(1, 14),
+        Paragraph("Where these numbers come from", styles["section"]),
+        _pdf_table(rows, full_width=True),
+        Spacer(1, 6),
+        Paragraph(
+            f"All figures are modelled estimates over {roi_window_years} years, not predictions, and "
+            f"describe published averages rather than any individual's outcome. Full methodology, "
+            f"assumptions and citations: {APP_URL}",
+            styles["caption"],
+        ),
+    ]
+
+
 def _pdf_rule(width: float = None) -> Table:
     """A thin accent rule, used under section headings. A 1-row Table is the
     least fragile way to draw a horizontal line as a flowable -- reportlab's
@@ -2603,6 +2656,13 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
         col_index=col_index, key_suffix_a="single", roi_window_years=roi_window_years,
     )
+    # Only cite the professional-school sources when this major actually uses
+    # them -- listing AAMC on a Software Developer's report is noise.
+    story += _pdf_sources_section(
+        styles, roi_window_years,
+        uses_training_debt=bool(MAJOR_DATA.get(major, {}).get("additional_training_debt")
+                                or MAJOR_DATA.get(major, {}).get("unpaid_training_years")),
+    )
 
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=letter).build(
@@ -2694,6 +2754,14 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
         scenario_b=scenario_b, major_name_b=major_b, interest_rate_b=interest_rate_b,
         col_index=col_index, roi_window_years=roi_window_years,
+    )
+    story += _pdf_sources_section(
+        styles, roi_window_years,
+        uses_training_debt=any(
+            MAJOR_DATA.get(m, {}).get("additional_training_debt")
+            or MAJOR_DATA.get(m, {}).get("unpaid_training_years")
+            for m in (major, major_b)
+        ),
     )
 
     buffer = io.BytesIO()
