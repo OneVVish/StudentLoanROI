@@ -42,6 +42,39 @@ SEARCH_TOLERANCE = 50.0  # dollars; well below the precision the model claims
 
 STRATEGIES = ["Standard 10-Year", "Income-Driven Repayment"]
 
+# BLS's "typical education needed for entry" (see add_education_field.py),
+# grouped by whether the app's core assumption -- 4 years of undergrad,
+# financed by the loan slider, then straight into this occupation's wage --
+# is actually true for that occupation.
+ADVANCED_EDUCATION_LEVELS = {"Master's degree", "Doctoral or professional degree"}
+
+EDU_BACHELORS = "bachelors"            # the assumption holds; break-even is meaningful
+EDU_SUB_BACHELORS = "sub_bachelors"    # charged a degree the job doesn't require
+EDU_ADVANCED_UNMODELED = "advanced_unmodeled"  # extra school ignored -> ROI overstated
+EDU_ADVANCED_MODELED = "advanced_modeled"      # the 3 hand-curated tracks
+
+
+def classify_education(info: dict, sub_bachelors_levels: set) -> str:
+    """Which of the four modelling regimes an occupation falls into.
+
+    The app charges every occupation the same thing: 4 years of undergrad on
+    the loan slider, then immediate entry at that occupation's wage. That is
+    true for a bachelor's-level occupation, and false in opposite directions
+    for the other two groups -- so pooling them produces a break-even
+    distribution that answers no question at all.
+    """
+    level = info.get("typical_education") or ""
+    models_training = bool(info.get("unpaid_training_years")
+                           or info.get("stipend_training_years")
+                           or info.get("additional_training_debt"))
+    if models_training:
+        return EDU_ADVANCED_MODELED
+    if level in ADVANCED_EDUCATION_LEVELS:
+        return EDU_ADVANCED_UNMODELED
+    if level in sub_bachelors_levels:
+        return EDU_SUB_BACHELORS
+    return EDU_BACHELORS
+
 
 def load_model_layer(state: str = None) -> dict:
     """app.py's constants + helper functions (its sections 1 and 2), without
@@ -150,6 +183,8 @@ def build_breakeven_table(ns: dict, rate: float) -> pd.DataFrame:
             row["additional_training_debt"] or row["unpaid_training_years"]
             or row["stipend_training_years"]
         )
+        row["typical_education"] = info.get("typical_education") or "(unknown)"
+        row["education_group"] = classify_education(info, ns["SUB_BACHELORS_EDUCATION_LEVELS"])
         for strategy in STRATEGIES:
             result = find_breakeven_loan(ns, major, rate, strategy)
             key = "standard" if strategy == STRATEGIES[0] else "idr"
@@ -203,6 +238,57 @@ def print_window_sensitivity(ns: dict, rate: float):
           "  number to prospective students as though it were the verdict.")
 
 
+def print_education_partition(df: pd.DataFrame):
+    """Which occupations the app's core assumption is even true for.
+
+    Everything else this script prints is conditional on this section. The
+    app charges every occupation 4 years of undergrad on the loan slider and
+    then drops the graduate straight into that occupation's wage. That holds
+    for a bachelor's-level occupation. For the other two groups it's false in
+    opposite directions, and a break-even number computed across all of them
+    pools three incompatible questions.
+    """
+    line = "=" * 78
+    print(f"\n{line}\nIS THE MODEL'S CORE ASSUMPTION TRUE FOR THIS OCCUPATION?\n"
+          f"4 years of undergrad, financed, then straight into this wage.\n{line}")
+    counts = df.education_group.value_counts()
+    total = len(df)
+    labels = {
+        EDU_BACHELORS: "Bachelor's -- assumption HOLDS. Break-even is meaningful here.",
+        EDU_SUB_BACHELORS: "Sub-bachelor's -- charged a 4-year degree the job never required.",
+        EDU_ADVANCED_UNMODELED: "Needs a Master's/Doctorate -- extra school NOT modelled.",
+        EDU_ADVANCED_MODELED: "Extended training, hand-modelled (Medicine/Law/Athletic Training).",
+    }
+    for group in [EDU_BACHELORS, EDU_SUB_BACHELORS, EDU_ADVANCED_UNMODELED, EDU_ADVANCED_MODELED]:
+        n = int(counts.get(group, 0))
+        print(f"  {n:4d} ({n/total*100:4.1f}%)  {labels[group]}")
+    valid = int(counts.get(EDU_BACHELORS, 0)) + int(counts.get(EDU_ADVANCED_MODELED, 0))
+    print(f"\n  Only {valid} of {total} ({valid/total*100:.1f}%) are modelled on the right "
+          f"educational\n  assumption. Every aggregate below is restricted to those unless "
+          f"it says\n  otherwise.")
+
+    sub = df[df.education_group == EDU_SUB_BACHELORS]
+    if not sub.empty:
+        print(f"\n  SUB-BACHELOR'S ({len(sub)}): the comparison is malformed, not unfavourable.\n"
+              "  Nobody borrows $190k to become a Shampooer, so 'does this degree pay off'\n"
+              "  has no answer. These dominate the never-break-even group and inflate it:")
+        print("   " + ", ".join(sub.typical_education.value_counts().index[:5]))
+
+    adv = df[df.education_group == EDU_ADVANCED_UNMODELED]
+    if not adv.empty:
+        print(f"\n  ADVANCED, UNMODELLED ({len(adv)}): ROI is systematically OVERSTATED.\n"
+              "  The model pays these occupations their full wage from year 1 with only\n"
+              "  undergrad debt -- no extra years of school, no graduate-school debt.\n"
+              "  Worst offenders (highest wage granted with no extra schooling):")
+        print(adv.nlargest(6, "starting_salary")[
+            ["major", "starting_salary", "typical_education"]].to_string(index=False))
+        print("\n  This contradicts the app's own hand-modelled Medicine, which DOES serve\n"
+              "  4 unpaid years + 3 of residency + $205k. Both live in the same dropdown:\n"
+              "  at a $190k loan over 10 years, Medicine reports -$405k while Pediatric\n"
+              "  Surgeons reports +$3.48M. Same life path, a $3.88M disagreement, and\n"
+              "  nothing on screen tells a student which one to believe.")
+
+
 def print_summary(df: pd.DataFrame, ns: dict, rate: float):
     line = "=" * 78
     print(f"\n{line}\nBREAK-EVEN DEBT BY MAJOR\n"
@@ -210,7 +296,17 @@ def print_summary(df: pd.DataFrame, ns: dict, rate: float):
     print(f"Model: {ns['ROI_WINDOW_YEARS']}-year window, HS baseline "
           f"${ns['HS_GRAD_SALARY']:,}/yr growing {ns['HS_GRAD_GROWTH_RATE']*100:.0f}%/yr, "
           f"loan rate {rate}%.")
-    print(f"Occupations analyzed: {len(df)}")
+
+    # Restricted to occupations the 4-year-degree assumption is actually true
+    # for -- see print_education_partition. Reporting these aggregates over
+    # all 836 was pooling three incompatible questions and producing a
+    # headline ("half never break even") that was mostly an artifact of
+    # charging cashiers for a degree they never needed.
+    full_n = len(df)
+    df = df[df.education_group.isin([EDU_BACHELORS, EDU_ADVANCED_MODELED])]
+    print(f"Occupations analyzed: {len(df)} of {full_n} "
+          f"(bachelor's-level + the hand-modelled training tracks; the rest are\n"
+          f"  excluded as not-comparable -- see the education partition above)")
 
     never = df[df["status_standard"] == "never_breaks_even"]
     print(f"\nNever break even, even at $0 undergrad loan: {len(never)} "
@@ -301,6 +397,7 @@ def main():
     print(f"  {len(ns['MAJOR_DATA'])} occupations loaded.", file=sys.stderr)
 
     df = build_breakeven_table(ns, args.rate)
+    print_education_partition(df)
     print_summary(df, ns, args.rate)
     print_window_sensitivity(ns, args.rate)
 
