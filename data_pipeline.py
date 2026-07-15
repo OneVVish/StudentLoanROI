@@ -52,9 +52,11 @@ Usage:
     python data_pipeline.py raw_bls_data.xlsx -o cleaned_careers.csv
     python data_pipeline.py state_M2025_dl.xlsx --state CA
     python data_pipeline.py state_M2025_dl.xlsx --state CA -o cleaned_careers_ca.csv
+    python data_pipeline.py MSA_M2024_dl.xlsx --metros -o data/metro_careers_clean.csv
 """
 
 import argparse
+from pathlib import Path
 
 import pandas as pd
 
@@ -70,6 +72,41 @@ TOP_CODE_ANNUAL_WAGE = 239200
 # career's implied growth rate is computed the same way as the 11
 # hand-curated majors.
 GROWTH_WINDOW_YEARS = 10
+
+# The app's CITY_DATA keys mapped to their BLS OEWS metropolitan area
+# titles, for --metros. Hardcoded here rather than derived, because BLS's
+# area titles are long, change wording between releases ("Nashville-
+# Davidson--Murfreesboro--Franklin, TN"), and a fuzzy match that silently
+# picks the wrong metro would be worse than a loud failure -- --metros exits
+# if any of these no longer resolves.
+#
+# Keep in sync with CITY_DATA in app.py section 1. Every key here must exist
+# there; "National Average" is deliberately absent, since that IS the
+# national file this script already produces.
+METRO_AREA_BY_CITY = {
+    "New York, NY": "New York-Newark-Jersey City, NY-NJ",
+    "San Francisco, CA": "San Francisco-Oakland-Fremont, CA",
+    "Chicago, IL": "Chicago-Naperville-Elgin, IL-IN",
+    "Austin, TX": "Austin-Round Rock-San Marcos, TX",
+    "Atlanta, GA": "Atlanta-Sandy Springs-Roswell, GA",
+    "Columbus, OH": "Columbus, OH",
+    "Denver, CO": "Denver-Aurora-Centennial, CO",
+    "Los Angeles, CA": "Los Angeles-Long Beach-Anaheim, CA",
+    "San Diego, CA": "San Diego-Chula Vista-Carlsbad, CA",
+    "Dallas, TX": "Dallas-Fort Worth-Arlington, TX",
+    "Houston, TX": "Houston-Pasadena-The Woodlands, TX",
+    "San Antonio, TX": "San Antonio-New Braunfels, TX",
+    "Cleveland, OH": "Cleveland, OH",
+    "Miami, FL": "Miami-Fort Lauderdale-West Palm Beach, FL",
+    "Seattle, WA": "Seattle-Tacoma-Bellevue, WA",
+    "Nashville, TN": "Nashville-Davidson--Murfreesboro--Franklin, TN",
+    "Philadelphia, PA": "Philadelphia-Camden-Wilmington, PA-NJ-DE-MD",
+    "Boston, MA": "Boston-Cambridge-Newton, MA-NH",
+    "Phoenix, AZ": "Phoenix-Mesa-Chandler, AZ",
+    "Detroit, MI": "Detroit-Warren-Dearborn, MI",
+    "Charlotte, NC": "Charlotte-Concord-Gastonia, NC-SC",
+    "Minneapolis, MN": "Minneapolis-St. Paul-Bloomington, MN-WI",
+}
 
 # Fallback annual growth rate used only when a_pct25 is unusable for a
 # given occupation (suppressed/missing) and a real CAGR can't be computed.
@@ -168,6 +205,15 @@ def build_clean_dataframe(xlsx_path: str, state: str = None) -> pd.DataFrame:
     if state:
         raw = filter_to_state(raw, state)
 
+    return _clean_detailed(raw)
+
+
+def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
+    """The o_group/wage cleaning every release shares, applied after any
+    geographic filtering. Extracted so --metros runs each city through
+    exactly the same rules as the national and state files rather than a
+    second copy of them (quiet suppresses the per-slice notes, which would
+    otherwise print 22 times)."""
     detailed = raw[raw["o_group"].astype(str).str.strip().str.lower() == "detailed"].copy()
 
     detailed["a_median"] = clean_wage_column(detailed["a_median"])
@@ -197,14 +243,70 @@ def build_clean_dataframe(xlsx_path: str, state: str = None) -> pd.DataFrame:
     final_columns = ["occ_code", "occ_title", "o_group", "a_pct25", "a_median", "annual_growth_rate"]
     result = detailed[final_columns].reset_index(drop=True)
 
-    if dropped_no_median:
+    if dropped_no_median and not quiet:
         print(f"Dropped {dropped_no_median} occupation(s) with no usable median wage (suppressed/missing).")
-    if fallback_count:
+    if fallback_count and not quiet:
         print(
             f"{fallback_count} occupation(s) had a suppressed/missing 25th-percentile wage -- "
             f"assigned the default {DEFAULT_GROWTH_RATE:.0%} annual growth rate instead."
         )
     return result
+
+
+def build_metro_dataframe(xlsx_path: str) -> pd.DataFrame:
+    """Every app city's own metro wages, from the BLS OEWS *Metropolitan*
+    release (oesm##ma.zip -> MSA_M####_dl.xlsx), as ONE long-format table
+    with a `city` column.
+
+    Long format rather than 22 separate CSVs: the app filters by city at
+    load, 22 files would drift out of sync with each other, and the whole
+    set is only ~1MB.
+
+    Why this exists at all: without it, a San Francisco student is modelled
+    with a *national* wage against San Francisco's cost-of-living index --
+    earning the country's average while paying SF's prices. The obvious
+    shortcut, scaling the national wage by the cost index, is worse than
+    useless: it cancels algebraically against the app's existing COL
+    division, and it's empirically false anyway. Comparing this app's own
+    national and California files, the CA/national wage ratio runs from 1.01
+    to 1.37 across occupations (nurses 1.52, cashiers 1.25) against a
+    statewide price index of ~1.12. Geographic wage premiums are
+    occupation-specific; one index cannot represent them. So: measure, don't
+    estimate.
+
+    Suppression is heavier here than nationally -- BLS withholds small
+    occupation-by-metro cells -- so each city carries roughly 73-91% of the
+    national occupation list. Occupations a city doesn't publish are simply
+    absent from its rows; app-side, they fall back to the national wage and
+    say so rather than silently pretending the figure is local.
+    """
+    raw = load_bls_data(xlsx_path)
+    if "area_title" not in raw.columns:
+        raise ValueError(
+            "No 'area_title' column -- this doesn't look like the BLS Metropolitan release. "
+            "Download oesm##ma.zip from bls.gov/oes/tables.htm and pass its MSA_M####_dl.xlsx."
+        )
+
+    available = set(raw["area_title"].dropna().astype(str))
+    missing = {city: area for city, area in METRO_AREA_BY_CITY.items() if area not in available}
+    if missing:
+        # Loud rather than silent: a renamed metro would otherwise quietly
+        # drop that city to national wages for every visitor.
+        raise ValueError(
+            "These metro area titles aren't in the file -- BLS likely renamed them in this "
+            "release. Update METRO_AREA_BY_CITY:\n  "
+            + "\n  ".join(f"{city}: {area!r}" for city, area in missing.items())
+        )
+
+    frames = []
+    for city, area in METRO_AREA_BY_CITY.items():
+        metro_raw = raw[raw["area_title"].astype(str) == area]
+        cleaned = _clean_detailed(metro_raw, quiet=True)
+        cleaned.insert(0, "city", city)
+        frames.append(cleaned)
+        print(f"  {city:20s} {len(cleaned):>4d} occupations")
+
+    return pd.concat(frames, ignore_index=True)
 
 
 def print_summary(df: pd.DataFrame) -> None:
@@ -227,21 +329,38 @@ if __name__ == "__main__":
     parser.add_argument("--state", default=None,
                          help="Two-letter state abbreviation (e.g. CA) to filter to. "
                               "Requires the BLS OEWS *State* release, not the National file.")
+    parser.add_argument("--metros", action="store_true",
+                         help="Produce one long-format dataset covering every city in the app's "
+                              "CITY_DATA, with a `city` column. Requires the BLS OEWS "
+                              "*Metropolitan* release (oesm##ma.zip -> MSA_M####_dl.xlsx).")
     parser.add_argument("-o", "--output", default=None,
                          help="Output CSV path (default: cleaned_careers.csv, or "
                               "cleaned_careers_<state>.csv when --state is given)")
     args = parser.parse_args()
+    if args.metros and args.state:
+        raise SystemExit("Error: --metros and --state are different releases; pass one or the other.")
     output_path = args.output or (
+        "data/metro_careers_clean.csv" if args.metros else
         f"cleaned_careers_{args.state.lower()}.csv" if args.state else "cleaned_careers.csv"
     )
 
     try:
-        clean_df = build_clean_dataframe(args.input_xlsx, state=args.state)
+        if args.metros:
+            print(f"Extracting {len(METRO_AREA_BY_CITY)} metro areas:")
+            clean_df = build_metro_dataframe(args.input_xlsx)
+        else:
+            clean_df = build_clean_dataframe(args.input_xlsx, state=args.state)
     except FileNotFoundError:
         raise SystemExit(f"Error: could not find '{args.input_xlsx}'. Download it from bls.gov/oes/tables.htm.")
     except ValueError as exc:
         raise SystemExit(f"Error: {exc}")
 
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     clean_df.to_csv(output_path, index=False)
     print(f"Wrote {len(clean_df)} rows to {output_path}")
-    print_summary(clean_df)
+    if args.metros:
+        print(f"{clean_df.city.nunique()} cities, "
+              f"{clean_df.occ_title.nunique()} distinct occupations, "
+              f"median {clean_df.groupby('city').size().median():.0f} per city.")
+    else:
+        print_summary(clean_df)

@@ -200,6 +200,12 @@ CAREERS_CSV_PATH_CA = "cleaned_careers_ca.csv"
 # by: Major" mode -- see build_major_data.
 MAJORS_CSV_PATH = "data/nyfed_majors_clean.csv"
 
+# Per-METRO occupation wages, via `data_pipeline.py --metros`. Long-format:
+# one row per (city, occupation). Lets Career mode answer what a Software
+# Developer earns *in San Francisco* ($160,060) rather than nationally
+# ($105,210) -- see build_major_data for why that matters.
+METRO_CAREERS_CSV_PATH = "data/metro_careers_clean.csv"
+
 # How many years separate starting_salary from median_salary in each dataset.
 # BLS: the 25th-percentile-to-median reading this app has always used. NY Fed
 # carries its own span per row (18), since its two figures are age-band
@@ -253,6 +259,30 @@ def load_bls_careers(csv_path: str) -> dict:
 
 
 @st.cache_data
+def load_metro_wages(csv_path: str, city: str) -> dict:
+    """One city's own BLS metro wages, as {occ_title: {starting_salary,
+    median_salary}}, from data_pipeline.py --metros.
+
+    Only the wage pair: everything else about an occupation (SOC group,
+    typical education) is a property of the occupation, not of where it's
+    done, so build_major_data overlays these onto the national entries
+    rather than replacing them.
+
+    Returns {} for a city with no metro file coverage, which callers must
+    treat as "use national wages" -- see build_major_data.
+    """
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return {}
+    city_rows = df[df["city"] == city]
+    return {
+        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median}
+        for row in city_rows.itertuples()
+    }
+
+
+@st.cache_data
 def load_nyfed_majors(csv_path: str) -> dict:
     """Per-major wages/outcomes from nyfed_pipeline.py's output, in the same
     {name: {starting_salary, median_salary, ...}} shape load_bls_careers
@@ -284,7 +314,7 @@ def load_nyfed_majors(csv_path: str) -> dict:
     }
 
 
-def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER) -> dict:
+def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER, city: str = None) -> dict:
     """The app's full {major_name: {...}} dataset: BLS wages, overridden by
     the hand-curated entries, with training structure overlaid on the
     doctoral/professional occupations.
@@ -328,6 +358,30 @@ def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER) -> dict:
         return load_nyfed_majors(MAJORS_CSV_PATH)
 
     data = {**load_bls_careers(csv_path), **CURATED_MAJOR_DATA}
+
+    # Real metro wages where BLS publishes them. Without this, a San
+    # Francisco student was modelled on a NATIONAL wage divided by San
+    # Francisco's cost index -- earning the country's average while paying
+    # SF's prices, which made every expensive city a pure penalty. It isn't:
+    # SF Software Developers start at $160,060 (1.52x national) against a
+    # 1.18x cost index, so the premium beats the cost. The app said the
+    # opposite.
+    #
+    # Wages only. Everything else (SOC group, typical education, the
+    # training overlay below) is a property of the occupation, not of where
+    # it's done.
+    #
+    # Occupations BLS suppresses for a metro (roughly 20% -- small
+    # occupation-by-city cells) keep their national wage and are FLAGGED, so
+    # the page can say which figure it's showing instead of passing a
+    # national number off as local. Curated majors have no metro equivalent
+    # and stay national by the same rule.
+    if city:
+        metro_wages = load_metro_wages(METRO_CAREERS_CSV_PATH, city)
+        for occupation, wages in metro_wages.items():
+            if occupation in data:
+                data[occupation] = {**data[occupation], **wages, "wage_geography": city}
+
     for major_name, training_fields in ADVANCED_TRAINING_OVERLAY.items():
         if major_name in data:
             data[major_name] = {**data[major_name], **training_fields}
@@ -3556,13 +3610,30 @@ st.session_state.setdefault(
     shared_dataset_mode if shared_dataset_mode in dataset_mode_options else DATASET_MODE_MAJOR,
 )
 dataset_mode = st.session_state["dataset_mode_radio"]
-MAJOR_DATA = build_major_data(careers_csv_path, mode=dataset_mode)
+
+# City drives the wage dataset now, not just the cost-of-living index, so it
+# must be resolved before MAJOR_DATA is built. Its widget renders further
+# down (after Target Profession), hence the same read-from-session_state
+# -first pattern used for the two controls above.
+city_options = list(CITY_DATA.keys())
+shared_city = get_shared_default("city", "San Francisco, CA")
+st.session_state.setdefault(
+    "city_select", shared_city if shared_city in city_options else "San Francisco, CA")
+city = st.session_state["city_select"]
+
+# Metro wages are Career mode only: the NY Fed publishes no geography, so
+# Major mode's salaries are national and only its cost-of-living adjustment
+# varies by city.
+MAJOR_DATA = build_major_data(
+    careers_csv_path, mode=dataset_mode,
+    city=(city if dataset_mode == DATASET_MODE_CAREER else None),
+)
 
 # Major mode is a single national dataset -- the NY Fed doesn't publish
 # per-state figures -- so fall back to Career mode's data if the majors CSV
 # is missing rather than rendering an empty dropdown.
 if not MAJOR_DATA:
-    MAJOR_DATA = build_major_data(careers_csv_path, mode=DATASET_MODE_CAREER)
+    MAJOR_DATA = build_major_data(careers_csv_path, mode=DATASET_MODE_CAREER, city=city)
     dataset_mode = DATASET_MODE_CAREER
     st.session_state["dataset_mode_radio"] = DATASET_MODE_CAREER
 
@@ -3614,16 +3685,16 @@ if enable_prestige_mode:
     # threaded through every calculation.
     major = get_prestige_adjusted_major_name(major, prestige_tier_a)
 
-city_options = list(CITY_DATA.keys())
-shared_city = get_shared_default("city", "San Francisco, CA")
-default_city_index = city_options.index(shared_city) if shared_city in city_options else (
-    city_options.index("San Francisco, CA") if "San Francisco, CA" in city_options else 0
-)
+# No index= here: session_state already holds this widget's value (seeded via
+# setdefault up in the Career section, where MAJOR_DATA needed it) and passing
+# both would trigger Streamlit's widget-default-conflict warning.
 city = st.sidebar.selectbox(
-    "City / Metro Area", city_options, index=default_city_index,
-    help="Where you plan to live and work after graduating. Adjusts your "
-         "take-home pay and the 10-year comparison for how expensive that "
-         "area is to live in.",
+    "City / Metro Area", city_options, key="city_select",
+    help="Where you plan to live and work after graduating. In Career mode "
+         "this sets BOTH the wages (your metro's own BLS figures) and the "
+         "cost-of-living adjustment -- so a higher-paying, pricier city can "
+         "come out ahead or behind on its own merits. Major mode's wages are "
+         "national, since the NY Fed publishes no per-city breakdown.",
 )
 # Computed here (not just where it's first used, further down) so it's
 # available for every compute_scenario_results() call in section 5 --
@@ -4773,6 +4844,24 @@ else:
     # assumption those numbers rest on, and it belongs beside them rather than
     # buried in Methodology where nobody reads it.
     st.info(underemployment_disclosure(major if dataset_mode == DATASET_MODE_MAJOR else None))
+
+    # Which geography the salary above actually came from. BLS suppresses
+    # roughly a fifth of occupation-by-metro cells, so those fall back to a
+    # national wage -- and a national number standing in for a local one,
+    # unlabelled, is the same class of hidden assumption as the
+    # underemployment rate was.
+    if dataset_mode == DATASET_MODE_CAREER and city != "National Average":
+        if MAJOR_DATA.get(major, {}).get("wage_geography") == city:
+            st.caption(
+                f"💡 Salaries are **{city}**'s own BLS figures, not national ones — so this "
+                f"weighs {city}'s pay against {city}'s cost of living."
+            )
+        else:
+            st.caption(
+                f"⚠️ BLS doesn't publish a separate **{major}** wage for {city} (too few "
+                f"workers to report), so the salary above is the **national** figure adjusted "
+                f"for {city}'s cost of living. Treat it as an approximation."
+            )
 
     ai_context = {}
     if enable_ai_mode:
