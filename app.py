@@ -2082,23 +2082,95 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
 APP_URL = "https://studentloanroi.streamlit.app"
 
 
+# The report's palette, matching the on-screen app so a downloaded PDF looks
+# like it came from the same product rather than from reportlab's defaults.
+PDF_ACCENT = colors.HexColor("#1a56db")     # headings, rules, table headers
+PDF_INK = colors.HexColor("#1f2430")        # body text
+PDF_MUTED = colors.HexColor("#667085")      # captions, page furniture
+PDF_RULE = colors.HexColor("#d8dce5")       # hairlines, table grid
+PDF_BAND = colors.HexColor("#f5f7fb")       # alternating table rows
+
+
 def _draw_pdf_header_footer(canvas, doc):
-    """Page decoration for every page of every generated PDF: the app's URL
-    in a header at the top, the generation date/time in a footer at the
-    bottom -- passed to SimpleDocTemplate.build() as onFirstPage/
-    onLaterPages, which reportlab calls once per page with the low-level
-    canvas (flowables like _pdf_table can't draw outside their own frame,
-    so headers/footers always go through this canvas-level hook instead)."""
+    """Page decoration for every page of every generated PDF -- passed to
+    SimpleDocTemplate.build() as onFirstPage/onLaterPages, which reportlab
+    calls once per page with the low-level canvas (flowables like _pdf_table
+    can't draw outside their own frame, so page furniture always goes
+    through this canvas-level hook instead).
+
+    Carries the tool's name, the page number, and the disclaimer on EVERY
+    page, because a printed report gets separated: a parent reading page 3
+    should still see what produced it and that it's an estimate, without
+    having to find page 1.
+    """
     canvas.saveState()
-    canvas.setFont("Helvetica", 8)
-    canvas.setFillColor(colors.grey)
     page_width, page_height = doc.pagesize
-    canvas.drawString(doc.leftMargin, page_height - 30, APP_URL)
-    canvas.drawRightString(
-        page_width - doc.rightMargin, 30,
-        f"Generated {now_local().strftime('%B %d, %Y at %I:%M %p %Z')}",
-    )
+
+    # Header: accent rule + wordmark, so the page reads as the app's output.
+    canvas.setStrokeColor(PDF_ACCENT)
+    canvas.setLineWidth(2)
+    canvas.line(doc.leftMargin, page_height - 44, page_width - doc.rightMargin, page_height - 44)
+    canvas.setFont("Helvetica-Bold", 8)
+    canvas.setFillColor(PDF_ACCENT)
+    canvas.drawString(doc.leftMargin, page_height - 40, "STUDENT LOAN PAYOFF & MAJOR ROI CALCULATOR")
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(PDF_MUTED)
+    canvas.drawRightString(page_width - doc.rightMargin, page_height - 40, APP_URL.replace("https://", ""))
+
+    # Footer: disclaimer left, page number right, hairline above both.
+    canvas.setStrokeColor(PDF_RULE)
+    canvas.setLineWidth(0.5)
+    canvas.line(doc.leftMargin, 46, page_width - doc.rightMargin, 46)
+    canvas.setFont("Helvetica", 7.5)
+    canvas.setFillColor(PDF_MUTED)
+    canvas.drawString(doc.leftMargin, 34, "Educational estimate — not financial advice. Figures are averages and will differ from any individual's actual outcome.")
+    canvas.drawString(doc.leftMargin, 24, f"Generated {now_local().strftime('%B %d, %Y at %I:%M %p %Z')}")
+    canvas.setFont("Helvetica-Bold", 8)
+    canvas.setFillColor(PDF_INK)
+    canvas.drawRightString(page_width - doc.rightMargin, 24, f"Page {canvas.getPageNumber()}")
     canvas.restoreState()
+
+
+def _pdf_styles() -> dict:
+    """The report's type scale, defined once and shared by both generators.
+
+    reportlab's getSampleStyleSheet() is serviceable but generic -- stock
+    sizes, no colour, and a centred Title that reads like a default. These
+    are the app's own hierarchy: an accent-coloured section heading with a
+    rule under it, muted captions, and a left-aligned cover title.
+    """
+    base = getSampleStyleSheet()
+    return {
+        "cover_title": ParagraphStyle(
+            "cover_title", parent=base["Title"], fontName="Helvetica-Bold",
+            fontSize=23, leading=27, textColor=PDF_INK, alignment=0, spaceAfter=2),
+        "cover_sub": ParagraphStyle(
+            "cover_sub", parent=base["Normal"], fontName="Helvetica",
+            fontSize=10.5, leading=15, textColor=PDF_MUTED, spaceAfter=0),
+        "section": ParagraphStyle(
+            "section", parent=base["Heading2"], fontName="Helvetica-Bold",
+            fontSize=13, leading=16, textColor=PDF_ACCENT, spaceBefore=14, spaceAfter=6),
+        "body": ParagraphStyle(
+            "body", parent=base["Normal"], fontName="Helvetica",
+            fontSize=9.5, leading=13, textColor=PDF_INK),
+        "caption": ParagraphStyle(
+            "caption", parent=base["Normal"], fontName="Helvetica",
+            fontSize=8, leading=11, textColor=PDF_MUTED),
+    }
+
+
+def _pdf_rule(width: float = None) -> Table:
+    """A thin accent rule, used under section headings. A 1-row Table is the
+    least fragile way to draw a horizontal line as a flowable -- reportlab's
+    HRFlowable exists but doesn't respect the frame width as reliably when
+    the story is built across multiple page sizes."""
+    rule = Table([[""]], colWidths=[width or PDF_CONTENT_WIDTH], rowHeights=[1])
+    rule.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), PDF_RULE),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    return rule
 
 
 # reportlab's default font (Helvetica) has no emoji glyphs -- every emoji
@@ -2126,6 +2198,12 @@ PDF_CELL_H_PADDING = 12  # matches the 6pt LEFTPADDING + 6pt RIGHTPADDING applie
 
 _PDF_CELL_STYLE = ParagraphStyle("pdf_cell", fontName="Helvetica", fontSize=PDF_CELL_FONT_SIZE, leading=11)
 _PDF_CELL_BOLD_STYLE = ParagraphStyle("pdf_cell_bold", fontName="Helvetica-Bold", fontSize=PDF_CELL_FONT_SIZE, leading=11)
+# Header-row cells sit on the accent band, so their text must knock out to
+# white. TableStyle's TEXTCOLOR can't do this -- each cell is a Paragraph,
+# which carries its own colour.
+_PDF_CELL_HEADER_STYLE = ParagraphStyle("pdf_cell_header", fontName="Helvetica-Bold",
+                                         fontSize=PDF_CELL_FONT_SIZE, leading=11,
+                                         textColor=colors.white)
 
 _PDF_MONEY_FORMATTER = mticker.FuncFormatter(lambda value, _pos: f"${value:,.0f}")
 
@@ -2239,7 +2317,7 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
     return _pdf_image_from_figure(fig)
 
 
-def _pdf_table(rows: list, header: bool = True) -> Table:
+def _pdf_table(rows: list, header: bool = True, full_width: bool = False) -> Table:
     """A bordered reportlab Table, centered on the page. Each column is
     sized to its own widest cell's natural text width (so a short table --
     e.g. a 2-column module summary -- stays compact and visibly centered,
@@ -2259,12 +2337,16 @@ def _pdf_table(rows: list, header: bool = True) -> Table:
     def _is_bold(r, c):
         return (header and r == 0) or (not header and c == 0)
 
-    def _cell(value, bold):
-        style = _PDF_CELL_BOLD_STYLE if bold else _PDF_CELL_STYLE
+    def _cell(value, bold, on_accent=False):
+        if on_accent:
+            style = _PDF_CELL_HEADER_STYLE
+        else:
+            style = _PDF_CELL_BOLD_STYLE if bold else _PDF_CELL_STYLE
         return Paragraph(xml_escape(str(value)), style)
 
     wrapped_rows = [
-        [_cell(cell, bold=_is_bold(r, c)) for c, cell in enumerate(row)]
+        [_cell(cell, bold=_is_bold(r, c), on_accent=(header and r == 0))
+         for c, cell in enumerate(row)]
         for r, row in enumerate(rows)
     ]
 
@@ -2279,23 +2361,42 @@ def _pdf_table(rows: list, header: bool = True) -> Table:
     ]
     natural_widths = [max(w, PDF_CELL_MIN_WIDTH) for w in natural_widths]
     total_natural = sum(natural_widths)
-    if total_natural > PDF_CONTENT_WIDTH:
+    if total_natural > PDF_CONTENT_WIDTH or full_width:
+        # Scale to fit exactly: down when the natural width would overflow,
+        # up when the caller asked for a full-width table.
         scale = PDF_CONTENT_WIDTH / total_natural
         col_widths = [w * scale for w in natural_widths]
     else:
         col_widths = natural_widths
 
     table = Table(wrapped_rows, colWidths=col_widths, hAlign="CENTER")
+    # Horizontal rules only, no vertical grid: the column gutters already
+    # separate the data, and dropping the verticals turns a boxed-in
+    # spreadsheet into something that reads like a report.
     style = [
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.4, PDF_RULE),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("LEFTPADDING", (0, 0), (-1, -1), PDF_CELL_H_PADDING / 2),
         ("RIGHTPADDING", (0, 0), (-1, -1), PDF_CELL_H_PADDING / 2),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]
     if header:
-        style.append(("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f2f6")))
+        # Accent header band with knocked-out white text.
+        style += [
+            ("BACKGROUND", (0, 0), (-1, 0), PDF_ACCENT),
+            ("LINEBELOW", (0, 0), (-1, 0), 0, PDF_ACCENT),
+            ("TOPPADDING", (0, 0), (-1, 0), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ]
+        # Zebra-band the body rows so a long per-year table stays trackable
+        # across the page without vertical rules.
+        for row_index in range(1, len(wrapped_rows)):
+            if row_index % 2 == 0:
+                style.append(("BACKGROUND", (0, row_index), (-1, row_index), PDF_BAND))
+    else:
+        # Key/value table: tint the label column instead of a header row.
+        style.append(("BACKGROUND", (0, 0), (0, -1), PDF_BAND))
     table.setStyle(TableStyle(style))
     return table
 
@@ -2341,14 +2442,14 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
     scalars only, never a DataFrame or chart object)."""
     if not module_context:
         return []
-    styles = getSampleStyleSheet()
+    styles = _pdf_styles()
     elements = []
     if module_context.get("prestige_mode_active"):
         rows = [["Scenario", "Selected College Tier"], ["A", module_context.get("scenario_a_prestige_tier", "")]]
         if "scenario_b_prestige_tier" in module_context:
             rows.append(["B", module_context["scenario_b_prestige_tier"]])
         elements += [
-            Spacer(1, 12), Paragraph("College Prestige & Cost Estimator", styles["Heading2"]),
+            Spacer(1, 12), Paragraph("College Prestige & Cost Estimator", styles["section"]),
             _pdf_table(rows),
         ]
     if module_context.get("ai_mode_active"):
@@ -2356,7 +2457,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         if "scenario_b_ai_risk_level" in module_context:
             rows.append(["B", module_context["scenario_b_ai_risk_level"]])
         elements += [
-            Spacer(1, 12), Paragraph("AI Employability Risk Analysis", styles["Heading2"]),
+            Spacer(1, 12), Paragraph("AI Employability Risk Analysis", styles["section"]),
             _pdf_table(rows),
         ]
     if module_context.get("future_forecasting_active"):
@@ -2364,7 +2465,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         if "scenario_b_future_plan_selected" in module_context:
             rows.append(["B", module_context["scenario_b_future_plan_selected"]])
         elements += [
-            Spacer(1, 12), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["Heading2"]),
+            Spacer(1, 12), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["section"]),
             _pdf_table(rows),
         ]
         if scenario_a is not None:
@@ -2389,7 +2490,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
     if module_context.get("apprenticeship_active"):
         elements += [
             Spacer(1, 12),
-            Paragraph("Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)", styles["Heading2"]),
+            Paragraph("Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)", styles["section"]),
             _pdf_table([
                 [f"{roi_window_years}-Yr Net Position (COL-Adjusted)", "Earnings Premium vs. HS Grad"],
                 [fmt_money(module_context["apprenticeship_net_position"]),
@@ -2420,36 +2521,47 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
     Loan Information (+ per-year table + balance chart), Real-World
     Take-Home (+ take-home charts), and the Financial Position section (+ ROI
     chart)."""
-    styles = getSampleStyleSheet()
+    styles = _pdf_styles()
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
 
     story = [
-        Paragraph(_strip_emoji("🎓 Student Loan Payoff & Major ROI Report"), styles["Title"]),
+        # Cover block: what this is, for whom, over what horizon. Previously
+        # the report opened straight into "Your Profile" under a stock
+        # centred Title, so a parent handed page 1 had no framing.
+        Paragraph("Student Loan Payoff &amp; Major ROI Report", styles["cover_title"]),
         Paragraph(
-            "Educational estimate tool — salary and cost figures are illustrative, not financial advice.",
-            styles["Italic"],
+            f"<b>{xml_escape(major)}</b> &nbsp;·&nbsp; {xml_escape(school_name_a or 'No school selected')}"
+            f" &nbsp;·&nbsp; {xml_escape(city)}",
+            styles["cover_sub"],
         ),
-        Spacer(1, 12),
-        Paragraph("Your Profile", styles["Heading2"]),
+        Paragraph(
+            f"Modelled over {roi_window_years} years after high school, against a debt-free "
+            f"high school graduate. All figures adjusted for cost of living in {xml_escape(city)}.",
+            styles["cover_sub"],
+        ),
+        Spacer(1, 8),
+        _pdf_rule(),
+        Spacer(1, 4),
+        Paragraph("Your Profile", styles["section"]),
         _pdf_table(
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
                                interest_rate, repayment_strategy, career_stage_label, city,
                                start_year=start_year_a),
-            header=False,
+            header=False, full_width=True,
         ),
         Spacer(1, 12),
-        Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["Heading2"]),
-        _pdf_table([
+        Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["section"]),
+        _pdf_table(full_width=True, rows=[
             ["Year", "Cost of Attendance", "Loan Amount This Year"],
             *[[f"{row['year']} ({start_year_a + row['year'] - 1})" if start_year_a is not None else row["year"],
                fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
         ]),
         Spacer(1, 6),
-        Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["Normal"]),
+        Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["body"]),
         Spacer(1, 6),
-        _pdf_table([
+        _pdf_table(full_width=True, rows=[
             ["Monthly Payment", "Payoff Timeline", "Total Interest Paid"],
             [
                 fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
@@ -2460,8 +2572,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         Spacer(1, 12),
         build_pdf_balance_chart(repayment_result["schedule"], scenario["strategy_label"]),
         Spacer(1, 12),
-        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}"), styles["Heading2"]),
-        _pdf_table([
+        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}"), styles["section"]),
+        _pdf_table(full_width=True, rows=[
             ["Gross Salary", "Take-Home Pay (annual)", "Monthly Disposable", "COL-Adjusted Disposable"],
             [fmt_money(gross), fmt_money(take_home["net_take_home"]),
              fmt_money(disposable_nominal), fmt_money(disposable_col_adjusted)],
@@ -2476,7 +2588,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         ]
     story += [
         Spacer(1, 12),
-        Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["Heading2"]),
+        Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["section"]),
         _pdf_table([
             [f"High School Grad — {roi_window_years}-Yr Net Position",
              f"{major} — {roi_window_years}-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
@@ -2499,10 +2611,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
     return buffer.getvalue()
 
 
-def _pdf_scenario_metrics_table(scenario: dict) -> Table:
+def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int) -> Table:
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
-    return _pdf_table([
+    return _pdf_table(full_width=True, rows=[
         ["Monthly Payment", "Payoff Timeline", "Total Interest Paid",
          f"{roi_window_years}-Yr Earnings Premium (COL-Adj.)"],
         [
@@ -2525,35 +2637,46 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, plus the loan-balance and
     10-year-net-position comparison charts."""
-    styles = getSampleStyleSheet()
+    styles = _pdf_styles()
     story = [
-        Paragraph(_strip_emoji("🎓 Student Loan Payoff & Major ROI Report — Scenario Comparison"), styles["Title"]),
+        # Same cover treatment as the single-scenario report -- see the
+        # comment there. The disclaimer isn't repeated in the body because
+        # _draw_pdf_header_footer now carries it on every page.
+        Paragraph("Student Loan Payoff &amp; Major ROI Report", styles["cover_title"]),
         Paragraph(
-            "Educational estimate tool — salary and cost figures are illustrative, not financial advice.",
-            styles["Italic"],
+            f"<b>{xml_escape(scenario_a['major'])}</b> vs <b>{xml_escape(scenario_b['major'])}</b>"
+            f" &nbsp;·&nbsp; {xml_escape(city)}",
+            styles["cover_sub"],
         ),
-        Spacer(1, 12),
-        Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']}", styles["Heading2"]),
+        Paragraph(
+            f"Two paths compared over {roi_window_years} years after high school, each against a "
+            f"debt-free high school graduate. All figures adjusted for cost of living in {xml_escape(city)}.",
+            styles["cover_sub"],
+        ),
+        Spacer(1, 8),
+        _pdf_rule(),
+        Spacer(1, 4),
+        Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']}", styles["section"]),
         _pdf_table(
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
                                interest_rate, repayment_strategy, city_name=city,
                                start_year=start_year_a),
-            header=False,
+            header=False, full_width=True,
         ),
         Spacer(1, 6),
-        _pdf_scenario_metrics_table(scenario_a),
+        _pdf_scenario_metrics_table(scenario_a, roi_window_years),
         Spacer(1, 12),
-        Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["Heading2"]),
+        Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
         _pdf_table(
             _pdf_profile_rows(major_b, school_name_b, in_state_b, coa_per_year_b,
                                personal_contribution_per_year_b, grants_per_year_b,
                                interest_rate_b, repayment_strategy_b, city_name=city,
                                start_year=start_year_b),
-            header=False,
+            header=False, full_width=True,
         ),
         Spacer(1, 6),
-        _pdf_scenario_metrics_table(scenario_b),
+        _pdf_scenario_metrics_table(scenario_b, roi_window_years),
         Spacer(1, 12),
         build_pdf_comparison_balance_chart(
             scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
