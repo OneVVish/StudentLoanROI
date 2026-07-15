@@ -911,6 +911,67 @@ def save_scenario_share(context: dict) -> bool:
         return False
 
 
+def maybe_log_scenario_event(context: dict) -> bool:
+    """Log one row per distinct major/school selection this session lands on,
+    into scenario_events -- the exploration path, not just the destination.
+
+    Why this exists: every other table here records a scenario only at a
+    commit point (survey submit, PDF download, share). If a visitor arrives
+    set on pre-med, sees a 2.3x DTI, switches to nursing and downloads a
+    report, those tables record one row saying "nursing" -- the switch, which
+    is the actual behavioral finding, leaves no trace. Joined on session_id
+    and ordered by event_seq, these rows reconstruct what a visitor tried and
+    in what order, which is what makes a per-major switch rate computable.
+
+    Fires on rerun, not on a click, because a major/school change *is* the
+    event -- there's no button to hang it off. Streamlit reruns the whole
+    script on every widget interaction, so this is called on each pass and
+    dedupes against the last signature stored in session_state.
+
+    The signature is deliberately only the major/school selections (A and B),
+    not the whole scenario: those are the choices "switching" refers to, and
+    keying on every field would insert a row per loan-slider tick -- adding
+    network latency to a drag and drowning the switches in noise. The
+    tradeoff is real: pure financing exploration (same major, different loan
+    amount) is invisible here, showing up only in whatever the visitor
+    eventually commits to. The rest of the scenario (loan, DTI, ROI) still
+    rides along on every row, so each switch is timestamped against the
+    numbers that were on screen when it happened.
+
+    event_seq orders events within a session explicitly rather than relying
+    on timestamps, which are taken from the visitor's own clock (now_local)
+    and can tie or run backwards across a timezone round-trip.
+
+    Returns True when a row was written, False when deduped or on any
+    failure -- matching the other save_* helpers, a logging problem must
+    never break the calculator.
+    """
+    signature = (
+        context.get("scenario_a_major"), context.get("scenario_a_school_name"),
+        context.get("scenario_b_major"), context.get("scenario_b_school_name"),
+    )
+    if st.session_state.get("last_scenario_signature") == signature:
+        return False
+    st.session_state.last_scenario_signature = signature
+    seq = st.session_state.get("scenario_event_seq", 0) + 1
+    st.session_state.scenario_event_seq = seq
+    try:
+        conn = get_supabase_connection()
+        row = {
+            "timestamp": now_local().isoformat(),
+            "session_id": get_session_id(),
+            "event_seq": seq,
+            **context,
+        }
+        execute_query(
+            conn.table("scenario_events").insert([row], count="None"),
+            ttl=0,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def get_shared_default(param_name: str, fallback: str) -> str:
     """A Scenario field's value from the URL's query params, set by a
     previous "Share Scenario" click -- so opening a shared link recreates
@@ -3550,6 +3611,21 @@ if compare_mode:
         ai_context, future_context, apprenticeship_context,
     )
 
+    # Runs on every rerun; maybe_log_scenario_event dedupes so only an actual
+    # major/school change writes a row. Built here rather than inside the
+    # download/share on_click lambdas below because a switch is an event in
+    # its own right -- most visitors who change their mind never click
+    # anything afterward, and those are exactly the ones worth recording.
+    maybe_log_scenario_event({**build_scenario_context(
+        major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+        school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+        compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+        interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+        personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+        inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+        scenario_b=scenario_b, start_year_a=start_year_a, start_year_b=start_year_b,
+    ), **module_context})
+
     compare_pdf_bytes = generate_pdf_report_compare(
         city, major, school_name_a, in_state_a, coa_per_year_a, personal_contribution_per_year_a,
         grants_per_year_a, interest_rate, repayment_strategy, scenario_a,
@@ -3789,6 +3865,14 @@ else:
         prestige_tier_a if enable_prestige_mode else None, None, ai_context, future_context,
         apprenticeship_context,
     )
+
+    # See the Compare Mode branch above -- same dedupe-on-rerun logging, for
+    # the single-scenario path.
+    maybe_log_scenario_event({**build_scenario_context(
+        major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+        school_name_a, inflation_rate_a, grants_per_year_a, scenario,
+        start_year_a=start_year_a,
+    ), **module_context})
 
     single_pdf_bytes = generate_pdf_report_single(
         major, city, school_name_a, in_state_a, career_stage_label,

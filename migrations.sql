@@ -71,3 +71,45 @@ create index if not exists usage_logs_session_id_idx       on usage_logs (sessio
 create index if not exists survey_responses_session_id_idx on survey_responses (session_id);
 create index if not exists pdf_downloads_session_id_idx    on pdf_downloads (session_id);
 create index if not exists scenario_shares_session_id_idx  on scenario_shares (session_id);
+
+
+-- 2026-07-15: scenario_events -- the exploration path, not just the destination.
+--
+-- Every other table records a scenario only at a commit point (survey
+-- submit, PDF download, share), so a visitor who arrives set on pre-med,
+-- sees a 2.3x DTI, switches to nursing and downloads a report leaves one
+-- row saying "nursing". The switch -- the actual behavioral finding -- is
+-- invisible. maybe_log_scenario_event (app.py section 2b) writes one row per
+-- distinct major/school selection a session lands on; joined on session_id
+-- and ordered by event_seq those rows reconstruct what was tried, in order,
+-- which is what makes a per-major switch rate computable.
+--
+-- Same scenario-context columns as pdf_downloads, so `like` keeps the three
+-- in sync automatically -- session_id and the apprenticeship columns above
+-- are already part of that shape by the time this runs. Order matters: this
+-- statement must come after the migrations above, which is why this file is
+-- append-only.
+create table if not exists scenario_events (like pdf_downloads);
+
+-- LIKE copies pdf_downloads' id column definition and its NOT NULL, but not
+-- the identity/default that generates the value -- an inherited id would
+-- therefore reject every insert that doesn't supply one. Drop it rather than
+-- inherit a half-copied column. Nothing needs a synthetic key here:
+-- survey_responses has no id either, and this table is only ever addressed
+-- by (session_id, event_seq).
+alter table scenario_events drop column if exists id;
+
+-- Orders events within a session explicitly. Timestamps come from the
+-- visitor's own clock (now_local) and can tie or run backwards across the
+-- timezone round-trip, so never ORDER BY timestamp within a session -- use
+-- event_seq.
+alter table scenario_events add column if not exists event_seq integer;
+
+create index if not exists scenario_events_session_id_idx on scenario_events (session_id, event_seq);
+
+-- LIKE copies columns, not privileges. Supabase's default privileges
+-- normally grant the anon role access to tables created here, but the app
+-- authenticates with the anon key and a table it can't insert into fails
+-- exactly like a missing column does -- silently. Explicit and idempotent,
+-- matching the access the other four tables already have.
+grant select, insert on scenario_events to anon;

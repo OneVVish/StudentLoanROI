@@ -94,23 +94,28 @@ def bucket_roi(roi_pct):
 
 # The optional Advanced Analysis modules, as (flag_column, label). Each flag
 # is NULL unless that module was switched on at save-time, so notna() is the
-# "was this module used" test. apprenticeship_active is deliberately absent:
-# its columns don't exist in the live tables, so any session that enabled that
-# module fails its insert outright and never appears here at all -- see
-# ENGAGEMENT_CAVEAT.
+# "was this module used" test.
 MODULE_FLAGS = [
     ("prestige_mode_active", "College Prestige"),
     ("ai_mode_active", "AI Employability Risk"),
     ("future_forecasting_active", "2026 Regulatory Forecasting"),
+    ("apprenticeship_active", "Trade Apprenticeship"),
 ]
 
+# The apprenticeship_* columns were missing from the tables until the
+# 2026-07-15 migration, and PostgREST rejects the whole row on an unknown
+# column -- so any session that switched that module on had its save dropped
+# entirely and never appears here at all, rather than appearing with blank
+# fields. Rows written after the migration are unaffected. This caveat is
+# about the historical data only; delete it once pre-migration rows are no
+# longer part of whatever's being analyzed (they're identifiable by
+# session_id IS NULL, which is also when session_id shipped).
 ENGAGEMENT_CAVEAT = (
-    "CAVEAT: the apprenticeship_* columns build_module_context writes don't\n"
-    "  exist in these tables yet, so every save from a session with the Trade\n"
-    "  Apprenticeship module enabled is rejected outright (PGRST204) and is\n"
-    "  missing from this data entirely -- not recorded with blank fields, but\n"
-    "  absent. Module adoption below is therefore a floor, and these events\n"
-    "  are a biased sample until that migration is applied."
+    "CAVEAT: rows predating the 2026-07-15 migration (session_id IS NULL) are\n"
+    "  a sample biased toward 'Trade Apprenticeship off' -- sessions using that\n"
+    "  module had their inserts rejected outright and are absent, not blank.\n"
+    "  Apprenticeship adoption among those rows reads as zero regardless of\n"
+    "  what actually happened. Rows with a session_id are unaffected."
 )
 
 
@@ -238,12 +243,97 @@ def analyze_engagement(events: pd.DataFrame):
     print(pd.DataFrame(rows).to_string(index=False) if rows else "  (no module columns present)")
 
 
+def analyze_switch_rate(events_df: pd.DataFrame):
+    """Table 4: per-major switch rate -- how often a major, once its DTI was
+    on screen, got abandoned for something else within the same session.
+
+    Reads scenario_events, which records one row per distinct major/school a
+    session lands on (see maybe_log_scenario_event in app.py). A "switch" is
+    a session where a major appears at some event_seq and a *different* major
+    appears at a later one. Ordered by event_seq, never timestamp -- those
+    come from the visitor's clock and can tie.
+
+    Two things make this weaker than it looks, and both belong in the paper
+    rather than in a footnote:
+
+    1. The first event of a session is the app's own default (Software
+       Developers at UC Berkeley), not the visitor's choice -- the sidebar
+       arrives pre-filled. So a session's event_seq=1 major is the
+       researcher's selection, and its switch rate mostly measures "people
+       moved off the default", which is not a behavioral finding. Reported
+       separately below for exactly that reason. The construct H1 calls the
+       student's "initial selection" is therefore not currently observed at
+       all; only a shared link (?major=...) makes event_seq=1 meaningful.
+
+    2. The last major in a session can never be recorded as switched away
+       from, since nothing follows it. Sessions with a single event
+       contribute a denominator and no possible switch.
+    """
+    print_section(
+        "SWITCH RATE BY MAJOR (paper Table 4)",
+        "Once a major's DTI was visible, how often was it abandoned in-session?",
+    )
+    if events_df.empty:
+        print("  (no scenario_events yet -- this needs post-deploy traffic)")
+        return
+    if "event_seq" not in events_df.columns or events_df["event_seq"].isna().all():
+        print("  (scenario_events has no event_seq -- migration incomplete?)")
+        return
+
+    df = events_df.dropna(subset=["session_id", "scenario_a_major"]).copy()
+    df = df.sort_values(["session_id", "event_seq"])
+    print(f"Sessions with a recorded path: {df.session_id.nunique()}  "
+          f"(events: {len(df)})")
+
+    multi = df.groupby("session_id").filter(lambda g: g.scenario_a_major.nunique() > 1)
+    print(f"Sessions that tried more than one major: {multi.session_id.nunique()}")
+    if multi.empty:
+        print("  (nobody has switched majors yet -- nothing to rank)")
+        return
+
+    rows = []
+    for major, seen in df.groupby("scenario_a_major"):
+        sessions_seen = set(seen.session_id)
+        switched = set()
+        for sid in sessions_seen:
+            path = df[df.session_id == sid]
+            first_at = path[path.scenario_a_major == major].event_seq.min()
+            later = path[path.event_seq > first_at]
+            if not later.empty and (later.scenario_a_major != major).any():
+                switched.add(sid)
+        was_default_start = bool(
+            (df[(df.scenario_a_major == major) & (df.event_seq == 1)]).shape[0]
+        )
+        rows.append({
+            "major": major,
+            "sessions_seen": len(sessions_seen),
+            "sessions_switched_away": len(switched),
+            "switch_rate_pct": round(len(switched) / len(sessions_seen) * 100, 1),
+            "median_dti_when_seen": round(pd.to_numeric(seen.scenario_a_dti_ratio,
+                                                        errors="coerce").median(), 3),
+            "appeared_as_landing_default": was_default_start,
+        })
+
+    table = pd.DataFrame(rows).sort_values("median_dti_when_seen", ascending=False)
+    chosen = table[~table.appeared_as_landing_default]
+    print("\nDeliberately-selected majors, ranked by DTI when seen "
+          "(excludes any major that was ever a session's landing default):")
+    print(chosen.to_string(index=False) if not chosen.empty
+          else "  (none yet -- every major so far was a landing default)")
+
+    default_rows = table[table.appeared_as_landing_default]
+    if not default_rows.empty:
+        print("\nLanding-default majors -- NOT a behavioral result, see docstring:")
+        print(default_rows.to_string(index=False))
+
+
 def main():
     client = load_supabase_client()
     survey_df = fetch_table(client, "survey_responses")
     usage_df = fetch_table(client, "usage_logs")
     pdf_df = fetch_table(client, "pdf_downloads")
     shares_df = fetch_table(client, "scenario_shares")
+    scenario_events_df = fetch_table(client, "scenario_events")
 
     events = build_engagement_frame(pdf_df, shares_df)
 
@@ -253,6 +343,7 @@ def main():
         # survey is no reason to skip them.
         print("No survey responses yet -- skipping the perception-change analysis.")
         analyze_engagement(events)
+        analyze_switch_rate(scenario_events_df)
         return
 
     df = survey_df.copy()
@@ -327,6 +418,7 @@ def main():
             print("  " + (", ".join(f"{w} ({c})" for w, c in top) if top else "(no notable words)"))
 
     analyze_engagement(events)
+    analyze_switch_rate(scenario_events_df)
 
     try:
         import matplotlib

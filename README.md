@@ -56,11 +56,13 @@ To run the app yourself, you need your own free Supabase project:
 
 1. Sign up at [supabase.com](https://supabase.com) (GitHub login works) and
    create a new project (free tier).
-2. In the project's SQL Editor, run the schema below. Four tables:
+2. In the project's SQL Editor, run the schema below. Five tables:
    `usage_logs` (one row per pageview/event), `survey_responses` (one row
-   per feedback submission), `pdf_downloads` (one per PDF report), and
-   `scenario_shares` (one per "Share Scenario" click). The last three all
-   store the same simulation-context columns — Scenario A's inputs and
+   per feedback submission), `pdf_downloads` (one per PDF report),
+   `scenario_shares` (one per "Share Scenario" click), and
+   `scenario_events` (one per distinct major/school a visitor tries, so the
+   path through the app is recoverable and not just the destination). The
+   last four all store the same simulation-context columns — Scenario A's inputs and
    results, Scenario B's when Compare Mode is on at save-time, and a
    column per optional Advanced Analysis module — so a response can be
    analyzed against the exact scenario that produced it.
@@ -153,6 +155,14 @@ To run the app yourself, you need your own free Supabase project:
      drop column feedback_text;
 
    create table scenario_shares (like pdf_downloads);
+
+   -- One row per distinct major/school selection a session lands on, so a
+   -- visitor who switches major after seeing a bad DTI leaves a trace of the
+   -- switch itself, not just of where they ended up. Order by event_seq, not
+   -- timestamp: timestamps come from the visitor's own clock and can tie.
+   create table scenario_events (like pdf_downloads);
+   alter table scenario_events add column event_seq integer;
+   create index scenario_events_session_id_idx on scenario_events (session_id, event_seq);
    ```
 
    The above is the schema for a **fresh** project. If you already created
