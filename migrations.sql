@@ -165,3 +165,40 @@ alter table survey_responses add column if not exists roi_horizon_years integer;
 alter table pdf_downloads    add column if not exists roi_horizon_years integer;
 alter table scenario_shares  add column if not exists roi_horizon_years integer;
 alter table scenario_events  add column if not exists roi_horizon_years integer;
+
+
+-- 2026-07-15: experiment_arm -- randomised contrast-framing condition.
+--
+-- 'contrast' = the dual-scenario view was open at page load (Software
+-- Developers vs Humanities); 'single' = one scenario. Assigned by hashing
+-- session_id (get_experiment_arm, app.py section 2b), so it is a fair coin
+-- that is stable across reruns.
+--
+-- Why it exists: while the dual-scenario view was purely opt-in, the paper's
+-- secondary hypothesis -- does contrast framing move perception beyond DTI
+-- disclosure alone? -- could not be tested at any sample size. Visitors who
+-- enabled the comparison were self-selected on engagement and prior
+-- uncertainty, so exposure to the manipulation was an outcome of the
+-- respondent's disposition. That confound lived in the assignment
+-- mechanism, not in the noise, so no amount of data would have separated
+-- "framing works" from "the sort of person who compares also reports
+-- changing their mind". Randomising the initial state fixes it.
+--
+-- ANALYSE INTENT-TO-TREAT ON THIS COLUMN. Visitors may still toggle the
+-- view, so conditioning on whether a comparison was actually used (i.e. on
+-- scenario_b_major being present) reintroduces exactly the self-selection
+-- the randomisation removes. Compare arms, not behaviours.
+--
+-- Sessions arriving via a shared ?compare= link are excluded from the
+-- randomised analysis: the link's explicit state overrides the assignment,
+-- so their initial view and their arm can disagree.
+--
+-- Rows predating this are NULL and were all effectively 'single' (the view
+-- defaulted off), but they are not randomised and must not be pooled with
+-- the 'single' arm.
+alter table survey_responses add column if not exists experiment_arm text;
+alter table pdf_downloads    add column if not exists experiment_arm text;
+alter table scenario_shares  add column if not exists experiment_arm text;
+alter table scenario_events  add column if not exists experiment_arm text;
+
+create index if not exists survey_responses_experiment_arm_idx on survey_responses (experiment_arm);

@@ -16,6 +16,7 @@ Architecture:
                                 and the impact survey.
 """
 
+import hashlib
 import io
 import re
 import uuid
@@ -757,6 +758,37 @@ def get_session_id() -> str:
     return st.session_state.session_id
 
 
+def get_experiment_arm() -> str:
+    """Which arm of the contrast-framing experiment this session is in:
+    "contrast" (dual-scenario view on at load) or "single".
+
+    The paper's secondary hypothesis asks whether side-by-side contrast
+    framing moves perception beyond DTI disclosure alone. While the
+    dual-scenario view was purely opt-in, that question was unanswerable at
+    any sample size: visitors who enabled it were self-selected on
+    engagement and prior uncertainty, so exposure to the manipulation was an
+    outcome of the respondent's disposition rather than something assigned.
+    The confound sat in the assignment mechanism, not in the noise. Randomly
+    assigning the view at load is what converts that exploratory association
+    into a confirmatory test.
+
+    Derived by hashing the session id rather than drawing a random number,
+    so it's stable across Streamlit's reruns without needing a separate
+    persisted draw -- session_id is already a uuid4, so its hash is
+    uniformly distributed and this is a fair coin, not a pattern.
+
+    This sets the dual-scenario view's INITIAL state only. A visitor remains
+    free to toggle it, which is why analysis must be intent-to-treat on this
+    column rather than on whether the comparison was ultimately used --
+    conditioning on the latter would reintroduce exactly the self-selection
+    the randomization removes.
+    """
+    if "experiment_arm" not in st.session_state:
+        digest = hashlib.sha256(get_session_id().encode()).hexdigest()
+        st.session_state.experiment_arm = "contrast" if int(digest, 16) % 2 == 0 else "single"
+    return st.session_state.experiment_arm
+
+
 def mark_major_explicitly_selected():
     """Record that the visitor chose the Target Profession themselves.
 
@@ -836,6 +868,7 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
         row = {
             "timestamp": now_local().isoformat(),
             "session_id": get_session_id(),
+            "experiment_arm": get_experiment_arm(),
             "major_explicitly_selected": get_major_explicitly_selected(),
             "respondent_role": respondent_role,
             "hs_graduation_year": hs_graduation_year,
@@ -1028,6 +1061,7 @@ def save_pdf_download(context: dict) -> bool:
     try:
         conn = get_supabase_connection()
         row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
+               "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
             conn.table("pdf_downloads").insert([row], count="None"),
@@ -1047,6 +1081,7 @@ def save_scenario_share(context: dict) -> bool:
     try:
         conn = get_supabase_connection()
         row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
+               "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
             conn.table("scenario_shares").insert([row], count="None"),
@@ -1106,6 +1141,7 @@ def maybe_log_scenario_event(context: dict) -> bool:
         row = {
             "timestamp": now_local().isoformat(),
             "session_id": get_session_id(),
+            "experiment_arm": get_experiment_arm(),
             "major_explicitly_selected": get_major_explicitly_selected(),
             "event_seq": seq,
             **context,
@@ -3133,8 +3169,32 @@ admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View") if st.session_s
 # never needs to guess which scenario's context to save. Results below
 # render live off whatever this (and every other sidebar input) is
 # currently set to -- there's no Calculate/Compare button to click.
+# Initial state is randomly assigned (see get_experiment_arm) so the
+# contrast-framing hypothesis is testable rather than confounded by who
+# chooses to look. In the "contrast" arm the page loads with the
+# dual-scenario view already open, pairing the default Software Developers
+# against Scenario B's default Humanities; in "single" it loads as one
+# scenario. Either way the visitor can toggle it freely -- this is the
+# assigned condition, not an enforced one, so analysis is intent-to-treat.
+#
+# An explicit ?compare= from a shared link beats the randomiser: someone
+# opening a link to a comparison must see that comparison, or the link is
+# broken. Those sessions are identifiable (their arm and their initial
+# state disagree) and belong outside the randomised analysis. Hence
+# get_shared_default(..., None) -- distinguishing "absent" from "0", which
+# a "0" fallback could not.
+_shared_compare = get_shared_default("compare", None)
+if _shared_compare is not None:
+    _default_compare = _shared_compare == "1"
+else:
+    _default_compare = get_experiment_arm() == "contrast"
+# setdefault + no value= is this file's established pattern for a keyed
+# widget (see the session-state notes in CLAUDE.md): value= would apply
+# only on first render anyway and triggers Streamlit's default-conflict
+# warning once session_state holds the key.
+st.session_state.setdefault("compare_mode", _default_compare)
 compare_mode = st.sidebar.checkbox(
-    "🔀 Compare Two Scenarios", value=get_shared_default("compare", "0") == "1", key="compare_mode",
+    "🔀 Compare Two Scenarios", key="compare_mode",
     help="Turn this on to compare two different majors, schools, or loan "
          "setups side by side instead of looking at just one.",
 )
