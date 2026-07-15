@@ -93,10 +93,11 @@ def load_model_layer(state: str = None) -> dict:
     there is exactly one implementation of calculate_roi, and a change to it
     shows up here automatically.
 
-    MAJOR_DATA is assembled the same way app.py's section 4 does it
-    (load_bls_careers + CURATED_MAJOR_DATA), because there it depends on a
-    sidebar widget -- the Career Salary Data source -- that doesn't exist
-    outside a real UI session.
+    MAJOR_DATA is assembled by calling app.py's own build_major_data, since
+    section 4 builds it from a sidebar widget -- the Career Salary Data
+    source -- that doesn't exist outside a real UI session. Calling the
+    shared function rather than re-implementing the merge keeps the wage +
+    curated + training-overlay precedence identical to the app's.
     """
     src = APP_PATH.read_text()
     marker = re.search(r"^# =+\n# 3\. PAGE CONFIG & SESSION STATE", src, re.M)
@@ -108,7 +109,7 @@ def load_model_layer(state: str = None) -> dict:
     exec(compile(src[:marker.start()], str(APP_PATH), "exec"), ns)
 
     csv_path = ns["CAREERS_CSV_PATH_CA"] if state == "CA" else ns["CAREERS_CSV_PATH_NATIONAL"]
-    ns["MAJOR_DATA"] = {**ns["load_bls_careers"](csv_path), **ns["CURATED_MAJOR_DATA"]}
+    ns["MAJOR_DATA"] = ns["build_major_data"](csv_path)
     return ns
 
 

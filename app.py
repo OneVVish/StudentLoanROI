@@ -113,6 +113,77 @@ CURATED_MAJOR_DATA = {
     },
 }
 
+# Training structure for BLS occupations that can't be entered with a
+# bachelor's, keyed by exact BLS occupation title.
+#
+# Why this exists: without it the app pays a Pediatric Surgeon their full
+# $336,380 the year they finish undergrad, with no medical school and no
+# medical-school debt -- and then, in the same dropdown, tells anyone who
+# picks the curated "Medicine" above that they serve 4 unpaid years, 3 of
+# residency and $205k. At a $190k loan over 10 years those two entries
+# disagreed by $3.88M about the same life path, with nothing on screen to
+# say which to believe. This applies Medicine's structure to the physician
+# and dentist occupations BLS itself flags as needing a doctoral/
+# professional degree.
+#
+# Only wages come from BLS; this overlay adds nothing but training fields,
+# and build_major_data() merges the two. Deliberately NOT done by copying
+# these occupations into CURATED_MAJOR_DATA, which would duplicate their
+# salaries and let them drift from the CSV on the next BLS release.
+#
+# SIMPLIFICATIONS, deliberate and documented (the Methodology section
+# repeats these -- keep them in sync):
+#  - Residency length is modeled as a representative 3 years for every
+#    physician specialty, exactly as the existing curated "Medicine" entry
+#    does. Real ACGME residencies run 3-7 years (family medicine 3,
+#    radiology 5, surgical specialties longer), so this UNDERSTATES the
+#    training delay for the longer specialties and correspondingly
+#    overstates their 10-year position. Fixing it properly needs each
+#    specialty's own ACGME program requirements -- ACGME's published
+#    "Levels of Training by Specialty" table defines PGY levels, not
+#    program length, so there is no single citable table to read it from.
+#  - Every physician gets AAMC's median medical school debt and resident
+#    stipend regardless of specialty, since AAMC reports those across all
+#    MD graduates rather than per specialty.
+#  - Dentists are modeled with dental school's 4 years and no residency.
+#    Prosthodontics and oral/maxillofacial surgery do require additional
+#    residency, so those two are understated on the same basis as above.
+#  - Nurse Anesthetists (SOC 29-1151) are a Master's-level occupation with
+#    a different financing profile and no comparable association-published
+#    debt median found, so they are deliberately NOT overlaid here and
+#    remain a known gap.
+ADVANCED_TRAINING_OVERLAY = {}
+
+# Physicians: AAMC's 2024 median medical school debt ($205,000) and 2024
+# preliminary median first-post-MD-year resident stipend ($65,100, used flat
+# across residency), the same figures and structure the curated "Medicine"
+# entry above already cites.
+# aamc.org/data-reports/students-residents
+_PHYSICIAN_TRAINING = {
+    "unpaid_training_years": 4, "stipend_training_years": 3,
+    "stipend_salary": 65000, "additional_training_debt": 205000,
+}
+for _title in [
+    "Anesthesiologists", "Cardiologists", "Emergency Medicine Physicians",
+    "Family Medicine Physicians", "Neurologists", "Obstetricians and Gynecologists",
+    "Ophthalmologists, Except Pediatric", "Orthopedic Surgeons, Except Pediatric",
+    "Pediatric Surgeons", "Physicians, Pathologists", "Psychiatrists", "Radiologists",
+]:
+    ADVANCED_TRAINING_OVERLAY[_title] = dict(_PHYSICIAN_TRAINING)
+
+# Dentists: 4 years of dental school. Debt is the ADA/ADEA 2024 Survey of
+# Dental School Seniors' average education debt among indebted graduates
+# ($293,900) -- reported as a mean, unlike AAMC's median, and bimodal
+# (public ~$260k vs private ~$321k), so it represents the middle of a wide
+# spread rather than a typical individual.
+# adea.org/home/publications/research-and-data/graduating-oral-health-students
+_DENTIST_TRAINING = {
+    "unpaid_training_years": 4, "additional_training_debt": 293900,
+}
+for _title in ["Oral and Maxillofacial Surgeons", "Prosthodontists", "Dentists, All Other Specialists"]:
+    ADVANCED_TRAINING_OVERLAY[_title] = dict(_DENTIST_TRAINING)
+
+
 # BLS OEWS-sourced careers from data_pipeline.py's output, in the same
 # {major_name: {starting_salary, median_salary}} shape as the curated dict
 # above, so every existing calculation (get_major_growth_rate,
@@ -146,6 +217,30 @@ def load_bls_careers(csv_path: str) -> dict:
         }
         for row in careers_df.itertuples()
     }
+
+
+def build_major_data(csv_path: str) -> dict:
+    """The app's full {major_name: {...}} dataset: BLS wages, overridden by
+    the hand-curated entries, with training structure overlaid on the
+    doctoral/professional occupations.
+
+    Order matters. BLS first (wages for ~825 occupations), then
+    CURATED_MAJOR_DATA (which fully replaces an entry, e.g. the synthetic
+    "Medicine"), then ADVANCED_TRAINING_OVERLAY, which only *adds* training
+    fields to whatever wages are already there -- so a BLS release changing
+    a surgeon's salary flows straight through and the overlay never has to
+    know about it.
+
+    Lives here rather than being spelled out at the MAJOR_DATA assignment in
+    section 4 because analyze_model.py builds the same dataset outside a
+    Streamlit session; one function means the paper's numbers can't drift
+    from the app's (the same reasoning as CLAUDE.md's chart-twin warning).
+    """
+    data = {**load_bls_careers(csv_path), **CURATED_MAJOR_DATA}
+    for major_name, training_fields in ADVANCED_TRAINING_OVERLAY.items():
+        if major_name in data:
+            data[major_name] = {**data[major_name], **training_fields}
+    return data
 
 # Baseline comparison group: a high school graduate (no college) who takes on
 # no loans. Annual figure is real BLS Current Population Survey data: median
@@ -2855,7 +2950,7 @@ st.session_state.setdefault(
 )
 career_data_source = st.session_state["career_source_radio"]
 careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
-MAJOR_DATA = {**load_bls_careers(careers_csv_path), **CURATED_MAJOR_DATA}
+MAJOR_DATA = build_major_data(careers_csv_path)
 
 # Defaults below assume a popular, concrete profile (Software Developer in
 # San Francisco, in-state at UC Berkeley, 10 years in) instead of generic
