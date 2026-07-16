@@ -2300,7 +2300,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     # slot where agreement never arises.
     if result["status"] == "never":
         return {
-            "headline": "Doesn't break even at any loan amount",
+            "headline": "No — not at any loan amount",
             "detail": (
                 f"Over {years} years, this path earns less than a debt-free high school "
                 f"graduate does — even with no loan at all. Borrowing less doesn't change "
@@ -2310,7 +2310,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         }
     if result["status"] == "beyond_search_max":
         return {
-            "headline": "Pays off at any realistic loan amount",
+            "headline": "Yes — at any realistic loan amount",
             "detail": (
                 f"Over {years} years this path stays ahead of a debt-free high school graduate "
                 f"even past {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven "
@@ -2333,19 +2333,36 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         #
         # Lead with the verdict at the debt they actually have; state the line
         # second, as a fact rather than a target.
-        headline = f"Still pays off at {fmt_money(loan_amount)}"
-        detail = (
-            f"Over {years} years, this path comes out ahead of a debt-free high school "
-            f"graduate. The break-even for {major_name} — where the degree and the loan "
-            f"cancel out — is {fmt_money(breakeven)} of undergraduate debt."
-        )
+        # The raw break-even is often a number nobody would ever borrow
+        # ($628,677 for Computer Science), which reads as noise rather than
+        # reassurance. Expressing it as a multiple of what they're actually
+        # borrowing is what makes it land: "3x what you're borrowing" is a
+        # fact about THEM, "$628,677" is a fact about Mars.
+        multiple = breakeven / loan_amount if loan_amount > 0 else None
+        headline = f"Yes — still pays off at {fmt_money(loan_amount)}"
+        if multiple is not None and multiple >= 1.5:
+            comparison = (
+                f"about {multiple:.0f}× what you're borrowing" if multiple >= 2
+                else "about half again what you're borrowing"
+            )
+            detail = (
+                f"Over {years} years, this path comes out ahead of a debt-free high school "
+                f"graduate. It would take {fmt_money(breakeven)} of loans — {comparison} — "
+                f"before that stopped being true."
+            )
+        else:
+            detail = (
+                f"Over {years} years, this path comes out ahead of a debt-free high school "
+                f"graduate — but only just. It stops being true at {fmt_money(breakeven)} "
+                f"of loans, and you're at {fmt_money(loan_amount)}."
+            )
     else:
-        headline = f"Doesn't pay off at {fmt_money(loan_amount)}"
+        headline = f"No — not at {fmt_money(loan_amount)}"
         detail = (
             f"Over {years} years, this path falls behind a debt-free high school graduate. "
-            f"The break-even for {major_name} is {fmt_money(breakeven)} of undergraduate "
-            f"debt — you're {fmt_money(abs(headroom))} past it. A longer horizon, a cheaper "
-            f"school, or Income-Driven Repayment can each move the line."
+            f"It stops being worth it past {fmt_money(breakeven)} of loans, and you're "
+            f"{fmt_money(abs(headroom))} over that. A longer horizon, a cheaper school, or "
+            f"Income-Driven Repayment can each move the line."
         )
     return {"headline": headline, "detail": detail, "status": "ok",
             "breakeven_loan": breakeven, "headroom": headroom}
@@ -4578,7 +4595,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             career_data_source=career_data_source_name,
         )
         if breakeven["headline"]:
-            st.markdown(f"**🎯 {breakeven['headline']}**".replace("$", r"\$"))
+            st.markdown("**🎯 Is this debt worth it?**")
+            st.markdown(breakeven["headline"].replace("$", r"\$"))
             st.caption(breakeven["detail"].replace("$", r"\$"))
 
         # Major mode's underemployment rate is per-major, so A and B carry
@@ -5160,7 +5178,12 @@ else:
         career_data_source=career_data_source,
     )
     if breakeven["headline"]:
-        st.markdown(f"**🎯 {breakeven['headline']}**".replace("$", r"\$"))
+        # A heading, because without one this block was an answer to a
+        # question the page never asked -- it just floated after the chart
+        # with a decorative 🎯 and no label. "Break-even" is also jargon, so
+        # the heading asks the question in the words a student would use.
+        st.subheader("🎯 Is this debt worth it?")
+        st.markdown(f"**{breakeven['headline']}**".replace("$", r"\$"))
         st.caption(breakeven["detail"].replace("$", r"\$"))
 
     # Sits directly under the position/premium numbers on purpose: this is the
