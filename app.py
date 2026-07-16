@@ -2362,12 +2362,18 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                 f"{fmt_money(breakeven)} of loans, and you're at {fmt_money(loan_amount)}."
             )
     else:
+        # State the break-even as an actionable CEILING, not just a fact. In
+        # the positive case a margin framed as "borrow $X more" reads as an
+        # invitation (removed earlier for that reason) -- but here the visitor
+        # is already OVER the line, so naming the cap points toward LESS debt,
+        # which is the safe direction. "Keep loans under $X" is the one number
+        # a student in this case can actually act on.
         headline = f"No — not at {fmt_money(loan_amount)}"
         detail = (
             f"For {major_name}, this falls behind a debt-free high school graduate over "
-            f"{years} years. It stops being worth it past {fmt_money(breakeven)} of loans, "
-            f"and you're {fmt_money(abs(headroom))} over that. A longer horizon, a cheaper "
-            f"school, or Income-Driven Repayment can each move the line."
+            f"{years} years. To come out ahead, total loans would need to stay under "
+            f"{fmt_money(breakeven)} — you're {fmt_money(abs(headroom))} above that ceiling. "
+            f"A longer horizon, a cheaper school, or Income-Driven Repayment can each move the line."
         )
     return {"headline": headline, "detail": detail, "status": "ok",
             "breakeven_loan": breakeven, "headroom": headroom,
