@@ -2632,10 +2632,14 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
     render at the same size."""
     if monthly_payment <= monthly_net_take_home:
         remaining = monthly_net_take_home - monthly_payment
+        # "vs. Disposable Income" was vague: "vs." reads as two separate
+        # things, when the pie is one whole (monthly take-home pay) split into
+        # two, and "disposable income" never says it means "what's left after
+        # the loan". Title now names the whole; slices use plain words.
         fig = px.pie(
-            names=["Student Loan Payment", "Remaining Disposable Income"],
+            names=["Student Loan Payment", "What's Left to Spend"],
             values=[monthly_payment, remaining],
-            title="Student Loan Payment vs. Disposable Income",
+            title="Your Monthly Take-Home Pay: Loan vs. What's Left",
         )
         fig.update_traces(textinfo="percent+label", automargin=True)
         fig.update_layout(showlegend=False, title_font_size=14)
@@ -3005,10 +3009,10 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
         remaining = monthly_net_take_home - monthly_payment
         ax.pie(
             [monthly_payment, remaining],
-            labels=["Student Loan Payment", "Remaining Disposable Income"],
+            labels=["Student Loan Payment", "What's Left to Spend"],
             autopct="%1.0f%%", startangle=90,
         )
-        ax.set_title("Student Loan Payment vs. Disposable Income")
+        ax.set_title("Your Monthly Take-Home Pay: Loan vs. What's Left")
     else:
         ax.bar(["Take-Home Pay", "Required Student Loan Payment"],
                [monthly_net_take_home, monthly_payment], color=["#636EFA", "#EF553B"])
