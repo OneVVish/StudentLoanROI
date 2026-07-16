@@ -2342,8 +2342,19 @@ def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_
     """The loan payment at a given career-stage snapshot. If the loan is
     already paid off or forgiven by target_month, the payment is $0 for
     either strategy -- Standard's constant monthly_payment is only valid
-    while the loan is still active."""
-    if target_month >= repayment_result["payoff_years"] * 12:
+    while the loan is still active.
+
+    Strictly greater-than, not >=, and the boundary is not academic: it is
+    the default view. A Standard 10-Year loan's final payment falls in month
+    120, and the Mid-Career (Year 10) snapshot asks for exactly month 120
+    ((9+1)*12). Treating "paid off at month 120" as "no payment in month
+    120" made the app report a $0 monthly payment, a $0 loan slice on the
+    Payment vs. Disposable Income chart, and disposable income overstated by
+    the entire payment -- while the Loan Information section directly above
+    still showed $2,062/month. Year 10 spans months 109-120 and every one of
+    them is a payment month; the loan is retired BY month 120, not BEFORE it.
+    """
+    if target_month > repayment_result["payoff_years"] * 12:
         return 0.0
     if strategy == "Standard 10-Year":
         return repayment_result["monthly_payment"]
