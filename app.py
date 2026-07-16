@@ -1061,6 +1061,66 @@ def get_experiment_arm() -> str:
     return st.session_state.experiment_arm
 
 
+def log_horizon_change():
+    """Fires when a visitor changes the ROI Horizon.
+
+    The horizon is this app's most consequential control -- it's what turns
+    medicine from $146k behind a high school graduate into $3.5M ahead -- and
+    until now nothing recorded whether anyone touches it. scenario_events
+    dedupes on the major/school signature, so a horizon change creates no
+    row there; a visitor could sweep 10 to 30 years and leave no trace.
+
+    Goes to usage_logs rather than a new table: that's an event stream keyed
+    by `action` which has only ever carried "pageview", and this is exactly
+    the kind of thing it exists for. No schema change.
+
+    If nobody ever fires this, that is itself a finding about the interface,
+    and one worth knowing before claiming the feature corrects anything.
+    """
+    log_usage_event(f"horizon_changed:{st.session_state.get('roi_horizon_select', '?')}")
+
+
+def log_compare_toggle():
+    """Fires when a visitor turns the dual-scenario view on or off.
+
+    H2 is analysed intent-to-treat on the randomly assigned arm, and that
+    doesn't change -- but reporting the COMPLIANCE rate is standard practice
+    for a randomised trial, and a reviewer will ask for it. Assignment fixes
+    only the initial view; visitors may toggle away from it.
+
+    Without this, compliance is visible only for sessions that reach a commit
+    point (survey/PDF/share), and only as a final state. Someone assigned to
+    the contrast arm who switches it off and leaves is currently invisible --
+    which is precisely the non-compliant case the rate is meant to capture.
+
+    Records the arm alongside the new state, so a row is self-describing
+    without a join.
+    """
+    state = "on" if st.session_state.get("compare_mode") else "off"
+    log_usage_event(f"compare_toggled:{state}:arm={get_experiment_arm()}")
+
+
+def get_traffic_source() -> str:
+    """Where this visit came from, read from a ?src= tag on the URL and
+    stamped on every row -- e.g. studentloanroi.streamlit.app/?src=jefferson_econ.
+
+    Recruitment is the binding constraint on the companion research, and
+    without this every visit is not merely anonymous but sourceless: if forty
+    people arrive the week a counsellor forwards the link, nothing
+    distinguishes them from a class visit, a newsletter, or the author's own
+    testing. A tag per outreach channel makes "which recruitment actually
+    worked" answerable, and lets self-testing be excluded from analysis.
+
+    Still anonymous: this identifies a CHANNEL, chosen by whoever built the
+    link, not a person. It carries nothing about the visitor, and a visitor
+    who edits or drops it just becomes untagged.
+
+    Returns None when absent, which is the normal case for organic traffic --
+    NULL in the database rather than a fabricated "direct".
+    """
+    return get_shared_default("src", None)
+
+
 def mark_major_explicitly_selected():
     """Record that the visitor chose the Target Profession themselves.
 
@@ -1106,7 +1166,8 @@ def log_usage_event(action: str):
         conn = get_supabase_connection()
         execute_query(
             conn.table("usage_logs").insert(
-                [{"timestamp": now_local().isoformat(), "session_id": get_session_id(), "action": action}],
+                [{"timestamp": now_local().isoformat(), "session_id": get_session_id(),
+                  "traffic_source": get_traffic_source(), "action": action}],
                 count="None",
             ),
             ttl=0,
@@ -1140,6 +1201,7 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
         row = {
             "timestamp": now_local().isoformat(),
             "session_id": get_session_id(),
+            "traffic_source": get_traffic_source(),
             "experiment_arm": get_experiment_arm(),
             "major_explicitly_selected": get_major_explicitly_selected(),
             "respondent_role": respondent_role,
@@ -1342,6 +1404,7 @@ def save_pdf_download(context: dict) -> bool:
     try:
         conn = get_supabase_connection()
         row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
+               "traffic_source": get_traffic_source(),
                "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
@@ -1362,6 +1425,7 @@ def save_scenario_share(context: dict) -> bool:
     try:
         conn = get_supabase_connection()
         row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
+               "traffic_source": get_traffic_source(),
                "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
@@ -1422,6 +1486,7 @@ def maybe_log_scenario_event(context: dict) -> bool:
         row = {
             "timestamp": now_local().isoformat(),
             "session_id": get_session_id(),
+            "traffic_source": get_traffic_source(),
             "experiment_arm": get_experiment_arm(),
             "major_explicitly_selected": get_major_explicitly_selected(),
             "event_seq": seq,
@@ -3617,11 +3682,17 @@ repayment_strategy = st.sidebar.selectbox(
 #
 # Not to be confused with the "Standard 10-Year" repayment strategy above:
 # that's a real 10-year loan term, and it doesn't move with this.
+# setdefault + key rather than index=, so on_change can read the new value
+# back out of session_state -- passing index= alongside key= also trips
+# Streamlit's widget-default-conflict warning (see CLAUDE.md).
+_shared_horizon = get_shared_int("horizon", ROI_WINDOW_YEARS)
+st.session_state.setdefault(
+    "roi_horizon_select",
+    _shared_horizon if _shared_horizon in ROI_HORIZON_OPTIONS else ROI_WINDOW_YEARS,
+)
 roi_horizon_years = st.sidebar.selectbox(
-    "ROI Horizon", ROI_HORIZON_OPTIONS,
-    index=(ROI_HORIZON_OPTIONS.index(get_shared_int("horizon", ROI_WINDOW_YEARS))
-           if get_shared_int("horizon", ROI_WINDOW_YEARS) in ROI_HORIZON_OPTIONS
-           else ROI_HORIZON_OPTIONS.index(ROI_WINDOW_YEARS)),
+    "ROI Horizon", ROI_HORIZON_OPTIONS, key="roi_horizon_select",
+    on_change=log_horizon_change,
     format_func=lambda y: f"{y} years",
     help="How far into the future every comparison on this page looks. "
          "Careers that train before they earn (medicine, law) look worst at "
@@ -3945,7 +4016,7 @@ else:
 # warning once session_state holds the key.
 st.session_state.setdefault("compare_mode", _default_compare)
 compare_mode = st.sidebar.checkbox(
-    "🔀 Compare Two Scenarios", key="compare_mode",
+    "🔀 Compare Two Scenarios", key="compare_mode", on_change=log_compare_toggle,
     help="Turn this on to compare two different majors, schools, or loan "
          "setups side by side instead of looking at just one.",
 )

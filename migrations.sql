@@ -228,3 +228,43 @@ alter table survey_responses add column if not exists dataset_mode text;
 alter table pdf_downloads    add column if not exists dataset_mode text;
 alter table scenario_shares  add column if not exists dataset_mode text;
 alter table scenario_events  add column if not exists dataset_mode text;
+
+
+-- 2026-07-15: traffic_source -- which outreach a visit came from.
+--
+-- Read from a ?src= tag on the URL (e.g. /?src=jefferson_econ), set by
+-- whoever builds the link. NULL for organic traffic, which is the normal
+-- case -- deliberately NULL rather than a fabricated 'direct'.
+--
+-- Recruitment is the binding constraint on this research, and without this
+-- every visit is not merely anonymous but sourceless: forty arrivals the
+-- week a counsellor forwards the link are indistinguishable from a class
+-- visit, a newsletter, or the author's own testing. This makes "which
+-- outreach worked" answerable and lets self-testing be excluded.
+--
+-- Still anonymous: it identifies a CHANNEL chosen by the link's author, not
+-- a person, and carries nothing about the visitor. usage_logs gets it too --
+-- that's the only table recording visits that never reach a commit point,
+-- which is exactly where attribution matters most (a channel that produces
+-- pageviews but no engagement is a finding).
+alter table usage_logs       add column if not exists traffic_source text;
+alter table survey_responses add column if not exists traffic_source text;
+alter table pdf_downloads    add column if not exists traffic_source text;
+alter table scenario_shares  add column if not exists traffic_source text;
+alter table scenario_events  add column if not exists traffic_source text;
+
+create index if not exists usage_logs_traffic_source_idx on usage_logs (traffic_source);
+
+
+-- NOTE: the horizon-change and compare-toggle events added at the same time
+-- need no NEW COLUMN of their own -- they go to usage_logs.action, an
+-- existing free-text event stream that has only ever carried 'pageview'.
+-- They do, however, depend on the usage_logs.traffic_source column above,
+-- because they share log_usage_event's single insert: until that column
+-- exists, every usage_logs write is rejected whole (PGRST204), pageviews
+-- included. Run this file before deploying.
+--     horizon_changed:30
+--     compare_toggled:off:arm=contrast
+-- Query them with `where action like 'horizon_changed:%'`. Reporting the
+-- compare-toggle compliance rate is standard practice for a randomised
+-- trial; H2 stays intent-to-treat on experiment_arm regardless.
