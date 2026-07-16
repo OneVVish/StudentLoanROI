@@ -2774,7 +2774,7 @@ def _pdf_breakeven_block(breakeven: dict, styles: dict, scenario_label: str = No
 
 
 def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False,
-                          major_for_underemployment: str = None) -> list:
+                          underemployment_majors: list = None) -> list:
     """A "where these numbers come from" section, closing every report.
 
     The app's on-screen Methodology section already carries this, and the
@@ -2821,11 +2821,29 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
     # table, not a row inside it -- the report is read detached from the app,
     # and "assumes you work in your field" is the assumption every figure on
     # every preceding page rests on.
-    disclosure = underemployment_disclosure(major_for_underemployment, for_pdf=True)
+    #
+    # underemployment_majors is a list of (scenario_label, major) pairs. In
+    # Major mode each major has its OWN underemployment rate, so a compare
+    # report needs one paragraph per scenario -- previously it showed only
+    # Scenario A's. In Career mode the text is national and shared, so the
+    # callers pass None and it renders once. Identical majors collapse to one.
+    if underemployment_majors:
+        seen, disclosure_paras = set(), []
+        for label, mjr in underemployment_majors:
+            if mjr in seen:
+                continue
+            seen.add(mjr)
+            text = underemployment_disclosure(mjr, for_pdf=True)
+            # Only label when there's more than one distinct major to
+            # distinguish -- a lone paragraph doesn't need "Scenario A:".
+            prefix = f"<b>{xml_escape(label)}:</b> " if label and len({m for _, m in underemployment_majors}) > 1 else ""
+            disclosure_paras.append(Paragraph(prefix + text, styles["body"]))
+    else:
+        disclosure_paras = [Paragraph(underemployment_disclosure(None, for_pdf=True), styles["body"])]
     return [
         Spacer(1, 14),
         Paragraph("What these numbers assume", styles["section"]),
-        Paragraph(disclosure, styles["body"]),
+        *disclosure_paras,
         Spacer(1, 10),
         Paragraph("Where these numbers come from", styles["section"]),
         _pdf_table(rows, col_ratios=[0.24, 0.76]),
@@ -3304,7 +3322,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         styles, roi_window_years,
         uses_training_debt=bool(MAJOR_DATA.get(major, {}).get("additional_training_debt")
                                 or MAJOR_DATA.get(major, {}).get("unpaid_training_years")),
-        major_for_underemployment=(major if dataset_mode == DATASET_MODE_MAJOR else None),
+        underemployment_majors=([(None, major)] if dataset_mode == DATASET_MODE_MAJOR else None),
     )
 
     buffer = io.BytesIO()
@@ -3427,7 +3445,10 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             or MAJOR_DATA.get(m, {}).get("unpaid_training_years")
             for m in (major, major_b)
         ),
-        major_for_underemployment=(major if dataset_mode == DATASET_MODE_MAJOR else None),
+        underemployment_majors=(
+            [("Scenario A", major), ("Scenario B", major_b)]
+            if dataset_mode == DATASET_MODE_MAJOR else None
+        ),
     )
 
     buffer = io.BytesIO()
