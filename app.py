@@ -480,10 +480,10 @@ UNDEREMPLOYMENT_MAJOR_COUNT = 73
 UNDEREMPLOYMENT_SOURCE_URL = "https://www.newyorkfed.org/research/college-labor-market"
 
 
-def underemployment_disclosure(major_name: str = None) -> str:
+def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) -> str:
     """One sentence about underemployment, framed for whichever dataset is
-    driving the page. Shared by the on-screen render, the PDF and the
-    Methodology section so the number and its framing can't drift.
+    driving the page. Shared by the on-screen render and the PDF so the number
+    and its framing can't drift.
 
     The two modes need genuinely different sentences, because the salaries
     mean different things:
@@ -497,24 +497,41 @@ def underemployment_disclosure(major_name: str = None) -> str:
     underemployed or not. The rate is already inside the number, so quoting
     it as a warning would be wrong twice over: it's not an unmodelled risk,
     and it's this major's own published figure rather than a national one.
+
+    for_pdf changes two things, both because the report is a static document
+    read detached from the app:
+      - markup is reportlab's <b>/<i>, not Streamlit's **/* -- the old code
+        emitted markdown and stripped it with fragile string replaces, which
+        left "*Major*" showing its asterisks in the PDF.
+      - the Career-mode "Switch Choose by to Major" call-to-action is dropped:
+        it tells the reader to click a sidebar toggle that doesn't exist on
+        paper.
     """
+    bold = (lambda t: f"<b>{t}</b>") if for_pdf else (lambda t: f"**{t}**")
+    ital = (lambda t: f"<i>{t}</i>") if for_pdf else (lambda t: f"*{t}*")
+
     if major_name is not None:
         rate = MAJOR_DATA.get(major_name, {}).get("underemployment_rate")
         if rate is not None:
             return (
-                f"These salaries already account for underemployment: **{rate:.0f}% of {major_name} "
-                f"graduates** work in jobs that don't require a degree, and they're included in the "
-                f"figures above rather than filtered out. That's what makes this different from asking "
-                f"about a specific job — it's what everyone who studied this actually earns."
+                f"These salaries already account for underemployment: "
+                f"{bold(f'{rate:.0f}% of {major_name} graduates')} work in jobs that don't require "
+                f"a degree, and they're included in the figures above rather than filtered out. "
+                f"That's what makes this different from asking about a specific job — it's what "
+                f"everyone who studied this actually earns."
             )
-    return (
+
+    base = (
         f"Every salary here assumes you work in the field you picked. Nationally, "
-        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of college graduates are *underemployed* — working a job "
+        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of college graduates are {ital('underemployed')} — working a job "
         f"that doesn't require a degree — ranging from {UNDEREMPLOYMENT_MIN_PCT:.0f}% "
         f"({UNDEREMPLOYMENT_MIN_MAJOR}) to {UNDEREMPLOYMENT_MAX_PCT:.0f}% ({UNDEREMPLOYMENT_MAX_MAJOR}) "
         f"depending on major. This calculator assumes you're in the {100 - UNDEREMPLOYMENT_OVERALL_PCT:.0f}% "
-        f"who aren't. Switch **Choose by** to *Major* for figures that include them."
+        f"who aren't."
     )
+    if not for_pdf:
+        base += f" Switch {bold('Choose by')} to {ital('Major')} for figures that include them."
+    return base
 
 # Registered Apprenticeship benchmark for the "Alternative Pathway" card.
 # Year-1 training wage ($52,000) and average starting salary upon
@@ -2804,9 +2821,7 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
     # table, not a row inside it -- the report is read detached from the app,
     # and "assumes you work in your field" is the assumption every figure on
     # every preceding page rests on.
-    disclosure = underemployment_disclosure(
-        major_for_underemployment
-    ).replace("*underemployed*", "<i>underemployed</i>").replace("**", "")
+    disclosure = underemployment_disclosure(major_for_underemployment, for_pdf=True)
     return [
         Spacer(1, 14),
         Paragraph("What these numbers assume", styles["section"]),
