@@ -4420,10 +4420,12 @@ actually deciding between.
   **$3.5 million ahead** at 30. Same data. The only thing that changed is where you stop
   counting.
 
-**What this can't tell you.** Every number here is an average for a whole major or job —
-not a prediction about you. It can tell you what a choice is likely to cost. It can't tell
-you whether it's worth it; that part is yours. Sources and assumptions are in
-**📚 Methodology & Sources** at the bottom.
+**Two senses of "worth it."** This does answer whether a major is worth it *financially* —
+whether the extra earnings beat the cost of the debt. That's the **"Is this debt worth it?"**
+verdict at the top. What it can't answer is whether it's worth it *to you*: a field you'd
+love for less money can easily beat a lucrative one you'd dread, and only you can weigh
+that trade. Every number here is also an average for a whole major, not a prediction about
+you personally. Sources and assumptions are in **📚 Methodology & Sources** at the bottom.
         """
     ).replace("$", r"\$"))
 
