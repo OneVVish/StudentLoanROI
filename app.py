@@ -2310,6 +2310,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                 f"that; only a longer horizon or a different path would."
             ),
             "status": "never", "breakeven_loan": None, "headroom": None,
+            "positive": False, "label": "Worth a rethink",
         }
     if result["status"] == "beyond_search_max":
         return {
@@ -2321,6 +2322,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                 f"than your balance — the debt outlives this window rather than disappearing."
             ),
             "status": "beyond_search_max", "breakeven_loan": None, "headroom": None,
+            "positive": True, "label": "Good news",
         }
 
     breakeven = result["breakeven_loan"]
@@ -2368,7 +2370,13 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
             f"school, or Income-Driven Repayment can each move the line."
         )
     return {"headline": headline, "detail": detail, "status": "ok",
-            "breakeven_loan": breakeven, "headroom": headroom}
+            "breakeven_loan": breakeven, "headroom": headroom,
+            # positive drives the render: green success box vs amber warning.
+            # A celebratory banner on a "No" would cheerlead the optimism bias
+            # this tool exists to correct, so the tone tracks the verdict, not
+            # the mere presence of a break-even.
+            "positive": headroom >= 0,
+            "label": "Good news" if headroom >= 0 else "Worth a rethink"}
 
 
 # ---- 2h. Taxes & Take-Home Pay --------------------------------------------
@@ -4321,6 +4329,15 @@ you whether it's worth it; that part is yours. Sources and assumptions are in
 # first created, not wherever that code physically executes.
 top_actions_container = st.container()
 
+# The break-even verdict, anchored high on the page (same position-anchored
+# st.container() trick as top_actions_container above): it's the one output a
+# student can act on -- "is this debt worth it, yes or no" -- so it leads
+# rather than sitting under the ROI chart where it was easy to miss. Filled
+# from the single-scenario branch once the scenario is computed. Compare Mode
+# leaves it empty and shows a per-column verdict in each panel instead, since
+# a single top banner can't answer for two scenarios at once.
+breakeven_banner_container = st.container()
+
 # ---- 5a. Admin Analytics Dashboard (hidden behind sidebar checkbox) ------
 
 if admin_enabled:
@@ -5181,13 +5198,18 @@ else:
         career_data_source=career_data_source,
     )
     if breakeven["headline"]:
-        # A heading, because without one this block was an answer to a
-        # question the page never asked -- it just floated after the chart
-        # with a decorative 🎯 and no label. "Break-even" is also jargon, so
-        # the heading asks the question in the words a student would use.
-        st.subheader("🎯 Is this debt worth it?")
-        st.markdown(f"**{breakeven['headline']}**".replace("$", r"\$"))
-        st.caption(breakeven["detail"].replace("$", r"\$"))
+        # Rendered into the container anchored high on the page rather than
+        # here, so the verdict leads instead of trailing the ROI chart. The
+        # callout colour tracks the verdict: st.success (green) reads as the
+        # "great news" a good result deserves, st.warning (amber) keeps a bad
+        # result sober -- a green banner on a "No" would be exactly the
+        # optimism-bias cheerleading this tool exists to counter.
+        with breakeven_banner_container:
+            box = st.success if breakeven["positive"] else st.warning
+            box(
+                f"**🎯 Is this debt worth it? {breakeven['label']}.**\n\n"
+                f"**{breakeven['headline']}**  \n{breakeven['detail']}".replace("$", r"\$")
+            )
 
     # Sits directly under the position/premium numbers on purpose: this is the
     # assumption those numbers rest on, and it belongs beside them rather than
