@@ -2730,6 +2730,32 @@ def _pdf_styles() -> dict:
     }
 
 
+def _pdf_breakeven_block(breakeven: dict, styles: dict, scenario_label: str = None) -> list:
+    """The 'Is this debt worth it?' section for a report, mirroring the
+    on-screen banner: the question, the verdict word ("Good news." / "Worth a
+    rethink."), then the headline and detail. Shared by both generators so the
+    single and compare PDFs can't drift from each other or from the page.
+
+    Returns [] for the sub-baccalaureate case (headline None), where the
+    on-screen block is silent too. scenario_label prefixes the heading in
+    Compare Mode ("Scenario A — Is this debt worth it?") so two of these on
+    one page stay distinguishable.
+
+    No colour: reportlab has no equivalent of st.success/st.warning here, and
+    the verdict word plus the accent-blue heading already carry the tone. The
+    green/amber box is an on-screen affordance, not information.
+    """
+    if not breakeven["headline"]:
+        return []
+    prefix = f"{scenario_label} — " if scenario_label else ""
+    parts = [Spacer(1, 10), Paragraph(_strip_emoji(f"🎯 {prefix}Is this debt worth it?"), styles["section"])]
+    if breakeven.get("label"):
+        parts.append(Paragraph(f"<b>{xml_escape(breakeven['label'])}.</b>", styles["body"]))
+    parts.append(Paragraph(f"<b>{xml_escape(breakeven['headline'])}</b>", styles["body"]))
+    parts.append(Paragraph(xml_escape(breakeven["detail"]), styles["body"]))
+    return parts
+
+
 def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False,
                           major_for_underemployment: str = None) -> list:
     """A "where these numbers come from" section, closing every report.
@@ -3242,20 +3268,16 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                  roi_window_years),
     ]
 
-    # Mirrors the on-screen break-even block -- same breakeven_summary call,
-    # so the report and the page cannot disagree about the number. Silent for
-    # sub-bachelor's occupations, exactly as on screen.
+    # Mirrors the on-screen break-even banner -- same breakeven_summary call,
+    # same heading and verdict word, so the report reads as the same section
+    # the visitor saw rather than a stray headline. Silent for sub-bachelor's
+    # occupations, exactly as on screen.
     breakeven = breakeven_summary(
         major, loan_amount, interest_rate, repayment_strategy,
         roi_window_years=roi_window_years, col_index=col_index,
         career_data_source=career_data_source,
     )
-    if breakeven["headline"]:
-        story += [
-            Spacer(1, 10),
-            Paragraph(xml_escape(breakeven["headline"]), styles["section"]),
-            Paragraph(xml_escape(breakeven["detail"]), styles["body"]),
-        ]
+    story += _pdf_breakeven_block(breakeven, styles)
 
     story += _pdf_module_sections(
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
@@ -3299,10 +3321,19 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  interest_rate_b, repayment_strategy_b, scenario_b,
                                  module_context: dict = None, start_year_a=None, start_year_b=None,
                                  col_index: float = 100.0,
-                                 roi_window_years: int = ROI_WINDOW_YEARS) -> bytes:
+                                 roi_window_years: int = ROI_WINDOW_YEARS,
+                                 loan_amount_a: float = 0.0, loan_amount_b: float = 0.0,
+                                 career_data_source: str = "National") -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
-    profile summaries + metric tables, plus the loan-balance and
-    10-year-net-position comparison charts."""
+    profile summaries + metric tables, per-scenario break-even, plus the
+    loan-balance and net-position comparison charts.
+
+    loan_amount_a/b and career_data_source are explicit parameters, not read
+    from module globals: the break-even's verdict compares the break-even
+    against the slider loan, and grabbing whichever loan_amount the module
+    last set would silently score Scenario B against A's loan. This function
+    already takes each scenario's other inputs as A/B pairs for exactly this
+    reason."""
     styles = _pdf_styles()
     story = [
         # Same cover treatment as the single-scenario report -- see the
@@ -3332,6 +3363,14 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         ),
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_a, roi_window_years),
+        # Per-scenario break-even, mirroring the on-screen compare panels. The
+        # single report had this and the compare one silently didn't -- the
+        # same one-branch-only gap the arm-parity fix already chased on screen.
+        *_pdf_breakeven_block(
+            breakeven_summary(major, loan_amount_a, interest_rate, repayment_strategy,
+                              roi_window_years=roi_window_years, col_index=col_index,
+                              career_data_source=career_data_source),
+            styles, scenario_label="Scenario A"),
         Spacer(1, 12),
         Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
         _pdf_table(
@@ -3343,6 +3382,11 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         ),
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_b, roi_window_years),
+        *_pdf_breakeven_block(
+            breakeven_summary(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
+                              roi_window_years=roi_window_years, col_index=col_index,
+                              career_data_source=career_data_source),
+            styles, scenario_label="Scenario B"),
         Spacer(1, 12),
         build_pdf_comparison_balance_chart(
             scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
@@ -5056,6 +5100,8 @@ if compare_mode:
         grants_per_year_b, interest_rate_b, repayment_strategy_b, scenario_b,
         module_context=module_context, start_year_a=start_year_a, start_year_b=start_year_b,
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
+        loan_amount_a=loan_amount, loan_amount_b=loan_amount_b,
+        career_data_source=career_data_source,
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
