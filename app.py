@@ -2291,13 +2291,16 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   roi_window_years, col_index,
                                   career_data_source=career_data_source)
     years = roi_window_years
-    # Every headline below is deliberately subject-less ("Still pays off at
-    # $X", not "{major} still pays off"). Career-mode names are plural BLS
-    # occupations ("Software Developers") while Major-mode names are singular
-    # ("Computer Science"), so any verb agreeing with the name is wrong in one
-    # mode or the other -- "Software Developers still pays off" / "Computer
-    # Science still pay off". The name goes in the detail, in a prepositional
-    # slot where agreement never arises.
+    # Career-mode names are plural BLS occupations ("Software Developers")
+    # while Major-mode names are singular ("Computer Science"), so any verb
+    # agreeing with the name is wrong in one mode or the other: "Software
+    # Developers still pays off" / "Computer Science still pay off". Two rules
+    # keep both readable, and violating either has already shipped once:
+    #   - headlines are subject-less ("Still pays off at $X")
+    #   - details name the major in a PREPOSITIONAL slot ("For {major}, this
+    #     comes out ahead"), never as the subject of a verb
+    # Dropping the name entirely is not the answer either -- that leaves an
+    # unanchored "this path" and the reader can't tell which path.
     if result["status"] == "never":
         return {
             "headline": "No — not at any loan amount",
@@ -2346,23 +2349,23 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                 else "about half again what you're borrowing"
             )
             detail = (
-                f"Over {years} years, this path comes out ahead of a debt-free high school "
-                f"graduate. It would take {fmt_money(breakeven)} of loans — {comparison} — "
-                f"before that stopped being true."
+                f"For {major_name}, this comes out ahead of a debt-free high school "
+                f"graduate over {years} years. It would take {fmt_money(breakeven)} of "
+                f"loans — {comparison} — before that stopped being true."
             )
         else:
             detail = (
-                f"Over {years} years, this path comes out ahead of a debt-free high school "
-                f"graduate — but only just. It stops being true at {fmt_money(breakeven)} "
-                f"of loans, and you're at {fmt_money(loan_amount)}."
+                f"For {major_name}, this comes out ahead of a debt-free high school "
+                f"graduate over {years} years — but only just. It stops being true at "
+                f"{fmt_money(breakeven)} of loans, and you're at {fmt_money(loan_amount)}."
             )
     else:
         headline = f"No — not at {fmt_money(loan_amount)}"
         detail = (
-            f"Over {years} years, this path falls behind a debt-free high school graduate. "
-            f"It stops being worth it past {fmt_money(breakeven)} of loans, and you're "
-            f"{fmt_money(abs(headroom))} over that. A longer horizon, a cheaper school, or "
-            f"Income-Driven Repayment can each move the line."
+            f"For {major_name}, this falls behind a debt-free high school graduate over "
+            f"{years} years. It stops being worth it past {fmt_money(breakeven)} of loans, "
+            f"and you're {fmt_money(abs(headroom))} over that. A longer horizon, a cheaper "
+            f"school, or Income-Driven Repayment can each move the line."
         )
     return {"headline": headline, "detail": detail, "status": "ok",
             "breakeven_loan": breakeven, "headroom": headroom}
