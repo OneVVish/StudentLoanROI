@@ -2291,24 +2291,31 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   roi_window_years, col_index,
                                   career_data_source=career_data_source)
     years = roi_window_years
+    # Every headline below is deliberately subject-less ("Still pays off at
+    # $X", not "{major} still pays off"). Career-mode names are plural BLS
+    # occupations ("Software Developers") while Major-mode names are singular
+    # ("Computer Science"), so any verb agreeing with the name is wrong in one
+    # mode or the other -- "Software Developers still pays off" / "Computer
+    # Science still pay off". The name goes in the detail, in a prepositional
+    # slot where agreement never arises.
     if result["status"] == "never":
         return {
-            "headline": f"{major_name} doesn't break even at any loan amount",
+            "headline": "Doesn't break even at any loan amount",
             "detail": (
-                f"Over {years} years, this path earns less than a high school graduate does — "
-                f"even with no loan at all. Borrowing less doesn't change that; only a longer "
-                f"horizon or a different path would."
+                f"Over {years} years, this path earns less than a debt-free high school "
+                f"graduate does — even with no loan at all. Borrowing less doesn't change "
+                f"that; only a longer horizon or a different path would."
             ),
             "status": "never", "breakeven_loan": None, "headroom": None,
         }
     if result["status"] == "beyond_search_max":
         return {
-            "headline": f"{major_name} stays ahead at any realistic loan amount",
+            "headline": "Pays off at any realistic loan amount",
             "detail": (
-                f"Over {years} years this path beats a high school graduate even past "
-                f"{fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven Repayment "
-                f"that's usually because the payment is capped by your income rather than your "
-                f"balance — the debt outlives this window rather than disappearing."
+                f"Over {years} years this path stays ahead of a debt-free high school graduate "
+                f"even past {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven "
+                f"Repayment that's usually because the payment is capped by your income rather "
+                f"than your balance — the debt outlives this window rather than disappearing."
             ),
             "status": "beyond_search_max", "breakeven_loan": None, "headroom": None,
         }
@@ -2316,17 +2323,29 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     breakeven = result["breakeven_loan"]
     headroom = breakeven - loan_amount
     if headroom >= 0:
-        headline = f"You could borrow {fmt_money(headroom)} more before this stops paying off"
+        # Deliberately NOT "you could borrow $X more". That was the original
+        # wording and it reads as an invitation -- a student skimming it sees
+        # permission to take on more debt, from a tool whose entire purpose is
+        # making debt legible. The margin is a safety margin, not an
+        # allowance, and for a high-earning major the break-even ($628,677 for
+        # Computer Science) is a number nobody borrows anyway, so quoting the
+        # gap as spendable headroom is both encouraging and meaningless.
+        #
+        # Lead with the verdict at the debt they actually have; state the line
+        # second, as a fact rather than a target.
+        headline = f"Still pays off at {fmt_money(loan_amount)}"
         detail = (
-            f"You're borrowing {fmt_money(loan_amount)}. Over {years} years, {major_name} stops "
-            f"beating a debt-free high school graduate at {fmt_money(breakeven)} of undergraduate debt."
+            f"Over {years} years, this path comes out ahead of a debt-free high school "
+            f"graduate. The break-even for {major_name} — where the degree and the loan "
+            f"cancel out — is {fmt_money(breakeven)} of undergraduate debt."
         )
     else:
-        headline = f"You're {fmt_money(abs(headroom))} past the point where this pays off"
+        headline = f"Doesn't pay off at {fmt_money(loan_amount)}"
         detail = (
-            f"You're borrowing {fmt_money(loan_amount)}. Over {years} years, {major_name} stops "
-            f"beating a debt-free high school graduate at {fmt_money(breakeven)} of undergraduate "
-            f"debt. A longer horizon, a cheaper school, or Income-Driven Repayment can each move this line."
+            f"Over {years} years, this path falls behind a debt-free high school graduate. "
+            f"The break-even for {major_name} is {fmt_money(breakeven)} of undergraduate "
+            f"debt — you're {fmt_money(abs(headroom))} past it. A longer horizon, a cheaper "
+            f"school, or Income-Driven Repayment can each move the line."
         )
     return {"headline": headline, "detail": detail, "status": "ok",
             "breakeven_loan": breakeven, "headroom": headroom}
