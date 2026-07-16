@@ -2356,25 +2356,26 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         # occupation, singular verb. The major goes in the detail's
         # prepositional slot instead.
         if multiple is not None and multiple >= 2:
-            headline = f"Yes — comfortably pays off at {fmt_money(loan_amount)}"
+            headline = f"Yes — comfortably worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out well ahead of a debt-free high school "
-                f"graduate over {years} years — comfortably worth the debt. It would take "
-                f"{fmt_money(breakeven)} of loans, about {multiple:.0f}× what you're borrowing, "
-                f"before that stopped being true."
+                f"graduate over {years} years — it earns back more than the loan costs you. "
+                f"It would take {fmt_money(breakeven)} of loans, about {multiple:.0f}× what "
+                f"you're borrowing, before that stopped being true."
             )
         elif multiple is not None and multiple >= 1.5:
-            headline = f"Yes — pays off at {fmt_money(loan_amount)}"
+            headline = f"Yes — worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out ahead of a debt-free high school graduate "
-                f"over {years} years. It would take {fmt_money(breakeven)} of loans — about half "
-                f"again what you're borrowing — before that stopped being true."
+                f"over {years} years — it earns back more than the loan costs you. It would take "
+                f"{fmt_money(breakeven)} of loans, about half again what you're borrowing, before "
+                f"that stopped being true."
             )
         else:
-            headline = f"Yes, but only just — at {fmt_money(loan_amount)}"
+            headline = f"Yes, but only just — worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out ahead of a debt-free high school graduate "
-                f"over {years} years, but the margin is thin: it stops being true at "
+                f"over {years} years, but the margin is thin: it stops being worth it at "
                 f"{fmt_money(breakeven)} of loans, and you're already at {fmt_money(loan_amount)}."
             )
     else:
