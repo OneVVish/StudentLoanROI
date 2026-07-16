@@ -2344,22 +2344,38 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         # borrowing is what makes it land: "3x what you're borrowing" is a
         # fact about THEM, "$628,677" is a fact about Mars.
         multiple = breakeven / loan_amount if loan_amount > 0 else None
-        headline = f"Yes — still pays off at {fmt_money(loan_amount)}"
-        if multiple is not None and multiple >= 1.5:
-            comparison = (
-                f"about {multiple:.0f}× what you're borrowing" if multiple >= 2
-                else "about half again what you're borrowing"
-            )
+        # Three tiers, because "comfortably" should mean it. A break-even at 2x+
+        # the loan is a genuine cushion and reads as reassurance; a break-even
+        # barely above the loan is a squeaker and saying "comfortable" there
+        # would oversell exactly the way this tool tries not to. "Pays off" is
+        # this app's established idiom for "is worth the debt" (cf. "Doesn't
+        # pay off"), not a literal claim about retiring the balance -- the loan
+        # amortises regardless; what's true is the degree beats skipping it.
+        # Headlines stay subject-less (see the rule above): naming the major
+        # here would give "Software Developers comfortably pays off" -- plural
+        # occupation, singular verb. The major goes in the detail's
+        # prepositional slot instead.
+        if multiple is not None and multiple >= 2:
+            headline = f"Yes — comfortably pays off at {fmt_money(loan_amount)}"
             detail = (
-                f"For {major_name}, this comes out ahead of a debt-free high school "
-                f"graduate over {years} years. It would take {fmt_money(breakeven)} of "
-                f"loans — {comparison} — before that stopped being true."
+                f"For {major_name}, this comes out well ahead of a debt-free high school "
+                f"graduate over {years} years — comfortably worth the debt. It would take "
+                f"{fmt_money(breakeven)} of loans, about {multiple:.0f}× what you're borrowing, "
+                f"before that stopped being true."
+            )
+        elif multiple is not None and multiple >= 1.5:
+            headline = f"Yes — pays off at {fmt_money(loan_amount)}"
+            detail = (
+                f"For {major_name}, this comes out ahead of a debt-free high school graduate "
+                f"over {years} years. It would take {fmt_money(breakeven)} of loans — about half "
+                f"again what you're borrowing — before that stopped being true."
             )
         else:
+            headline = f"Yes, but only just — at {fmt_money(loan_amount)}"
             detail = (
-                f"For {major_name}, this comes out ahead of a debt-free high school "
-                f"graduate over {years} years — but only just. It stops being true at "
-                f"{fmt_money(breakeven)} of loans, and you're at {fmt_money(loan_amount)}."
+                f"For {major_name}, this comes out ahead of a debt-free high school graduate "
+                f"over {years} years, but the margin is thin: it stops being true at "
+                f"{fmt_money(breakeven)} of loans, and you're already at {fmt_money(loan_amount)}."
             )
     else:
         # State the break-even as an actionable CEILING, not just a fact. In
@@ -5212,8 +5228,12 @@ else:
         # optimism-bias cheerleading this tool exists to counter.
         with breakeven_banner_container:
             box = st.success if breakeven["positive"] else st.warning
+            # The verdict word ("Good news." / "Worth a rethink.") gets its
+            # own line under the question, then the headline, then the detail --
+            # three visual tiers, skimmable top to bottom.
             box(
-                f"**🎯 Is this debt worth it? {breakeven['label']}.**\n\n"
+                f"**🎯 Is this debt worth it?**\n\n"
+                f"**{breakeven['label']}.**\n\n"
                 f"**{breakeven['headline']}**  \n{breakeven['detail']}".replace("$", r"\$")
             )
 
