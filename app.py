@@ -231,15 +231,18 @@ DATASET_MODE_MAJOR = "Major"
 DATASET_MODE_CAREER = "Career"
 
 # The landing selection per mode, and Scenario B's counterpart -- the pairing
-# the randomised contrast arm shows (see get_experiment_arm). Career mode's
-# pair is the long-standing Software Developers vs Humanities; Major mode's
-# is its nearest honest equivalent in the NY Fed's list, which has no
-# "Humanities" row. Both are high-return-technical vs lower-return-
-# exploratory, which is what the contrast manipulation requires.
+# the randomised contrast arm shows (see get_experiment_arm). Both sides are
+# high-return-technical (Computer Science / Software Developers) against
+# lower-return-exploratory (Journalism and its occupation), which is what the
+# contrast manipulation requires. The two modes name the same field
+# differently: "Journalism" is a NY Fed major, while the BLS occupation it
+# maps to is "News Analysts, Reporters, and Journalists" -- Career mode has no
+# bare "Journalism" row. Each string must exist in its own mode's dataset or
+# the dropdown silently falls back to the alphabetically-first entry.
 DEFAULT_SELECTION_A = {DATASET_MODE_MAJOR: "Computer Science",
                        DATASET_MODE_CAREER: "Software Developers"}
-DEFAULT_SELECTION_B = {DATASET_MODE_MAJOR: "Liberal Arts",
-                       DATASET_MODE_CAREER: "Humanities"}
+DEFAULT_SELECTION_B = {DATASET_MODE_MAJOR: "Journalism",
+                       DATASET_MODE_CAREER: "News Analysts, Reporters, and Journalists"}
 
 # What the dropdown is called in each mode. "Target Profession" is a lie in
 # Major mode -- the visitor is picking what to study, not what to become.
