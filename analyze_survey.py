@@ -60,8 +60,29 @@ def load_supabase_client():
 
 
 def fetch_table(client, table_name: str) -> pd.DataFrame:
+    """Fetch a table, automatically excluding developer/test rows.
+
+    The app's ?test=1 flag skips Supabase logging entirely, so most test
+    sessions never reach the database. Rows logged *before* that flag existed
+    are marked instead, via a backfilled boolean `is_test` column (add it once
+    in the Supabase SQL editor:
+        ALTER TABLE <table> ADD COLUMN IF NOT EXISTS is_test boolean NOT NULL DEFAULT false;
+        UPDATE <table> SET is_test = true;   -- run before any real traffic
+    ). If that column is present, rows flagged true are dropped here so every
+    analysis is clean without remembering to filter. If it isn't there yet,
+    this falls back to using all rows unchanged. false / NULL / missing all
+    count as real data -- only an explicit true is treated as a test row.
+    """
     response = client.table(table_name).select("*").execute()
-    return pd.DataFrame(response.data)
+    df = pd.DataFrame(response.data)
+    if "is_test" in df.columns:
+        is_test = df["is_test"].fillna(False).astype(bool)
+        dropped = int(is_test.sum())
+        if dropped:
+            df = df[~is_test].reset_index(drop=True)
+            print(f"  ({table_name}: excluded {dropped} test row(s) flagged is_test=true)",
+                  file=sys.stderr)
+    return df
 
 
 def bucket_dti(dti):
