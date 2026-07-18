@@ -3547,6 +3547,13 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
              fmt_money(roi_result["earnings_premium"])],
         ]),
+        Paragraph(
+            f"<b>Earnings Premium</b> is the bottom line: how much more (or less) money you would "
+            f"have after {roi_window_years} years by going into {major} (after paying off the loan) "
+            f"instead of skipping college and working as a debt-free high school graduate. It is the "
+            f"difference between the two Net Position figures, both adjusted for the cost of living in "
+            f"{city} -- that is what 'COL-Adjusted' means.",
+            styles["caption"]),
         Spacer(1, 12),
         build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
                                  roi_window_years),
@@ -3642,6 +3649,13 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         Spacer(1, 8),
         _pdf_rule(),
         Spacer(1, 4),
+        Paragraph(
+            f"<b>Earnings Premium</b> (shown for each scenario below) is the bottom line: how much "
+            f"more (or less) money you would have after {roi_window_years} years by taking that path "
+            f"instead of skipping college and working as a debt-free high school graduate — with both "
+            f"sides adjusted for the cost of living in {city} ('COL-Adjusted').",
+            styles["caption"]),
+        Spacer(1, 6),
         Paragraph(f"Scenario A: {scenario_a['major']} — {scenario_a['strategy_label']}", styles["section"]),
         _pdf_table(
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
