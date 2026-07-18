@@ -2028,11 +2028,14 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    total_investment: float, col_index: float = 100.0,
                    years: int = ROI_WINDOW_YEARS,
-                   hs_wage_index: float = 1.0) -> dict:
+                   hs_wage_index: float = 1.0,
+                   personal_contribution: float = 0.0,
+                   enrollment_years: int = 0) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
-    in that window) compared against a debt-free high school graduate's
-    cumulative earnings over the same window. `total_investment` is the ROI%
+    in that window, minus any personal_contribution) compared against a
+    debt-free high school graduate's cumulative earnings over the same
+    window. `total_investment` is the ROI%
     denominator -- not just the loan principal: it's effective_principal
     (loan slider + any additional training debt, see get_effective_principal)
     plus any personal_contribution the caller adds on top (money put toward
@@ -2041,6 +2044,29 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     principal actually fed into the loan repayment simulation -- you don't
     pay interest on money you never borrowed, but it's still part of what
     you "invested" for ROI purposes.
+
+    personal_contribution is ALSO subtracted from the major's net position
+    (the numerator), not just added to the denominator. Cash put toward the
+    degree is a real outflow the debt-free HS grad never made -- exactly like
+    a loan payment, only without the interest -- so it has to reduce the
+    major's net position too. Leaving it in the denominator alone overstated
+    the return: a degree paid for with $40k cash that earned a $40k premium
+    reported +100% ROI (denominator only) when the true net gain was $0 (0%).
+
+    enrollment_years is the in-enrollment opportunity cost: the years the
+    degree-seeker spends in college earning ~nothing while the debt-free HS
+    grad is already working. When it's 0 (the default) the clock starts at
+    graduation for both sides -- the original behaviour. When it's >0 (the
+    "count foregone earnings" Advanced-Analysis option passes UNDERGRAD_YEARS)
+    the HS baseline earns for `years + enrollment_years` while the major still
+    earns only `years` of post-graduation salary -- i.e. the HS grad is
+    credited with the head-start wages banked during the degree-seeker's
+    enrollment. This is a numerator effect only: it lowers the earnings
+    premium (and pushes the break-even down), but total_investment stays
+    out-of-pocket tuition/debt, so ROI% reads as "net gain per dollar of
+    tuition, after netting out the wages given up to earn the degree." The
+    foregone years are the biggest real cost of a degree and dwarf tuition,
+    so leaving them out (enrollment_years=0) flatters every degree.
 
     Both net positions are adjusted for the selected city's cost of living
     (col_index) -- assuming the HS grad lives in the same city as the major
@@ -2064,11 +2090,19 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # scale only, and expensive cities flatter the degree for no real reason.
     # hs_wage_index is that city's all-occupations wage level (see
     # get_metro_wage_index); 1.0 is the national average, i.e. a no-op.
+    # range(years + enrollment_years): the HS grad also works the years the
+    # degree-seeker spends enrolled (enrollment_years, 0 unless the foregone-
+    # earnings option is on), so those head-start wages count against the
+    # degree. Growth compounds from year 0, so the enrollment years correctly
+    # sit at the *front* of the HS grad's raise trajectory.
     hs_cumulative_earnings = sum(
-        HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** y for y in range(years)
+        HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** y
+        for y in range(years + enrollment_years)
     )
 
-    major_net_position_nominal = major_cumulative_earnings - total_loan_payments_in_window
+    major_net_position_nominal = (
+        major_cumulative_earnings - total_loan_payments_in_window - personal_contribution
+    )
     hs_net_position_nominal = hs_cumulative_earnings
 
     major_net_position = adjust_for_cost_of_living(major_net_position_nominal, col_index)
@@ -2108,13 +2142,26 @@ def get_apprenticeship_salary_for_year(year_index: int) -> float:
 
 
 def calculate_apprenticeship_roi(hs_net_position: float, col_index: float = 100.0,
-                                  years: int = ROI_WINDOW_YEARS) -> dict:
+                                  years: int = ROI_WINDOW_YEARS,
+                                  enrollment_years: int = 0) -> dict:
     """Illustrative Registered Apprenticeship benchmark, computed the same
     way calculate_roi computes a major's ROI, but from the two-phase wage
     curve above instead of a MAJOR_DATA lookup. hs_net_position is passed
     in (not recomputed) so this always compares against the exact same
-    HS-grad baseline already shown elsewhere on the page."""
-    apprentice_cumulative_earnings = sum(get_apprenticeship_salary_for_year(y) for y in range(years))
+    HS-grad baseline already shown elsewhere on the page.
+
+    enrollment_years mirrors calculate_roi's foregone-earnings option, but
+    with the opposite sign for the trade path: an apprentice is *earning*
+    (the ramping training wage) during the very years a degree-seeker is in
+    college, so those years are added to the apprentice's own earning window
+    rather than charged against it. When the option is on, the HS baseline
+    passed in is already extended by the same enrollment_years, so all three
+    paths -- degree, apprentice, HS grad -- are compared over one consistent
+    span that starts at age 18 instead of at college graduation. With it off
+    (0) the apprentice earns over `years`, the original behaviour."""
+    apprentice_cumulative_earnings = sum(
+        get_apprenticeship_salary_for_year(y) for y in range(years + enrollment_years)
+    )
     apprentice_net_position_nominal = apprentice_cumulative_earnings - APPRENTICESHIP_TYPICAL_DEBT
     apprentice_net_position = adjust_for_cost_of_living(apprentice_net_position_nominal, col_index)
     earnings_premium = apprentice_net_position - hs_net_position
@@ -2167,7 +2214,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               personal_contribution: float = 0.0,
                               col_index: float = 100.0,
                               roi_window_years: int = ROI_WINDOW_YEARS,
-                              hs_wage_index: float = 1.0) -> dict:
+                              hs_wage_index: float = 1.0,
+                              enrollment_years: int = 0) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -2206,13 +2254,21 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         strategy_label = "Income-Driven Repayment"
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
                                 total_investment, col_index=col_index, years=roi_window_years,
-                                hs_wage_index=hs_wage_index)
+                                hs_wage_index=hs_wage_index,
+                                personal_contribution=personal_contribution,
+                                enrollment_years=enrollment_years)
     return {
         "major": major_name,
         "strategy_label": strategy_label,
         "effective_principal": effective_principal,
         "personal_contribution": personal_contribution,
         "total_investment": total_investment,
+        # Stamp the enrollment-cost assumption onto the scenario so every
+        # re-derivation off this dict (break-even, apprenticeship, the PDF)
+        # reuses the exact value it was computed under, rather than each call
+        # site re-reading the toggle and risking a mismatch -- the same class
+        # of bug the hs_wage_index threading fixed.
+        "enrollment_years": enrollment_years,
         "repayment_result": repayment_result,
         "roi_result": roi_result,
     }
@@ -2230,7 +2286,10 @@ BREAKEVEN_SEARCH_TOLERANCE = 50.0  # dollars; well under the precision the model
 def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strategy: str,
                          roi_window_years: int = ROI_WINDOW_YEARS,
                          col_index: float = 100.0,
-                         career_data_source: str = "National") -> dict:
+                         career_data_source: str = "National",
+                         hs_wage_index: float = 1.0,
+                         personal_contribution: float = 0.0,
+                         enrollment_years: int = 0) -> dict:
     """The undergraduate loan at which `major_name` stops beating a debt-free
     high school graduate — i.e. where earnings_premium crosses zero.
 
@@ -2248,12 +2307,25 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
     irrelevant within the window). Rendering either as "your break-even is
     $X" would print a falsehood.
 
-    personal_contribution is deliberately not a parameter: it moves the ROI%
-    denominator but not the earnings premium, so it cannot move the crossing.
-    col_index can't move it either — the cost-of-living adjustment divides
-    both sides of the comparison by the same index, scaling the premium
-    without relocating its zero. It's threaded through anyway so this always
-    calls compute_scenario_results exactly as the rest of the page does.
+    col_index doesn't move the crossing — the cost-of-living adjustment
+    divides both sides of the comparison by the same index, scaling the
+    premium without relocating its zero. It's threaded through anyway so this
+    always calls compute_scenario_results exactly as the rest of the page does.
+
+    hs_wage_index, personal_contribution and enrollment_years all DO move the
+    crossing, so each is a real parameter that must match the scenario being
+    displayed. hs_wage_index scales the HS-grad baseline up to the selected
+    city's wage level -- it lands on only one side of the comparison, so a
+    high-wage metro pushes the break-even down. personal_contribution is a
+    fixed cash outflow subtracted from the major's side (see calculate_roi),
+    so more of it also pushes the break-even down. enrollment_years adds the
+    degree-seeker's foregone-earnings years to the HS baseline only, so it too
+    pushes the break-even down. Passing the page's displayed value for one but
+    the default for another is exactly the bug this signature exists to
+    prevent: the verdict ("worth it") would be computed against a different
+    baseline than the earnings-premium number printed beside it. All three are
+    still independent of the loan, so earnings_premium stays monotonic in loan
+    size and the bisection remains valid.
 
     Cached because the on-screen render calls it on every Streamlit rerun and
     a bisection is ~15 full amortisation simulations.
@@ -2269,7 +2341,10 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
     def premium_at(loan: float) -> float:
         return compute_scenario_results(
             major_name, loan, interest_rate, repayment_strategy,
+            personal_contribution=personal_contribution,
             col_index=col_index, roi_window_years=roi_window_years,
+            hs_wage_index=hs_wage_index,
+            enrollment_years=enrollment_years,
         )["roi_result"]["earnings_premium"]
 
     if premium_at(0.0) <= 0:
@@ -2290,7 +2365,10 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
 def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        repayment_strategy: str, roi_window_years: int = ROI_WINDOW_YEARS,
                        col_index: float = 100.0,
-                       career_data_source: str = "National") -> dict:
+                       career_data_source: str = "National",
+                       hs_wage_index: float = 1.0,
+                       personal_contribution: float = 0.0,
+                       enrollment_years: int = 0) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
     borrowing, shared by the on-screen section and its PDF counterpart so
     the two can't drift.
@@ -2309,7 +2387,10 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
 
     result = find_breakeven_loan(major_name, interest_rate, repayment_strategy,
                                   roi_window_years, col_index,
-                                  career_data_source=career_data_source)
+                                  career_data_source=career_data_source,
+                                  hs_wage_index=hs_wage_index,
+                                  personal_contribution=personal_contribution,
+                                  enrollment_years=enrollment_years)
     years = roi_window_years
     # Career-mode names are plural BLS occupations ("Software Developers")
     # while Major-mode names are singular ("Computer Science"), so any verb
@@ -3316,6 +3397,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         major, loan_amount, interest_rate, repayment_strategy,
         roi_window_years=roi_window_years, col_index=col_index,
         career_data_source=career_data_source,
+        hs_wage_index=get_metro_wage_index(city),
+        personal_contribution=scenario["personal_contribution"],
+        enrollment_years=scenario["enrollment_years"],
     )
     story += _pdf_breakeven_block(breakeven, styles)
 
@@ -3409,7 +3493,10 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         *_pdf_breakeven_block(
             breakeven_summary(major, loan_amount_a, interest_rate, repayment_strategy,
                               roi_window_years=roi_window_years, col_index=col_index,
-                              career_data_source=career_data_source),
+                              career_data_source=career_data_source,
+                              hs_wage_index=get_metro_wage_index(city),
+                              personal_contribution=scenario_a["personal_contribution"],
+                              enrollment_years=scenario_a["enrollment_years"]),
             styles, scenario_label="Scenario A"),
         Spacer(1, 12),
         Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
@@ -3425,7 +3512,10 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         *_pdf_breakeven_block(
             breakeven_summary(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                               roi_window_years=roi_window_years, col_index=col_index,
-                              career_data_source=career_data_source),
+                              career_data_source=career_data_source,
+                              hs_wage_index=get_metro_wage_index(city),
+                              personal_contribution=scenario_b["personal_contribution"],
+                              enrollment_years=scenario_b["enrollment_years"]),
             styles, scenario_label="Scenario B"),
         Spacer(1, 12),
         build_pdf_comparison_balance_chart(
@@ -4088,6 +4178,24 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "apprenticeship's 10-year financial position against your "
              "chosen major and a high school graduate -- see Methodology.",
     )
+    enable_foregone_earnings = st.checkbox(
+        "Count foregone earnings during enrollment", key="count_foregone_earnings",
+        help=f"Charge the ~{UNDERGRAD_YEARS} years of wages a student gives up "
+             "while enrolled full-time -- usually the single largest real cost "
+             "of a degree, bigger than tuition -- against the degree. The "
+             "debt-free high school graduate (and, when shown, the trade "
+             "apprentice) is credited with those head-start years of income, "
+             "so every path is compared from age 18 rather than from "
+             "graduation. This lowers each degree's earnings premium and "
+             "break-even. Off by default. See Methodology.",
+    )
+
+# The in-enrollment opportunity cost, in years, that section 5's ROI calls
+# charge against a degree: UNDERGRAD_YEARS when the option above is on, else 0
+# (the clock starts at graduation -- the original behaviour). Read as a plain
+# variable below because this script runs top-to-bottom, so section 5's
+# compute_scenario_results calls see the value the checkbox just set.
+enrollment_years_setting = UNDERGRAD_YEARS if enable_foregone_earnings else 0
 
 st.sidebar.divider()
 
@@ -4673,7 +4781,8 @@ def render_takehome_block(scenario: dict, major_name: str, career_stage_key: int
 
 def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: int,
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
-                           col_index: float, career_data_source_name: str):
+                           col_index: float, career_data_source_name: str,
+                           hs_wage_index: float = 1.0):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -4725,6 +4834,9 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             scenario["major"], loan_amount, interest_rate, repayment_strategy,
             roi_window_years=roi_window_years, col_index=col_index,
             career_data_source=career_data_source_name,
+            hs_wage_index=hs_wage_index,
+            personal_contribution=scenario["personal_contribution"],
+            enrollment_years=scenario["enrollment_years"],
         )
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
@@ -4943,6 +5055,10 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
     st.subheader("🔨 Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)")
     typical_education = MAJOR_DATA.get(major_name_a, {}).get("typical_education", "")
     uses_own_profession_data = typical_education in SUB_BACHELORS_EDUCATION_LEVELS
+    # Read the foregone-earnings assumption off the scenario it's compared
+    # against, so the trade path and the degree share one age-18 timeline (see
+    # calculate_roi / calculate_apprenticeship_roi). 0 when the option is off.
+    enrollment_years = scenario_a.get("enrollment_years", 0)
 
     if uses_own_profession_data:
         st.caption(
@@ -4955,7 +5071,13 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
         quick_facts = st.columns(2)
         quick_facts[0].metric("Starting Salary (BLS)", fmt_money(MAJOR_DATA[major_name_a]["starting_salary"]))
         quick_facts[1].metric("Assumed Loan for This Path", fmt_money(0))
-        alt_result = calculate_roi(major_name_a, 0, 0, col_index=col_index, years=roi_window_years)
+        # A sub-bachelor's profession works immediately -- it forgoes no
+        # enrollment years -- so the option must not penalise it. Extending
+        # BOTH sides by enrollment_years (via a longer window, enrollment_years
+        # left at 0) keeps the age-18 timeline consistent with the degree while
+        # charging this path no foregone-earnings gap.
+        alt_result = calculate_roi(major_name_a, 0, 0, col_index=col_index,
+                                   years=roi_window_years + enrollment_years)
         alt_net_position = alt_result["major_net_position"]
         alt_earnings_premium = alt_result["earnings_premium"]
         alt_label = f"{major_name_a} (No 4-Yr Loan)"
@@ -4974,7 +5096,7 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
         quick_facts[3].metric("Typical Training Debt", fmt_money(APPRENTICESHIP_TYPICAL_DEBT))
         apprenticeship_result = calculate_apprenticeship_roi(
             scenario_a["roi_result"]["hs_net_position"], col_index=col_index,
-            years=roi_window_years,
+            years=roi_window_years, enrollment_years=enrollment_years,
         )
         alt_net_position = apprenticeship_result["apprentice_net_position"]
         alt_earnings_premium = apprenticeship_result["earnings_premium"]
@@ -5044,22 +5166,26 @@ if compare_mode:
     scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                            personal_contribution, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
-                                           hs_wage_index=get_metro_wage_index(city))
+                                           hs_wage_index=get_metro_wage_index(city),
+                                           enrollment_years=enrollment_years_setting)
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
-                                           hs_wage_index=get_metro_wage_index(city))
+                                           hs_wage_index=get_metro_wage_index(city),
+                                           enrollment_years=enrollment_years_setting)
 
     col_a, col_b = st.columns(2)
     render_scenario_panel(
         col_a, scenario_a, "A", roi_horizon_years,
         loan_amount, interest_rate, repayment_strategy,
         city_info["col_index"], career_data_source,
+        hs_wage_index=get_metro_wage_index(city),
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
         loan_amount_b, interest_rate_b, repayment_strategy_b,
         city_info["col_index"], career_data_source,
+        hs_wage_index=get_metro_wage_index(city),
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -5193,7 +5319,8 @@ else:
     scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                          personal_contribution, city_info["col_index"],
                                          roi_window_years=roi_horizon_years,
-                                         hs_wage_index=get_metro_wage_index(city))
+                                         hs_wage_index=get_metro_wage_index(city),
+                                         enrollment_years=enrollment_years_setting)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -5310,6 +5437,9 @@ else:
         major, loan_amount, interest_rate, repayment_strategy,
         roi_window_years=roi_horizon_years, col_index=city_info["col_index"],
         career_data_source=career_data_source,
+        hs_wage_index=get_metro_wage_index(city),
+        personal_contribution=personal_contribution,
+        enrollment_years=scenario["enrollment_years"],
     )
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
@@ -5442,7 +5572,8 @@ if not st.session_state.survey_submitted:
             scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                                    personal_contribution, city_info["col_index"],
                                                    roi_window_years=roi_horizon_years,
-                                                   hs_wage_index=get_metro_wage_index(city))
+                                                   hs_wage_index=get_metro_wage_index(city),
+                                                   enrollment_years=enrollment_years_setting)
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
             # expander) -- referencing them outside an "if compare_mode:"
@@ -5453,7 +5584,8 @@ if not st.session_state.survey_submitted:
                 scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                                        personal_contribution_b, city_info["col_index"],
                                                        roi_window_years=roi_horizon_years,
-                                                       hs_wage_index=get_metro_wage_index(city))
+                                                       hs_wage_index=get_metro_wage_index(city),
+                                                       enrollment_years=enrollment_years_setting)
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                     interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
@@ -5815,9 +5947,9 @@ any personal identifying information — it's used to help a companion
 research paper understand how tools like this one affect students'
 thinking about college and careers.
 
-**Advanced Analysis Settings (optional, off by default).** Four extra
+**Advanced Analysis Settings (optional, off by default).** Five extra
 modules live in a sidebar expander. Each one is opt-in, and the calculator
-behaves exactly as described above when all four are left off.
+behaves exactly as described above when all five are left off.
 
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
   fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard
@@ -5895,6 +6027,29 @@ behaves exactly as described above when all four are left off.
   above), since no BLS per-occupation trajectory exists past that point.
   **This is one illustrative national benchmark, not a personalized
   estimate for any specific trade or apprenticeship program.**
+- **Count foregone earnings during enrollment.** By default this calculator
+  starts its earnings clock at *graduation*: it compares a graduate's first
+  N years of post-degree salary against a high-school graduate's same N
+  years, and captures only the *tuition/debt* cost of the degree. But the
+  largest real cost of a bachelor's degree is usually not tuition — it's the
+  roughly four years of wages given up while enrolled full-time, during which
+  the debt-free high-school graduate is already working, earning raises, and
+  banking that income. Turning this option on adds those ~4 foregone years
+  (UNDERGRAD_YEARS) to the high-school baseline, so every path is compared on
+  one consistent timeline that starts at **age 18** rather than at
+  graduation. Concretely: the high-school graduate is credited with ~4 extra
+  years of earnings at the front, the degree-seeker earns nothing during
+  enrollment, and — when the Trade Apprenticeship module is also on — the
+  apprentice, who *is* paid during those years, is credited with them too (a
+  sub-bachelor's profession that requires no degree is likewise never charged
+  a gap it doesn't incur). This lowers each degree's earnings premium and
+  break-even, often substantially, and is the more economically complete
+  comparison. It is a *numerator* adjustment only: the ROI% denominator stays
+  out-of-pocket tuition/debt, so ROI% reads as net gain per dollar of tuition
+  after netting out the wages given up. The model still reports these as
+  **undiscounted** dollars — it does not apply a present-value discount rate
+  to future cash flows, on either side, so the comparison is a real-dollar
+  cumulative-earnings comparison, not a net-present-value calculation.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
