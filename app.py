@@ -50,7 +50,7 @@ COLLEGE_SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.jso
 
 # Starting salary + mid-career (median) salary per major, sourced from the
 # U.S. Bureau of Labor Statistics Occupational Employment and Wage Statistics
-# (OEWS), May 2023 national estimates (bls.gov/oes/2023/may/). Each major is
+# (OEWS), May 2025 national estimates (bls.gov/oes/2025/may/). Each major is
 # mapped to its closest BLS-tracked occupation (SOC code below).
 # "starting_salary" is that occupation's 25th-percentile annual wage (a proxy
 # for an entry-level new grad); "median_salary" is the occupation's median
@@ -64,32 +64,32 @@ COLLEGE_SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.jso
 # 2a -- rather than stored separately, so the loan/ROI simulation's year-10
 # salary always matches this median exactly.
 CURATED_MAJOR_DATA = {
-    # Software Developers, SOC 15-1252: 25th pct $101,200 / median $132,270
-    "Computer Science": {"starting_salary": 101200, "median_salary": 132270, "soc_major_group": "15"},
-    # Registered Nurses, SOC 29-1141: 25th pct $75,990 / median $86,070
-    "Nursing": {"starting_salary": 75990, "median_salary": 86070, "soc_major_group": "29"},
-    # Business Operations Specialists, All Other, SOC 13-1199: 25th pct $59,010 / median $79,590
-    "Business": {"starting_salary": 59010, "median_salary": 79590, "soc_major_group": "13"},
-    # Financial and Investment Analysts, SOC 13-2051: 25th pct $76,880 / median $99,010
-    "Finance": {"starting_salary": 76880, "median_salary": 99010, "soc_major_group": "13"},
-    # Market Research Analysts and Marketing Specialists, SOC 13-1161: 25th pct $52,840 / median $74,680
-    "Humanities": {"starting_salary": 52840, "median_salary": 74680, "soc_major_group": "13"},
-    # Fine Artists, Including Painters, Sculptors, and Illustrators, SOC 27-1013: 25th pct $38,160 / median $59,300
-    "Arts": {"starting_salary": 38160, "median_salary": 59300, "soc_major_group": "27"},
-    # Coaches and Scouts, SOC 27-2022: 25th pct $32,440 / median $45,910
-    "Sports Management": {"starting_salary": 32440, "median_salary": 45910, "soc_major_group": "27"},
-    # Exercise Physiologists, SOC 29-1128: 25th pct $45,870 / median $54,860
-    "Exercise Science": {"starting_salary": 45870, "median_salary": 54860, "soc_major_group": "29"},
-    # Athletic Trainers, SOC 29-9091: 25th pct $49,750 / median $57,930. BLS
+    # Software Developers, SOC 15-1252: 25th pct $105,210 / median $135,980
+    "Computer Science": {"starting_salary": 105210, "median_salary": 135980, "soc_major_group": "15"},
+    # Registered Nurses, SOC 29-1141: 25th pct $80,330 / median $97,550
+    "Nursing": {"starting_salary": 80330, "median_salary": 97550, "soc_major_group": "29"},
+    # Business Operations Specialists, All Other, SOC 13-1199: 25th pct $62,640 / median $83,050
+    "Business": {"starting_salary": 62640, "median_salary": 83050, "soc_major_group": "13"},
+    # Financial and Investment Analysts, SOC 13-2051: 25th pct $79,290 / median $102,740
+    "Finance": {"starting_salary": 79290, "median_salary": 102740, "soc_major_group": "13"},
+    # Market Research Analysts and Marketing Specialists, SOC 13-1161: 25th pct $58,350 / median $78,760
+    "Humanities": {"starting_salary": 58350, "median_salary": 78760, "soc_major_group": "13"},
+    # Fine Artists, Including Painters, Sculptors, and Illustrators, SOC 27-1013: 25th pct $37,560 / median $55,490
+    "Arts": {"starting_salary": 37560, "median_salary": 55490, "soc_major_group": "27"},
+    # Coaches and Scouts, SOC 27-2022: 25th pct $35,330 / median $47,320
+    "Sports Management": {"starting_salary": 35330, "median_salary": 47320, "soc_major_group": "27"},
+    # Exercise Physiologists, SOC 29-1128: 25th pct $49,620 / median $59,460
+    "Exercise Science": {"starting_salary": 49620, "median_salary": 59460, "soc_major_group": "29"},
+    # Athletic Trainers, SOC 29-9091: 25th pct $55,130 / median $62,520. BLS
     # now lists a master's as the typical entry-level education, so this
     # major has a 2-year unpaid training delay (the accredited master's
     # program) before the salary above applies -- see get_annual_salary_for_year.
     "Athletic Training": {
-        "starting_salary": 49750, "median_salary": 57930,
+        "starting_salary": 55130, "median_salary": 62520,
         "unpaid_training_years": 2, "soc_major_group": "29",
     },
-    # Family Medicine Physicians, SOC 29-1215: 25th pct $152,810 / median
-    # $224,640. 4 unpaid years (med school) + 3 stipend years (residency;
+    # Family Medicine Physicians, SOC 29-1215: 25th pct $162,420 / median
+    # $244,180. 4 unpaid years (med school) + 3 stipend years (residency;
     # 3-year length matches Family Medicine's real ACGME program length, so
     # this pathway is internally consistent). Stipend is AAMC's 2024
     # preliminary median first-post-MD-year resident stipend ($65,100),
@@ -98,17 +98,17 @@ CURATED_MAJOR_DATA = {
     # median medical school debt ($205,000, aamc.org/data-reports/students-
     # residents) -- added to the user's loan slider as the true principal.
     "Medicine": {
-        "starting_salary": 152810, "median_salary": 224640,
+        "starting_salary": 162420, "median_salary": 244180,
         "unpaid_training_years": 4, "stipend_training_years": 3,
         "stipend_salary": 65000, "additional_training_debt": 205000,
         "soc_major_group": "29",
     },
-    # Lawyers, SOC 23-1011: 25th pct $98,030 / median $145,760. 3 unpaid
+    # Lawyers, SOC 23-1011: 25th pct $102,990 / median $159,670. 3 unpaid
     # years (law school, no paid-training equivalent). additional_training_
     # debt is the ABA Young Lawyers Division 2024 Student Loan Survey's
     # average law-school-only debt ($130,000, americanbar.org).
     "Law": {
-        "starting_salary": 98030, "median_salary": 145760,
+        "starting_salary": 102990, "median_salary": 159670,
         "unpaid_training_years": 3, "additional_training_debt": 130000,
         "soc_major_group": "23",
     },
@@ -6029,19 +6029,19 @@ person's paycheck actually changes over 10 years.
 
 | Major | BLS Occupation (SOC) | 25th Pctile | Median |
 |---|---|---|---|
-| Computer Science | Software Developers (15-1252) | $101,200 | $132,270 |
-| Nursing | Registered Nurses (29-1141) | $75,990 | $86,070 |
-| Business | Business Operations Specialists, All Other (13-1199) | $59,010 | $79,590 |
-| Finance | Financial and Investment Analysts (13-2051) | $76,880 | $99,010 |
-| Humanities | Market Research Analysts & Marketing Specialists (13-1161) | $52,840 | $74,680 |
-| Arts | Fine Artists, incl. Painters/Sculptors/Illustrators (27-1013) | $38,160 | $59,300 |
-| Sports Management | Coaches and Scouts (27-2022) | $32,440 | $45,910 |
-| Exercise Science | Exercise Physiologists (29-1128) | $45,870 | $54,860 |
-| Athletic Training | Athletic Trainers (29-9091) | $49,750 | $57,930 |
-| Medicine | Family Medicine Physicians (29-1215) | $152,810 | $224,640 |
-| Law | Lawyers (23-1011) | $98,030 | $145,760 |
+| Computer Science | Software Developers (15-1252) | $105,210 | $135,980 |
+| Nursing | Registered Nurses (29-1141) | $80,330 | $97,550 |
+| Business | Business Operations Specialists, All Other (13-1199) | $62,640 | $83,050 |
+| Finance | Financial and Investment Analysts (13-2051) | $79,290 | $102,740 |
+| Humanities | Market Research Analysts & Marketing Specialists (13-1161) | $58,350 | $78,760 |
+| Arts | Fine Artists, incl. Painters/Sculptors/Illustrators (27-1013) | $37,560 | $55,490 |
+| Sports Management | Coaches and Scouts (27-2022) | $35,330 | $47,320 |
+| Exercise Science | Exercise Physiologists (29-1128) | $49,620 | $59,460 |
+| Athletic Training | Athletic Trainers (29-9091) | $55,130 | $62,520 |
+| Medicine | Family Medicine Physicians (29-1215) | $162,420 | $244,180 |
+| Law | Lawyers (23-1011) | $102,990 | $159,670 |
 
-Source: [bls.gov/oes/2023/may](https://www.bls.gov/oes/2023/may/) (occupation
+Source: [bls.gov/oes/2025/may](https://www.bls.gov/oes/2025/may/) (occupation
 profile pages by SOC code).
 
 **Careers beyond the 11 majors above.** The dropdown also includes
