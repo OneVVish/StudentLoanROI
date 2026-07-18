@@ -598,6 +598,21 @@ ROI_HORIZON_OPTIONS = [10, 15, 20, 30]
 # you're *repaying*.
 UNDERGRAD_YEARS = 4
 
+# Community-college-transfer path ("2+2"): a student spends the first
+# COMMUNITY_COLLEGE_YEARS years at a community college, then transfers to the
+# 4-year school to finish the SAME bachelor's. The degree, earnings, and the
+# UNDERGRAD_YEARS enrollment timeline are unchanged -- only the first years'
+# cost drops to community-college prices, cutting the loan. The default cost is
+# the national-average annual tuition & fees at a public two-year (community)
+# college, in-district: $3,990 (College Board, Trends in College Pricing
+# 2023-24, rounded). It's tuition & fees, not a full Cost of Attendance, so the
+# modeled saving reflects the tuition differential for a transfer student who
+# lives at home during the community-college years -- the common pattern. It's
+# an editable default: a student who dorms at a community college, or whose
+# local college costs more/less, can enter their own figure.
+COMMUNITY_COLLEGE_YEARS = 2
+COMMUNITY_COLLEGE_COA_DEFAULT = 3990
+
 # Cost of Attendance inflation estimate: CAGR between these two fixed
 # College Scorecard data years (school-specific, via the API's year-prefixed
 # fields, e.g. "2018.cost.attendance.academic_year"). Fixed years rather
@@ -1326,7 +1341,9 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
                         interest_rate, repayment_strategy, compare_mode, major_b=None, school_name_b=None,
                         in_state_b=None, coa_per_year_b=None, personal_contribution_per_year_b=None,
                         grants_per_year_b=None, interest_rate_b=None, repayment_strategy_b=None,
-                        start_year_a=None, start_year_b=None, roi_horizon_years=None) -> dict:
+                        start_year_a=None, start_year_b=None, roi_horizon_years=None,
+                        cc_transfer_a=False, cc_coa_per_year_a=None,
+                        cc_transfer_b=False, cc_coa_per_year_b=None) -> dict:
     """Every Scenario A (and, when compare_mode, Scenario B) input as a flat
     {query_param_name: value} dict of strings -- the exact shape
     get_shared_default() reads back on a fresh visit, so a "Share Scenario"
@@ -1355,6 +1372,8 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "compare": "1" if compare_mode else "0",
         "start_year": str(start_year_a),
         "horizon": str(roi_horizon_years),
+        "cc_a": "1" if cc_transfer_a else "0",
+        "cc_coa_a": str(cc_coa_per_year_a),
     }
     if compare_mode:
         params.update({
@@ -1367,6 +1386,8 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
             "rate_b": str(interest_rate_b),
             "strategy_b": repayment_strategy_b,
             "start_year_b": str(start_year_b),
+            "cc_b": "1" if cc_transfer_b else "0",
+            "cc_coa_b": str(cc_coa_per_year_b),
         })
     return params
 
@@ -2175,7 +2196,8 @@ def calculate_apprenticeship_roi(hs_net_position: float, col_index: float = 100.
 
 def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per_year: float,
                                    grants_per_year: float, inflation_rate: float,
-                                   years: int = UNDERGRAD_YEARS) -> list:
+                                   years: int = UNDERGRAD_YEARS,
+                                   cc_years: int = 0, cc_coa_per_year: float = 0.0) -> list:
     """Per-year loan breakdown across `years` of enrollment, growing Cost of
     Attendance year-over-year by inflation_rate while Personal Contribution
     and Grants & Scholarships both stay flat nominal amounts -- Year 1 uses
@@ -2183,29 +2205,43 @@ def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per
     (1 + inflation_rate). The loan gap widens each year since neither
     funding source scales with rising costs, matching how this plays out
     for most families/awards in practice. Returns one dict per year
-    (1-indexed): {"year", "coa", "loan_amount"}. compute_total_loan_amount
+    (1-indexed): {"year", "coa", "loan_amount", "phase"}. compute_total_loan_amount
     below just sums this -- kept separate so the results page can show the
-    year-by-year build-up, not only the final total."""
+    year-by-year build-up, not only the final total.
+
+    cc_years/cc_coa_per_year model the community-college-transfer path: the
+    first cc_years use cc_coa_per_year as the base cost (community-college
+    prices) instead of coa_per_year, then the remaining years use coa_per_year
+    (the 4-year school). Inflation still compounds from year 0 across the whole
+    span, so a university year lands at coa_per_year*(1+r)**year_index -- i.e.
+    the 4-year sticker has inflated by the time the student transfers into it.
+    cc_years=0 (the default) is the original single-institution behaviour."""
     schedule = []
     for year_index in range(years):
-        coa_this_year = coa_per_year * (1 + inflation_rate) ** year_index
+        is_cc = year_index < cc_years
+        base = cc_coa_per_year if is_cc else coa_per_year
+        coa_this_year = base * (1 + inflation_rate) ** year_index
         loan_amount = max(coa_this_year - personal_contribution_per_year - grants_per_year, 0)
-        schedule.append({"year": year_index + 1, "coa": coa_this_year, "loan_amount": loan_amount})
+        schedule.append({"year": year_index + 1, "coa": coa_this_year, "loan_amount": loan_amount,
+                         "phase": "community_college" if is_cc else "university"})
     return schedule
 
 
 def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_year: float,
                                grants_per_year: float, inflation_rate: float,
-                               years: int = UNDERGRAD_YEARS) -> float:
+                               years: int = UNDERGRAD_YEARS,
+                               cc_years: int = 0, cc_coa_per_year: float = 0.0) -> float:
     """Total loan across `years` of enrollment -- see
-    compute_loan_schedule_by_year for the year-by-year math this sums.
+    compute_loan_schedule_by_year for the year-by-year math this sums (including
+    the cc_years/cc_coa_per_year community-college-transfer path).
     Grants & Scholarships reduces the loan the same way Personal
     Contribution does, but -- unlike Personal Contribution -- is never
     added to total_investment (the ROI% denominator) in
     compute_scenario_results, since it's free third-party money, not
     something the student/family gave up."""
     schedule = compute_loan_schedule_by_year(coa_per_year, personal_contribution_per_year,
-                                              grants_per_year, inflation_rate, years)
+                                              grants_per_year, inflation_rate, years,
+                                              cc_years=cc_years, cc_coa_per_year=cc_coa_per_year)
     return sum(row["loan_amount"] for row in schedule)
 
 
@@ -3837,6 +3873,30 @@ grants_per_year_a = st.sidebar.number_input(
     help="Grant or scholarship aid that reduces what you need to borrow. "
          "This amount does not need to be repaid back to the grantor.",
 )
+cc_transfer_a = st.sidebar.checkbox(
+    "Start at community college, then transfer",
+    value=get_shared_default("cc_a", "0") == "1", key="cc_transfer_a",
+    help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
+         "college, then transferring to the 4-year school above to finish the "
+         "same bachelor's degree. Earnings, the degree and the enrollment "
+         "timeline are unchanged -- only those first years cost community-"
+         "college prices instead of 4-year prices, which lowers the loan. Put "
+         "this on for one scenario and off for the other to compare the two "
+         "paths to the same degree. See Methodology.",
+)
+if cc_transfer_a:
+    cc_coa_per_year_a = st.sidebar.number_input(
+        "Community College Cost (per year, $)", min_value=0, max_value=100000,
+        value=get_shared_int("cc_coa_a", COMMUNITY_COLLEGE_COA_DEFAULT), step=250,
+        key="cc_coa_per_year_a",
+        help="Annual cost for the community-college years, before Personal "
+             "Contribution and Grants. Defaults to the U.S. average public "
+             "two-year in-district tuition & fees (College Board); edit it to "
+             "your local community college's figure.",
+    )
+else:
+    cc_coa_per_year_a = 0.0
+cc_years_a = COMMUNITY_COLLEGE_YEARS if cc_transfer_a else 0
 # Loan amount is derived, not entered: Cost of Attendance minus whatever
 # isn't borrowed, per year, growing COA by an estimated inflation rate each
 # year while Personal Contribution and Grants & Scholarships both stay flat
@@ -3854,8 +3914,11 @@ inflation_rate_a = (
 # nothing for the common case of starting right away.
 years_until_start_a = max(start_year_a - now_local().year, 0)
 effective_coa_per_year_a = coa_per_year_a * (1 + inflation_rate_a) ** years_until_start_a
+effective_cc_coa_per_year_a = cc_coa_per_year_a * (1 + inflation_rate_a) ** years_until_start_a
 computed_loan_amount_a = compute_total_loan_amount(effective_coa_per_year_a, personal_contribution_per_year_a,
-                                                    grants_per_year_a, inflation_rate_a)
+                                                    grants_per_year_a, inflation_rate_a,
+                                                    cc_years=cc_years_a,
+                                                    cc_coa_per_year=effective_cc_coa_per_year_a)
 personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
 if years_until_start_a > 0:
     coa_projection_note = (
@@ -3865,9 +3928,17 @@ if years_until_start_a > 0:
     )
 else:
     coa_projection_note = ""
+# First-year cost is the community-college figure when the transfer path is on.
+first_year_cost_a = effective_cc_coa_per_year_a if cc_transfer_a else effective_coa_per_year_a
+cc_note_a = (
+    f"Community-college transfer: first {COMMUNITY_COLLEGE_YEARS} yrs at "
+    f"{fmt_money(effective_cc_coa_per_year_a)}/yr, then {fmt_money(effective_coa_per_year_a)}/yr "
+    f"at the 4-year school. "
+) if cc_transfer_a else ""
 st.sidebar.caption((
     f"{coa_projection_note}"
-    f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
+    f"{cc_note_a}"
+    f"Year 1 ({start_year_a}): {fmt_money(first_year_cost_a)} COA − "
     f"{fmt_money(personal_contribution_per_year_a)} personal "
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
     f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_a)}** loan, **{fmt_money(personal_contribution)}** personal"
@@ -4416,6 +4487,29 @@ if compare_mode:
                  "borrow. This amount does not need to be repaid back to "
                  "the grantor.",
         )
+        cc_transfer_b = st.checkbox(
+            "Start at community college, then transfer",
+            value=get_shared_default("cc_b", "0") == "1", key="cc_transfer_b",
+            help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
+                 "community college, then transferring to the 4-year school "
+                 "above to finish the same bachelor's degree. Earnings, the "
+                 "degree and the enrollment timeline are unchanged -- only "
+                 "those first years cost community-college prices, which lowers "
+                 "the loan. See Methodology.",
+        )
+        if cc_transfer_b:
+            cc_coa_per_year_b = st.number_input(
+                "Community College Cost (per year, $)", min_value=0, max_value=100000,
+                value=get_shared_int("cc_coa_b", COMMUNITY_COLLEGE_COA_DEFAULT), step=250,
+                key="cc_coa_per_year_b",
+                help="Annual cost for the community-college years, before "
+                     "Personal Contribution and Grants. Defaults to the U.S. "
+                     "average public two-year in-district tuition & fees "
+                     "(College Board); edit to your local college's figure.",
+            )
+        else:
+            cc_coa_per_year_b = 0.0
+        cc_years_b = COMMUNITY_COLLEGE_YEARS if cc_transfer_b else 0
         control_type_b = coa_match_b["control_type"] if coa_match_b is not None else None
         inflation_rate_b = (
             DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
@@ -4423,8 +4517,11 @@ if compare_mode:
         )
         years_until_start_b = max(start_year_b - now_local().year, 0)
         effective_coa_per_year_b = coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
+        effective_cc_coa_per_year_b = cc_coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
         computed_loan_amount_b = compute_total_loan_amount(effective_coa_per_year_b, personal_contribution_per_year_b,
-                                                            grants_per_year_b, inflation_rate_b)
+                                                            grants_per_year_b, inflation_rate_b,
+                                                            cc_years=cc_years_b,
+                                                            cc_coa_per_year=effective_cc_coa_per_year_b)
         personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
         if years_until_start_b > 0:
             coa_projection_note_b = (
@@ -4434,9 +4531,16 @@ if compare_mode:
             )
         else:
             coa_projection_note_b = ""
+        first_year_cost_b = effective_cc_coa_per_year_b if cc_transfer_b else effective_coa_per_year_b
+        cc_note_b = (
+            f"Community-college transfer: first {COMMUNITY_COLLEGE_YEARS} yrs at "
+            f"{fmt_money(effective_cc_coa_per_year_b)}/yr, then {fmt_money(effective_coa_per_year_b)}/yr "
+            f"at the 4-year school. "
+        ) if cc_transfer_b else ""
         st.caption((
             f"{coa_projection_note_b}"
-            f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
+            f"{cc_note_b}"
+            f"Year 1 ({start_year_b}): {fmt_money(first_year_cost_b)} COA − "
             f"{fmt_money(personal_contribution_per_year_b)} personal "
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
             f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
@@ -5302,6 +5406,8 @@ if compare_mode:
                 repayment_strategy_b=repayment_strategy_b,
                 start_year_a=start_year_a, start_year_b=start_year_b,
                 roi_horizon_years=roi_horizon_years,
+                cc_transfer_a=cc_transfer_a, cc_coa_per_year_a=cc_coa_per_year_a,
+                cc_transfer_b=cc_transfer_b, cc_coa_per_year_b=cc_coa_per_year_b,
             ))
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
@@ -5335,7 +5441,8 @@ else:
         st.caption(loan_caption)
 
     loan_schedule_a = compute_loan_schedule_by_year(
-        effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a
+        effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+        cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a
     )
     st.caption(
         "Here's how your loan builds up year by year -- Cost of Attendance "
@@ -5537,6 +5644,7 @@ else:
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                 interest_rate, repayment_strategy, False, start_year_a=start_year_a,
                 roi_horizon_years=roi_horizon_years,
+                cc_transfer_a=cc_transfer_a, cc_coa_per_year_a=cc_coa_per_year_a,
             ))
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
@@ -5876,6 +5984,28 @@ and the total loan is those four years added together:
 added up for all 4 years of an assumed bachelor's degree. Because tuition
 keeps rising while your personal contribution and any scholarships don't,
 the gap — and your loan — tends to grow a bit each year.
+
+**Community-college transfer ("2+2").** Checking "Start at community
+college, then transfer" models the common path of spending the first
+""" + str(COMMUNITY_COLLEGE_YEARS) + """ years at a community college and then transferring to the 4-year
+school to finish the **same** bachelor's degree. Only the *cost* of those
+first years changes — they use the Community College Cost you enter
+instead of the 4-year school's Cost of Attendance — so the loan shrinks,
+but earnings, the degree, and the ~4-year enrollment timeline (and so the
+foregone-earnings option) are all identical to the direct-to-4-year path.
+The Community College Cost field defaults to the U.S. average annual
+tuition & fees at a public two-year college for in-district students
+(**""" + fmt_money(COMMUNITY_COLLEGE_COA_DEFAULT) + """/yr**, College Board, Trends in College Pricing 2023-24);
+it's tuition & fees rather than a full Cost of Attendance, so the modeled
+saving reflects the tuition differential for a transfer student who lives
+at home during the community-college years — the common pattern — and the
+field is editable for anyone whose situation differs (dorming, a pricier
+local college, etc.). This deliberately does **not** apply any
+transfer-student earnings penalty: the model treats the resulting degree
+as identical to one earned by starting at the 4-year school, which is the
+optimistic-but-common assumption; real transfer outcomes vary. To compare
+the two paths directly, turn the option on for one scenario and off for
+the other in Compare Mode.
 
 **Accounting for a delayed start.** "Year Starting Undergraduate School"
 lets you model not starting college right away. If you pick a future year,
