@@ -1239,6 +1239,8 @@ def log_usage_event(action: str):
     at the very top of the script, before anything else renders, so a
     Supabase hiccup here must never be allowed to take down the whole
     calculator for every visitor."""
+    if st.session_state.get("test_mode"):
+        return  # ?test=1 developer session -- don't log interactions
     try:
         conn = get_supabase_connection()
         execute_query(
@@ -1273,6 +1275,8 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
     credentials, schema mismatch) so the caller can tell the user their
     submission didn't save instead of silently losing it.
     """
+    if st.session_state.get("test_mode"):
+        return True  # ?test=1: show the normal success UX, but don't write
     try:
         conn = get_supabase_connection()
         row = {
@@ -1486,6 +1490,8 @@ def save_pdf_download(context: dict) -> bool:
     st.button) only runs on an actual click, not on every rerun. Returns
     True on success, False on any failure, matching save_survey_response's
     contract."""
+    if st.session_state.get("test_mode"):
+        return True  # ?test=1 developer session -- don't log interactions
     try:
         conn = get_supabase_connection()
         row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
@@ -1507,6 +1513,8 @@ def save_scenario_share(context: dict) -> bool:
     build_scenario_context). Fired when "Share Scenario" is clicked, right
     after the shareable URL is generated. Returns True on success, False on
     any failure, matching the other save_* helpers' contract."""
+    if st.session_state.get("test_mode"):
+        return True  # ?test=1 developer session -- don't log interactions
     try:
         conn = get_supabase_connection()
         row = {"timestamp": now_local().isoformat(), "session_id": get_session_id(),
@@ -1557,6 +1565,8 @@ def maybe_log_scenario_event(context: dict) -> bool:
     failure -- matching the other save_* helpers, a logging problem must
     never break the calculator.
     """
+    if st.session_state.get("test_mode"):
+        return False  # ?test=1 developer session -- don't log interactions
     signature = (
         context.get("scenario_a_major"), context.get("scenario_a_school_name"),
         context.get("scenario_b_major"), context.get("scenario_b_school_name"),
@@ -3775,6 +3785,16 @@ components.html(
 
 # Log exactly one "pageview" per browser session. This check runs before any
 # widgets are drawn, so later reruns triggered by moving a slider or opening
+# ?test=1 marks this as a developer/test session: NONE of the interaction
+# logging (pageview, scenario events, PDF/share/survey) is written to Supabase,
+# so your own testing never contaminates the research data. Set before the
+# pageview log below so even that first write is skipped, and made sticky for
+# the whole session -- a later rerun that drops the query param (e.g. after
+# "Share Scenario" rewrites the URL) keeps the flag on. Rides the same
+# get_shared_default query-param mechanism as ?admin=1.
+if "test_mode" not in st.session_state:
+    st.session_state.test_mode = get_shared_default("test", "0") == "1"
+
 # an expander see "pageview_logged" already set and skip logging again.
 if "pageview_logged" not in st.session_state:
     log_usage_event("pageview")
@@ -4840,6 +4860,8 @@ st.caption(
     "**Free · anonymous · no sign-up** — an educational estimate, not financial "
     "advice. Salary and cost figures are illustrative."
 )
+if st.session_state.get("test_mode"):
+    st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
 st.info(
     "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
     "anything. Everything below updates instantly as you change it, no button to click."
