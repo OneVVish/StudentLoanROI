@@ -6472,15 +6472,17 @@ behaves exactly as described above when all five are left off.
   years of earnings at the front, the degree-seeker earns nothing during
   enrollment, and — when the Trade Apprenticeship module is also on — the
   apprentice, who *is* paid during those years, is credited with them too (a
-  sub-bachelor's profession that requires no degree is likewise never charged
-  a gap it doesn't incur). This lowers each degree's earnings premium and
-  break-even, often substantially, and is the more economically complete
-  comparison. It is a *numerator* adjustment only: the ROI% denominator stays
-  out-of-pocket tuition/debt, so ROI% reads as net gain per dollar of tuition
-  after netting out the wages given up. The model still reports these as
-  **undiscounted** dollars — it does not apply a present-value discount rate
-  to future cash flows, on either side, so the comparison is a real-dollar
-  cumulative-earnings comparison, not a net-present-value calculation.
+  job that doesn't need a 4-year degree is likewise never charged for time it
+  didn't spend in school). This lowers each degree's earnings premium and
+  break-even, often by a lot, and is the more complete way to compare. It
+  only changes the *earnings* side of the comparison — the tuition and debt
+  you put in stay the same — so the ROI% still reads as "how much you come out
+  ahead for every dollar of tuition," now counting the wages you skipped to be
+  in school. One simplification to know about: the totals are just each year's
+  real (inflation-adjusted) dollars added up — the model doesn't treat a dollar
+  earned 10 years from now as worth less than a dollar today (what economists
+  call "discounting"). It's a straightforward apples-to-apples earnings
+  comparison, not a formal net-present-value calculation.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
