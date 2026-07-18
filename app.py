@@ -3598,9 +3598,10 @@ def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int) -> Table:
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
     return _pdf_table(full_width=True, rows=[
-        ["Monthly Payment", "Payoff Timeline", "Total Interest Paid",
+        ["Total Loan", "Monthly Payment", "Payoff Timeline", "Total Interest Paid",
          f"{roi_window_years}-Yr Earnings Premium (COL-Adj.)"],
         [
+            fmt_money(scenario["effective_principal"]),
             fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
             f"{repayment_result['payoff_years']:.1f} yrs",
             fmt_money(repayment_result["total_interest"]),
