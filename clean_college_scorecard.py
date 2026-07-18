@@ -31,6 +31,8 @@ import pandas as pd
 # usage reasonable.
 COLUMNS_TO_LOAD = [
     "INSTNM",          # Institution name
+    "STABBR",          # 2-letter state abbreviation (used to pick a state-level
+                       # community-college cost default in the app)
     "CONTROL",         # 1 = Public, 2 = Private Non-Profit, 3 = Private For-Profit
     "COSTT4_A",        # Avg. cost of attendance, academic-year programs
     "COSTT4_P",        # Avg. cost of attendance, continuous-enrollment programs
@@ -137,7 +139,7 @@ def build_clean_dataframe(csv_path: str) -> pd.DataFrame:
     # ones lets you show your work (how in_state_coa/out_of_state_coa were
     # derived) rather than presenting a black-box number.
     final_columns = [
-        "INSTNM", "CONTROL", "control_type",
+        "INSTNM", "STABBR", "CONTROL", "control_type",
         "in_state_coa", "out_of_state_coa",
         "COSTT4_A", "COSTT4_P", "TUITIONFEE_IN", "TUITIONFEE_OUT",
     ]

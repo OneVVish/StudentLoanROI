@@ -598,6 +598,63 @@ ROI_HORIZON_OPTIONS = [10, 15, 20, 30]
 # you're *repaying*.
 UNDERGRAD_YEARS = 4
 
+# Community-college-transfer path ("2+2"): a student spends the first
+# COMMUNITY_COLLEGE_YEARS years at a community college, then transfers to the
+# 4-year school to finish the SAME bachelor's. The degree, earnings, and the
+# UNDERGRAD_YEARS enrollment timeline are unchanged -- only the first years'
+# cost drops to community-college prices, cutting the loan. Costs below are the
+# average annual IN-DISTRICT (in-state) tuition & fees at a public two-year
+# (community) college -- NOT a full Cost of Attendance -- so the modeled saving
+# reflects the tuition differential for a transfer student who lives at home
+# during the community-college years, the common pattern. Source: National
+# Center for Education Statistics (NCES), Digest of Education Statistics, via
+# the Education Data Initiative (educationdata.org), 2025; national in-district
+# average $3,890. Editable per scenario for a student who dorms or whose local
+# college differs.
+COMMUNITY_COLLEGE_YEARS = 2
+COMMUNITY_COLLEGE_COA_DEFAULT = 3890  # national in-district avg (NCES 2025)
+
+# Per-state average in-district community-college tuition & fees, keyed by
+# 2-letter abbreviation to match STATE_TAX_BRACKETS and CITY_DATA["state_key"].
+# Source: NCES Digest of Education Statistics via Education Data Initiative
+# (educationdata.org, 2025). A state absent here falls back to
+# COMMUNITY_COLLEGE_COA_DEFAULT.
+COMMUNITY_COLLEGE_COST_BY_STATE = {
+    "AL": 5440, "AK": 7140, "AZ": 2330, "AR": 3950, "CA": 1390, "CO": 3700,
+    "CT": 5140, "DE": 5710, "FL": 2880, "GA": 3380, "HI": 3480, "ID": 3630,
+    "IL": 4590, "IN": 5010, "IA": 6030, "KS": 3940, "KY": 4950, "LA": 4720,
+    "ME": 4080, "MD": 4760, "MA": 6010, "MI": 4280, "MN": 6530, "MS": 3980,
+    "MO": 4400, "MT": 4270, "NE": 3680, "NV": 3340, "NH": 7680, "NJ": 5380,
+    "NM": 2080, "NY": 6210, "NC": 2730, "ND": 6060, "OH": 5000, "OK": 4770,
+    "OR": 5810, "PA": 6170, "RI": 5500, "SC": 5380, "SD": 8000, "TN": 4790,
+    "TX": 3160, "UT": 4600, "VT": 7470, "VA": 5640, "WA": 4990, "WV": 4970,
+    "WI": 5030, "WY": 4530,
+}
+
+# 2-letter abbrev -> full name, for the Community College State dropdown. The
+# app has no other US-state list; this is the canonical one.
+US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+    "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+    "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+    "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+    "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+    "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+    "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+    "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+    "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+# Helper: default annual CC cost for a state abbrev (None/unknown -> national).
+def community_college_cost_for_state(state_key) -> int:
+    if not state_key:
+        return COMMUNITY_COLLEGE_COA_DEFAULT
+    return COMMUNITY_COLLEGE_COST_BY_STATE.get(state_key, COMMUNITY_COLLEGE_COA_DEFAULT)
+
 # Cost of Attendance inflation estimate: CAGR between these two fixed
 # College Scorecard data years (school-specific, via the API's year-prefixed
 # fields, e.g. "2018.cost.attendance.academic_year"). Fixed years rather
@@ -1326,7 +1383,9 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
                         interest_rate, repayment_strategy, compare_mode, major_b=None, school_name_b=None,
                         in_state_b=None, coa_per_year_b=None, personal_contribution_per_year_b=None,
                         grants_per_year_b=None, interest_rate_b=None, repayment_strategy_b=None,
-                        start_year_a=None, start_year_b=None, roi_horizon_years=None) -> dict:
+                        start_year_a=None, start_year_b=None, roi_horizon_years=None,
+                        cc_mode_a="none", cc_state_a="__national__", cc_coa_per_year_a=None,
+                        cc_mode_b="none", cc_state_b="__national__", cc_coa_per_year_b=None) -> dict:
     """Every Scenario A (and, when compare_mode, Scenario B) input as a flat
     {query_param_name: value} dict of strings -- the exact shape
     get_shared_default() reads back on a fresh visit, so a "Share Scenario"
@@ -1355,6 +1414,9 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "compare": "1" if compare_mode else "0",
         "start_year": str(start_year_a),
         "horizon": str(roi_horizon_years),
+        "cc_mode_a": cc_mode_a,
+        "cc_state_a": cc_state_a,
+        "cc_coa_a": str(cc_coa_per_year_a),
     }
     if compare_mode:
         params.update({
@@ -1367,6 +1429,9 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
             "rate_b": str(interest_rate_b),
             "strategy_b": repayment_strategy_b,
             "start_year_b": str(start_year_b),
+            "cc_mode_b": cc_mode_b,
+            "cc_state_b": cc_state_b,
+            "cc_coa_b": str(cc_coa_per_year_b),
         })
     return params
 
@@ -2030,7 +2095,8 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    years: int = ROI_WINDOW_YEARS,
                    hs_wage_index: float = 1.0,
                    personal_contribution: float = 0.0,
-                   enrollment_years: int = 0) -> dict:
+                   enrollment_years: int = 0,
+                   working_years: int = 0) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window, minus any personal_contribution) compared against a
@@ -2068,6 +2134,18 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     foregone years are the biggest real cost of a degree and dwarf tuition,
     so leaving them out (enrollment_years=0) flatters every degree.
 
+    working_years models the community-college "part-time while working
+    full-time" path: for the first `working_years` of the enrollment window
+    the degree-seeker is NOT foregoing earnings -- they work full-time at
+    roughly a high-school-graduate wage while attending part-time -- so those
+    years are added back to the major's side (same HS-wage formula, same front
+    of the timeline as the baseline). Because the HS baseline earns the same
+    wage those years, they cancel in the premium: the net effect is "no
+    foregone penalty for the part-time years," which is exactly that path's
+    advantage. working_years only bites when enrollment_years > 0 (the age-18
+    timeline); with foregone earnings off, both are 0 and this is a no-op. It
+    is loan-independent, so the break-even bisection stays valid.
+
     Both net positions are adjusted for the selected city's cost of living
     (col_index) -- assuming the HS grad lives in the same city as the major
     track, since that's the only city input this app has -- so Earnings
@@ -2099,9 +2177,19 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
         HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** y
         for y in range(years + enrollment_years)
     )
+    # Part-time-while-working community-college years: the major side earns a
+    # HS-equivalent wage for the first `working_years` of the timeline (front,
+    # growing from year 0 -- identical terms to the HS baseline's first
+    # working_years, so they cancel in the premium). 0 unless the part-time CC
+    # path is on AND the foregone-earnings option is on.
+    major_working_earnings = sum(
+        HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** y
+        for y in range(working_years)
+    )
 
     major_net_position_nominal = (
-        major_cumulative_earnings - total_loan_payments_in_window - personal_contribution
+        major_cumulative_earnings + major_working_earnings
+        - total_loan_payments_in_window - personal_contribution
     )
     hs_net_position_nominal = hs_cumulative_earnings
 
@@ -2175,7 +2263,9 @@ def calculate_apprenticeship_roi(hs_net_position: float, col_index: float = 100.
 
 def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per_year: float,
                                    grants_per_year: float, inflation_rate: float,
-                                   years: int = UNDERGRAD_YEARS) -> list:
+                                   years: int = UNDERGRAD_YEARS,
+                                   cc_years: int = 0, cc_coa_per_year: float = 0.0,
+                                   finance_cc_years: bool = True) -> list:
     """Per-year loan breakdown across `years` of enrollment, growing Cost of
     Attendance year-over-year by inflation_rate while Personal Contribution
     and Grants & Scholarships both stay flat nominal amounts -- Year 1 uses
@@ -2183,29 +2273,57 @@ def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per
     (1 + inflation_rate). The loan gap widens each year since neither
     funding source scales with rising costs, matching how this plays out
     for most families/awards in practice. Returns one dict per year
-    (1-indexed): {"year", "coa", "loan_amount"}. compute_total_loan_amount
+    (1-indexed): {"year", "coa", "loan_amount", "phase"}. compute_total_loan_amount
     below just sums this -- kept separate so the results page can show the
-    year-by-year build-up, not only the final total."""
+    year-by-year build-up, not only the final total.
+
+    cc_years/cc_coa_per_year model the community-college-transfer path: the
+    first cc_years use cc_coa_per_year as the base cost (community-college
+    prices) instead of coa_per_year, then the remaining years use coa_per_year
+    (the 4-year school). Inflation still compounds from year 0 across the whole
+    span, so a university year lands at coa_per_year*(1+r)**year_index -- i.e.
+    the 4-year sticker has inflated by the time the student transfers into it.
+    cc_years=0 (the default) is the original single-institution behaviour.
+
+    finance_cc_years=False models the "no-loan community college" rule: the CC
+    years contribute $0 to the loan (paid out of pocket / Pell / from wages),
+    so only the university years are financed. The CC rows are still emitted
+    with their `coa` (for the year-by-year display and for summing the CC
+    out-of-pocket cost) -- they just carry loan_amount=0. Keeping the CC years
+    in the loop (rather than dropping them) is what positions the university
+    years at the correct inflated year_index."""
     schedule = []
     for year_index in range(years):
-        coa_this_year = coa_per_year * (1 + inflation_rate) ** year_index
-        loan_amount = max(coa_this_year - personal_contribution_per_year - grants_per_year, 0)
-        schedule.append({"year": year_index + 1, "coa": coa_this_year, "loan_amount": loan_amount})
+        is_cc = year_index < cc_years
+        base = cc_coa_per_year if is_cc else coa_per_year
+        coa_this_year = base * (1 + inflation_rate) ** year_index
+        if is_cc and not finance_cc_years:
+            loan_amount = 0.0
+        else:
+            loan_amount = max(coa_this_year - personal_contribution_per_year - grants_per_year, 0)
+        schedule.append({"year": year_index + 1, "coa": coa_this_year, "loan_amount": loan_amount,
+                         "phase": "community_college" if is_cc else "university"})
     return schedule
 
 
 def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_year: float,
                                grants_per_year: float, inflation_rate: float,
-                               years: int = UNDERGRAD_YEARS) -> float:
+                               years: int = UNDERGRAD_YEARS,
+                               cc_years: int = 0, cc_coa_per_year: float = 0.0,
+                               finance_cc_years: bool = True) -> float:
     """Total loan across `years` of enrollment -- see
-    compute_loan_schedule_by_year for the year-by-year math this sums.
+    compute_loan_schedule_by_year for the year-by-year math this sums (including
+    the cc_years/cc_coa_per_year community-college-transfer path and the
+    finance_cc_years no-loan-CC rule).
     Grants & Scholarships reduces the loan the same way Personal
     Contribution does, but -- unlike Personal Contribution -- is never
     added to total_investment (the ROI% denominator) in
     compute_scenario_results, since it's free third-party money, not
     something the student/family gave up."""
     schedule = compute_loan_schedule_by_year(coa_per_year, personal_contribution_per_year,
-                                              grants_per_year, inflation_rate, years)
+                                              grants_per_year, inflation_rate, years,
+                                              cc_years=cc_years, cc_coa_per_year=cc_coa_per_year,
+                                              finance_cc_years=finance_cc_years)
     return sum(row["loan_amount"] for row in schedule)
 
 
@@ -2215,7 +2333,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               col_index: float = 100.0,
                               roi_window_years: int = ROI_WINDOW_YEARS,
                               hs_wage_index: float = 1.0,
-                              enrollment_years: int = 0) -> dict:
+                              enrollment_years: int = 0,
+                              working_years: int = 0) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -2256,19 +2375,21 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                                 total_investment, col_index=col_index, years=roi_window_years,
                                 hs_wage_index=hs_wage_index,
                                 personal_contribution=personal_contribution,
-                                enrollment_years=enrollment_years)
+                                enrollment_years=enrollment_years,
+                                working_years=working_years)
     return {
         "major": major_name,
         "strategy_label": strategy_label,
         "effective_principal": effective_principal,
         "personal_contribution": personal_contribution,
         "total_investment": total_investment,
-        # Stamp the enrollment-cost assumption onto the scenario so every
+        # Stamp the enrollment-cost assumptions onto the scenario so every
         # re-derivation off this dict (break-even, apprenticeship, the PDF)
-        # reuses the exact value it was computed under, rather than each call
+        # reuses the exact values it was computed under, rather than each call
         # site re-reading the toggle and risking a mismatch -- the same class
         # of bug the hs_wage_index threading fixed.
         "enrollment_years": enrollment_years,
+        "working_years": working_years,
         "repayment_result": repayment_result,
         "roi_result": roi_result,
     }
@@ -2289,7 +2410,8 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          career_data_source: str = "National",
                          hs_wage_index: float = 1.0,
                          personal_contribution: float = 0.0,
-                         enrollment_years: int = 0) -> dict:
+                         enrollment_years: int = 0,
+                         working_years: int = 0) -> dict:
     """The undergraduate loan at which `major_name` stops beating a debt-free
     high school graduate — i.e. where earnings_premium crosses zero.
 
@@ -2320,12 +2442,14 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
     fixed cash outflow subtracted from the major's side (see calculate_roi),
     so more of it also pushes the break-even down. enrollment_years adds the
     degree-seeker's foregone-earnings years to the HS baseline only, so it too
-    pushes the break-even down. Passing the page's displayed value for one but
-    the default for another is exactly the bug this signature exists to
-    prevent: the verdict ("worth it") would be computed against a different
-    baseline than the earnings-premium number printed beside it. All three are
-    still independent of the loan, so earnings_premium stays monotonic in loan
-    size and the bisection remains valid.
+    pushes the break-even down. working_years (part-time-while-working CC) adds
+    HS-wage earnings back to the major side, pushing the break-even UP. Passing
+    the page's displayed value for one but the default for another is exactly
+    the bug this signature exists to prevent: the verdict ("worth it") would be
+    computed against a different baseline than the earnings-premium number
+    printed beside it. All of these are still independent of the loan, so
+    earnings_premium stays monotonic in loan size and the bisection remains
+    valid.
 
     Cached because the on-screen render calls it on every Streamlit rerun and
     a bisection is ~15 full amortisation simulations.
@@ -2345,6 +2469,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             col_index=col_index, roi_window_years=roi_window_years,
             hs_wage_index=hs_wage_index,
             enrollment_years=enrollment_years,
+            working_years=working_years,
         )["roi_result"]["earnings_premium"]
 
     if premium_at(0.0) <= 0:
@@ -2368,7 +2493,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        career_data_source: str = "National",
                        hs_wage_index: float = 1.0,
                        personal_contribution: float = 0.0,
-                       enrollment_years: int = 0) -> dict:
+                       enrollment_years: int = 0,
+                       working_years: int = 0) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
     borrowing, shared by the on-screen section and its PDF counterpart so
     the two can't drift.
@@ -2390,7 +2516,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   career_data_source=career_data_source,
                                   hs_wage_index=hs_wage_index,
                                   personal_contribution=personal_contribution,
-                                  enrollment_years=enrollment_years)
+                                  enrollment_years=enrollment_years,
+                                  working_years=working_years)
     years = roi_window_years
     # Career-mode names are plural BLS occupations ("Software Developers")
     # while Major-mode names are singular ("Computer Science"), so any verb
@@ -3400,6 +3527,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         hs_wage_index=get_metro_wage_index(city),
         personal_contribution=scenario["personal_contribution"],
         enrollment_years=scenario["enrollment_years"],
+        working_years=scenario["working_years"],
     )
     story += _pdf_breakeven_block(breakeven, styles)
 
@@ -3496,7 +3624,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               career_data_source=career_data_source,
                               hs_wage_index=get_metro_wage_index(city),
                               personal_contribution=scenario_a["personal_contribution"],
-                              enrollment_years=scenario_a["enrollment_years"]),
+                              enrollment_years=scenario_a["enrollment_years"],
+                              working_years=scenario_a["working_years"]),
             styles, scenario_label="Scenario A"),
         Spacer(1, 12),
         Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
@@ -3515,7 +3644,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               career_data_source=career_data_source,
                               hs_wage_index=get_metro_wage_index(city),
                               personal_contribution=scenario_b["personal_contribution"],
-                              enrollment_years=scenario_b["enrollment_years"]),
+                              enrollment_years=scenario_b["enrollment_years"],
+                              working_years=scenario_b["working_years"]),
             styles, scenario_label="Scenario B"),
         Spacer(1, 12),
         build_pdf_comparison_balance_chart(
@@ -3837,11 +3967,85 @@ grants_per_year_a = st.sidebar.number_input(
     help="Grant or scholarship aid that reduces what you need to borrow. "
          "This amount does not need to be repaid back to the grantor.",
 )
+# Community-college path: None / full-time transfer / part-time while working.
+# (Replaces the old single "Start at community college" checkbox; legacy shared
+# links with cc_a=1 map to the full-time transfer mode.)
+_legacy_cc_a = get_shared_default("cc_a", "0") == "1"
+st.session_state.setdefault(
+    "cc_mode_a", get_shared_default("cc_mode_a", "fulltime" if _legacy_cc_a else "none"))
+cc_mode_a = st.sidebar.radio(
+    "Community college path",
+    options=["none", "fulltime", "parttime"],
+    format_func=lambda c: {
+        "none": "None — start at the 4-year school",
+        "fulltime": "Full-time community college, then transfer (2+2)",
+        "parttime": "Part-time community college while working, then transfer",
+    }[c],
+    key="cc_mode_a",
+    help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
+         "college, then transferring to the 4-year school above to finish the "
+         "SAME bachelor's -- earnings and the degree are unchanged, only the "
+         "cost of those years drops. Community college is assumed paid without "
+         "loans (Pell/work/out-of-pocket), so it adds nothing to your debt. "
+         "'Part-time while working' means you work full-time during the "
+         "community-college years (earning, not foregoing income) -- its "
+         "earnings advantage shows up when 'count foregone earnings' is on. "
+         "Put a different path in each scenario to compare them. See Methodology.",
+)
+cc_transfer_a = cc_mode_a != "none"
+is_parttime_a = cc_mode_a == "parttime"
+cc_years_a = COMMUNITY_COLLEGE_YEARS if cc_transfer_a else 0
+university_years_a = max(UNDERGRAD_YEARS - cc_years_a, 0)
+if cc_transfer_a:
+    # Default CC state: the selected 4-year school's state (you transfer within
+    # a state), then the work city's state, then national. coa_match_a.get is a
+    # graceful no-op until the college dataset carries STABBR (see
+    # clean_college_scorecard.py) -- falls through to city/national meanwhile.
+    _school_state_a = coa_match_a.get("STABBR") if coa_match_a is not None else None
+    if _school_state_a not in US_STATES:
+        _school_state_a = None
+    _city_a = st.session_state.get("city_select")
+    _city_state_a = CITY_DATA.get(_city_a, {}).get("state_key") if _city_a else None
+    if _city_state_a not in US_STATES:
+        _city_state_a = None
+    _shared_state_a = get_shared_default("cc_state_a", "")
+    _default_state_a = (_shared_state_a if _shared_state_a in US_STATES or _shared_state_a == "__national__"
+                        else (_school_state_a or _city_state_a or "__national__"))
+    st.session_state.setdefault("cc_state_a", _default_state_a)
+    cc_state_key_a = st.sidebar.selectbox(
+        "Community College State",
+        ["__national__"] + sorted(US_STATES, key=lambda k: US_STATES[k]),
+        format_func=lambda k: "National average" if k == "__national__" else US_STATES[k],
+        key="cc_state_a",
+        help="Community-college tuition varies widely by state. Defaults to "
+             "your school's state (then your work city's), and sets the cost "
+             "below. Source: NCES via the Education Data Initiative (2025).",
+    )
+    _state_cost_a = community_college_cost_for_state(
+        None if cc_state_key_a == "__national__" else cc_state_key_a)
+    # Cost auto-fills from the state, but a manual (or shared-link) override
+    # survives until the state itself changes -- same pattern as the COA/loan
+    # auto-fill below.
+    st.session_state.setdefault("cc_coa_per_year_a", get_shared_int("cc_coa_a", int(_state_cost_a)))
+    st.session_state.setdefault("cc_state_cost_seen_a", _state_cost_a)
+    if st.session_state["cc_state_cost_seen_a"] != _state_cost_a:
+        st.session_state["cc_state_cost_seen_a"] = _state_cost_a
+        st.session_state["cc_coa_per_year_a"] = int(_state_cost_a)
+    cc_coa_per_year_a = st.sidebar.number_input(
+        "Community College Cost (per year, $)", min_value=0, max_value=100000, step=250,
+        key="cc_coa_per_year_a",
+        help="Average annual in-district tuition & fees for the selected "
+             "state's community colleges (NCES). Edit to your local college. "
+             "Paid out of pocket -- it is NOT added to the loan, but it does "
+             "count as a real cost (personal contribution) in the ROI.",
+    )
+else:
+    cc_coa_per_year_a = 0.0
+    cc_state_key_a = "__national__"
 # Loan amount is derived, not entered: Cost of Attendance minus whatever
-# isn't borrowed, per year, growing COA by an estimated inflation rate each
-# year while Personal Contribution and Grants & Scholarships both stay flat
-# -- then summed to the total every downstream calculation
-# (effective_principal, ROI, take-home) operates on.
+# isn't borrowed, per financed year. With a community-college path the CC years
+# add $0 to the loan (paid out of pocket) -- only the university_years are
+# financed -- and the CC tuition becomes an out-of-pocket personal contribution.
 control_type_a = coa_match_a["control_type"] if coa_match_a is not None else None
 inflation_rate_a = (
     DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
@@ -3854,9 +4058,27 @@ inflation_rate_a = (
 # nothing for the common case of starting right away.
 years_until_start_a = max(start_year_a - now_local().year, 0)
 effective_coa_per_year_a = coa_per_year_a * (1 + inflation_rate_a) ** years_until_start_a
-computed_loan_amount_a = compute_total_loan_amount(effective_coa_per_year_a, personal_contribution_per_year_a,
-                                                    grants_per_year_a, inflation_rate_a)
-personal_contribution = personal_contribution_per_year_a * UNDERGRAD_YEARS
+effective_cc_coa_per_year_a = cc_coa_per_year_a * (1 + inflation_rate_a) ** years_until_start_a
+# Build the schedule once, then derive both the (university-only) loan and the
+# CC out-of-pocket from it -- single source of truth, no drift.
+_schedule_a = compute_loan_schedule_by_year(
+    effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+    cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False)
+computed_loan_amount_a = sum(r["loan_amount"] for r in _schedule_a)
+cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college")
+# Foregone-earnings option (widget rendered further down; read from state, per
+# this file's established before-the-widget pattern). enrollment_years extends
+# the HS baseline; working_years credits the part-time CC years back to the
+# major side. Both gate on the option; enrollment_years == UNDERGRAD_YEARS in
+# every mode when it's on (cc_years + university_years), so no-CC is unchanged.
+_foregone_on = st.session_state.get("count_foregone_earnings", False)
+enrollment_years_a = (cc_years_a + university_years_a) if _foregone_on else 0
+working_years_a = cc_years_a if (is_parttime_a and _foregone_on) else 0
+# Double-count guard: the per-year family contribution applies only to the
+# financed university years; the CC tuition (cc_oop_a) is a separate additive
+# out-of-pocket cost. No CC (university_years=4, cc_oop=0) => pc_per_year*4,
+# exactly the original value.
+personal_contribution = personal_contribution_per_year_a * university_years_a + cc_oop_a
 if years_until_start_a > 0:
     coa_projection_note = (
         f"Today's Year 1 COA: {fmt_money(coa_per_year_a)} → projected to "
@@ -3865,7 +4087,21 @@ if years_until_start_a > 0:
     )
 else:
     coa_projection_note = ""
+if cc_transfer_a:
+    _work_note_a = "working full-time, " if is_parttime_a else ""
+    cc_note_a = (
+        f"{COMMUNITY_COLLEGE_YEARS} yrs community college ({_work_note_a}"
+        f"{fmt_money(effective_cc_coa_per_year_a)}/yr, no loan → {fmt_money(cc_oop_a)} out-of-pocket), "
+        f"then {university_years_a} yrs at the 4-year school ({fmt_money(effective_coa_per_year_a)}/yr, financed). "
+    )
+else:
+    cc_note_a = ""
 st.sidebar.caption((
+    f"{coa_projection_note}"
+    f"{cc_note_a}"
+    f"→ **{fmt_money(computed_loan_amount_a)}** loan, **{fmt_money(personal_contribution)}** personal "
+    f"(incl. {fmt_money(cc_oop_a)} community college)"
+    if cc_transfer_a else
     f"{coa_projection_note}"
     f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
     f"{fmt_money(personal_contribution_per_year_a)} personal "
@@ -4190,12 +4426,14 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "break-even. Off by default. See Methodology.",
     )
 
-# The in-enrollment opportunity cost, in years, that section 5's ROI calls
-# charge against a degree: UNDERGRAD_YEARS when the option above is on, else 0
-# (the clock starts at graduation -- the original behaviour). Read as a plain
-# variable below because this script runs top-to-bottom, so section 5's
-# compute_scenario_results calls see the value the checkbox just set.
-enrollment_years_setting = UNDERGRAD_YEARS if enable_foregone_earnings else 0
+# The in-enrollment opportunity cost is now applied PER SCENARIO (its
+# enrollment_years_a/_b and working_years_a/_b are computed up in the Scenario
+# A/B financing blocks, which read this checkbox's value from
+# st.session_state["count_foregone_earnings"] before the widget renders here --
+# the established before-the-widget pattern). A single global setting couldn't
+# express a part-time-CC scenario next to a direct one, so there's no global
+# enrollment_years_setting anymore. `enable_foregone_earnings` is kept for any
+# direct readers below.
 
 st.sidebar.divider()
 
@@ -4416,6 +4654,67 @@ if compare_mode:
                  "borrow. This amount does not need to be repaid back to "
                  "the grantor.",
         )
+        _legacy_cc_b = get_shared_default("cc_b", "0") == "1"
+        st.session_state.setdefault(
+            "cc_mode_b", get_shared_default("cc_mode_b", "fulltime" if _legacy_cc_b else "none"))
+        cc_mode_b = st.radio(
+            "Community college path",
+            options=["none", "fulltime", "parttime"],
+            format_func=lambda c: {
+                "none": "None — start at the 4-year school",
+                "fulltime": "Full-time community college, then transfer (2+2)",
+                "parttime": "Part-time community college while working, then transfer",
+            }[c],
+            key="cc_mode_b",
+            help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
+                 "community college, then transferring to finish the SAME "
+                 "bachelor's. Community college is assumed paid without loans, "
+                 "so it adds nothing to the debt. 'Part-time while working' "
+                 "means you work full-time during the community-college years. "
+                 "See Methodology.",
+        )
+        cc_transfer_b = cc_mode_b != "none"
+        is_parttime_b = cc_mode_b == "parttime"
+        cc_years_b = COMMUNITY_COLLEGE_YEARS if cc_transfer_b else 0
+        university_years_b = max(UNDERGRAD_YEARS - cc_years_b, 0)
+        if cc_transfer_b:
+            _school_state_b = coa_match_b.get("STABBR") if coa_match_b is not None else None
+            if _school_state_b not in US_STATES:
+                _school_state_b = None
+            _city_b = st.session_state.get("city_select")
+            _city_state_b = CITY_DATA.get(_city_b, {}).get("state_key") if _city_b else None
+            if _city_state_b not in US_STATES:
+                _city_state_b = None
+            _shared_state_b = get_shared_default("cc_state_b", "")
+            _default_state_b = (_shared_state_b if _shared_state_b in US_STATES or _shared_state_b == "__national__"
+                                else (_school_state_b or _city_state_b or "__national__"))
+            st.session_state.setdefault("cc_state_b", _default_state_b)
+            cc_state_key_b = st.selectbox(
+                "Community College State",
+                ["__national__"] + sorted(US_STATES, key=lambda k: US_STATES[k]),
+                format_func=lambda k: "National average" if k == "__national__" else US_STATES[k],
+                key="cc_state_b",
+                help="Community-college tuition varies widely by state. Defaults "
+                     "to your school's state (then work city's) and sets the "
+                     "cost below. Source: NCES via Education Data Initiative.",
+            )
+            _state_cost_b = community_college_cost_for_state(
+                None if cc_state_key_b == "__national__" else cc_state_key_b)
+            st.session_state.setdefault("cc_coa_per_year_b", get_shared_int("cc_coa_b", int(_state_cost_b)))
+            st.session_state.setdefault("cc_state_cost_seen_b", _state_cost_b)
+            if st.session_state["cc_state_cost_seen_b"] != _state_cost_b:
+                st.session_state["cc_state_cost_seen_b"] = _state_cost_b
+                st.session_state["cc_coa_per_year_b"] = int(_state_cost_b)
+            cc_coa_per_year_b = st.number_input(
+                "Community College Cost (per year, $)", min_value=0, max_value=100000, step=250,
+                key="cc_coa_per_year_b",
+                help="Average annual in-district tuition & fees for the selected "
+                     "state's community colleges (NCES). Paid out of pocket -- "
+                     "not added to the loan, but counts as a real cost in the ROI.",
+            )
+        else:
+            cc_coa_per_year_b = 0.0
+            cc_state_key_b = "__national__"
         control_type_b = coa_match_b["control_type"] if coa_match_b is not None else None
         inflation_rate_b = (
             DEFAULT_COA_INFLATION_RATE if enable_prestige_mode
@@ -4423,9 +4722,16 @@ if compare_mode:
         )
         years_until_start_b = max(start_year_b - now_local().year, 0)
         effective_coa_per_year_b = coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
-        computed_loan_amount_b = compute_total_loan_amount(effective_coa_per_year_b, personal_contribution_per_year_b,
-                                                            grants_per_year_b, inflation_rate_b)
-        personal_contribution_b = personal_contribution_per_year_b * UNDERGRAD_YEARS
+        effective_cc_coa_per_year_b = cc_coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
+        _schedule_b = compute_loan_schedule_by_year(
+            effective_coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b, inflation_rate_b,
+            cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b, finance_cc_years=False)
+        computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
+        cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
+        _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
+        enrollment_years_b = (cc_years_b + university_years_b) if _foregone_on_b else 0
+        working_years_b = cc_years_b if (is_parttime_b and _foregone_on_b) else 0
+        personal_contribution_b = personal_contribution_per_year_b * university_years_b + cc_oop_b
         if years_until_start_b > 0:
             coa_projection_note_b = (
                 f"Today's Year 1 COA: {fmt_money(coa_per_year_b)} → projected to "
@@ -4434,7 +4740,21 @@ if compare_mode:
             )
         else:
             coa_projection_note_b = ""
+        if cc_transfer_b:
+            _work_note_b = "working full-time, " if is_parttime_b else ""
+            cc_note_b = (
+                f"{COMMUNITY_COLLEGE_YEARS} yrs community college ({_work_note_b}"
+                f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan → {fmt_money(cc_oop_b)} out-of-pocket), "
+                f"then {university_years_b} yrs at the 4-year school ({fmt_money(effective_coa_per_year_b)}/yr, financed). "
+            )
+        else:
+            cc_note_b = ""
         st.caption((
+            f"{coa_projection_note_b}"
+            f"{cc_note_b}"
+            f"→ **{fmt_money(computed_loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal "
+            f"(incl. {fmt_money(cc_oop_b)} community college)"
+            if cc_transfer_b else
             f"{coa_projection_note_b}"
             f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
             f"{fmt_money(personal_contribution_per_year_b)} personal "
@@ -5058,6 +5378,10 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
     # Read the foregone-earnings assumption off the scenario it's compared
     # against, so the trade path and the degree share one age-18 timeline (see
     # calculate_roi / calculate_apprenticeship_roi). 0 when the option is off.
+    # working_years deliberately does NOT propagate here: it's a major-side-only
+    # effect of the degree-seeker's part-time community college, and the
+    # apprentice path (and the shared hs_net_position, which is unchanged across
+    # CC modes) is independent of whether the degree was reached via CC.
     enrollment_years = scenario_a.get("enrollment_years", 0)
 
     if uses_own_profession_data:
@@ -5167,12 +5491,14 @@ if compare_mode:
                                            personal_contribution, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
                                            hs_wage_index=get_metro_wage_index(city),
-                                           enrollment_years=enrollment_years_setting)
+                                           enrollment_years=enrollment_years_a,
+                                           working_years=working_years_a)
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
                                            hs_wage_index=get_metro_wage_index(city),
-                                           enrollment_years=enrollment_years_setting)
+                                           enrollment_years=enrollment_years_b,
+                                           working_years=working_years_b)
 
     col_a, col_b = st.columns(2)
     render_scenario_panel(
@@ -5302,6 +5628,8 @@ if compare_mode:
                 repayment_strategy_b=repayment_strategy_b,
                 start_year_a=start_year_a, start_year_b=start_year_b,
                 roi_horizon_years=roi_horizon_years,
+                cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+                cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
             ))
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
@@ -5320,7 +5648,8 @@ else:
                                          personal_contribution, city_info["col_index"],
                                          roi_window_years=roi_horizon_years,
                                          hs_wage_index=get_metro_wage_index(city),
-                                         enrollment_years=enrollment_years_setting)
+                                         enrollment_years=enrollment_years_a,
+                                         working_years=working_years_a)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -5335,7 +5664,8 @@ else:
         st.caption(loan_caption)
 
     loan_schedule_a = compute_loan_schedule_by_year(
-        effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a
+        effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+        cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
     )
     st.caption(
         "Here's how your loan builds up year by year -- Cost of Attendance "
@@ -5440,6 +5770,7 @@ else:
         hs_wage_index=get_metro_wage_index(city),
         personal_contribution=personal_contribution,
         enrollment_years=scenario["enrollment_years"],
+        working_years=scenario["working_years"],
     )
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
@@ -5537,6 +5868,7 @@ else:
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                 interest_rate, repayment_strategy, False, start_year_a=start_year_a,
                 roi_horizon_years=roi_horizon_years,
+                cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
             ))
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
@@ -5573,7 +5905,8 @@ if not st.session_state.survey_submitted:
                                                    personal_contribution, city_info["col_index"],
                                                    roi_window_years=roi_horizon_years,
                                                    hs_wage_index=get_metro_wage_index(city),
-                                                   enrollment_years=enrollment_years_setting)
+                                                   enrollment_years=enrollment_years_a,
+                                                   working_years=working_years_a)
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
             # expander) -- referencing them outside an "if compare_mode:"
@@ -5585,7 +5918,8 @@ if not st.session_state.survey_submitted:
                                                        personal_contribution_b, city_info["col_index"],
                                                        roi_window_years=roi_horizon_years,
                                                        hs_wage_index=get_metro_wage_index(city),
-                                                       enrollment_years=enrollment_years_setting)
+                                                       enrollment_years=enrollment_years_b,
+                                                       working_years=working_years_b)
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                     interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
@@ -5876,6 +6210,50 @@ and the total loan is those four years added together:
 added up for all 4 years of an assumed bachelor's degree. Because tuition
 keeps rising while your personal contribution and any scholarships don't,
 the gap — and your loan — tends to grow a bit each year.
+
+**Community-college path ("2+2").** The "Community college path" selector
+models spending the first """ + str(COMMUNITY_COLLEGE_YEARS) + """ years at a community college and then
+transferring to the 4-year school to finish the **same** bachelor's degree.
+The degree, earnings, and the ~4-year enrollment timeline are identical to
+the direct-to-4-year path — only the cost and how it's paid change. There
+are two on modes:
+
+- **Full-time, then transfer.** You attend community college full-time for
+  """ + str(COMMUNITY_COLLEGE_YEARS) + """ years, then transfer. These are still foregone-earnings years (you're
+  enrolled, not working), exactly like the direct path.
+- **Part-time while working, then transfer.** You work full-time and attend
+  community college part-time, so those years are **not** foregone earnings —
+  you're earning roughly a high-school-graduate wage — and then you attend the
+  4-year school full-time to finish. This is usually the most financially
+  favorable path. Its earnings advantage only shows up when *Count foregone
+  earnings during enrollment* is on (which puts every path on one age-18
+  timeline); its lower debt shows up either way.
+
+**Community college is assumed paid without loans.** In both modes the
+community-college years add **$0 to the loan** — most community-college
+students don't borrow (it's low-cost, and Pell grants or part-time work
+cover it). Only the two university years are financed. The community-college
+tuition is still counted as a real cost: it enters the ROI as an out-of-pocket
+*personal contribution* (money you gave up, but with no interest), and it is
+**not** double-counted against your per-year Personal Contribution, which the
+model applies only to the financed university years.
+
+**State-level community-college cost.** Community-college tuition varies
+widely by state — from roughly $1,400/yr (California) to $8,000/yr (South
+Dakota) — so the **Community College State** dropdown sets the default cost
+from average annual in-district tuition & fees for that state (national
+average **""" + fmt_money(COMMUNITY_COLLEGE_COA_DEFAULT) + """/yr**). It defaults to your selected 4-year school's
+state (then your work city's state), on the assumption you attend community
+college where you'll transfer. Source: National Center for Education
+Statistics (NCES), Digest of Education Statistics, via the Education Data
+Initiative (educationdata.org), 2025. These are tuition & fees, not a full
+Cost of Attendance, so the modeled figure reflects the tuition a transfer
+student living at home pays; the field is editable for any other situation.
+This deliberately does **not** apply a transfer-student earnings penalty —
+the resulting degree is treated as identical to one earned by starting at the
+4-year school (optimistic but common; real transfer outcomes vary). To
+compare paths directly, set a different path in each scenario in Compare
+Mode.
 
 **Accounting for a delayed start.** "Year Starting Undergraduate School"
 lets you model not starting college right away. If you pick a future year,
