@@ -39,7 +39,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from st_supabase_connection import SupabaseConnection, execute_query
 
 # ============================================================
@@ -516,12 +516,13 @@ def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) ->
     if major_name is not None:
         rate = MAJOR_DATA.get(major_name, {}).get("underemployment_rate")
         if rate is not None:
+            pct_phrase = bold(f"{rate:.0f}% who end up in jobs that don't require a college degree")
             return (
-                f"These salaries already account for underemployment: "
-                f"{bold(f'{rate:.0f}% of {major_name} graduates')} work in jobs that don't require "
-                f"a degree, and they're included in the figures above rather than filtered out. "
-                f"That's what makes this different from asking about a specific job — it's what "
-                f"everyone who studied this actually earns."
+                f"The salary above isn't a best-case number — it's what people who studied "
+                f"{major_name} actually earn on average, and that average includes the "
+                f"{pct_phrase} (and usually earn less). Those lower earners are counted in, not "
+                f"left out, so this reflects the real range of outcomes for {major_name} graduates "
+                f"— not just the ones who land a job in their field."
             )
 
     base = (
@@ -2999,7 +3000,8 @@ def _pdf_breakeven_block(breakeven: dict, styles: dict, scenario_label: str = No
 
 
 def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False,
-                          underemployment_majors: list = None) -> list:
+                          underemployment_majors: list = None,
+                          uses_community_college: bool = False) -> list:
     """A "where these numbers come from" section, closing every report.
 
     The app's on-screen Methodology section already carries this, and the
@@ -3034,6 +3036,14 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
          "(updated February 2026), from Census ACS/IPUMS and DOL O*NET, covering "
          f"{UNDEREMPLOYMENT_MAJOR_COUNT} majors."],
     ]
+    if uses_community_college:
+        rows.append([
+            "Community-college costs",
+            "Average in-district tuition & fees by state, National Center for Education Statistics "
+            "(NCES) via the Education Data Initiative (2025). Community-college years are modelled as "
+            "paid without loans; the resulting degree is treated as identical to one earned by "
+            "starting at the 4-year school.",
+        ])
     if uses_training_debt:
         rows.append([
             "Professional-school debt & training",
@@ -3066,7 +3076,7 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
     else:
         disclosure_paras = [Paragraph(underemployment_disclosure(None, for_pdf=True), styles["body"])]
     return [
-        Spacer(1, 14),
+        PageBreak(),
         Paragraph("What these numbers assume", styles["section"]),
         *disclosure_paras,
         Spacer(1, 10),
@@ -3534,9 +3544,13 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
     if gross > 0 and monthly_payment is not None:
         story += [
             Spacer(1, 12),
-            build_pdf_takehome_pie_chart(take_home),
-            Spacer(1, 12),
-            build_pdf_takehome_vs_loan_chart(take_home["net_take_home"] / 12, monthly_payment),
+            # Keep the two take-home charts on one page rather than letting a
+            # page break split the pair.
+            KeepTogether([
+                build_pdf_takehome_pie_chart(take_home),
+                Spacer(1, 12),
+                build_pdf_takehome_vs_loan_chart(take_home["net_take_home"] / 12, monthly_payment),
+            ]),
         ]
     story += [
         Spacer(1, 12),
@@ -3585,6 +3599,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         uses_training_debt=bool(MAJOR_DATA.get(major, {}).get("additional_training_debt")
                                 or MAJOR_DATA.get(major, {}).get("unpaid_training_years")),
         underemployment_majors=([(None, major)] if dataset_mode == DATASET_MODE_MAJOR else None),
+        uses_community_college=bool(cc_info_a),
     )
 
     buffer = io.BytesIO()
@@ -3679,7 +3694,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_a["enrollment_years"],
                               working_years=scenario_a["working_years"]),
             styles, scenario_label="Scenario A"),
-        Spacer(1, 12),
+        PageBreak(),
         Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
         _pdf_table(
             _pdf_profile_rows(major_b, school_name_b, in_state_b, coa_per_year_b,
@@ -3699,7 +3714,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_b["enrollment_years"],
                               working_years=scenario_b["working_years"]),
             styles, scenario_label="Scenario B"),
-        Spacer(1, 12),
+        PageBreak(),
+        Paragraph(_strip_emoji("📊 Side-by-Side Charts"), styles["section"]),
+        Spacer(1, 6),
         build_pdf_comparison_balance_chart(
             scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
             scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
@@ -3728,6 +3745,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             [("Scenario A", major), ("Scenario B", major_b)]
             if dataset_mode == DATASET_MODE_MAJOR else None
         ),
+        uses_community_college=bool(cc_info_a) or bool(cc_info_b),
     )
 
     buffer = io.BytesIO()
