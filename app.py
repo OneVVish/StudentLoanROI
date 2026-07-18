@@ -6173,11 +6173,15 @@ contribution) — you owe a fixed dollar amount no matter where you live,
 so that number stays as-is. In Compare Mode, both scenarios share one
 city selector rather than each getting their own.
 
-**Taxes.** We use real 2024 federal tax brackets for a single filer with
-no dependents (IRS Rev. Proc. 2023-34), plus FICA taxes (6.2% Social
-Security, up to a $168,600 wage cap, + 1.45% Medicare). We don't model
-itemized deductions, tax credits, or the extra Medicare tax that kicks in
-above $200K (no major's salary here reaches that high). For state tax, we
+**Taxes.** A salary is the amount *before* taxes, but what actually pays a
+loan is your **take-home pay** — what's left after taxes come out of each
+paycheck — so we subtract real taxes to get there. We use the actual 2024
+federal income-tax rates for someone filing on their own with no kids (IRS
+Rev. Proc. 2023-34), plus **FICA** — the Social Security and Medicare taxes
+taken out of every U.S. paycheck (6.2% for Social Security, up to a $168,600
+income cap, and 1.45% for Medicare). To keep it simple we don't model
+itemized deductions, tax credits, or the extra Medicare tax on income above
+$200K (none of the careers here pay that much). For state tax, we
 use real tax brackets for New York, California, Ohio, and Minnesota — a
 single flat rate would badly overstate what most people actually pay
 (New York's top rate of 10.9%, for example, only kicks in above $25
@@ -6193,7 +6197,8 @@ depending on income, so 3.5% is a reasonable stand-in).
 [Source: Tax Foundation, 2024 State Income Tax Rates](https://taxfoundation.org/data/all/state/state-income-tax-rates-2024/).
 
 **How "cost of living" is measured.** Each city's cost-of-living number
-comes from real government data (BEA Regional Price Parities, 2023),
+comes from real government data on how far a dollar actually goes in each
+city (the U.S. Bureau of Economic Analysis's Regional Price Parities, 2023),
 by way of the Tax Foundation's "Real Value of $100 by Metro" report. In
 short: if $100 buys less in a city than the national average, that city's
 cost-of-living number goes up. "National Average" doesn't correspond to
@@ -6211,18 +6216,19 @@ story — not a way to start the story over from a different point.
 **How the "Student Loan Payment / Take-Home Ratio" color coding works.** This
 percentage (shown below the take-home chart) is color-coded against two real, commonly-cited
 guidelines — Green ("Manageable") means your loan payment is at or under 10%
-of gross monthly income, a widely-cited student-loan budgeting guideline
+of your gross (before-tax) monthly income, a widely-cited student-loan
+budgeting guideline
 (e.g. [SoFi](https://www.sofi.com/learn/content/percentage-of-income-towards-student-loans/)).
-Red ("High") means it's over 36% of gross income — the standard "back-end"
-debt-to-income ceiling mortgage lenders use for a well-qualified borrower's
-*total* debt, meaning this loan payment alone already consumes the share of
-income normally budgeted for every debt combined. Orange ("Elevated") is
-everything in between. Both guidelines are normally expressed as a
-percentage of *gross* income, but this app's ratio uses *take-home* (net)
-pay — so both thresholds are converted onto your own take-home basis using
-this scenario's actual effective tax rate (`gross_threshold / (1 −
-effective_tax_rate)`), not a generic assumed conversion factor. Hover over
-the percentage to see the exact converted thresholds for your scenario.
+Red ("High") means it's over 36% — the limit mortgage lenders use for *all*
+of a borrower's debt payments added together, so at that level this one
+student loan is already eating the entire share of income a lender expects
+to cover every debt you have. Orange ("Elevated") is everything in between.
+Those guidelines are normally written as a percentage of *before-tax*
+income, but this app measures the payment against your *take-home* (after-tax)
+pay — the money you'd actually have to make the payment with. So we shift both
+cutoffs onto a take-home basis using this scenario's real tax rate (the share
+of income that goes to taxes), rather than a one-size-fits-all guess. Hover
+over the percentage to see the exact cutoffs for your scenario.
 
 **How "Compare Two Scenarios" works.** Comparing two scenarios runs the
 exact same calculations described above, just twice — once for each
