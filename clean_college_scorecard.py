@@ -38,6 +38,10 @@ COLUMNS_TO_LOAD = [
     "COSTT4_P",        # Avg. cost of attendance, continuous-enrollment programs
     "TUITIONFEE_IN",   # In-state tuition & fees
     "TUITIONFEE_OUT",  # Out-of-state tuition & fees
+    "NPCURL",          # URL of the school's own Net Price Calculator (a text
+                       # field -- deliberately NOT in numeric_columns below, or
+                       # to_numeric would coerce every URL to NaN). Often blank
+                       # or missing a scheme; the app normalizes it at display.
 ]
 
 # College Scorecard's raw CSV export encodes missing numeric values as the
@@ -142,6 +146,7 @@ def build_clean_dataframe(csv_path: str) -> pd.DataFrame:
         "INSTNM", "STABBR", "CONTROL", "control_type",
         "in_state_coa", "out_of_state_coa",
         "COSTT4_A", "COSTT4_P", "TUITIONFEE_IN", "TUITIONFEE_OUT",
+        "NPCURL",
     ]
     return calculated[final_columns].reset_index(drop=True)
 

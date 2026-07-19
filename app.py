@@ -1677,7 +1677,8 @@ def load_coa_dataset() -> pd.DataFrame:
     try:
         return pd.read_csv(COA_DATASET_PATH)
     except (FileNotFoundError, pd.errors.EmptyDataError):
-        return pd.DataFrame(columns=["INSTNM", "control_type", "in_state_coa", "out_of_state_coa"])
+        return pd.DataFrame(
+            columns=["INSTNM", "control_type", "in_state_coa", "out_of_state_coa", "NPCURL"])
 
 
 def find_school_coa(school_name: str, coa_df: pd.DataFrame):
@@ -1696,6 +1697,45 @@ def find_school_coa(school_name: str, coa_df: pd.DataFrame):
         return exact.iloc[0]
     partial = coa_df[names_lower.str.contains(query_lower, regex=False)]
     return partial.iloc[0] if not partial.empty else None
+
+
+# Two free, authoritative federal tools that let a student replace the app's
+# school-average sticker COA with their own personalized figures (see the
+# "🎯 Get Your Real Numbers" section on the main page). The SAI estimator is
+# universal; the per-school Net Price Calculator link comes from the NPCURL
+# column in the COA dataset, with this directory as the fallback when we have
+# no URL on file for a given school.
+SAI_ESTIMATOR_URL = "https://studentaid.gov/aid-estimator/"
+NPC_DIRECTORY_URL = "https://collegecost.ed.gov/net-price"
+
+
+def normalize_npc_url(raw) -> str:
+    """Clean a raw NPCURL value from the COA dataset into a clickable https
+    link, or return None if there's nothing usable. Scorecard stores these
+    inconsistently -- ~45% omit the http(s):// scheme (bare domains like
+    "www.school.edu/npc") and some contain literal spaces -- so we prepend a
+    scheme when missing and percent-encode spaces. The raw value is left as-is
+    in the CSV (traceable); normalization happens only here, at display time."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text or text.lower() == "nan":
+        return None
+    if not text.lower().startswith(("http://", "https://")):
+        text = "https://" + text
+    return text.replace(" ", "%20")
+
+
+def get_school_npc_url(school_name: str) -> str:
+    """Resolve a school's own Net Price Calculator URL from the local COA
+    dataset, normalized for display. Returns None when the school isn't in the
+    dataset or has no URL on file -- callers fall back to NPC_DIRECTORY_URL."""
+    if not school_name:
+        return None
+    coa_match = find_school_coa(school_name, load_coa_dataset())
+    if coa_match is None:
+        return None
+    return normalize_npc_url(coa_match.get("NPCURL"))
 
 
 # Common abbreviations that don't literally appear inside the real College
@@ -3472,6 +3512,44 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
     return elements
 
 
+def _pdf_resources_section(styles: dict, schools: list) -> list:
+    """Mirror the on-screen "🎯 Get Your Real Numbers" section in the report:
+    point the reader at the two free federal tools that replace the app's
+    school-average sticker inputs with personalized figures, and say which
+    input each result belongs in. One shared implementation, called from both
+    the single and compare builders so the two can't drift apart (same reason
+    the on-screen version is a shared helper).
+
+    schools: list of (label, school_name) -- label is None for the single
+    report, "Scenario A"/"Scenario B" for the compare report."""
+    parts = [
+        Spacer(1, 12),
+        Paragraph(_strip_emoji("🎯 Get Your Real Numbers"), styles["section"]),
+        Paragraph(
+            "The cost and aid figures above are school-wide averages. Two free, official "
+            "tools give you your own personalized numbers instead:",
+            styles["body"]),
+    ]
+    for label, name in schools:
+        npc_href = xml_escape(get_school_npc_url(name) or NPC_DIRECTORY_URL)
+        prefix = (f"<b>{xml_escape(label)} — your real cost after aid:</b> " if label
+                  else "<b>Your real cost after aid:</b> ")
+        parts.append(Paragraph(
+            prefix +
+            f'<a href="{npc_href}" color="blue">open the net price calculator</a>. It gives your '
+            "net price — the cost after grants &amp; scholarships. Enter that as Cost of Attendance, "
+            "and set Grants &amp; Scholarships to $0 (the net price already removed them).",
+            styles["body"]))
+    sai_href = xml_escape(SAI_ESTIMATOR_URL)
+    parts.append(Paragraph(
+        "<b>Your family contribution (SAI):</b> "
+        f'<a href="{sai_href}" color="blue">open the Federal Student Aid Estimator</a> to estimate '
+        "your Student Aid Index, and enter it as Personal Contribution (per year). It lowers the "
+        "loan on top of the net price above — that is correct, not double-counting.",
+        styles["body"]))
+    return parts
+
+
 def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_stage_label,
                                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
@@ -3522,6 +3600,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         ]),
         Spacer(1, 6),
         Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["body"]),
+        *_pdf_resources_section(styles, [(None, school_name_a)]),
         Spacer(1, 6),
         _pdf_table(full_width=True, rows=[
             ["Monthly Payment", "Payoff Timeline", "Total Interest Paid"],
@@ -3728,6 +3807,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
             roi_window_years,
         ),
+        *_pdf_resources_section(styles, [("Scenario A", school_name_a), ("Scenario B", school_name_b)]),
     ]
     story += _pdf_module_sections(
         module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
@@ -5033,6 +5113,69 @@ if not enable_prestige_mode:
     else:
         render_school_lookup(st.container(), school_name_a, "A")
 
+
+def _npc_link_markdown(school_name: str) -> str:
+    """One net-price-calculator markdown link for a school: the school's own
+    calculator when we have its URL on file, otherwise the ED directory where
+    they can search for it."""
+    url = get_school_npc_url(school_name)
+    if url and school_name:
+        return f"[Open {school_name}'s net price calculator →]({url})"
+    return f"[Find your school's net price calculator →]({NPC_DIRECTORY_URL})"
+
+
+def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prestige_mode):
+    """Route users to the two free federal tools that turn the app's
+    school-average sticker inputs into their own personalized figures, and
+    spell out exactly which sidebar field each result goes into. Rendered once
+    for everyone, *before* the single/compare results branch -- keeping it out
+    of either branch is what stops it becoming an experiment-arm confound."""
+    st.subheader("🎯 Get Your Real Numbers")
+    st.caption(
+        "The cost and aid figures here are school-wide averages. For a decision this "
+        "big, it's worth five minutes replacing them with your own — both tools below "
+        "are free, official, and only need a few inputs."
+    )
+    col_cost, col_sai = st.columns(2)
+
+    with col_cost:
+        st.markdown("**💵 Your real cost after aid**")
+        if prestige_mode:
+            # Prestige Mode holds a tier label, not a real school -- only the
+            # directory link makes sense.
+            st.markdown(f"[Find your school's net price calculator →]({NPC_DIRECTORY_URL})")
+        elif compare_mode:
+            st.markdown("Scenario A: " + _npc_link_markdown(school_name_a))
+            st.markdown("Scenario B: " + _npc_link_markdown(school_name_b))
+        else:
+            st.markdown(_npc_link_markdown(school_name_a))
+        st.caption(
+            "Gives your **net price** — the cost after grants & scholarships. Enter that "
+            "number as **Cost of Attendance** in the sidebar, and set **Grants & "
+            "Scholarships to \\$0** (the net price already subtracted them — leaving a "
+            "grants figure in would subtract aid twice)."
+        )
+
+    with col_sai:
+        st.markdown("**🎓 Your family contribution (SAI)**")
+        st.markdown(f"[Open the Federal Student Aid Estimator →]({SAI_ESTIMATOR_URL})")
+        st.caption(
+            "Estimates your **Student Aid Index (SAI)** — what your family is expected to "
+            "put toward each year. Enter it as **Personal Contribution (per year)** in the "
+            "sidebar. This lowers your loan on top of the net price above, and that's "
+            "correct — net price doesn't remove the family contribution, so it's not "
+            "double-counting."
+        )
+
+    st.divider()
+
+
+# school_name_b only exists when Compare Mode is on (it's assigned inside the
+# Scenario B sidebar expander); the conditional short-circuits so the name
+# isn't looked up in single-scenario mode.
+render_get_accurate_inputs(
+    school_name_a, school_name_b if compare_mode else None, compare_mode, enable_prestige_mode)
+
 # ---- 5c. Calculator Results ----------------------------------------------
 
 def get_loan_principal_caption(scenario: dict) -> str:
@@ -6302,6 +6445,21 @@ and the total loan is those four years added together:
 added up for all 4 years of an assumed bachelor's degree. Because tuition
 keeps rising while your personal contribution and any scholarships don't,
 the gap — and your loan — tends to grow a bit each year.
+
+**Getting your own numbers instead of school averages.** The Cost of
+Attendance we auto-fill is a school-wide *average sticker price* — what a
+typical student is charged before aid. Two free, official tools give you
+your own figures, and the **🎯 Get Your Real Numbers** section near the top
+links to both. Your school's **Net Price Calculator** (each U.S. college is
+federally required to host one; find yours through the Department of
+Education's directory at
+[collegecost.ed.gov/net-price](https://collegecost.ed.gov/net-price)) returns
+your *net price* — cost after grants and scholarships — which you enter as
+Cost of Attendance while setting Grants & Scholarships to $0. The federal
+[Student Aid Estimator](https://studentaid.gov/aid-estimator/) estimates your
+Student Aid Index (SAI), which you enter as Personal Contribution. These
+compose correctly: net price removes grants but not the family contribution,
+so subtracting the SAI on top of it is not double-counting.
 
 **Community-college path ("2+2").** The "Community college path" selector
 models spending the first """ + str(COMMUNITY_COLLEGE_YEARS) + """ years at a community college and then
