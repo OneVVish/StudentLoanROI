@@ -5237,26 +5237,30 @@ def render_school_lookup(container, school_name: str, label: str):
     """Render one scenario's school lookup (COA match + median debt) into a
     layout container. Used once for the single-scenario view and twice
     (Scenario A / B) in Compare Mode, so the two can't drift apart from
-    being hand-copied -- same reasoning as render_scenario_panel."""
+    being hand-copied -- same reasoning as render_scenario_panel.
+
+    label is None for a shared box (both compare scenarios are the same school),
+    which drops the "Scenario A/B:" prefix since it applies to both."""
     with container:
         if not school_name:
             return
         coa_match = find_school_coa(school_name, load_coa_dataset())
         debt_data = fetch_median_debt(school_name, scorecard_api_key)
+        scenario_prefix = f"Scenario {label}: " if label else ""
 
         if coa_match is not None:
             coa_text = (
-                f"**Scenario {label}: {coa_match['INSTNM']}** ({coa_match['control_type']}) — "
+                f"**{scenario_prefix}{coa_match['INSTNM']}** ({coa_match['control_type']}) — "
                 f"In-state Cost of Attendance: {fmt_money(coa_match['in_state_coa'])} | "
                 f"Out-of-state Cost of Attendance: {fmt_money(coa_match['out_of_state_coa'])} "
                 f"({now_local().year})"
             ).replace("$", r"\$")
             st.info(coa_text)
         else:
-            st.caption(
-                f"Scenario {label}: no Cost of Attendance match in the local dataset yet "
-                "(currently only a small sample of schools -- see data/college_coa_clean.csv)."
-            )
+            no_match = (f"Scenario {label}: no" if label else "No") + \
+                " Cost of Attendance match in the local dataset yet"
+            st.caption(no_match + " (currently only a small sample of schools -- "
+                       "see data/college_coa_clean.csv).")
 
         if debt_data and debt_data.get("median_debt"):
             # Escape "$" -- st.caption renders markdown, and a pair of literal
@@ -5271,7 +5275,10 @@ def render_school_lookup(container, school_name: str, label: str):
 # label, not a school name) -- skip the lookup entirely rather than firing a
 # pointless College Scorecard API call for a nonsense query.
 if not enable_prestige_mode:
-    if compare_mode:
+    if compare_mode and school_name_a and school_name_a == school_name_b:
+        # Both scenarios are the same school -- one COA box, not a duplicate pair.
+        render_school_lookup(st.container(), school_name_a, None)
+    elif compare_mode:
         lookup_col_a, lookup_col_b = st.columns(2)
         render_school_lookup(lookup_col_a, school_name_a, "A")
         render_school_lookup(lookup_col_b, school_name_b, "B")
