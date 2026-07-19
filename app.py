@@ -4195,6 +4195,15 @@ if st.session_state["start_year_a"] not in _start_year_opts_a:
     st.session_state["start_year_a"] = now_local().year
 st.session_state.setdefault("personal_contribution_per_year_a", get_shared_int("pc", 0))
 st.session_state.setdefault("grants_per_year_a", get_shared_int("grants", 0))
+# Streamlit drops a widget's value from session_state the moment the widget
+# stops rendering, so toggling to Simplified (which hides these inputs) would
+# reset Cost of Attendance to 0 the next time Detailed re-creates the box.
+# Re-affirming each key every run converts it from a widget-owned value back to
+# a persistent one, so entered/auto-filled figures survive the hide/show cycle.
+for _k in ("coa_per_year_a", "start_year_a",
+           "personal_contribution_per_year_a", "grants_per_year_a"):
+    if _k in st.session_state:
+        st.session_state[_k] = st.session_state[_k]
 if loan_source_a == "personal":
     if not enable_prestige_mode:
         coa_per_year_a = st.sidebar.number_input(
@@ -4904,6 +4913,13 @@ if compare_mode:
             st.session_state["start_year_b"] = now_local().year
         st.session_state.setdefault("personal_contribution_per_year_b", get_shared_int("pc_b", 0))
         st.session_state.setdefault("grants_per_year_b", get_shared_int("grants_b", 0))
+        # See Scenario A: re-affirm so hiding these inputs (Simplified) doesn't
+        # let Streamlit garbage-collect the values and reset COA to 0 on the
+        # next Detailed render.
+        for _k in ("coa_per_year_b", "start_year_b",
+                   "personal_contribution_per_year_b", "grants_per_year_b"):
+            if _k in st.session_state:
+                st.session_state[_k] = st.session_state[_k]
         if loan_source_b == "personal":
             if not enable_prestige_mode:
                 coa_per_year_b = st.number_input(
