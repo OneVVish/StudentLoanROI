@@ -978,7 +978,7 @@ NYFED_MAJOR_SOC_GROUP = {
     "Treatment Therapy": "29",
 }
 
-# ---- 2026 Regulatory & Macro Forecasting (optional "Advanced Analysis" mode) -
+# ---- 2026 Federal Repayment Plans: RAP & Tiered Standard (optional "Advanced Analysis" mode) -
 # Real, enacted federal law: the One Big Beautiful Bill Act (H.R. 1, 2025)
 # replaces existing IDR plans with the Repayment Assistance Plan (RAP) and
 # introduces a Tiered Standard Plan, both effective for new federal loan
@@ -3678,31 +3678,42 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
             _pdf_table(rows),
         ]
     if module_context.get("future_forecasting_active"):
-        rows = [["Scenario", "2026 Plan Selected"], ["A", module_context.get("future_plan_selected", "")]]
-        if "scenario_b_future_plan_selected" in module_context:
-            rows.append(["B", module_context["scenario_b_future_plan_selected"]])
         elements += [
-            PageBreak(), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["section"]),
-            _pdf_table(rows),
+            PageBreak(), Paragraph("2026 Federal Repayment Plans (RAP & Tiered Standard)", styles["section"]),
         ]
         if scenario_a is not None:
-            for suffix, scenario, major_name, rate, plan_key in [
-                (key_suffix_a, scenario_a, major_name_a, interest_rate_a, "future_plan_selected"),
-                (key_suffix_b, scenario_b, major_name_b, interest_rate_b, "scenario_b_future_plan_selected"),
+            for suffix, scenario, major_name, rate, label in [
+                (key_suffix_a, scenario_a, major_name_a, interest_rate_a,
+                 "Scenario A" if scenario_b is not None else None),
+                (key_suffix_b, scenario_b, major_name_b, interest_rate_b, "Scenario B"),
             ]:
-                if scenario is None or plan_key not in module_context:
+                if scenario is None:
                     continue
                 dependents = st.session_state.get(f"rap_dependents_{suffix}", 0)
-                result, roi_2026 = compute_future_plan_result(
-                    scenario, major_name, rate, module_context[plan_key], dependents, col_index=col_index,
-                    roi_window_years=roi_window_years,
-                )
+                tiered_res, tiered_roi = compute_future_plan_result(
+                    scenario, major_name, rate, "2026 Tiered Standard Plan", dependents,
+                    col_index=col_index, roi_window_years=roi_window_years)
+                rap_res, rap_roi = compute_future_plan_result(
+                    scenario, major_name, rate, "2026 Repayment Assistance Plan (RAP)", dependents,
+                    col_index=col_index, roi_window_years=roi_window_years)
+                term_years = calculate_tiered_standard_term(scenario["effective_principal"])
+                rap_pay = calculate_rap_payment(get_annual_salary_for_year(major_name, 0), dependents)
+                if label:
+                    elements.append(Paragraph(f"<b>{label}: {xml_escape(major_name)}</b>", styles["body"]))
                 elements += [
+                    _pdf_table([
+                        ["Plan", "Monthly", "Payoff / Forgiveness", "Interest", "Forgiven (30yr)",
+                         f"{roi_window_years}-Yr Premium"],
+                        ["Tiered Standard", fmt_money(tiered_res["monthly_payment"]), f"{term_years} yrs",
+                         fmt_money(tiered_res["total_interest"]), "-", fmt_money(tiered_roi["earnings_premium"])],
+                        ["RAP (Yr-1 income)", fmt_money(rap_pay["monthly_payment"]),
+                         f"{rap_res['payoff_years']:.1f} yrs", "$0 (waived)",
+                         fmt_money(rap_res["forgiven_amount"]), fmt_money(rap_roi["earnings_premium"])],
+                    ]),
+                    Spacer(1, 8),
+                    build_pdf_comparison_balance_chart(tiered_res["schedule"], "Tiered Standard",
+                                                        rap_res["schedule"], "RAP"),
                     Spacer(1, 12),
-                    build_pdf_balance_chart(result["schedule"], module_context[plan_key]),
-                    Spacer(1, 12),
-                    build_pdf_roi_bar_chart(roi_2026["hs_net_position"], roi_2026["major_net_position"], major_name,
-                                             roi_window_years),
                 ]
     if module_context.get("apprenticeship_active"):
         elements += [
@@ -4947,10 +4958,10 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "Methodology.",
     )
     enable_future_proofing = st.checkbox(
-        "Enable 2026 Regulatory & Macro Forecasting", key="enable_future_proofing",
-        help="Preview the real 2026 federal repayment plans (Repayment "
-             "Assistance Plan and Tiered Standard Plan) and a real "
-             "cost-of-living comparison across cities -- see Methodology.",
+        "Enable 2026 Federal Repayment Plans (RAP & Tiered)", key="enable_future_proofing",
+        help="Compare the two real 2026 federal repayment plans side by side -- "
+             "the Repayment Assistance Plan (RAP) and the Tiered Standard Plan, "
+             "both effective July 1, 2026. See Methodology.",
     )
     enable_apprenticeship = st.checkbox(
         "Enable Trade Apprenticeship Comparison", key="enable_apprenticeship",
@@ -5916,100 +5927,84 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
                                     scenario_b: dict = None, major_name_b: str = None,
                                     interest_rate_b: float = None, col_index: float = 100.0,
                                     roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
-    """2026 Federal Loan Framework & Macro Forecasting container (only
-    rendered when enable_future_proofing is True). Returns the
+    """2026 Federal Repayment Plans container: compares the RAP and Tiered
+    Standard plans side by side (only rendered when enable_future_proofing is
+    True). Returns the
     {column_name: value} fields for build_module_context. See the RAP_*
     constants and calculate_tiered_standard_term/calculate_rap_payment/
     simulate_rap_schedule (section 2e-2) for the real, cited mechanics
     behind these numbers."""
-    st.subheader("⚖️ 2026 Federal Loan Framework & Macro Forecasting")
+    st.subheader("⚖️ 2026 Federal Repayment Plans — RAP vs. Tiered Standard")
     st.caption(
-        "Models the Repayment Assistance Plan (RAP) and Tiered Standard Plan "
-        "created by the One Big Beautiful Bill Act (H.R. 1, 2025), effective "
-        "for new federal loan borrowers July 1, 2026 -- see Methodology for "
-        "sourcing and important caveats before relying on these numbers."
+        "Compares the two real 2026 federal repayment plans side by side -- the "
+        "Repayment Assistance Plan (RAP) and the Tiered Standard Plan, created by "
+        "the One Big Beautiful Bill Act (H.R. 1, 2025) and effective for new "
+        "federal loan borrowers July 1, 2026. See Methodology for sourcing and "
+        "important caveats before relying on these numbers."
     )
 
-    def _render_plan(scenario, major_name, interest_rate, key_suffix):
-        effective_principal = scenario["effective_principal"]
-        plan_options = ["2026 Tiered Standard Plan", "2026 Repayment Assistance Plan (RAP)"]
-        future_plan = st.selectbox("2026 Repayment Plan", plan_options, key=f"future_plan_{key_suffix}")
-        dependents = 0
-        if future_plan == plan_options[0]:
-            result, roi_result_2026 = compute_future_plan_result(
-                scenario, major_name, interest_rate, future_plan, dependents, col_index=col_index,
-                roi_window_years=roi_window_years,
-            )
-            term_years = calculate_tiered_standard_term(effective_principal)
-            cols = st.columns(3)
-            cols[0].metric("Fixed Term (by balance)", f"{term_years} yrs")
-            cols[1].metric("Monthly Payment", fmt_money(result["monthly_payment"]))
-            cols[2].metric("Total Interest Paid", fmt_money(result["total_interest"]))
-        else:
-            dependents = st.number_input(
-                "Dependents", min_value=0, max_value=10, value=0, key=f"rap_dependents_{key_suffix}",
-                help="Reduces your RAP payment by $50/month per dependent (real OBBBA provision).",
-            )
-            result, roi_result_2026 = compute_future_plan_result(
-                scenario, major_name, interest_rate, future_plan, dependents, col_index=col_index,
-                roi_window_years=roi_window_years,
-            )
-            gross_year1 = get_annual_salary_for_year(major_name, 0)
-            rap = calculate_rap_payment(gross_year1, dependents)
-            cols = st.columns(3)
-            cols[0].metric("Monthly Payment (Year 1 income)", fmt_money(rap["monthly_payment"]))
-            cols[1].metric("Payoff / Forgiveness Timeline", f"{result['payoff_years']:.1f} yrs")
-            cols[2].metric("Forgiven After 30 Years", fmt_money(result["forgiven_amount"]))
-            st.caption(
-                "Under RAP, unpaid monthly interest is waived and the "
-                "government matches up to $50/month toward your principal if "
-                "your own payment doesn't cover that much -- so your balance "
-                "never grows from unpaid interest (real OBBBA provisions)."
-            )
-
-        st.plotly_chart(
-            build_balance_chart(result["schedule"], future_plan),
-            use_container_width=True, key=f"future_balance_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
+    def _render_plans(scenario, major_name, interest_rate, key_suffix):
+        """Both 2026 plans compared side by side: RAP and Tiered Standard, on the
+        same metrics and one overlaid balance chart, so a borrower sees the
+        trade-off directly instead of flipping a dropdown."""
+        dependents = st.number_input(
+            "Dependents (for RAP)", min_value=0, max_value=10, value=0,
+            key=f"rap_dependents_{key_suffix}",
+            help="Reduces the RAP payment by $50/month per dependent (real OBBBA provision).",
         )
-
-        st.markdown(f"**{roi_window_years}-Year Financial Position Under This Plan**")
+        tiered_res, tiered_roi = compute_future_plan_result(
+            scenario, major_name, interest_rate, "2026 Tiered Standard Plan", dependents,
+            col_index=col_index, roi_window_years=roi_window_years,
+        )
+        rap_res, rap_roi = compute_future_plan_result(
+            scenario, major_name, interest_rate, "2026 Repayment Assistance Plan (RAP)", dependents,
+            col_index=col_index, roi_window_years=roi_window_years,
+        )
+        term_years = calculate_tiered_standard_term(scenario["effective_principal"])
+        rap_pay = calculate_rap_payment(get_annual_salary_for_year(major_name, 0), dependents)
+        render_centered_table(pd.DataFrame([
+            {"Plan": "Tiered Standard",
+             "Monthly Payment": fmt_money(tiered_res["monthly_payment"]),
+             "Payoff / Forgiveness": f"{term_years} yrs (fixed)",
+             "Interest Paid": fmt_money(tiered_res["total_interest"]),
+             "Forgiven (30 yr)": "—",
+             f"{roi_window_years}-Yr Premium": fmt_money(tiered_roi["earnings_premium"])},
+            {"Plan": "RAP (Year-1 income)",
+             "Monthly Payment": fmt_money(rap_pay["monthly_payment"]),
+             "Payoff / Forgiveness": f"{rap_res['payoff_years']:.1f} yrs",
+             "Interest Paid": "$0 (waived)",
+             "Forgiven (30 yr)": fmt_money(rap_res["forgiven_amount"]),
+             f"{roi_window_years}-Yr Premium": fmt_money(rap_roi["earnings_premium"])},
+        ]))
         st.caption(
-            "Recomputed using this 2026 plan's actual payments, instead of "
-            "your selected Repayment Strategy above -- same COL-adjusted "
-            f"comparison as the main {roi_window_years}-Year Financial Position section."
-        )
-        pos_cols = st.columns(3)
-        pos_cols[0].metric(
-            f"High School Grad — {roi_window_years}-Yr Net Position (No Loan)",
-            fmt_money(roi_result_2026["hs_net_position"]),
-        )
-        pos_cols[1].metric(f"{major_name} — {roi_window_years}-Yr Net Position", fmt_money(roi_result_2026["major_net_position"]))
-        pos_cols[2].metric(
-            "Earnings Premium (COL-Adjusted)", fmt_money(roi_result_2026["earnings_premium"]),
-            delta=fmt_pct(roi_result_2026["roi_pct"]) + " ROI" if roi_result_2026["roi_pct"] is not None else None,
+            "Under **RAP**, payments track your income, unpaid interest is waived, and the "
+            "government matches up to $50/month toward principal — so the balance never grows "
+            "and anything left is forgiven after 30 years. **Tiered Standard** is a fixed "
+            "payment over a term set by your balance. Premium is the COL-adjusted "
+            f"{roi_window_years}-year earnings premium under each plan."
         )
         st.plotly_chart(
-            build_roi_bar_chart(roi_result_2026["hs_net_position"], roi_result_2026["major_net_position"], major_name,
-                                 roi_window_years),
-            use_container_width=True, key=f"future_roi_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
+            build_comparison_balance_chart(tiered_res["schedule"], "Tiered Standard",
+                                            rap_res["schedule"], "RAP"),
+            use_container_width=True, key=f"future_compare_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
         )
-        return future_plan
+        return "Both (Tiered Standard & RAP)"
 
     if scenario_b is not None:
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown(f"**Scenario A: {major_name_a}**")
-            plan_a = _render_plan(scenario_a, major_name_a, interest_rate_a, "a")
+            plan_a = _render_plans(scenario_a, major_name_a, interest_rate_a, "a")
         with col_b:
             st.markdown(f"**Scenario B: {major_name_b}**")
-            plan_b = _render_plan(scenario_b, major_name_b, interest_rate_b, "b")
+            plan_b = _render_plans(scenario_b, major_name_b, interest_rate_b, "b")
         context = {
             "future_forecasting_active": True, "future_plan_selected": plan_a,
             "scenario_b_future_plan_selected": plan_b,
         }
         macro_major = major_name_a
     else:
-        plan_a = _render_plan(scenario_a, major_name_a, interest_rate_a, "single")
+        plan_a = _render_plans(scenario_a, major_name_a, interest_rate_a, "single")
         context = {"future_forecasting_active": True, "future_plan_selected": plan_a}
         macro_major = major_name_a
 
@@ -7163,7 +7158,7 @@ behaves exactly as described above when all five are left off.
   group — a representative approximation, clearly labeled as such, since a major
   spreads across many jobs. A few majors that span the whole labor market
   (Interdisciplinary Studies, Liberal Arts) are left unmapped and show no level.
-- **2026 Regulatory & Macro Forecasting.** Models two *real, enacted* federal
+- **2026 Federal Repayment Plans (RAP & Tiered Standard).** Compares two *real, enacted* federal
   loan repayment plans created by the One Big Beautiful Bill Act (H.R. 1,
   2025): the **Repayment Assistance Plan (RAP)** and the **Tiered Standard
   Plan**, both effective for new federal loan borrowers starting July 1,
