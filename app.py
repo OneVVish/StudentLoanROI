@@ -3410,7 +3410,7 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
                        personal_contribution_per_year, grants_per_year,
                        interest_rate_pct, repayment_strategy_label,
                        career_stage=None, city_name=None, start_year=None,
-                       cc_info=None) -> list:
+                       cc_info=None, loan_source: str = "personal") -> list:
     rows = [
         ["Profession", major_name],
         ["School", school_name or "(not entered)"],
@@ -3435,10 +3435,15 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     _coa_label = ("Cost of Attendance (per year, 4-year school)"
                   if cc_info and cc_info.get("mode") in ("fulltime", "parttime")
                   else "Cost of Attendance (per year)")
+    rows.append([_coa_label, fmt_money(coa_per_year)])
+    # In Simplified mode (loan_source == "college") the loan is the school's
+    # reported median debt, so Personal Contribution and Grants don't feed it --
+    # they're hidden in the sidebar and would only show stale/zero values here,
+    # so leave them out of the report too.
+    if loan_source != "college":
+        rows.append(["Personal Contribution (per year)", fmt_money(personal_contribution_per_year)])
+        rows.append(["Grants & Scholarships (per year)", fmt_money(grants_per_year)])
     rows += [
-        [_coa_label, fmt_money(coa_per_year)],
-        ["Personal Contribution (per year)", fmt_money(personal_contribution_per_year)],
-        ["Grants & Scholarships (per year)", fmt_money(grants_per_year)],
         ["Average Loan Interest Rate", fmt_pct(interest_rate_pct)],
         ["Repayment Strategy", repayment_strategy_label],
     ]
@@ -3624,7 +3629,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
                                interest_rate, repayment_strategy, career_stage_label, city,
-                               start_year=start_year_a, cc_info=cc_info_a),
+                               start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a),
             header=False, full_width=True,
         ),
         Spacer(1, 12),
@@ -3746,7 +3751,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  roi_window_years: int = ROI_WINDOW_YEARS,
                                  loan_amount_a: float = 0.0, loan_amount_b: float = 0.0,
                                  career_data_source: str = "National",
-                                 cc_info_a=None, cc_info_b=None) -> bytes:
+                                 cc_info_a=None, cc_info_b=None,
+                                 loan_source_a: str = "personal",
+                                 loan_source_b: str = "personal") -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, per-scenario break-even, plus the
     loan-balance and net-position comparison charts.
@@ -3788,7 +3795,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
                                interest_rate, repayment_strategy, city_name=city,
-                               start_year=start_year_a, cc_info=cc_info_a),
+                               start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a),
             header=False, full_width=True,
         ),
         Spacer(1, 6),
@@ -3811,7 +3818,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             _pdf_profile_rows(major_b, school_name_b, in_state_b, coa_per_year_b,
                                personal_contribution_per_year_b, grants_per_year_b,
                                interest_rate_b, repayment_strategy_b, city_name=city,
-                               start_year=start_year_b, cc_info=cc_info_b),
+                               start_year=start_year_b, cc_info=cc_info_b, loan_source=loan_source_b),
             header=False, full_width=True,
         ),
         Spacer(1, 6),
@@ -5962,6 +5969,7 @@ if compare_mode:
         career_data_source=career_data_source,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
         cc_info_b=_cc_info_for_pdf(cc_mode_b, cc_state_key_b, effective_cc_coa_per_year_b, cc_oop_b, cc_years_b),
+        loan_source_a=loan_source_a, loan_source_b=loan_source_b,
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
