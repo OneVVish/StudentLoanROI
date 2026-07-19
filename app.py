@@ -5508,6 +5508,9 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
             # Prestige Mode holds a tier label, not a real school -- only the
             # directory link makes sense.
             st.markdown(f"[Find your school's net price calculator →]({NPC_DIRECTORY_URL})")
+        elif compare_mode and school_name_a and school_name_a == school_name_b:
+            # Both scenarios are the same school -- one link, not a redundant pair.
+            st.markdown(_npc_link_markdown(school_name_a))
         elif compare_mode:
             st.markdown("Scenario A: " + _npc_link_markdown(school_name_a))
             st.markdown("Scenario B: " + _npc_link_markdown(school_name_b))
