@@ -3544,8 +3544,15 @@ def _pdf_resources_section(styles: dict, schools: list) -> list:
 
     schools: list of (label, school_name) -- label is None for the single
     report, "Scenario A"/"Scenario B" for the compare report."""
+    # One net-price link, not a redundant pair, when both scenarios point at the
+    # same school (or there's only one scenario). Mirrors the on-screen dedupe.
+    distinct_names = {name for _, name in schools if name}
+    if len(distinct_names) <= 1:
+        schools = [(None, next(iter(distinct_names), None))]
     parts = [
-        Spacer(1, 12),
+        # Starts its own page -- it's a self-contained "what to do next" section,
+        # so it reads better clear of the loan tables above it.
+        PageBreak(),
         Paragraph(_strip_emoji("🎯 Get Your Real Numbers"), styles["section"]),
         Paragraph(
             "The cost and aid figures above are school-wide averages. Two free, official "
