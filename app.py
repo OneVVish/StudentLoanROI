@@ -584,6 +584,28 @@ IDR_MAX_TERM_YEARS = 20
 STANDARD_TERM_YEARS = 10
 ROI_WINDOW_YEARS = 10
 
+# Federal Direct (Subsidized + Unsubsidized) borrowing limits. These cap how
+# much of a year's need can be met with federal Direct loans; anything above is
+# "unmet need" that has to come from Direct PLUS or private/alternative loans at
+# a higher rate (modeled as the gap-financing tranche, see split_loan_financing).
+# Annual limits are combined sub+unsub by year in school; dependent students
+# whose parents can't get PLUS get the independent limits in practice, so the
+# toggle covers both. Aggregate = lifetime ceiling. Source: U.S. Dept. of
+# Education / studentaid.gov (Federal Student Aid), 2024-25.
+FEDERAL_DIRECT_ANNUAL_LIMITS = {
+    "dependent":   {1: 5500, 2: 6500, 3: 7500, 4: 7500},   # year 4+ stays 7500
+    "independent": {1: 9500, 2: 10500, 3: 12500, 4: 12500},
+}
+FEDERAL_DIRECT_AGGREGATE_CAP = {"dependent": 31000, "independent": 57500}
+# Loan origination (disbursement) fees, applied as a principal gross-up: the fee
+# is deducted at disbursement, so you repay slightly more than you receive.
+# Direct Sub/Unsub 1.057%, Direct PLUS 4.228% (loans disbursed 2024-25).
+ORIGINATION_FEE = {"federal": 0.01057, "gap": 0.04228}
+# Default interest rates for the two tranches (user-editable). Federal ~ recent
+# undergraduate Direct rate; gap between recent PLUS (~9%) and private.
+DEFAULT_FEDERAL_RATE = 6.5
+DEFAULT_GAP_RATE = 8.5
+
 # Horizons offered by the sidebar's ROI Horizon selector. ROI_WINDOW_YEARS
 # stays the default (and every model function's default argument), so an
 # unset horizon reproduces the original fixed-10-year behaviour exactly.
@@ -937,6 +959,46 @@ def fmt_money(value):
 
 def fmt_pct(value):
     return f"{value:.1f}%"
+
+
+def financing_summary_text(financing: dict) -> str:
+    """One-line federal-vs-gap breakdown of the cap-and-gap split (Option A), or
+    None when there's no gap (the whole loan fit under the federal Direct cap, or
+    Simplified mode where no split was done). Shared by the on-screen Loan
+    Information display and the PDF so they can't drift."""
+    if not financing or financing.get("gap_principal", 0) <= 0:
+        return None
+    fee_note = ", incl. fees" if financing.get("fees_included") else ""
+    return (
+        f"Financed as {fmt_money(financing['federal_principal'])} federal Direct "
+        f"@{fmt_pct(financing['federal_rate'])} + {fmt_money(financing['gap_principal'])} "
+        f"gap financing (PLUS/private) @{fmt_pct(financing['gap_rate'])}{fee_note} "
+        f"→ {fmt_pct(financing['blended_rate'])} blended"
+    )
+
+
+def render_financing_note(financing: dict) -> None:
+    """On-screen version of financing_summary_text: the breakdown caption plus a
+    warning when the gap tranche is large (those loans carry the higher rate and
+    generally aren't IDR/forgiveness-eligible, so IDR results flatter the gap)."""
+    text = financing_summary_text(financing)
+    if not text:
+        return
+    st.caption(text.replace("$", r"\$"))
+    if financing.get("gap_share", 0) > 0.4:
+        st.warning(
+            f"About {fmt_pct(financing['gap_share'] * 100)} of this loan is gap financing "
+            "(Direct PLUS or private). It carries the higher rate above and generally "
+            "isn't eligible for income-driven repayment or forgiveness — so under an IDR "
+            "strategy the gap portion is modeled more favorably than it would really be."
+        )
+
+
+def _pdf_financing_flowables(financing: dict, styles: dict) -> list:
+    """The financing_summary_text breakdown as a reportlab flowable list (empty
+    when there's no gap) -- shared by both PDF builders."""
+    text = financing_summary_text(financing)
+    return [Paragraph(xml_escape(text), styles["caption"])] if text else []
 
 
 def render_centered_table(df: pd.DataFrame) -> None:
@@ -1426,6 +1488,10 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         # a shared "Simplified" link stays Simplified when it lands on a school
         # that does have reported debt.
         "loan_mode": st.session_state.get("loan_mode", "Simplified"),
+        # Cap-and-gap financing inputs (Detailed mode). gap_rate is per-scenario;
+        # dependency is global. Read from session_state, like loan_mode.
+        "gap_rate": str(st.session_state.get("gap_rate_a", DEFAULT_GAP_RATE)),
+        "dependency": st.session_state.get("loan_dependency", "dependent"),
         "cc_mode_a": cc_mode_a,
         "cc_state_a": cc_state_a,
         "cc_coa_a": str(cc_coa_per_year_a),
@@ -1439,6 +1505,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
             "pc_b": str(personal_contribution_per_year_b),
             "grants_b": str(grants_per_year_b),
             "rate_b": str(interest_rate_b),
+            "gap_rate_b": str(st.session_state.get("gap_rate_b", DEFAULT_GAP_RATE)),
             "strategy_b": repayment_strategy_b,
             "start_year_b": str(start_year_b),
             "cc_mode_b": cc_mode_b,
@@ -2395,6 +2462,57 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
     return sum(row["loan_amount"] for row in schedule)
 
 
+def federal_direct_cap(schedule: list, dependency: str) -> float:
+    """Total federal Direct (sub+unsub) a student can borrow across the financed
+    years of `schedule` (the per-year list from compute_loan_schedule_by_year).
+    Community-college years borrow $0 (they're paid out of pocket, phase
+    "community_college"), so only "university" rows count, each at its
+    class-standing annual limit (1st/2nd/3rd/4th year). Bounded by the lifetime
+    aggregate cap. Anything a family needs above this is gap financing."""
+    limits = FEDERAL_DIRECT_ANNUAL_LIMITS.get(dependency, FEDERAL_DIRECT_ANNUAL_LIMITS["dependent"])
+    total = 0.0
+    for row in schedule:
+        if row.get("phase") == "university":
+            total += limits[min(row["year"], 4)]
+    return min(total, FEDERAL_DIRECT_AGGREGATE_CAP.get(dependency, FEDERAL_DIRECT_AGGREGATE_CAP["dependent"]))
+
+
+def split_loan_financing(effective_principal: float, federal_cap: float,
+                          federal_rate: float, gap_rate: float,
+                          include_fees: bool = True) -> dict:
+    """Split a loan into a federal Direct tranche (up to federal_cap) and a
+    higher-rate gap tranche (PLUS/private) for whatever's above the cap, then
+    reduce them to a single fee-adjusted principal + principal-weighted blended
+    rate to feed the existing repayment engine (Option A).
+
+    Splitting on effective_principal (undergrad loan + any professional-school
+    debt) means med/law debt above the undergrad cap lands in the gap tranche --
+    a reasonable proxy for its real Grad PLUS pricing, better than the old flat
+    single rate. Fees are a disbursement gross-up: you repay a bit more than you
+    receive. Returns the tranche figures plus what the engine should use."""
+    federal_principal = min(max(effective_principal, 0.0), max(federal_cap, 0.0))
+    gap_principal = max(effective_principal - federal_principal, 0.0)
+    fed_fee = ORIGINATION_FEE["federal"] if include_fees else 0.0
+    gap_fee = ORIGINATION_FEE["gap"] if include_fees else 0.0
+    federal_financed = federal_principal * (1 + fed_fee)
+    gap_financed = gap_principal * (1 + gap_fee)
+    financed_principal = federal_financed + gap_financed
+    if financed_principal > 0:
+        blended_rate = (federal_financed * federal_rate + gap_financed * gap_rate) / financed_principal
+    else:
+        blended_rate = federal_rate
+    return {
+        "federal_principal": federal_principal,
+        "gap_principal": gap_principal,
+        "financed_principal": financed_principal,
+        "blended_rate": blended_rate,
+        "federal_rate": federal_rate,
+        "gap_rate": gap_rate,
+        "fees_included": include_fees,
+        "gap_share": (gap_principal / effective_principal) if effective_principal > 0 else 0.0,
+    }
+
+
 def compute_scenario_results(major_name: str, loan_amount: float,
                               interest_rate: float, repayment_strategy: str,
                               personal_contribution: float = 0.0,
@@ -2402,7 +2520,9 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               roi_window_years: int = ROI_WINDOW_YEARS,
                               hs_wage_index: float = 1.0,
                               enrollment_years: int = 0,
-                              working_years: int = 0) -> dict:
+                              working_years: int = 0,
+                              federal_cap: float = None, gap_rate: float = None,
+                              include_fees: bool = False) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -2431,13 +2551,27 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     """
     effective_principal = get_effective_principal(major_name, loan_amount)
     total_investment = effective_principal + personal_contribution
+    # Cap-and-gap financing (Option A): when a federal Direct cap and a gap rate
+    # are supplied (Detailed mode), split the loan into the capped federal
+    # tranche and a higher-rate gap tranche, then repay a single fee-adjusted
+    # principal at the blended rate. With no cap/gap (the default, e.g. Simplified
+    # mode or legacy callers) it's the original single-rate behavior untouched.
+    if federal_cap is not None and gap_rate is not None:
+        financing = split_loan_financing(
+            effective_principal, federal_cap, interest_rate, gap_rate, include_fees)
+        principal_for_repayment = financing["financed_principal"]
+        rate_for_repayment = financing["blended_rate"]
+    else:
+        financing = None
+        principal_for_repayment = effective_principal
+        rate_for_repayment = interest_rate
     if repayment_strategy == "Standard 10-Year":
         repayment_result = calculate_standard_repayment(
-            effective_principal, interest_rate, roi_window_years=roi_window_years)
+            principal_for_repayment, rate_for_repayment, roi_window_years=roi_window_years)
         strategy_label = "Standard 10-Year"
     else:
         repayment_result = calculate_idr_repayment(
-            effective_principal, interest_rate, major_name, roi_window_years=roi_window_years)
+            principal_for_repayment, rate_for_repayment, major_name, roi_window_years=roi_window_years)
         strategy_label = "Income-Driven Repayment"
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
                                 total_investment, col_index=col_index, years=roi_window_years,
@@ -2460,6 +2594,9 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         "working_years": working_years,
         "repayment_result": repayment_result,
         "roi_result": roi_result,
+        # None unless the cap-and-gap split was applied (Detailed mode); the
+        # results page / PDF show the federal-vs-gap breakdown when it's set.
+        "financing": financing,
     }
 
 
@@ -2479,7 +2616,9 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          hs_wage_index: float = 1.0,
                          personal_contribution: float = 0.0,
                          enrollment_years: int = 0,
-                         working_years: int = 0) -> dict:
+                         working_years: int = 0,
+                         federal_cap: float = None, gap_rate: float = None,
+                         include_fees: bool = False) -> dict:
     """The undergraduate loan at which `major_name` stops beating a debt-free
     high school graduate — i.e. where earnings_premium crosses zero.
 
@@ -2538,6 +2677,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             hs_wage_index=hs_wage_index,
             enrollment_years=enrollment_years,
             working_years=working_years,
+            federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
         )["roi_result"]["earnings_premium"]
 
     if premium_at(0.0) <= 0:
@@ -2562,7 +2702,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        hs_wage_index: float = 1.0,
                        personal_contribution: float = 0.0,
                        enrollment_years: int = 0,
-                       working_years: int = 0) -> dict:
+                       working_years: int = 0,
+                       federal_cap: float = None, gap_rate: float = None,
+                       include_fees: bool = False) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
     borrowing, shared by the on-screen section and its PDF counterpart so
     the two can't drift.
@@ -2585,7 +2727,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   hs_wage_index=hs_wage_index,
                                   personal_contribution=personal_contribution,
                                   enrollment_years=enrollment_years,
-                                  working_years=working_years)
+                                  working_years=working_years,
+                                  federal_cap=federal_cap, gap_rate=gap_rate,
+                                  include_fees=include_fees)
     years = roi_window_years
     # Career-mode names are plural BLS occupations ("Software Developers")
     # while Major-mode names are singular ("Computer Science"), so any verb
@@ -3579,7 +3723,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 disposable_col_adjusted, module_context: dict = None,
                                 start_year_a=None, monthly_payment=None, col_index: float = 100.0,
                                 roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None,
-                                loan_source_a: str = "personal") -> bytes:
+                                loan_source_a: str = "personal",
+                                federal_cap_a: float = None, gap_rate_a: float = None,
+                                include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
     Take-Home (+ take-home charts), and the Financial Position section (+ ROI
@@ -3605,6 +3751,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             *[[f"{row['year']} ({start_year_a + row['year'] - 1})" if start_year_a is not None else row["year"],
                fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
         ])]
+
+    financing_line = _pdf_financing_flowables(scenario.get("financing"), styles)
 
     story = [
         # Cover block: what this is, for whom, over what horizon. Previously
@@ -3637,6 +3785,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         *loan_detail,
         Spacer(1, 6),
         Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["body"]),
+        *financing_line,
         *_pdf_resources_section(styles, [(None, school_name_a)]),
         Spacer(1, 6),
         _pdf_table(full_width=True, rows=[
@@ -3701,6 +3850,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         personal_contribution=scenario["personal_contribution"],
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
+        federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
     )
     story += _pdf_breakeven_block(breakeven, styles)
 
@@ -3753,7 +3903,10 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  career_data_source: str = "National",
                                  cc_info_a=None, cc_info_b=None,
                                  loan_source_a: str = "personal",
-                                 loan_source_b: str = "personal") -> bytes:
+                                 loan_source_b: str = "personal",
+                                 federal_cap_a: float = None, gap_rate_a: float = None,
+                                 federal_cap_b: float = None, gap_rate_b: float = None,
+                                 include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, per-scenario break-even, plus the
     loan-balance and net-position comparison charts.
@@ -3800,6 +3953,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         ),
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_a, roi_window_years),
+        *_pdf_financing_flowables(scenario_a.get("financing"), styles),
         # Per-scenario break-even, mirroring the on-screen compare panels. The
         # single report had this and the compare one silently didn't -- the
         # same one-branch-only gap the arm-parity fix already chased on screen.
@@ -3810,7 +3964,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               hs_wage_index=get_metro_wage_index(city),
                               personal_contribution=scenario_a["personal_contribution"],
                               enrollment_years=scenario_a["enrollment_years"],
-                              working_years=scenario_a["working_years"]),
+                              working_years=scenario_a["working_years"],
+                              federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees),
             styles, scenario_label="Scenario A"),
         PageBreak(),
         Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
@@ -3823,6 +3978,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         ),
         Spacer(1, 6),
         _pdf_scenario_metrics_table(scenario_b, roi_window_years),
+        *_pdf_financing_flowables(scenario_b.get("financing"), styles),
         *_pdf_breakeven_block(
             breakeven_summary(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                               roi_window_years=roi_window_years, col_index=col_index,
@@ -3830,7 +3986,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               hs_wage_index=get_metro_wage_index(city),
                               personal_contribution=scenario_b["personal_contribution"],
                               enrollment_years=scenario_b["enrollment_years"],
-                              working_years=scenario_b["working_years"]),
+                              working_years=scenario_b["working_years"],
+                              federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=include_fees),
             styles, scenario_label="Scenario B"),
         PageBreak(),
         Paragraph(_strip_emoji("📊 Side-by-Side Charts"), styles["section"]),
@@ -4182,6 +4339,25 @@ else:
     st.sidebar.caption("Simplified is unavailable for this school — using Detailed.")
     effective_loan_mode = "Detailed"
 
+# Dependent vs independent sets the federal Direct borrowing cap, which decides
+# how much of a Detailed-mode loan is capped federal debt vs higher-rate gap
+# financing (PLUS/private). Global -- one student, same status across scenarios.
+# Only rendered in Detailed (Simplified uses reported federal-only debt, no cap).
+st.session_state.setdefault("loan_dependency", get_shared_default("dependency", "dependent"))
+if effective_loan_mode == "Detailed":
+    loan_dependency = st.sidebar.radio(
+        "Dependency status (both scenarios)",
+        options=["dependent", "independent"],
+        format_func=lambda d: {"dependent": "Dependent (parents' info on FAFSA)",
+                                "independent": "Independent"}[d],
+        key="loan_dependency",
+        help="Sets your federal Direct loan limit -- about $27,000 total over four "
+             "years if dependent, $45,000 if independent. Need above that limit is "
+             "modeled as higher-rate gap financing (Direct PLUS or private loans).",
+    )
+else:
+    loan_dependency = st.session_state["loan_dependency"]
+
 loan_source_a = "college" if (effective_loan_mode == "Simplified" and median_debt_a is not None) else "personal"
 
 # Cost & aid inputs render inline only when the cost-based (Detailed/personal)
@@ -4195,13 +4371,14 @@ if st.session_state["start_year_a"] not in _start_year_opts_a:
     st.session_state["start_year_a"] = now_local().year
 st.session_state.setdefault("personal_contribution_per_year_a", get_shared_int("pc", 0))
 st.session_state.setdefault("grants_per_year_a", get_shared_int("grants", 0))
+st.session_state.setdefault("gap_rate_a", get_shared_float("gap_rate", DEFAULT_GAP_RATE))
 # Streamlit drops a widget's value from session_state the moment the widget
 # stops rendering, so toggling to Simplified (which hides these inputs) would
 # reset Cost of Attendance to 0 the next time Detailed re-creates the box.
 # Re-affirming each key every run converts it from a widget-owned value back to
 # a persistent one, so entered/auto-filled figures survive the hide/show cycle.
 for _k in ("coa_per_year_a", "start_year_a",
-           "personal_contribution_per_year_a", "grants_per_year_a"):
+           "personal_contribution_per_year_a", "grants_per_year_a", "gap_rate_a"):
     if _k in st.session_state:
         st.session_state[_k] = st.session_state[_k]
 if loan_source_a == "personal":
@@ -4343,6 +4520,10 @@ _schedule_a = compute_loan_schedule_by_year(
     cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False)
 computed_loan_amount_a = sum(r["loan_amount"] for r in _schedule_a)
 cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college")
+# Federal Direct cap for the cap-and-gap split -- summed annual limits over the
+# financed years. Only meaningful in Detailed (Simplified's median debt is
+# already federal-only); None there so compute_scenario_results skips the split.
+federal_cap_a = federal_direct_cap(_schedule_a, loan_dependency) if loan_source_a == "personal" else None
 # Foregone-earnings option (widget rendered further down; read from state, per
 # this file's established before-the-widget pattern). enrollment_years extends
 # the HS baseline; working_years credits the part-time CC years back to the
@@ -4417,12 +4598,25 @@ if loan_source_a == "college":
         "estimate from your own cost & aid instead."
     ).replace("$", r"\$"))
 interest_rate = st.sidebar.number_input(
-    "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
-    value=get_shared_float("rate", 5.5), step=0.1,
-    help="The interest rate on your student loan. 5.50% is a reasonable "
-         "placeholder for recent federal undergraduate loan rates -- check "
-         "your school's financial aid offer for your real rate.",
+    "Federal Direct rate (%)", min_value=0.0, max_value=20.0,
+    value=get_shared_float("rate", DEFAULT_FEDERAL_RATE), step=0.1,
+    help="Rate on federal Direct (Subsidized/Unsubsidized) loans -- the first "
+         "~$27k over four years (dependent). 6.5% is a placeholder for the recent "
+         "undergraduate Direct rate; it resets every July 1. In Simplified mode "
+         "this rate applies to the whole reported federal debt.",
 )
+# Gap financing rate: only shown/used in Detailed, for need above the federal cap
+# (Direct PLUS or private). Simplified reads the seeded value but never uses it.
+if loan_source_a == "personal":
+    gap_rate_a = st.sidebar.number_input(
+        "Gap financing rate (%)", min_value=0.0, max_value=25.0,
+        step=0.1, key="gap_rate_a",
+        help="Rate on borrowing above the federal Direct cap -- Direct PLUS "
+             "(~9% + 4.2% fee) or private/alternative loans. Applied to the "
+             "'gap' tranche; the app blends it with the federal rate above.",
+    )
+else:
+    gap_rate_a = st.session_state["gap_rate_a"]
 repayment_strategy_options = ["Standard 10-Year", "Income-Driven Repayment (IDR)"]
 shared_repayment_strategy = get_shared_default("strategy", "Standard 10-Year")
 default_repayment_strategy_index = (
@@ -4913,11 +5107,12 @@ if compare_mode:
             st.session_state["start_year_b"] = now_local().year
         st.session_state.setdefault("personal_contribution_per_year_b", get_shared_int("pc_b", 0))
         st.session_state.setdefault("grants_per_year_b", get_shared_int("grants_b", 0))
+        st.session_state.setdefault("gap_rate_b", get_shared_float("gap_rate_b", DEFAULT_GAP_RATE))
         # See Scenario A: re-affirm so hiding these inputs (Simplified) doesn't
         # let Streamlit garbage-collect the values and reset COA to 0 on the
         # next Detailed render.
         for _k in ("coa_per_year_b", "start_year_b",
-                   "personal_contribution_per_year_b", "grants_per_year_b"):
+                   "personal_contribution_per_year_b", "grants_per_year_b", "gap_rate_b"):
             if _k in st.session_state:
                 st.session_state[_k] = st.session_state[_k]
         if loan_source_b == "personal":
@@ -5035,6 +5230,8 @@ if compare_mode:
             cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b, finance_cc_years=False)
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
         cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
+        federal_cap_b = (federal_direct_cap(_schedule_b, loan_dependency)
+                         if loan_source_b == "personal" else None)
         _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
         enrollment_years_b = (cc_years_b + university_years_b) if _foregone_on_b else 0
         working_years_b = cc_years_b if (is_parttime_b and _foregone_on_b) else 0
@@ -5099,14 +5296,23 @@ if compare_mode:
         if enable_prestige_mode:
             major_b = get_prestige_adjusted_major_name(major_b, prestige_tier_b)
         interest_rate_b = st.number_input(
-            "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
-            value=get_shared_float("rate_b", 5.5), step=0.1,
+            "Federal Direct rate (%)", min_value=0.0, max_value=20.0,
+            value=get_shared_float("rate_b", DEFAULT_FEDERAL_RATE), step=0.1,
             key="interest_rate_b",
-            help="The interest rate on your student loan. 5.50% is a "
-                 "reasonable placeholder for recent federal undergraduate "
-                 "loan rates -- check your school's financial aid offer "
-                 "for your real rate.",
+            help="Rate on federal Direct loans (the first ~$27k over four years, "
+                 "dependent). 6.5% is a placeholder for the recent undergraduate "
+                 "Direct rate; it resets every July 1.",
         )
+        if loan_source_b == "personal":
+            gap_rate_b = st.number_input(
+                "Gap financing rate (%)", min_value=0.0, max_value=25.0,
+                step=0.1, key="gap_rate_b",
+                help="Rate on borrowing above the federal Direct cap -- Direct "
+                     "PLUS or private/alternative loans. Blended with the federal "
+                     "rate above.",
+            )
+        else:
+            gap_rate_b = st.session_state["gap_rate_b"]
         shared_repayment_strategy_b = get_shared_default("strategy_b", "Standard 10-Year")
         default_repayment_strategy_b_index = (
             repayment_strategy_options.index(shared_repayment_strategy_b)
@@ -5486,7 +5692,9 @@ def render_takehome_block(scenario: dict, major_name: str, career_stage_key: int
 def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: int,
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
                            col_index: float, career_data_source_name: str,
-                           hs_wage_index: float = 1.0):
+                           hs_wage_index: float = 1.0,
+                           federal_cap: float = None, gap_rate: float = None,
+                           include_fees: bool = False):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -5521,6 +5729,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         )
         st.metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
         st.metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
+        render_financing_note(scenario.get("financing"))
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
             fmt_money(roi_result["earnings_premium"]),
@@ -5541,6 +5750,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             hs_wage_index=hs_wage_index,
             personal_contribution=scenario["personal_contribution"],
             enrollment_years=scenario["enrollment_years"],
+            federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
         )
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
@@ -5876,13 +6086,15 @@ if compare_mode:
                                            roi_window_years=roi_horizon_years,
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_a,
-                                           working_years=working_years_a)
+                                           working_years=working_years_a,
+                                           federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_b,
-                                           working_years=working_years_b)
+                                           working_years=working_years_b,
+                                           federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
 
     col_a, col_b = st.columns(2)
     render_scenario_panel(
@@ -5890,12 +6102,14 @@ if compare_mode:
         loan_amount, interest_rate, repayment_strategy,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
+        federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
         loan_amount_b, interest_rate_b, repayment_strategy_b,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
+        federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -5986,6 +6200,8 @@ if compare_mode:
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
         cc_info_b=_cc_info_for_pdf(cc_mode_b, cc_state_key_b, effective_cc_coa_per_year_b, cc_oop_b, cc_years_b),
         loan_source_a=loan_source_a, loan_source_b=loan_source_b,
+        federal_cap_a=federal_cap_a, gap_rate_a=gap_rate_a,
+        federal_cap_b=federal_cap_b, gap_rate_b=gap_rate_b, include_fees=True,
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
@@ -6036,7 +6252,8 @@ else:
                                          roi_window_years=roi_horizon_years,
                                          hs_wage_index=get_metro_wage_index(city),
                                          enrollment_years=enrollment_years_a,
-                                         working_years=working_years_a)
+                                         working_years=working_years_a,
+                                         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -6063,8 +6280,10 @@ else:
         # when the personal calc is actually the loan in use.
         st.caption((
             f"This uses **{fmt_money(default_loan_a)}** -- the median debt graduates of "
-            f"{school_name_a} who borrowed leave with (College Scorecard). Switch to "
-            "Detailed mode in the sidebar to model your own cost and aid instead."
+            f"{school_name_a} who borrowed leave with (College Scorecard). It counts "
+            "**federal loans only** -- Direct PLUS and private borrowing aren't included, "
+            "so a student who needed those owes more. Switch to Detailed mode in the "
+            "sidebar to model your own cost, aid, and gap financing instead."
         ).replace("$", r"\$"))
     else:
         st.caption(
@@ -6102,6 +6321,8 @@ else:
     )
     loan_metric_cols[1].metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
     loan_metric_cols[2].metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
+
+    render_financing_note(scenario.get("financing"))
 
     if repayment_result["forgiven_amount"] > 0:
         st.warning(
@@ -6180,6 +6401,7 @@ else:
         personal_contribution=personal_contribution,
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
+        federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
     )
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
@@ -6258,6 +6480,7 @@ else:
         module_context=module_context, start_year_a=start_year_a, monthly_payment=monthly_payment,
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
         loan_source_a=loan_source_a,
+        federal_cap_a=federal_cap_a, gap_rate_a=gap_rate_a, include_fees=True,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     )
     with top_actions_container:
@@ -6317,7 +6540,8 @@ if not st.session_state.survey_submitted:
                                                    roi_window_years=roi_horizon_years,
                                                    hs_wage_index=get_metro_wage_index(city),
                                                    enrollment_years=enrollment_years_a,
-                                                   working_years=working_years_a)
+                                                   working_years=working_years_a,
+                                                   federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
             # expander) -- referencing them outside an "if compare_mode:"
@@ -6330,7 +6554,8 @@ if not st.session_state.survey_submitted:
                                                        roi_window_years=roi_horizon_years,
                                                        hs_wage_index=get_metro_wage_index(city),
                                                        enrollment_years=enrollment_years_b,
-                                                       working_years=working_years_b)
+                                                       working_years=working_years_b,
+                                                       federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                     interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
@@ -6643,6 +6868,28 @@ being unavailable), Simplified isn't offered and Detailed is used.
 Either way, whatever ends up in the **Total Loan Amount** field is what every
 calculation on the page uses — you can also type any amount directly (e.g. a
 real financial aid offer) to override it.
+
+**Federal caps and gap financing (Detailed mode).** Federal Direct
+(Subsidized/Unsubsidized) loans are capped: about **$5,500 / $6,500 /
+$7,500 / $7,500** per year for a dependent undergraduate (higher if
+independent), so roughly **$27,000 over four years** ($45,000 independent).
+Need above that limit can't be met with Direct loans — it comes from **Direct
+PLUS or private/alternative loans** at a higher rate, plus origination fees
+(~1.06% federal, ~4.23% PLUS). So Detailed mode splits your loan into the
+capped federal tranche (at your **Federal Direct rate**) and a **gap tranche**
+(at your **Gap financing rate**), grosses each up for its fee, and repays the
+combined balance at the principal-weighted **blended** rate — the breakdown is
+shown under the loan metrics. The **Dependency status** toggle sets the cap;
+professional-school debt (medicine/law) falls into the gap tranche, a
+reasonable stand-in for its real Grad PLUS pricing. Rates default to recent
+figures and reset every July 1 — enter your own.
+
+*A simplification worth knowing:* the model repays everything at one blended
+rate, so under **Income-Driven Repayment** it applies forgiveness to the whole
+balance. In reality private and PLUS gap loans generally **aren't**
+IDR/forgiveness-eligible, so IDR results flatter the gap portion — the app
+warns you when the gap is a large share of the loan. Simplified mode's median
+debt is **federal loans only** and excludes PLUS/private entirely.
 
 **Getting your own numbers instead of school averages.** The Cost of
 Attendance we auto-fill is a school-wide *average sticker price* — what a
