@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
 
+import certifi
 import matplotlib
 matplotlib.use("Agg")  # must precede importing pyplot -- no display/browser needed
 import matplotlib.pyplot as plt
@@ -1890,7 +1891,12 @@ def fetch_median_debt(school_name: str, api_key: str):
         "api_key": api_key,
     }
     try:
-        response = requests.get(COLLEGE_SCORECARD_URL, params=params, timeout=6)
+        # Pin TLS verification to certifi's CA bundle rather than the system
+        # default. The python.org macOS build ships without a usable root store,
+        # so a plain requests.get raises SSLCertVerificationError locally --
+        # which fetch_* would swallow as "no data", silently disabling the
+        # college-reported loan (Simplified mode) on every local run.
+        response = requests.get(COLLEGE_SCORECARD_URL, params=params, timeout=6, verify=certifi.where())
         response.raise_for_status()
         results = response.json().get("results", [])
         if not results:
@@ -1925,7 +1931,12 @@ def fetch_school_coa_history(school_name: str, api_key: str):
         "api_key": api_key,
     }
     try:
-        response = requests.get(COLLEGE_SCORECARD_URL, params=params, timeout=6)
+        # Pin TLS verification to certifi's CA bundle rather than the system
+        # default. The python.org macOS build ships without a usable root store,
+        # so a plain requests.get raises SSLCertVerificationError locally --
+        # which fetch_* would swallow as "no data", silently disabling the
+        # college-reported loan (Simplified mode) on every local run.
+        response = requests.get(COLLEGE_SCORECARD_URL, params=params, timeout=6, verify=certifi.where())
         response.raise_for_status()
         results = response.json().get("results", [])
         if not results:
