@@ -5427,9 +5427,12 @@ who skipped college, took no debt, and started working right away. Both adjusted
 it costs to live in your city. Everything on this page is some version of that one
 comparison.
 
-**What to do.** Pick your major and school on the left. Numbers update as you change
-them. Nothing is saved, there's no login, and you can't break it — try the majors you're
-actually deciding between.
+**What to do.** Pick your major and school on the left. Your loan fills in automatically
+from what graduates of that school typically borrow (**Simplified**); switch **Loan
+estimate** to **Detailed** to build it from your own cost and aid instead. Numbers update
+as you change them. Nothing is saved, there's no login, and you can't break it — try the
+majors you're actually deciding between. Don't know your real cost or family contribution?
+The **🎯 Get Your Real Numbers** section lower down links to two free official tools.
 
 **The two settings that change the answer most:**
 
