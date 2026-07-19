@@ -346,6 +346,11 @@ def load_nyfed_majors(csv_path: str) -> dict:
             "underemployment_rate": row.underemployment_rate,
             "unemployment_rate": row.unemployment_rate,
             "share_with_graduate_degree": row.share_with_graduate_degree,
+            # Representative occupation group for the optional AI Employability
+            # Risk module (majors have no SOC code of their own -- see
+            # NYFED_MAJOR_SOC_GROUP). None for the few majors left unmapped, which
+            # then honestly show "Unknown".
+            "soc_major_group": NYFED_MAJOR_SOC_GROUP.get(row.major),
         }
         for row in df.itertuples()
     }
@@ -930,6 +935,47 @@ AI_EXPOSURE_BY_SOC_GROUP = {
            "rationale": "Physical operation tasks with limited current AI (as opposed to separate autonomy/robotics) task overlap."},
     "55": {"label": "Military Specific", "risk_level": "Low", "score": 20,
            "rationale": "Not covered in detail by the civilian occupational-exposure research this feature is based on."},
+}
+
+# The AI Employability Risk feature keys off SOC occupation major groups, which
+# Career-mode (BLS) and CURATED_MAJOR_DATA carry directly. Major mode's NY Fed
+# dataset is majors, not occupations, so it has no SOC code -- this maps each
+# major to the occupation major group it most commonly leads to, so Major mode
+# shows a representative exposure level instead of "Unknown". It's a deliberate
+# approximation (a major spreads across many jobs, which is exactly what the NY
+# Fed data measures) and is labeled as such on the page. Majors that genuinely
+# span the whole labor market (Interdisciplinary Studies, Liberal Arts) are left
+# out on purpose -- they honestly have no single representative occupation.
+NYFED_MAJOR_SOC_GROUP = {
+    "Accounting": "13", "Advertising and Public Relations": "27",
+    "Aerospace Engineering": "17", "Agriculture": "19",
+    "Animal and Plant Sciences": "19", "Anthropology": "19", "Architecture": "17",
+    "Art History": "27", "Biochemistry": "19", "Biology": "19",
+    "Business Analytics": "13", "Business Management": "11",
+    "Chemical Engineering": "17", "Chemistry": "19", "Civil Engineering": "17",
+    "Commercial Art & Graphic Design": "27", "Communications": "27",
+    "Computer Engineering": "15", "Computer Science": "15",
+    "Construction Services": "11", "Criminal Justice": "33",
+    "Early Childhood Education": "25", "Earth Sciences": "19", "Economics": "19",
+    "Electrical Engineering": "17", "Elementary Education": "25",
+    "Engineering Technologies": "17", "English Language": "27",
+    "Environmental Studies": "19", "Ethnic Studies": "19",
+    "Family and Consumer Sciences": "25", "Finance": "13", "Fine Arts": "27",
+    "Foreign Language": "27", "General Business": "13", "General Education": "25",
+    "General Engineering": "17", "General Social Sciences": "19", "Geography": "19",
+    "Health Services": "29", "History": "19", "Industrial Engineering": "17",
+    "Information Systems & Management": "15", "International Affairs": "19",
+    "Journalism": "27", "Leisure and Hospitality": "11", "Marketing": "13",
+    "Mass Media": "27", "Mathematics": "15", "Mechanical Engineering": "17",
+    "Medical Technicians": "29", "Miscellaneous Biological Science": "19",
+    "Miscellaneous Education": "25", "Miscellaneous Engineering": "17",
+    "Miscellaneous Physical Sciences": "19", "Miscellaneous Technologies": "17",
+    "Nursing": "29", "Nutrition Sciences": "29", "Performing Arts": "27",
+    "Pharmacy": "29", "Philosophy": "25", "Physics": "19",
+    "Political Science": "19", "Psychology": "19", "Public Policy and Law": "23",
+    "Secondary Education": "25", "Social Services": "21", "Sociology": "19",
+    "Special Education": "25", "Theology and Religion": "21",
+    "Treatment Therapy": "29",
 }
 
 # ---- 2026 Regulatory & Macro Forecasting (optional "Advanced Analysis" mode) -
@@ -5802,6 +5848,12 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
         "personalized prediction -- \"exposure\" measures task overlap with "
         "current AI tools, not certainty of job loss. See Methodology."
     )
+    if dataset_mode == DATASET_MODE_MAJOR:
+        st.caption(
+            "In Major mode this is shown for the occupation group each major most "
+            "commonly leads to — a representative approximation, since a major spreads "
+            "across many jobs. Switch to Career mode to score a specific occupation."
+        )
 
     def _render_one(name):
         info = get_ai_exposure_for_major(name)
@@ -7100,7 +7152,14 @@ behaves exactly as described above when all five are left off.
   that a job will disappear** — high exposure often means parts of a job get
   AI-assisted, not that the whole job is automated. Any "lower-exposure
   alternative" suggested is picked from majors already in this app's own
-  dataset by closest starting salary — never invented.
+  dataset by closest starting salary — never invented. In **Career mode** each
+  occupation has its own SOC group directly. In **Major mode**, a major isn't an
+  occupation, so each major is mapped to the occupation group it most commonly
+  leads to (e.g. Accounting → Business & Financial Operations, Mechanical
+  Engineering → Architecture & Engineering) and the exposure shown is for that
+  group — a representative approximation, clearly labeled as such, since a major
+  spreads across many jobs. A few majors that span the whole labor market
+  (Interdisciplinary Studies, Liberal Arts) are left unmapped and show no level.
 - **2026 Regulatory & Macro Forecasting.** Models two *real, enacted* federal
   loan repayment plans created by the One Big Beautiful Bill Act (H.R. 1,
   2025): the **Repayment Assistance Plan (RAP)** and the **Tiered Standard
