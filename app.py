@@ -1419,6 +1419,12 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "compare": "1" if compare_mode else "0",
         "start_year": str(start_year_a),
         "horizon": str(roi_horizon_years),
+        # The Loan estimate mode (Simplified/Detailed) is global, so it rides in
+        # the base params rather than the compare-only block. Read from the
+        # persistent preference key, not the possibly-forced effective value, so
+        # a shared "Simplified" link stays Simplified when it lands on a school
+        # that does have reported debt.
+        "loan_mode": st.session_state.get("loan_mode", "Simplified"),
         "cc_mode_a": cc_mode_a,
         "cc_state_a": cc_state_a,
         "cc_coa_a": str(cc_coa_per_year_a),
@@ -3556,7 +3562,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 scenario, take_home, gross, disposable_nominal,
                                 disposable_col_adjusted, module_context: dict = None,
                                 start_year_a=None, monthly_payment=None, col_index: float = 100.0,
-                                roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None) -> bytes:
+                                roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None,
+                                loan_source_a: str = "personal") -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
     Take-Home (+ take-home charts), and the Financial Position section (+ ROI
@@ -3564,6 +3571,24 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
     styles = _pdf_styles()
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
+
+    # Decision-3 parity with the on-screen view: the per-year COA->loan table
+    # appears only when the cost-based personal calc is the loan in use. With
+    # the college-reported default, that table would contradict the total, so a
+    # one-line note replaces it (the Total Loan Amount line below still shows the
+    # figure actually used).
+    if loan_source_a == "college":
+        loan_detail = [Paragraph(
+            "Loan is this school's median completer debt (College Scorecard) -- the median "
+            "amount graduates who borrowed leave with -- not a per-year cost buildup. Use "
+            "Switch to Detailed mode in the app to model your own cost and aid instead.",
+            styles["body"])]
+    else:
+        loan_detail = [_pdf_table(full_width=True, rows=[
+            ["Year", "Cost of Attendance", "Loan Amount This Year"],
+            *[[f"{row['year']} ({start_year_a + row['year'] - 1})" if start_year_a is not None else row["year"],
+               fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
+        ])]
 
     story = [
         # Cover block: what this is, for whom, over what horizon. Previously
@@ -3593,11 +3618,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         ),
         Spacer(1, 12),
         Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["section"]),
-        _pdf_table(full_width=True, rows=[
-            ["Year", "Cost of Attendance", "Loan Amount This Year"],
-            *[[f"{row['year']} ({start_year_a + row['year'] - 1})" if start_year_a is not None else row["year"],
-               fmt_money(row["coa"]), fmt_money(row["loan_amount"])] for row in loan_schedule_a],
-        ]),
+        *loan_detail,
         Spacer(1, 6),
         Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["body"]),
         *_pdf_resources_section(styles, [(None, school_name_a)]),
@@ -4086,47 +4107,116 @@ else:
     # is a no-op once anything -- the callback or a prior render -- has already
     # populated it, so this only ever supplies the very first render's default.
     st.session_state.setdefault("coa_per_year_a", int(default_coa_per_year_a))
-    coa_per_year_a = st.sidebar.number_input(
-        "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
-        key="coa_per_year_a",
-        help="The full sticker price for your first year (Year 1) at this "
-             "school -- tuition, fees, room & board, books, everything -- "
-             "before subtracting scholarships or what you pay yourself. "
-             "Years 2-4 are projected from this using the estimated COA "
-             "inflation rate below. Auto-fills if we found your school "
-             "above.",
+    # The Cost of Attendance widget itself renders below, in the Detailed-mode
+    # (loan_source == "personal") input block, once the Loan estimate toggle has
+    # been resolved -- so the sidebar can lead with the loan default.
+
+# The college-reported loan default: the median cumulative federal debt that
+# graduates of this school who borrowed leave with (College Scorecard, via the
+# cached fetch_median_debt). None in Prestige Mode (no real school) or when the
+# school has no reported figure -- the loan then falls back to the cost-based
+# personal calculation below, exactly as the app worked before this default.
+median_debt_a = None if enable_prestige_mode else (
+    (fetch_median_debt(school_name_a, scorecard_api_key) or {}).get("median_debt"))
+
+# ---- Loan estimate mode: Simplified vs Detailed ------------------------
+# One global toggle drives both scenarios. Simplified uses the school's
+# college-reported median debt (no cost/aid inputs needed); Detailed builds the
+# loan from Cost of Attendance minus Personal Contribution and Grants and shows
+# the year-by-year breakdown. Rendered here -- after Scenario A's school is
+# resolved -- so the disable gate can see whether a reported figure exists.
+# Scenario B reads the same st.session_state["loan_mode"]; the gate keys off
+# Scenario A (B is resolved later inside its own expander), a documented
+# simplification: the rare "A has no reported debt but B does" case uses Detailed
+# for both, which is safe and still accurate.
+simplified_available = median_debt_a is not None
+st.session_state.setdefault("loan_mode", get_shared_default("loan_mode", "Simplified"))
+if simplified_available:
+    loan_mode = st.sidebar.radio(
+        "Loan estimate (both scenarios)",
+        options=["Simplified", "Detailed"],
+        format_func=lambda m: {
+            "Simplified": "Simplified — use the school's reported debt",
+            "Detailed": "Detailed — estimate from my cost & aid",
+        }[m],
+        key="loan_mode",
+        help="Simplified uses the median debt graduates who borrowed leave this "
+             "school with (College Scorecard) -- no cost or aid inputs needed. "
+             "Detailed builds the loan from Cost of Attendance minus your Personal "
+             "Contribution and Grants, and shows the year-by-year breakdown. "
+             "Applies to both scenarios in Compare Mode.",
     )
-start_year_options_a = list(range(now_local().year, now_local().year + 8))
-shared_start_year_a = get_shared_int("start_year", now_local().year)
-default_start_year_a_index = (
-    start_year_options_a.index(shared_start_year_a) if shared_start_year_a in start_year_options_a else 0
-)
-start_year_a = st.sidebar.selectbox(
-    "Year Starting Undergraduate School", start_year_options_a, index=default_start_year_a_index,
-    key="start_year_a",
-    help="If you won't start college right away, Cost of Attendance above "
-         "gets projected forward to this year using the estimated COA "
-         "inflation rate below, before growing further across all 4 years "
-         "of enrollment. Leave at the current year for no adjustment.",
-)
-personal_contribution_per_year_a = st.sidebar.number_input(
-    "Personal Contribution (per year, $)", min_value=0, max_value=100000,
-    value=get_shared_int("pc", 0), step=500,
-    key="personal_contribution_per_year_a",
-    help="Also called the Student Aid Index (SAI) -- the amount your family "
-         "is expected to contribute. Savings or family money toward this "
-         "year's cost that you did NOT borrow. The loan amount below is "
-         "Cost of Attendance minus this and Grants & Scholarships -- "
-         "counted in the ROI% denominator, but not added to the loan "
-         "you're actually repaying (no interest accrues on it).",
-)
-grants_per_year_a = st.sidebar.number_input(
-    "Grants & Scholarships (per year, $)", min_value=0, max_value=100000,
-    value=get_shared_int("grants", 0), step=500,
-    key="grants_per_year_a",
-    help="Grant or scholarship aid that reduces what you need to borrow. "
-         "This amount does not need to be repaid back to the grantor.",
-)
+    effective_loan_mode = loan_mode
+else:
+    # No reported debt for this school (Prestige tier, a school not in College
+    # Scorecard, or the live lookup being down) -- Simplified can't produce a
+    # number, so it's disabled and Detailed is used. The stored "loan_mode"
+    # preference is left untouched (this uses a separate display key) so it
+    # returns if a reported figure does.
+    st.sidebar.radio(
+        "Loan estimate (both scenarios)", options=["Detailed"],
+        format_func=lambda m: "Detailed — estimate from my cost & aid",
+        key="loan_mode_unavailable_display", disabled=True,
+        help="Simplified needs a school with reported debt in College Scorecard. "
+             "We don't have one for this selection, so the loan is estimated from "
+             "your cost & aid below.",
+    )
+    st.sidebar.caption("Simplified is unavailable for this school — using Detailed.")
+    effective_loan_mode = "Detailed"
+
+loan_source_a = "college" if (effective_loan_mode == "Simplified" and median_debt_a is not None) else "personal"
+
+# Cost & aid inputs render inline only when the cost-based (Detailed/personal)
+# path is what's driving this scenario's loan. When hidden (Simplified, using the
+# reported figure) the values are read from session_state -- seeded here -- so
+# effective COA, the per-year schedule, computed_loan_amount_a, and share links
+# stay defined.
+_start_year_opts_a = list(range(now_local().year, now_local().year + 8))
+st.session_state.setdefault("start_year_a", get_shared_int("start_year", now_local().year))
+if st.session_state["start_year_a"] not in _start_year_opts_a:
+    st.session_state["start_year_a"] = now_local().year
+st.session_state.setdefault("personal_contribution_per_year_a", get_shared_int("pc", 0))
+st.session_state.setdefault("grants_per_year_a", get_shared_int("grants", 0))
+if loan_source_a == "personal":
+    if not enable_prestige_mode:
+        coa_per_year_a = st.sidebar.number_input(
+            "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
+            key="coa_per_year_a",
+            help="The full sticker price for your first year (Year 1) at this "
+                 "school -- tuition, fees, room & board, books, everything -- "
+                 "before subtracting scholarships or what you pay yourself. "
+                 "Years 2-4 are projected from this using the estimated COA "
+                 "inflation rate. Auto-fills if we found your school above.",
+        )
+    start_year_a = st.sidebar.selectbox(
+        "Year Starting Undergraduate School", _start_year_opts_a,
+        key="start_year_a",
+        help="If you won't start college right away, Cost of Attendance "
+             "gets projected forward to this year using the estimated COA "
+             "inflation rate, before growing further across all 4 years "
+             "of enrollment. Leave at the current year for no adjustment.",
+    )
+    personal_contribution_per_year_a = st.sidebar.number_input(
+        "Personal Contribution (per year, $)", min_value=0, max_value=100000, step=500,
+        key="personal_contribution_per_year_a",
+        help="Also called the Student Aid Index (SAI) -- the amount your family "
+             "is expected to contribute. Savings or family money toward this "
+             "year's cost that you did NOT borrow. Subtracted (with Grants) from "
+             "Cost of Attendance to get the loan; it counts in the ROI% "
+             "denominator without accruing interest.",
+    )
+    grants_per_year_a = st.sidebar.number_input(
+        "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, step=500,
+        key="grants_per_year_a",
+        help="Grant or scholarship aid that reduces what you need to borrow. "
+             "This amount does not need to be repaid back to the grantor.",
+    )
+else:
+    # Simplified: inputs hidden; use the seeded / last-known values.
+    coa_per_year_a = st.session_state["coa_per_year_a"]
+    start_year_a = st.session_state["start_year_a"]
+    personal_contribution_per_year_a = st.session_state["personal_contribution_per_year_a"]
+    grants_per_year_a = st.session_state["grants_per_year_a"]
 # Community-college path: None / full-time transfer / part-time while working.
 # (Replaces the old single "Start at community college" checkbox; legacy shared
 # links with cc_a=1 map to the full-time transfer mode.)
@@ -4259,38 +4349,46 @@ else:
 st.sidebar.caption((
     f"{coa_projection_note}"
     f"{cc_note_a}"
-    f"→ **{fmt_money(computed_loan_amount_a)}** loan, **{fmt_money(personal_contribution)}** personal "
+    f"→ **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal "
     f"(incl. {fmt_money(cc_oop_a)} community college)"
     if cc_transfer_a else
     f"{coa_projection_note}"
     f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
     f"{fmt_money(personal_contribution_per_year_a)} personal "
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
-    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_a)}** loan, **{fmt_money(personal_contribution)}** personal"
+    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
-# Pre-fills with the calculated total above, but the user can type any other
-# amount to override it (e.g. the real total from a financial aid offer,
-# which won't match this simplified per-year model exactly). Refreshes back
-# to the calculated total whenever that total itself changes -- detected by
-# comparing against the last calculated total this box was filled with, so
-# a manual override survives reruns that don't touch COA/Personal
-# Contribution/Grants/school, but not one that does -- matching how the
-# Cost of Attendance field's own school auto-fill behaves (see
-# _autofill_coa).
-if st.session_state.get("computed_loan_amount_a_seen") != computed_loan_amount_a:
-    st.session_state["computed_loan_amount_a_seen"] = computed_loan_amount_a
-    st.session_state["loan_amount_a"] = int(computed_loan_amount_a)
-st.session_state.setdefault("loan_amount_a", int(computed_loan_amount_a))
+# The loan field default follows the active loan source (set by the Loan estimate
+# toggle above): the college-reported median debt in Simplified, the cost-based
+# personal calculation in Detailed.
+if loan_source_a == "college":
+    default_loan_a = int(median_debt_a)
+else:
+    default_loan_a = int(computed_loan_amount_a)
+# Re-seed the overridable field whenever the active default itself moves -- a
+# school change or a mode switch flips it; editing cost/aid moves the personal
+# figure only when Detailed is driving. A manual override survives reruns that
+# don't move the default (same seen-value guard as before, keyed on the active
+# default).
+if st.session_state.get("default_loan_a_seen") != default_loan_a:
+    st.session_state["default_loan_a_seen"] = default_loan_a
+    st.session_state["loan_amount_a"] = default_loan_a
+st.session_state.setdefault("loan_amount_a", default_loan_a)
 loan_amount = st.sidebar.number_input(
     "Total Loan Amount ($)", min_value=0, max_value=1000000, step=500,
     key="loan_amount_a",
-    help="Pre-filled with the calculated total above (Cost of Attendance "
-         "minus Personal Contribution and Grants & Scholarships, summed "
-         "over 4 years). You can override this with any other amount -- "
-         "for example, the real total from a financial aid offer -- and "
-         "that amount is used for every calculation below instead of the "
-         "calculated total.",
+    help="In Simplified mode this is the median debt graduates who borrowed leave "
+         "this school with (College Scorecard); in Detailed mode it's the cost-based "
+         "total (Cost of Attendance minus Personal Contribution and Grants, over 4 "
+         "years). Override with any amount -- e.g. a real financial aid offer -- and "
+         "that's used everywhere below.",
 )
+if loan_source_a == "college":
+    st.sidebar.caption((
+        f"Simplified: median debt for graduates of {school_name_a} who borrowed "
+        f"({fmt_money(default_loan_a)}, College Scorecard). Switch to Detailed to "
+        "estimate from your own cost & aid instead."
+    ).replace("$", r"\$"))
 interest_rate = st.sidebar.number_input(
     "Average Loan Interest Rate (%)", min_value=0.0, max_value=20.0,
     value=get_shared_float("rate", 5.5), step=0.1,
@@ -4773,47 +4871,62 @@ if compare_mode:
                 if default_coa_per_year_b is None:
                     default_coa_per_year_b = 7500
             st.session_state.setdefault("coa_per_year_b", int(default_coa_per_year_b))
-            coa_per_year_b = st.number_input(
-                "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
-                key="coa_per_year_b",
-                help="The full sticker price for your first year (Year 1) at "
-                     "this school -- tuition, fees, room & board, books, "
-                     "everything -- before subtracting scholarships or what "
-                     "you pay yourself. Years 2-4 are projected from this "
-                     "using the estimated COA inflation rate below. "
-                     "Auto-fills if we found your school above.",
+            # (COA widget renders below, inside the loan-source-gated block.)
+        # ---- Scenario B loan source (uses the global Loan estimate toggle) ----
+        # Scenario B honors the same effective_loan_mode set in Scenario A's
+        # section, but resolves college-vs-personal against its OWN reported debt,
+        # so B falls back to Detailed inputs when its school has no figure even
+        # while A stays Simplified.
+        median_debt_b = None if enable_prestige_mode else (
+            (fetch_median_debt(school_name_b, scorecard_api_key) or {}).get("median_debt"))
+        loan_source_b = "college" if (effective_loan_mode == "Simplified" and median_debt_b is not None) else "personal"
+        _start_year_opts_b = list(range(now_local().year, now_local().year + 8))
+        st.session_state.setdefault("start_year_b", get_shared_int("start_year_b", now_local().year))
+        if st.session_state["start_year_b"] not in _start_year_opts_b:
+            st.session_state["start_year_b"] = now_local().year
+        st.session_state.setdefault("personal_contribution_per_year_b", get_shared_int("pc_b", 0))
+        st.session_state.setdefault("grants_per_year_b", get_shared_int("grants_b", 0))
+        if loan_source_b == "personal":
+            if not enable_prestige_mode:
+                coa_per_year_b = st.number_input(
+                    "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
+                    key="coa_per_year_b",
+                    help="The full sticker price for your first year (Year 1) at "
+                         "this school -- tuition, fees, room & board, books, "
+                         "everything -- before subtracting scholarships or what "
+                         "you pay yourself. Years 2-4 are projected from this "
+                         "using the estimated COA inflation rate. "
+                         "Auto-fills if we found your school above.",
+                )
+            start_year_b = st.selectbox(
+                "Year Starting Undergraduate School", _start_year_opts_b,
+                key="start_year_b",
+                help="If you won't start college right away, Cost of Attendance "
+                     "gets projected forward to this year using the estimated COA "
+                     "inflation rate, before growing further across all 4 years "
+                     "of enrollment. Leave at the current year for no adjustment.",
             )
-        start_year_options_b = list(range(now_local().year, now_local().year + 8))
-        shared_start_year_b = get_shared_int("start_year_b", now_local().year)
-        default_start_year_b_index = (
-            start_year_options_b.index(shared_start_year_b) if shared_start_year_b in start_year_options_b else 0
-        )
-        start_year_b = st.selectbox(
-            "Year Starting Undergraduate School", start_year_options_b, index=default_start_year_b_index,
-            key="start_year_b",
-            help="If you won't start college right away, Cost of Attendance above "
-                 "gets projected forward to this year using the estimated COA "
-                 "inflation rate below, before growing further across all 4 years "
-                 "of enrollment. Leave at the current year for no adjustment.",
-        )
-        personal_contribution_per_year_b = st.number_input(
-            "Personal Contribution (per year, $)", min_value=0, max_value=100000,
-            value=get_shared_int("pc_b", 0), step=500,
-            key="personal_contribution_per_year_b",
-            help="Also called the Student Aid Index (SAI) -- the amount your "
-                 "family is expected to contribute. Savings or family money "
-                 "toward this year's cost that wasn't borrowed. The loan "
-                 "amount below is Cost of Attendance minus this and Grants "
-                 "& Scholarships.",
-        )
-        grants_per_year_b = st.number_input(
-            "Grants & Scholarships (per year, $)", min_value=0, max_value=100000,
-            value=get_shared_int("grants_b", 0), step=500,
-            key="grants_per_year_b",
-            help="Grant or scholarship aid that reduces what you need to "
-                 "borrow. This amount does not need to be repaid back to "
-                 "the grantor.",
-        )
+            personal_contribution_per_year_b = st.number_input(
+                "Personal Contribution (per year, $)", min_value=0, max_value=100000, step=500,
+                key="personal_contribution_per_year_b",
+                help="Also called the Student Aid Index (SAI) -- the amount your "
+                     "family is expected to contribute. Savings or family money "
+                     "toward this year's cost that wasn't borrowed. Subtracted "
+                     "(with Grants) from Cost of Attendance to get the loan.",
+            )
+            grants_per_year_b = st.number_input(
+                "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, step=500,
+                key="grants_per_year_b",
+                help="Grant or scholarship aid that reduces what you need to "
+                     "borrow. This amount does not need to be repaid back to "
+                     "the grantor.",
+            )
+        else:
+            # Simplified: inputs hidden; use the seeded / last-known values.
+            coa_per_year_b = st.session_state["coa_per_year_b"]
+            start_year_b = st.session_state["start_year_b"]
+            personal_contribution_per_year_b = st.session_state["personal_contribution_per_year_b"]
+            grants_per_year_b = st.session_state["grants_per_year_b"]
         _legacy_cc_b = get_shared_default("cc_b", "0") == "1"
         st.session_state.setdefault(
             "cc_mode_b", get_shared_default("cc_mode_b", "fulltime" if _legacy_cc_b else "none"))
@@ -4912,32 +5025,43 @@ if compare_mode:
         st.caption((
             f"{coa_projection_note_b}"
             f"{cc_note_b}"
-            f"→ **{fmt_money(computed_loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal "
+            f"→ **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal "
             f"(incl. {fmt_money(cc_oop_b)} community college)"
             if cc_transfer_b else
             f"{coa_projection_note_b}"
             f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
             f"{fmt_money(personal_contribution_per_year_b)} personal "
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
-            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_b)}** loan, **{fmt_money(personal_contribution_b)}** personal"
+            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
-        # See Scenario A's identical pattern (above) for why this compares
-        # against the last-seen calculated total rather than always
-        # resetting or never resetting.
-        if st.session_state.get("computed_loan_amount_b_seen") != computed_loan_amount_b:
-            st.session_state["computed_loan_amount_b_seen"] = computed_loan_amount_b
-            st.session_state["loan_amount_b"] = int(computed_loan_amount_b)
-        st.session_state.setdefault("loan_amount_b", int(computed_loan_amount_b))
+        # Mirrors Scenario A: default to the college-reported median debt when
+        # available, else the cost-based personal calc. See A's block for why
+        # the seen-guard is keyed on the active default. loan_source_b was already
+        # resolved above (from the global toggle + B's own reported debt); here we
+        # just pick the matching default figure.
+        if loan_source_b == "college":
+            default_loan_b = int(median_debt_b)
+        else:
+            default_loan_b = int(computed_loan_amount_b)
+        if st.session_state.get("default_loan_b_seen") != default_loan_b:
+            st.session_state["default_loan_b_seen"] = default_loan_b
+            st.session_state["loan_amount_b"] = default_loan_b
+        st.session_state.setdefault("loan_amount_b", default_loan_b)
         loan_amount_b = st.number_input(
             "Total Loan Amount ($)", min_value=0, max_value=1000000, step=500,
             key="loan_amount_b",
-            help="Pre-filled with the calculated total above (Cost of "
-                 "Attendance minus Personal Contribution and Grants & "
-                 "Scholarships, summed over 4 years). You can override this "
-                 "with any other amount -- for example, the real total from "
-                 "a financial aid offer -- and that amount is used for "
-                 "every calculation below instead of the calculated total.",
+            help="In Simplified mode this is the median debt graduates who borrowed "
+                 "leave this school with (College Scorecard); in Detailed mode it's "
+                 "the cost-based total (Cost of Attendance minus Personal Contribution "
+                 "and Grants, over 4 years). Override with any amount -- e.g. a real "
+                 "financial aid offer -- used everywhere below.",
         )
+        if loan_source_b == "college":
+            st.caption((
+                f"Simplified: median debt for graduates of {school_name_b} who borrowed "
+                f"({fmt_money(default_loan_b)}, College Scorecard). Switch to Detailed to "
+                "estimate from your own cost & aid instead."
+            ).replace("$", r"\$"))
         if enable_prestige_mode:
             major_b = get_prestige_adjusted_major_name(major_b, prestige_tier_b)
         interest_rate_b = st.number_input(
@@ -5891,28 +6015,50 @@ else:
     if loan_caption:
         st.caption(loan_caption)
 
+    # Computed unconditionally (it's cheap) so the PDF builder always has it; the
+    # on-screen table below is what's shown conditionally.
     loan_schedule_a = compute_loan_schedule_by_year(
         effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
         cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
     )
-    st.caption(
-        "Here's how your loan builds up year by year -- Cost of Attendance "
-        "grows by the estimated inflation rate each year, while Personal "
-        "Contribution and Grants & Scholarships stay the same."
-    )
-    render_centered_table(pd.DataFrame([
-        {"Year": f"{row['year']} ({start_year_a + row['year'] - 1})",
-         "Cost of Attendance": fmt_money(row["coa"]),
-         "Loan Amount This Year": fmt_money(row["loan_amount"])}
-        for row in loan_schedule_a
-    ]))
-    st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
-    if abs(loan_amount - computed_loan_amount_a) >= 1:
+    if loan_source_a == "college":
+        # The loan is the college-reported figure, not a per-year cost buildup, so
+        # a year-by-year COA->loan table would contradict the total. Show the
+        # reported number instead; the cost-based per-year breakdown appears only
+        # when the personal calc is actually the loan in use.
         st.caption((
-            f"You overrode the calculated total ({fmt_money(computed_loan_amount_a)}) in the "
-            "sidebar -- the table above still shows the calculated year-by-year breakdown, "
-            "but every calculation below uses your overridden total instead."
+            f"This uses **{fmt_money(default_loan_a)}** -- the median debt graduates of "
+            f"{school_name_a} who borrowed leave with (College Scorecard). Switch to "
+            "Detailed mode in the sidebar to model your own cost and aid instead."
         ).replace("$", r"\$"))
+    else:
+        st.caption(
+            "Here's how your loan builds up year by year -- Cost of Attendance "
+            "grows by the estimated inflation rate each year, while Personal "
+            "Contribution and Grants & Scholarships stay the same."
+        )
+        render_centered_table(pd.DataFrame([
+            {"Year": f"{row['year']} ({start_year_a + row['year'] - 1})",
+             "Cost of Attendance": fmt_money(row["coa"]),
+             "Loan Amount This Year": fmt_money(row["loan_amount"])}
+            for row in loan_schedule_a
+        ]))
+    st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
+    # "Overridden" is measured against whichever default is active, so the note
+    # only fires on a real manual change (not on the expected college-vs-personal
+    # gap that exists by design).
+    if abs(loan_amount - default_loan_a) >= 1:
+        if loan_source_a == "college":
+            st.caption((
+                f"You changed the loan from the college-reported {fmt_money(default_loan_a)} to "
+                f"{fmt_money(loan_amount)} in the sidebar -- every calculation below uses your amount."
+            ).replace("$", r"\$"))
+        else:
+            st.caption((
+                f"You overrode the calculated total ({fmt_money(computed_loan_amount_a)}) in the "
+                "sidebar -- the table above still shows the calculated year-by-year breakdown, "
+                "but every calculation below uses your overridden total instead."
+            ).replace("$", r"\$"))
 
     loan_metric_cols = st.columns(3)
     loan_metric_cols[0].metric(
@@ -6076,6 +6222,7 @@ else:
         scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
         module_context=module_context, start_year_a=start_year_a, monthly_payment=monthly_payment,
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
+        loan_source_a=loan_source_a,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     )
     with top_actions_container:
@@ -6421,10 +6568,12 @@ debt figures come from the U.S. Department of Education's College
 Scorecard ([collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)).
 In-state and out-of-state Cost of Attendance are pre-calculated for over
 5,000 real U.S. schools (see `clean_college_scorecard.py` for exactly how)
-rather than looked up live each time. Typical debt-at-graduation is looked
-up live instead, so it works for any school in College Scorecard's
-database. Both numbers are shown just for context — they don't feed into
-any of the calculator's math directly. Each scenario has its own school
+rather than looked up live each time. Typical debt-at-graduation — the
+median federal loan debt that graduates who borrowed leave with — is
+looked up live instead, so it works for any school in College Scorecard's
+database. Cost of Attendance is shown for context, but the debt figure now
+does double duty: it's also the **default loan amount** (see the next
+section). Each scenario has its own school
 field, so Compare Mode can hold, say, "Computer Science at School A"
 against "Computer Science at School B." When your school is found, Cost
 of Attendance below auto-fills using in-state or out-of-state pricing,
@@ -6432,19 +6581,33 @@ based on whether you checked **In-State Student?**. If your school isn't
 found, or you'd rather enter your own number, typing over the auto-filled
 value always works — it won't get overwritten later.
 
-**How your loan amount is actually calculated.** You don't type in a loan
-amount directly — instead, each scenario asks for three things per year:
-Cost of Attendance, Personal Contribution, and Grants & Scholarships.
-Cost of Attendance is assumed to grow a little every year (an estimated
-inflation rate), while Personal Contribution and Grants & Scholarships
-stay the same dollar amount each year. Each year's loan amount is
-whatever's left after subtracting Personal Contribution and Grants &
-Scholarships from that year's Cost of Attendance (never less than $0),
-and the total loan is those four years added together:
-`Loan (Year N) = max(Cost of Attendance × (1 + inflation rate)^(N-1) − Personal Contribution − Grants & Scholarships, 0)`,
-added up for all 4 years of an assumed bachelor's degree. Because tuition
-keeps rising while your personal contribution and any scholarships don't,
-the gap — and your loan — tends to grow a bit each year.
+**How your loan amount is actually calculated.** A **Loan estimate** toggle
+in the sidebar lets you choose how the loan is built, and applies to both
+scenarios in Compare Mode:
+
+*Simplified* (the default) uses the school's **median completer debt** from
+College Scorecard — the median federal loan debt that graduates of that
+school who borrowed actually leave with. Because it's a real-world outcome,
+you get a realistic answer just by picking a school, without entering any
+cost or aid. One caveat: it counts federal loans among students who borrowed
+*and* completed, so it can understate the total for someone who will also
+take private or parent loans, or who won't finish — switch to Detailed to
+model those.
+
+*Detailed* builds the loan from your own **Cost of Attendance, Personal
+Contribution, and Grants & Scholarships** (entered per year). Cost of
+Attendance grows a little each year (an estimated inflation rate) while
+Personal Contribution and Grants stay flat; each year's loan is whatever's
+left after subtracting them, never below $0, summed across the 4 years of an
+assumed bachelor's:
+`Loan (Year N) = max(Cost of Attendance × (1 + inflation rate)^(N-1) − Personal Contribution − Grants & Scholarships, 0)`.
+Detailed also shows the year-by-year breakdown. When a school has no reported
+debt (one that reports none, the College Tier estimator, or the live lookup
+being unavailable), Simplified isn't offered and Detailed is used.
+
+Either way, whatever ends up in the **Total Loan Amount** field is what every
+calculation on the page uses — you can also type any amount directly (e.g. a
+real financial aid offer) to override it.
 
 **Getting your own numbers instead of school averages.** The Cost of
 Attendance we auto-fill is a school-wide *average sticker price* — what a
