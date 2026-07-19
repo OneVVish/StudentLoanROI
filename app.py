@@ -5513,7 +5513,8 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
     st.caption(
         "The cost and aid figures here are school-wide averages. For a decision this "
         "big, it's worth five minutes replacing them with your own — both tools below "
-        "are free, official, and only need a few inputs."
+        "are free, official, and only need a few inputs. They're separate government "
+        "sites, not part of this app."
     )
     col_cost, col_sai = st.columns(2)
 
