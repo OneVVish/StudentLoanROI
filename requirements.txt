@@ -12,6 +12,10 @@ numpy==2.5.0
 pyarrow==24.0.0
 plotly==6.8.0
 requests==2.34.2
+# Already an indirect dependency of requests; pinned + imported directly
+# because app.py passes certifi.where() as the TLS CA bundle for the College
+# Scorecard calls (the python.org macOS Python has no usable system root store).
+certifi==2026.6.17
 st-supabase-connection==2.1.3
 openpyxl==3.1.5
 reportlab==5.0.0
