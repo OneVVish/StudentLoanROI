@@ -3418,22 +3418,25 @@ def build_pdf_scenario_comparison_roi_chart(hs_net_position: float,
     return _pdf_image_from_figure(fig)
 
 
-def build_pdf_takehome_pie_chart(take_home: dict) -> Image:
-    """PDF counterpart to build_takehome_pie_chart."""
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+def build_pdf_takehome_pie_chart(take_home: dict, max_width: float = PDF_CONTENT_WIDTH) -> Image:
+    """PDF counterpart to build_takehome_pie_chart. max_width lets the caller
+    render it at half width so the two take-home charts sit side by side on one
+    page (a full-width pair is taller than a page and would split)."""
+    fig, ax = plt.subplots(figsize=(4.5, 4.0))
     labels = ["Take-Home Pay", "Federal Tax", "State Tax", "FICA"]
     values = [take_home["net_take_home"], take_home["federal_tax"],
               take_home["state_tax"], take_home["fica_tax"]]
     ax.pie(values, labels=labels, autopct="%1.0f%%", startangle=90)
     ax.set_title("Where Your Salary Actually Goes")
-    return _pdf_image_from_figure(fig)
+    return _pdf_image_from_figure(fig, max_width=max_width)
 
 
-def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: float) -> Image:
+def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: float,
+                                      max_width: float = PDF_CONTENT_WIDTH) -> Image:
     """PDF counterpart to build_takehome_vs_loan_chart -- same pie-or-bar-
     fallback branch condition (a pie can't represent a payment that
     exceeds take-home pay)."""
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+    fig, ax = plt.subplots(figsize=(4.5, 4.0))
     if monthly_payment <= monthly_net_take_home:
         remaining = monthly_net_take_home - monthly_payment
         ax.pie(
@@ -3448,7 +3451,7 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
         ax.set_title("Monthly Student Loan Payment Exceeds Take-Home Pay")
         ax.set_ylabel("Monthly $")
         ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
-    return _pdf_image_from_figure(fig)
+    return _pdf_image_from_figure(fig, max_width=max_width)
 
 
 def _pdf_table(rows: list, header: bool = True, full_width: bool = False,
@@ -3617,7 +3620,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         if "scenario_b_prestige_tier" in module_context:
             rows.append(["B", module_context["scenario_b_prestige_tier"]])
         elements += [
-            Spacer(1, 12), Paragraph("College Prestige & Cost Estimator", styles["section"]),
+            PageBreak(), Paragraph("College Prestige & Cost Estimator", styles["section"]),
             _pdf_table(rows),
         ]
     if module_context.get("ai_mode_active"):
@@ -3625,7 +3628,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         if "scenario_b_ai_risk_level" in module_context:
             rows.append(["B", module_context["scenario_b_ai_risk_level"]])
         elements += [
-            Spacer(1, 12), Paragraph("AI Employability Risk Analysis", styles["section"]),
+            PageBreak(), Paragraph("AI Employability Risk Analysis", styles["section"]),
             _pdf_table(rows),
         ]
     if module_context.get("future_forecasting_active"):
@@ -3633,7 +3636,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         if "scenario_b_future_plan_selected" in module_context:
             rows.append(["B", module_context["scenario_b_future_plan_selected"]])
         elements += [
-            Spacer(1, 12), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["section"]),
+            PageBreak(), Paragraph("2026 Federal Loan Framework & Macro Forecasting", styles["section"]),
             _pdf_table(rows),
         ]
         if scenario_a is not None:
@@ -3657,7 +3660,7 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
                 ]
     if module_context.get("apprenticeship_active"):
         elements += [
-            Spacer(1, 12),
+            PageBreak(),
             Paragraph("Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)", styles["section"]),
             _pdf_table([
                 [f"{roi_window_years}-Yr Net Position (COL-Adjusted)", "Earnings Premium vs. HS Grad"],
@@ -3787,13 +3790,12 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a),
             header=False, full_width=True,
         ),
-        Spacer(1, 12),
+        PageBreak(),
         Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["section"]),
         *loan_detail,
         Spacer(1, 6),
         Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["body"]),
         *financing_line,
-        *_pdf_resources_section(styles, [(None, school_name_a)]),
         Spacer(1, 6),
         _pdf_table(full_width=True, rows=[
             ["Monthly Payment", "Payoff Timeline", "Total Interest Paid"],
@@ -3805,6 +3807,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         ]),
         Spacer(1, 12),
         build_pdf_balance_chart(repayment_result["schedule"], scenario["strategy_label"]),
+        # "Get Your Real Numbers" starts its own page (PageBreak lives in
+        # _pdf_resources_section) -- placed after the complete Loan Information
+        # section so it no longer splits it.
+        *_pdf_resources_section(styles, [(None, school_name_a)]),
         Spacer(1, 12),
         Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}"), styles["section"]),
         _pdf_table(full_width=True, rows=[
@@ -3814,15 +3820,21 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         ]),
     ]
     if gross > 0 and monthly_payment is not None:
+        # Both take-home charts side by side, so the pair fits on a single page
+        # -- stacked at full width they're each taller than half a page and the
+        # pair overflows, which forced a split.
+        _chart_w = (PDF_CONTENT_WIDTH - 18) / 2
         story += [
             Spacer(1, 12),
-            # Keep the two take-home charts on one page rather than letting a
-            # page break split the pair.
-            KeepTogether([
-                build_pdf_takehome_pie_chart(take_home),
-                Spacer(1, 12),
-                build_pdf_takehome_vs_loan_chart(take_home["net_take_home"] / 12, monthly_payment),
-            ]),
+            KeepTogether(Table(
+                [[build_pdf_takehome_pie_chart(take_home, max_width=_chart_w),
+                  build_pdf_takehome_vs_loan_chart(take_home["net_take_home"] / 12, monthly_payment,
+                                                    max_width=_chart_w)]],
+                colWidths=[PDF_CONTENT_WIDTH / 2, PDF_CONTENT_WIDTH / 2],
+                hAlign="CENTER",
+                style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                  ("ALIGN", (0, 0), (-1, -1), "CENTER")]),
+            )),
         ]
     story += [
         Spacer(1, 12),
