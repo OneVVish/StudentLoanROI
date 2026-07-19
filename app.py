@@ -5506,8 +5506,9 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
     """Route users to the two free federal tools that turn the app's
     school-average sticker inputs into their own personalized figures, and
     spell out exactly which sidebar field each result goes into. Rendered once
-    for everyone, *before* the single/compare results branch -- keeping it out
-    of either branch is what stops it becoming an experiment-arm confound."""
+    for everyone (after the results, just above the survey) at module level,
+    outside the single/compare branches -- keeping it out of either branch is
+    what stops it becoming an experiment-arm confound."""
     st.subheader("🎯 Get Your Real Numbers")
     st.caption(
         "The cost and aid figures here are school-wide averages. For a decision this "
@@ -5550,12 +5551,6 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
 
     st.divider()
 
-
-# school_name_b only exists when Compare Mode is on (it's assigned inside the
-# Scenario B sidebar expander); the conditional short-circuits so the name
-# isn't looked up in single-scenario mode.
-render_get_accurate_inputs(
-    school_name_a, school_name_b if compare_mode else None, compare_mode, enable_prestige_mode)
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
@@ -6531,6 +6526,15 @@ else:
             st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact scenario.")
 
 st.divider()
+
+# "Get Your Real Numbers" sits here -- after the results, just above the survey.
+# It's rendered at module level (outside the single/compare branches that rejoined
+# above), so both experiment arms see it identically -- keeping it out of either
+# branch is what stops it becoming an H2 confound. school_name_b only exists when
+# Compare Mode is on (assigned inside the Scenario B sidebar expander); the
+# conditional short-circuits so the name isn't looked up in single-scenario mode.
+render_get_accurate_inputs(
+    school_name_a, school_name_b if compare_mode else None, compare_mode, enable_prestige_mode)
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------
 
