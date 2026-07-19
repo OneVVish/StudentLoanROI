@@ -3588,7 +3588,7 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
         rows.append(["Personal Contribution (per year)", fmt_money(personal_contribution_per_year)])
         rows.append(["Grants & Scholarships (per year)", fmt_money(grants_per_year)])
     rows += [
-        ["Average Loan Interest Rate", fmt_pct(interest_rate_pct)],
+        ["Federal Direct rate", fmt_pct(interest_rate_pct)],
         ["Repayment Strategy", repayment_strategy_label],
     ]
     return rows
@@ -4138,7 +4138,7 @@ st.sidebar.header("🎓 Your Profile")
 # alike): hide the +/- stepper buttons, and show a $ or % unit prefix on
 # the left based on which one appears in the widget's own label -- every
 # number_input in this app has exactly one or the other (e.g. "Cost of
-# Attendance (per year, $)", "Average Loan Interest Rate (%)"), and
+# Attendance (per year, $)", "Federal Direct rate (%)"), and
 # Streamlit mirrors that label text onto the input's aria-label, so a
 # plain CSS attribute selector is enough without touching each widget.
 st.markdown(
@@ -6897,14 +6897,19 @@ $7,500 / $7,500** per year for a dependent undergraduate (higher if
 independent), so roughly **$27,000 over four years** ($45,000 independent).
 Need above that limit can't be met with Direct loans — it comes from **Direct
 PLUS or private/alternative loans** at a higher rate, plus origination fees
-(~1.06% federal, ~4.23% PLUS). So Detailed mode splits your loan into the
-capped federal tranche (at your **Federal Direct rate**) and a **gap tranche**
-(at your **Gap financing rate**), grosses each up for its fee, and repays the
-combined balance at the principal-weighted **blended** rate — the breakdown is
-shown under the loan metrics. The **Dependency status** toggle sets the cap;
-professional-school debt (medicine/law) falls into the gap tranche, a
-reasonable stand-in for its real Grad PLUS pricing. Rates default to recent
-figures and reset every July 1 — enter your own.
+(1.057% on Direct Subsidized/Unsubsidized, 4.228% on Direct PLUS — stable
+since October 2020). So Detailed mode splits your loan into the capped federal
+tranche (at your **Federal Direct rate**) and a **gap tranche** (at your **Gap
+financing rate**), grosses each up for its fee, and repays the combined balance
+at the principal-weighted **blended** rate — the breakdown is shown under the
+loan metrics. The **Dependency status** toggle sets the cap; professional-school
+debt (medicine/law) falls into the gap tranche, a reasonable stand-in for its
+real Grad PLUS pricing. Interest rates reset every July 1: for loans first
+disbursed in 2025–26 the undergraduate Direct rate is 6.39% and Grad PLUS is
+8.94% — the app defaults to 6.5% and 8.5% as round placeholders, so enter your
+own. Loan limits, rates, and fees: U.S. Department of Education / Federal
+Student Aid ([studentaid.gov/understand-aid/types/loans/interest-rates](https://studentaid.gov/understand-aid/types/loans/interest-rates)
+and [.../subsidized-unsubsidized](https://studentaid.gov/understand-aid/types/loans/subsidized-unsubsidized)).
 
 *A simplification worth knowing:* the model repays everything at one blended
 rate, so under **Income-Driven Repayment** it applies forgiveness to the whole
@@ -6987,16 +6992,17 @@ apply the same way. This makes every dollar figure here a real (inflation-
 adjusted), apples-to-apples comparison rather than a nominal one.
 
 **Overriding the Total Loan Amount.** The "Total Loan Amount ($)" field
-right above Average Loan Interest Rate is pre-filled with that calculated
-total, but you can type over it with any other number — for example, the
-real total from an actual financial aid offer letter, which won't match
-this simplified per-year model exactly. Once you do, every calculation on
-this page uses your typed number instead of the calculated one (the
-per-year table above it still shows the calculated breakdown, for
-reference). Your override sticks across reruns, but refreshes back to the
-newly calculated total the next time you change Cost of Attendance,
-Personal Contribution, Grants & Scholarships, or your school -- the same
-way the Cost of Attendance field itself auto-fills from a school lookup
+(just above the Federal Direct rate) is pre-filled for you — with the
+school's reported median debt in **Simplified** mode, or the cost-based
+per-year total in **Detailed** mode — but you can type over it with any
+other number, for example the real total from an actual financial aid offer
+letter. Once you do, every calculation on this page uses your typed number
+instead (in Detailed, the per-year table still shows the calculated
+breakdown, for reference). Your override sticks across reruns, but refreshes
+back to the pre-filled default the next time you change something that moves
+it — switching schools or the Loan estimate mode, or (in Detailed) editing
+Cost of Attendance, Personal Contribution, or Grants & Scholarships — the
+same way the Cost of Attendance field itself auto-fills from a school lookup
 until you type over it.
 
 **Why Grants & Scholarships and Personal Contribution are treated
