@@ -268,3 +268,50 @@ create index if not exists usage_logs_traffic_source_idx on usage_logs (traffic_
 -- Query them with `where action like 'horizon_changed:%'`. Reporting the
 -- compare-toggle compliance rate is standard practice for a randomised
 -- trial; H2 stays intent-to-treat on experiment_arm regardless.
+
+
+-- 2026-07-27: admin-dashboard breakdown fields
+--   career_data_source, loan_mode, cc_mode_a, cc_mode_b.
+--
+-- These four choices were previously carried ONLY in share-link params
+-- (build_share_params) and the PDF -- never persisted -- so the admin
+-- dashboard could not break usage down by any of them. build_scenario_context
+-- now emits them, so the four scenario tables need the columns. Until this is
+-- applied, every survey/pdf/share/scenario_event write is rejected whole
+-- (PGRST204) exactly like a missing column always is here -- run this file
+-- BEFORE deploying the app change. usage_logs is untouched (it carries no
+-- scenario context), so pageview logging is unaffected either way.
+--
+--   career_data_source -- 'National' / 'California' wage dataset (Career mode
+--     only; the radio is disabled in Major mode, so read it together with
+--     dataset_mode -- a Major-mode row's value is just the inert default).
+--   loan_mode          -- 'Simplified' (school median debt) / 'Detailed'
+--     (cost/aid inputs). Global, one per session.
+--   cc_mode_a/b        -- community-college path: 'none' / 'fulltime' /
+--     'parttime'. cc_mode_b is only set in Compare Mode (NULL otherwise).
+--
+-- Rows predating this are NULL: unknown, not a default -- exclude from the
+-- relevant breakdown rather than counting as 'National'/'Simplified'/'none'.
+alter table survey_responses
+  add column if not exists career_data_source text,
+  add column if not exists loan_mode text,
+  add column if not exists cc_mode_a text,
+  add column if not exists cc_mode_b text;
+
+alter table pdf_downloads
+  add column if not exists career_data_source text,
+  add column if not exists loan_mode text,
+  add column if not exists cc_mode_a text,
+  add column if not exists cc_mode_b text;
+
+alter table scenario_shares
+  add column if not exists career_data_source text,
+  add column if not exists loan_mode text,
+  add column if not exists cc_mode_a text,
+  add column if not exists cc_mode_b text;
+
+alter table scenario_events
+  add column if not exists career_data_source text,
+  add column if not exists loan_mode text,
+  add column if not exists cc_mode_a text,
+  add column if not exists cc_mode_b text;

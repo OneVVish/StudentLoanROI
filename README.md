@@ -90,6 +90,15 @@ To run the app yourself, you need your own free Supabase project:
      perception_change text,
      feedback_text text,
 
+     -- Session-global scenario context (see build_scenario_context). Each was
+     -- previously only in the share link; logged now so the admin dashboard
+     -- can break usage down by them. career_data_source is Career-mode only
+     -- (inert default in Major mode); cc_mode_b is NULL outside Compare Mode.
+     career_data_source text,   -- National / California
+     loan_mode text,            -- Simplified / Detailed
+     cc_mode_a text,            -- none / fulltime / parttime
+     cc_mode_b text,            -- none / fulltime / parttime (Compare Mode only)
+
      -- Scenario A (see build_scenario_context in app.py).
      scenario_a_school_name text,
      scenario_a_major text,

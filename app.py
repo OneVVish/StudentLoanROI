@@ -1438,6 +1438,16 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # same column. Any analysis stratifying on ROI or salary must group
         # by this, exactly as it must for roi_horizon_years.
         "dataset_mode": dataset_mode,
+        # The three fields below read module-level globals the same way
+        # dataset_mode does (assigned in section 4 before the results run), so
+        # no caller signature changes. They used to live only in share-link
+        # params (build_share_params), which meant the admin dashboard could
+        # not break usage down by any of them. career_data_source is only
+        # meaningful in Career mode (the radio is disabled in Major mode);
+        # read it together with dataset_mode when aggregating.
+        "career_data_source": career_data_source,                      # National / California
+        "loan_mode": st.session_state.get("loan_mode", "Simplified"),  # Simplified / Detailed
+        "cc_mode_a": cc_mode_a,                                         # none / fulltime / parttime
         # The horizon every roi_pct/earnings_premium below was computed over.
         # Without it those columns aren't comparable across rows: a 30-year
         # ROI and a 10-year ROI are different quantities wearing the same
@@ -1468,6 +1478,9 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         starting_salary_b = MAJOR_DATA[major_b]["starting_salary"]
         dti_ratio_b = round(loan_amount_b / starting_salary_b, 4) if starting_salary_b else None
         context.update({
+            # cc_mode_b is a module global only in the compare branch (assigned
+            # in section 5c), so it is referenced only here, inside compare_mode.
+            "cc_mode_b": cc_mode_b,   # none / fulltime / parttime
             "scenario_b_school_name": school_name_b or None,
             "scenario_b_major": major_b,
             "scenario_b_loan_amount": loan_amount_b,
@@ -5484,21 +5497,180 @@ top_actions_container = st.container()
 # a single top banner can't answer for two scenarios at once.
 breakeven_banner_container = st.container()
 
+# ---- 5a. Admin Analytics Dashboard: aggregation helpers -------------------
+
+def _admin_parse_dates(df: pd.DataFrame) -> pd.Series:
+    """usage_logs timestamps are ISO strings stamped in the visitor's own
+    timezone (now_local), so offsets vary row to row -- utc=True normalizes
+    them to one axis, errors='coerce' turns anything unparseable into NaT
+    rather than raising. Returns a Series of python dates aligned to df.index."""
+    return pd.to_datetime(df["timestamp"], utc=True, errors="coerce").dt.date
+
+
+def _admin_final_per_session(events_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per session_id -- the visitor's LAST scenario_events row (max
+    event_seq) -- so the breakdowns read as 'what each distinct visitor ended
+    up configuring', not raw event volume (a session that tried five majors
+    would otherwise count five times). Order by event_seq, never timestamp:
+    timestamps come from the visitor's own clock and can tie or run backwards."""
+    if events_df.empty or "session_id" not in events_df.columns:
+        return events_df
+    df = events_df.copy()
+    if "event_seq" in df.columns:
+        df["_seq"] = pd.to_numeric(df["event_seq"], errors="coerce").fillna(-1)
+        df = df.sort_values("_seq")
+    df = df.drop_duplicates(subset="session_id", keep="last")
+    return df.drop(columns=[c for c in ["_seq"] if c in df.columns])
+
+
+def _admin_count_table(df: pd.DataFrame, column: str, label: str,
+                        missing: str = "(none)") -> None:
+    """value_counts on one column, rendered via render_centered_table. NULL or
+    empty values fold into `missing` (newly-logged columns are all-NULL on
+    historical rows, so this is the common case at first). Emits a 'No data
+    yet' caption and returns when the column is absent or the frame is empty."""
+    if df.empty or column not in df.columns:
+        st.caption("No data yet.")
+        return
+    series = df[column].astype("object").where(df[column].notna(), missing)
+    series = series.replace("", missing)
+    counts = series.value_counts().reset_index()
+    counts.columns = [label, "Count"]
+    render_centered_table(counts)
+
+
+def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
+    """Distinct session_ids across the union of the given tables -- the funnel
+    counts visitors, not rows, and a visitor can appear in several tables."""
+    parts = [d["session_id"] for d in dfs if not d.empty and "session_id" in d.columns]
+    if not parts:
+        return 0
+    return int(pd.concat(parts, ignore_index=True).dropna().nunique())
+
+
 # ---- 5a. Admin Analytics Dashboard (hidden behind sidebar checkbox) ------
 
 if admin_enabled:
     st.subheader("📊 Admin Analytics Dashboard")
 
-    usage_df = load_table_safe("usage_logs", columns=["timestamp", "action"])
-    pdf_downloads_df = load_table_safe("pdf_downloads", columns=["timestamp"])
-    scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp"])
-    survey_df = load_table_safe("survey_responses", columns=["timestamp"])
+    # load_table_safe does select("*"); the columns= list is only the fallback
+    # frame's shape when a table can't be read, so it names what each panel needs.
+    usage_df = load_table_safe(
+        "usage_logs", columns=["timestamp", "action", "traffic_source", "session_id"])
+    events_df = load_table_safe(
+        "scenario_events",
+        columns=["timestamp", "session_id", "event_seq", "dataset_mode",
+                 "career_data_source", "loan_mode", "cc_mode_a", "scenario_a_major",
+                 "scenario_a_loan_amount", "scenario_a_repayment_strategy",
+                 "roi_horizon_years", "experiment_arm"])
+    pdf_downloads_df = load_table_safe("pdf_downloads", columns=["timestamp", "session_id"])
+    scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp", "session_id"])
+    survey_df = load_table_safe("survey_responses", columns=["timestamp", "session_id"])
+
+    # One row per distinct visitor's final configuration -- the basis for every
+    # "what visitors configured" breakdown below.
+    final_df = _admin_final_per_session(events_df)
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total App Interactions", len(usage_df))
     col2.metric("Total Survey Responses", len(survey_df))
     col3.metric("Total PDF Downloads", len(pdf_downloads_df))
     col4.metric("Total Scenario Shares", len(scenario_shares_df))
+
+    st.divider()
+
+    # (a) App interactions over time
+    st.markdown("#### 📈 App interactions over time")
+    _daily = _admin_parse_dates(usage_df).dropna() if (
+        not usage_df.empty and "timestamp" in usage_df.columns) else pd.Series([], dtype=object)
+    if _daily.empty:
+        st.caption("No data yet.")
+    else:
+        by_day = _daily.value_counts().sort_index()
+        chart_df = pd.DataFrame({"Interactions": by_day.values},
+                                index=pd.to_datetime(list(by_day.index)))
+        st.bar_chart(chart_df)
+
+    # (b) App interactions by traffic source (?src= tag)
+    st.markdown("#### 🔗 Interactions by traffic source")
+    st.caption("From the `?src=` tag on the link visitors arrived through; "
+               "organic visits carry none.")
+    _admin_count_table(usage_df, "traffic_source", "Source", missing="(organic)")
+
+    st.divider()
+    st.markdown("#### 🎓 What visitors configured")
+    st.caption(f"One row per distinct visitor ({len(final_df)} sessions with a "
+               "scenario), taking each session's final selection.")
+
+    # (e) Major vs Career
+    st.markdown("**Chose by — Major vs Career**")
+    _admin_count_table(final_df, "dataset_mode", "Mode")
+
+    # (f) National vs California (Career mode only -- the radio is disabled in
+    # Major mode, so a Major-mode row's value is just the inert default)
+    st.markdown("**Wage dataset — National vs California**")
+    st.caption("Career mode only; Major mode has no geography, so those "
+               "sessions are excluded rather than counted as the default.")
+    _career_only = final_df[final_df["dataset_mode"] == DATASET_MODE_CAREER] if (
+        not final_df.empty and "dataset_mode" in final_df.columns) else final_df
+    _admin_count_table(_career_only, "career_data_source", "Dataset")
+
+    # (c) Community-college path
+    st.markdown("**Community-college path**")
+    _admin_count_table(final_df, "cc_mode_a", "CC mode")
+
+    # (d) Loan estimate -- amount ranges AND Simplified/Detailed mode
+    st.markdown("**Loan estimate — amount ranges**")
+    _amounts = pd.to_numeric(final_df["scenario_a_loan_amount"], errors="coerce").dropna() if (
+        not final_df.empty and "scenario_a_loan_amount" in final_df.columns) else pd.Series([], dtype=float)
+    if _amounts.empty:
+        st.caption("No data yet.")
+    else:
+        _bins = [-0.01, 0, 10_000, 25_000, 50_000, 100_000, float("inf")]
+        _labels = ["$0", "≤ $10k", "≤ $25k", "≤ $50k", "≤ $100k", "> $100k"]
+        _buckets = pd.cut(_amounts, bins=_bins, labels=_labels)
+        _table = _buckets.value_counts().reindex(_labels).fillna(0).astype(int).reset_index()
+        _table.columns = ["Loan amount", "Count"]
+        render_centered_table(_table)
+
+    st.markdown("**Loan estimate — Simplified vs Detailed**")
+    _admin_count_table(final_df, "loan_mode", "Loan mode")
+
+    st.divider()
+    st.markdown("#### 🔎 Other breakdowns")
+
+    # Top majors / careers chosen
+    st.markdown("**Top 10 majors / careers chosen**")
+    if final_df.empty or "scenario_a_major" not in final_df.columns or \
+            final_df["scenario_a_major"].dropna().empty:
+        st.caption("No data yet.")
+    else:
+        _top = final_df["scenario_a_major"].dropna().value_counts().head(10).reset_index()
+        _top.columns = ["Major / career", "Count"]
+        render_centered_table(_top)
+
+    # Repayment strategy
+    st.markdown("**Repayment strategy**")
+    _admin_count_table(final_df, "scenario_a_repayment_strategy", "Strategy")
+
+    # ROI horizon
+    st.markdown("**ROI horizon (years)**")
+    _admin_count_table(final_df, "roi_horizon_years", "Horizon (yrs)")
+
+    # Experiment arm (H2 randomised assignment)
+    st.markdown("**Experiment arm (H2 assignment)**")
+    _admin_count_table(final_df, "experiment_arm", "Arm")
+
+    # Engagement funnel -- distinct visitors reaching each stage
+    st.markdown("**Engagement funnel (distinct sessions)**")
+    _funnel = pd.DataFrame({
+        "Stage": ["Visited (pageviews)", "Configured a scenario",
+                  "Committed (PDF / share / survey)"],
+        "Sessions": [_admin_n_sessions(usage_df),
+                     _admin_n_sessions(events_df),
+                     _admin_n_sessions(pdf_downloads_df, scenario_shares_df, survey_df)],
+    })
+    render_centered_table(_funnel)
 
     st.divider()
 
