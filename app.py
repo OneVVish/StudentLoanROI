@@ -3092,7 +3092,10 @@ def build_takehome_pie_chart(take_home: dict):
                  take_home["state_tax"], take_home["fica_tax"]],
         title="Where Your Salary Actually Goes",
     )
-    fig.update_traces(textinfo="percent+label", automargin=True)
+    # Dollar amount alongside the percentage on each slice, matching the
+    # Loan-vs-What's-Left pie. %{value:$,.0f} is d3 currency formatting.
+    fig.update_traces(
+        texttemplate="%{label}<br>%{value:$,.0f} (%{percent})", automargin=True)
     fig.update_layout(showlegend=False, title_font_size=14)
     return fig
 
@@ -3120,7 +3123,12 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
             values=[monthly_payment, remaining],
             title="Your Monthly Take-Home Pay: Loan vs. What's Left",
         )
-        fig.update_traces(textinfo="percent+label", automargin=True)
+        # Show the dollar amount alongside the percentage on each slice, not
+        # just percent -- "$4,631 (60%)" is more actionable than "60%" alone
+        # when the whole point is how much cash the payment actually consumes.
+        # %{value:$,.0f} is d3 currency formatting, matching fmt_money's style.
+        fig.update_traces(
+            texttemplate="%{label}<br>%{value:$,.0f} (%{percent})", automargin=True)
         fig.update_layout(showlegend=False, title_font_size=14)
         return fig
     fig = px.bar(
@@ -3485,7 +3493,14 @@ def build_pdf_takehome_pie_chart(take_home: dict, max_width: float = PDF_CONTENT
     labels = ["Take-Home Pay", "Federal Tax", "State Tax", "FICA"]
     values = [take_home["net_take_home"], take_home["federal_tax"],
               take_home["state_tax"], take_home["fica_tax"]]
-    ax.pie(values, labels=labels, autopct="%1.0f%%", startangle=90)
+    # Dollar amount alongside the percentage, in sync with the on-screen
+    # build_takehome_pie_chart. autopct only gets the percentage, so recover
+    # each slice's dollars from it via the total (sum of all four slices).
+    _pie_total = sum(values)
+    ax.pie(
+        values, labels=labels, startangle=90,
+        autopct=lambda pct: f"${pct / 100 * _pie_total:,.0f}\n({pct:.0f}%)",
+    )
     ax.set_title("Where Your Salary Actually Goes")
     return _pdf_image_from_figure(fig, max_width=max_width)
 
@@ -3498,10 +3513,16 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
     fig, ax = plt.subplots(figsize=(4.5, 4.0))
     if monthly_payment <= monthly_net_take_home:
         remaining = monthly_net_take_home - monthly_payment
+        # Kept in sync with the on-screen build_takehome_vs_loan_chart, which
+        # now labels each slice with its dollar amount as well as the percent.
+        # matplotlib's autopct only gets the percentage, so recover the dollar
+        # value from it via the slice total (payment + remaining).
+        _pie_total = monthly_payment + remaining
         ax.pie(
             [monthly_payment, remaining],
             labels=["Student Loan Payment", "What's Left to Spend"],
-            autopct="%1.0f%%", startangle=90,
+            autopct=lambda pct: f"${pct / 100 * _pie_total:,.0f}\n({pct:.0f}%)",
+            startangle=90,
         )
         ax.set_title("Your Monthly Take-Home Pay: Loan vs. What's Left")
     else:
