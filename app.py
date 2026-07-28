@@ -3040,6 +3040,19 @@ def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major
     return fig
 
 
+def cc_chart_label_suffix(cc_mode) -> str:
+    """Compact community-college-path tag appended to a scenario's label in the
+    side-by-side comparison charts (on screen and in the PDF), so a 2+2 transfer
+    scenario is distinguishable from a straight four-year one right on the chart.
+    Empty for a four-year start (cc_mode 'none' or None), matching the panels'
+    render_cc_path_note, which shows nothing then too."""
+    if cc_mode == "fulltime":
+        return " (via comm. college)"
+    if cc_mode == "parttime":
+        return " (via comm. college, working)"
+    return ""
+
+
 def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
                                     schedule_b: pd.DataFrame, label_b: str):
     """Overlay both scenarios' loan balance curves on one chart for direct
@@ -4103,14 +4116,14 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         Paragraph(_strip_emoji("📊 Side-by-Side Charts"), styles["section"]),
         Spacer(1, 6),
         build_pdf_comparison_balance_chart(
-            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
-            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
+            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
+            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
         ),
         Spacer(1, 12),
         build_pdf_scenario_comparison_roi_chart(
             scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
-            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
+            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
             roi_window_years,
         ),
         *_pdf_resources_section(styles, [("Scenario A", school_name_a), ("Scenario B", school_name_b)]),
@@ -6429,16 +6442,16 @@ if compare_mode:
 
     st.plotly_chart(
         build_comparison_balance_chart(
-            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}",
-            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}",
+            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
+            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}",
         ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
     st.plotly_chart(
         build_scenario_comparison_roi_chart(
             scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}",
-            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}",
+            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
+            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}",
             roi_horizon_years,
         ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
