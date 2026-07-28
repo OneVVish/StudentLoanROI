@@ -5967,12 +5967,34 @@ def render_takehome_block(scenario: dict, major_name: str, career_stage_key: int
     }
 
 
+def render_cc_path_note(cc_mode: str) -> None:
+    """One-line community-college-path note rendered into the current container.
+
+    Called from BOTH the single-scenario Loan Information section and the
+    Compare Mode scenario panel, so a 2+2 transfer scenario is visibly labelled
+    as one in either arm -- anything one branch shows and the other doesn't is
+    an H2 confound. Renders nothing for a straight four-year start ('none'),
+    matching the PDF's _cc_info_for_pdf, which omits the disclosure then too."""
+    if cc_mode == "fulltime":
+        st.caption(
+            f"🏫 **Community-college path:** {COMMUNITY_COLLEGE_YEARS} years at a "
+            "community college, then transfer to finish the same degree — the "
+            "community-college years are paid out of pocket, not financed."
+        )
+    elif cc_mode == "parttime":
+        st.caption(
+            f"🏫 **Community-college path:** {COMMUNITY_COLLEGE_YEARS} years at a "
+            "community college **while working full-time**, then transfer to "
+            "finish the same degree."
+        )
+
+
 def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: int,
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
                            col_index: float, career_data_source_name: str,
                            hs_wage_index: float = 1.0,
                            federal_cap: float = None, gap_rate: float = None,
-                           include_fees: bool = False):
+                           include_fees: bool = False, cc_mode: str = "none"):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -5995,6 +6017,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
     """
     with column:
         st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']}**")
+        render_cc_path_note(cc_mode)
 
         for caption in get_investment_captions(scenario):
             st.caption(caption)
@@ -6371,6 +6394,7 @@ if compare_mode:
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+        cc_mode=cc_mode_a,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -6378,6 +6402,7 @@ if compare_mode:
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
+        cc_mode=cc_mode_b,
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -6530,6 +6555,8 @@ else:
     # ---- 5c-1. Loan Information --------------------------------------------
 
     st.subheader(f"💳 Loan Information — {strategy_label}")
+
+    render_cc_path_note(cc_mode_a)
 
     loan_caption = get_loan_principal_caption(scenario)
     if loan_caption:
