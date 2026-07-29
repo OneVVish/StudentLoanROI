@@ -3381,6 +3381,47 @@ def _pdf_breakeven_block(breakeven: dict, styles: dict, scenario_label: str = No
     return parts
 
 
+def _pdf_major_careers_section(underemployment_majors: list, styles: dict) -> list:
+    """PDF flowables for "Careers this major commonly leads to" -- the report
+    twin of the on-screen render_major_careers. Major mode only: it reuses the
+    (label, major) pairs the sources section already builds, which are None in
+    Career mode. One line per distinct major that maps to a labelled SOC group
+    with example occupations; returns [] when nothing qualifies (e.g. only
+    unmapped majors like Interdisciplinary Studies), so the section simply
+    doesn't appear -- matching the on-screen behaviour. Kept in sync with
+    render_major_careers per the two-parallel-implementations rule."""
+    if not underemployment_majors:
+        return []
+    multi = len({m for _, m in underemployment_majors}) > 1
+    seen, lines = set(), []
+    for label, mjr in underemployment_majors:
+        if mjr in seen:
+            continue
+        seen.add(mjr)
+        group = MAJOR_DATA.get(mjr, {}).get("soc_major_group")
+        group_label = (AI_EXPOSURE_BY_SOC_GROUP.get(group) or {}).get("label") if group else None
+        examples = careers_for_major(group, CAREERS_CSV_PATH_NATIONAL) if group_label else []
+        if not examples:
+            continue
+        listing = ", ".join(f"{xml_escape(title)} ({fmt_money(median)})" for title, median in examples)
+        prefix = f"<b>{xml_escape(label)}:</b> " if label and multi else ""
+        lines.append(Paragraph(prefix + listing, styles["body"]))
+    if not lines:
+        return []
+    return [
+        Spacer(1, 10),
+        Paragraph("Careers this major commonly leads to", styles["section"]),
+        Paragraph(
+            "Example occupations in the field each major most commonly leads to, at national "
+            "median pay (U.S. Bureau of Labor Statistics) — a representative sample, not an "
+            "exhaustive or guaranteed list.",
+            styles["caption"],
+        ),
+        Spacer(1, 4),
+        *lines,
+    ]
+
+
 def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False,
                           underemployment_majors: list = None,
                           uses_community_college: bool = False) -> list:
@@ -3457,10 +3498,18 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
             disclosure_paras.append(Paragraph(prefix + text, styles["body"]))
     else:
         disclosure_paras = [Paragraph(underemployment_disclosure(None, for_pdf=True), styles["body"])]
+
+    # PDF twin of the on-screen "Careers this major commonly leads to" section
+    # (render_major_careers). Major mode only -- built from the same
+    # underemployment_majors list, which is None in Career mode. Keep in sync
+    # with render_major_careers, per the two-parallel-chart-implementations rule.
+    careers_flowables = _pdf_major_careers_section(underemployment_majors, styles)
+
     return [
         PageBreak(),
         Paragraph("What these numbers assume", styles["section"]),
         *disclosure_paras,
+        *careers_flowables,
         Spacer(1, 10),
         Paragraph("Where these numbers come from", styles["section"]),
         _pdf_table(rows, col_ratios=[0.24, 0.76]),
