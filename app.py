@@ -543,6 +543,53 @@ def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) ->
         base += f" Switch {bold('Choose by')} to {ital('Major')} for figures that include them."
     return base
 
+
+def render_major_careers(major_name: str, compact: bool = False) -> None:
+    """Render a short "Careers this major commonly leads to" block for the
+    selected major, into the current Streamlit container.
+
+    Answers the "what jobs does this major lead to?" question from data the app
+    already owns: the major's SOC major group (already on every major via
+    NYFED_MAJOR_SOC_GROUP) is used to pull real BLS occupations in that field,
+    each with its real median wage (careers_for_major). No external careers
+    source is copied -- the reference site that inspired this is copyrighted and
+    paywalled, so only the idea is reused, from public BLS data in the repo.
+
+    Renders nothing when the major has no mapped SOC group (Interdisciplinary
+    Studies, Liberal Arts -- which genuinely span the whole labour market) or the
+    group has no label, exactly as underemployment_disclosure degrades. Shared by
+    the single-scenario view and Compare Mode's per-scenario panel so both result
+    branches show it identically (an asymmetry between them is an H2 confound);
+    compact=True drops it to a caption for Compare Mode's narrow columns.
+
+    Deliberately uses the National BLS dataset regardless of the Career-source
+    radio, so the "leads to" set for a major is stable across geographies -- the
+    caption says so.
+    """
+    group = MAJOR_DATA.get(major_name, {}).get("soc_major_group")
+    label = (AI_EXPOSURE_BY_SOC_GROUP.get(group) or {}).get("label") if group else None
+    if not label:
+        return
+    examples = careers_for_major(group, CAREERS_CSV_PATH_NATIONAL)
+    if not examples:
+        return
+    lines = "  \n".join(f"• {title} — {fmt_money(median)} median" for title, median in examples)
+    caption = (
+        f"Example occupations in the **{label}** field — a representative sample "
+        "from the U.S. Bureau of Labor Statistics, not an exhaustive or guaranteed "
+        "list. A major spreads across many paths; these are common destinations, "
+        "shown at national median pay."
+    ).replace("$", r"\$")
+    body = lines.replace("$", r"\$")
+    if compact:
+        st.caption("**💼 Careers this major commonly leads to**  \n" + body)
+        st.caption(caption)
+    else:
+        with st.expander("💼 Careers this major commonly leads to"):
+            st.markdown(body)
+            st.caption(caption)
+
+
 # Registered Apprenticeship benchmark for the "Alternative Pathway" card.
 # Year-1 training wage ($52,000) and average starting salary upon
 # completion ($86,000) bookend a two-phase illustrative wage curve: pay
@@ -936,6 +983,60 @@ AI_EXPOSURE_BY_SOC_GROUP = {
     "55": {"label": "Military Specific", "risk_level": "Low", "score": 20,
            "rationale": "Not covered in detail by the civilian occupational-exposure research this feature is based on."},
 }
+
+
+@st.cache_data(show_spinner=False)
+def careers_for_major(soc_group: str, csv_path: str, limit: int = 6) -> list:
+    """Example BLS occupations a major commonly leads to, for the "Careers this
+    major leads to" section (Major mode).
+
+    A NY Fed major already carries a 2-digit SOC major group (NYFED_MAJOR_SOC_
+    GROUP); this returns real occupations from that same group in the app's own
+    BLS dataset, each with its real median wage -- so "what does this major lead
+    to" is answered from data already in the repo, not from any external (and in
+    this case copyrighted/paywalled) careers reference.
+
+    Restricted toward bachelor's-level+ roles: an SOC major group also contains
+    sub-bachelor's occupations (e.g. Ushers under "Arts, Design, Entertainment,
+    Sports & Media") that a four-year major doesn't lead to, and listing them
+    would misrepresent the degree. If that filter leaves too few (<3) to be
+    useful, fall back to the unfiltered group rather than show a near-empty list.
+
+    Read via load_bls_careers (already cached) rather than re-reading the CSV.
+    soc_group and csv_path are passed args, not globals, so the @st.cache_data
+    key stays correct (same reason find_breakeven_loan takes its rate as an arg).
+    Returns [(occ_title, median_salary), ...] sorted by median desc, capped at
+    `limit`; empty list when the group is None/unknown or the dataset is missing.
+    """
+    if not soc_group:
+        return []
+    careers = load_bls_careers(csv_path)
+    in_group = [
+        (title, info["median_salary"])
+        for title, info in careers.items()
+        if info.get("soc_major_group") == soc_group and info.get("median_salary")
+    ]
+    # A 2-digit SOC major group spans every education level, so an unfiltered
+    # list misrepresents the degree in BOTH directions: it pulls in sub-
+    # bachelor's roles a four-year major doesn't lead to (Ushers under Arts),
+    # AND advanced-degree roles a bachelor's alone doesn't reach (Pediatric
+    # Surgeons under Nursing). The NY Fed majors are all bachelor's-level, so
+    # prefer occupations BLS marks as bachelor's-entry -- the truest "what this
+    # degree leads to". Degrade gracefully if that leaves too few: bachelor's-or-
+    # above (drop only sub-bachelor's), then the whole group, so a small or
+    # oddly-classified group still shows something rather than nothing.
+    bachelors_only = [(t, m) for t, m in in_group
+                      if careers[t].get("typical_education") == "Bachelor's degree"]
+    bachelors_plus = [(t, m) for t, m in in_group
+                      if careers[t].get("typical_education") not in SUB_BACHELORS_EDUCATION_LEVELS]
+    if len(bachelors_only) >= 3:
+        pool = bachelors_only
+    elif len(bachelors_plus) >= 3:
+        pool = bachelors_plus
+    else:
+        pool = in_group
+    pool.sort(key=lambda tm: tm[1], reverse=True)
+    return pool[:limit]
 
 # The AI Employability Risk feature keys off SOC occupation major groups, which
 # Career-mode (BLS) and CURATED_MAJOR_DATA carry directly. Major mode's NY Fed
@@ -6078,6 +6179,9 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # the call site.
         if dataset_mode == DATASET_MODE_MAJOR:
             st.caption(underemployment_disclosure(scenario["major"]))
+            # Careers this major leads to -- compact, so each narrow compare
+            # column shows its own. Same helper as the single-scenario view.
+            render_major_careers(scenario["major"], compact=True)
 
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
@@ -6734,6 +6838,12 @@ else:
     # buried in Methodology where nobody reads it.
     st.info(underemployment_disclosure(major if dataset_mode == DATASET_MODE_MAJOR else None))
 
+    # Careers this major leads to -- Major mode only (a Career-mode pick already
+    # IS a specific occupation). Shared helper, also called from render_scenario_
+    # panel so both result branches match.
+    if dataset_mode == DATASET_MODE_MAJOR:
+        render_major_careers(major)
+
     # Which geography the salary above actually came from. BLS suppresses
     # roughly a fifth of occupation-by-metro cells, so those fall back to a
     # national wage -- and a national number standing in for a local one,
@@ -7022,6 +7132,19 @@ Counseling Psychologists) — so applying a per-career underemployment rate
 would mean guessing at which majors feed which careers. We'd rather tell
 you the assumption than invent a number to hide it. Read every figure below
 as "if you land the job," not "you will land the job."
+
+**"Careers this major commonly leads to" (Major mode).** Beside that
+disclosure we list a few example occupations for the selected major, each at
+its national median pay. These are real BLS occupations drawn from the same
+occupation major group the major maps to (the SOC group described in the AI
+module note below) — a **representative sample of the field, not an
+exhaustive or guaranteed list**, since a major spreads across many jobs.
+Wages are the national BLS medians already used throughout this app, shown at
+the national level regardless of the California/National salary toggle so the
+"leads to" set stays stable. Occupations that a four-year degree doesn't
+typically lead to (those BLS marks as needing less than a bachelor's) are
+filtered out. This is our own summary of public BLS data — it is not drawn
+from any subscription careers guide.
 
 **What if you skip college? The high school graduate baseline.** We
 compare every major against $49,192/year — real median pay for full-time
