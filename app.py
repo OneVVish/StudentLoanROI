@@ -3447,7 +3447,9 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
         ["High school graduate baseline",
          "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
          "for full-time workers age 25+ with a high school diploma and no college ($946/week, Q3 2024), "
-         "annualised. Wage growth of 2%/yr is an assumption, not a BLS figure."],
+         "annualised. This is an all-ages median, not a young graduate's starting pay, so the "
+         "comparison is against a typical working adult without a degree — the more demanding test. "
+         "Wage growth of 2%/yr is an assumption, not a BLS figure."],
         ["Cost of attendance & college debt",
          "U.S. Department of Education, College Scorecard."],
         ["Federal & state income tax",
@@ -7203,6 +7205,34 @@ late 2024, annualized).
 We assume this grows a modest 2%/year (a stand-in for normal raises and
 cost-of-living bumps) since BLS doesn't publish a real year-by-year
 trajectory for this group the way it does for individual careers.
+
+**One thing to know about that baseline: it's an all-ages figure.** $49,192
+is the median across *every* high school graduate aged 25 and up — someone
+two years out of school and someone thirty years into a career, averaged
+together. Earnings typically peak in the late 40s and early 50s, so that
+blended median sits above what a young worker actually takes home. Meanwhile
+the person this app models is roughly 18 to 32 across the whole comparison
+window. In Census microdata for that exact group, an 18-to-20-year-old high
+school graduate working full time has a median wage near $31,000 — about 40%
+below the all-ages figure we start from.
+
+That cuts both ways over ten years. Early on our baseline is too generous,
+which makes the degree look *worse* than it is. Later on it's too stingy: we
+grow it at a flat 2%/year, while real pay for workers in their twenties climbs
+substantially faster than that. The two errors run in opposite directions and
+partly cancel, and we don't claim to know what the net effect is.
+
+We still headline the published BLS number, because it's the one a reader can
+look up and check. BLS itself only breaks earnings out by education for ages
+25 and up, so there's no official under-25 figure for high school graduates;
+the $31,000 above comes from the underlying Census survey records rather than
+a published table. What we won't do is manufacture a starting wage by running
+our own 2%/year assumption backwards — that 2% describes how wages drift over
+*calendar time*, not how one person's pay climbs with *age*, and the two
+aren't interchangeable. So read
+this comparison as "a degree versus a typical working adult without one,"
+rather than "versus your classmate who skipped college." It's the more
+demanding of the two tests.
 
 **How your loan payment is calculated.** *Standard 10-Year* just means a
 fixed payment every month for 10 years, using the standard math lenders
