@@ -335,6 +335,52 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
     return result
 
 
+def build_all_states_dataframe(xlsx_path: str) -> pd.DataFrame:
+    """Every state's own wages from the BLS OEWS *State* release, as ONE
+    long-format table with a `state` column -- the same shape --metros
+    produces, and for the same reasons.
+
+    Why every state rather than the single --state file this script already
+    made: the app layers national -> state -> metro, taking the finest
+    geography BLS actually publishes for each occupation. Metros publish a
+    median of 82% of occupations (72-92% by city), so roughly a fifth of every
+    city's careers fall through, and before this they fell all the way to a
+    national average. Now they land on the state, which is closer to right for
+    every one of them.
+
+    It also removes a control that shouldn't have existed. The app used to ask
+    the visitor to pick "National or California" as a Career Salary Data
+    source, independently of the city they'd already chosen -- so California +
+    New York was reachable, and the ~51 occupations New York suppresses showed
+    California wages while the page called them national figures. A state is
+    not a preference; it is a fact about the selected city.
+    """
+    raw = load_bls_data(xlsx_path)
+    column = find_state_column(raw)
+    values = raw[column].astype(str).str.strip()
+    looks_like_abbreviation = values.str.len().median() <= 3
+
+    frames = []
+    for abbreviation, full_name in STATE_ABBR_TO_NAME.items():
+        if looks_like_abbreviation:
+            matches = values.str.upper() == abbreviation
+        else:
+            matches = values.str.lower() == full_name.lower()
+        cleaned = _clean_detailed(raw[matches], quiet=True)
+        if cleaned.empty:
+            # Loud rather than silent -- a state that stops matching means the
+            # release renamed or restructured its state column, and every city
+            # in that state would quietly fall back to national wages.
+            raise ValueError(
+                f"No detailed rows matched {abbreviation} ({full_name}) in column "
+                f"'{column}'. The State release's layout may have changed."
+            )
+        cleaned.insert(0, "state", abbreviation)
+        frames.append(cleaned)
+
+    return pd.concat(frames, ignore_index=True)
+
+
 def build_metro_dataframe(xlsx_path: str) -> pd.DataFrame:
     """Every app city's own metro wages, from the BLS OEWS *Metropolitan*
     release (oesm##ma.zip -> MSA_M####_dl.xlsx), as ONE long-format table
@@ -492,6 +538,10 @@ if __name__ == "__main__":
                          help="Produce one long-format dataset covering every city in the app's "
                               "CITY_DATA, with a `city` column. Requires the BLS OEWS "
                               "*Metropolitan* release (oesm##ma.zip -> MSA_M####_dl.xlsx).")
+    parser.add_argument("--all-states", action="store_true", dest="all_states",
+                         help="Produce one long-format dataset covering EVERY state, with a "
+                              "`state` column. Requires the BLS OEWS *State* release -- the same "
+                              "file --state takes, read whole instead of filtered to one state.")
     parser.add_argument("--national", default=None,
                          help="With --metros: the National release from the SAME year, whose "
                               "all-occupations median becomes the wage index's denominator. "
@@ -501,12 +551,14 @@ if __name__ == "__main__":
                          help="Output CSV path (default: cleaned_careers.csv, or "
                               "cleaned_careers_<state>.csv when --state is given)")
     args = parser.parse_args()
-    if args.metros and args.state:
-        raise SystemExit("Error: --metros and --state are different releases; pass one or the other.")
+    _modes = [bool(args.metros), bool(args.state), bool(args.all_states)]
+    if sum(_modes) > 1:
+        raise SystemExit("Error: --metros, --state and --all-states are mutually exclusive; pass one.")
     if args.national and not args.metros:
         raise SystemExit("Error: --national only applies to --metros (it supplies the wage index's denominator).")
     output_path = args.output or (
         "data/metro_careers_clean.csv" if args.metros else
+        "data/state_careers_clean.csv" if args.all_states else
         f"cleaned_careers_{args.state.lower()}.csv" if args.state else "cleaned_careers.csv"
     )
 
@@ -515,6 +567,9 @@ if __name__ == "__main__":
             print(f"Extracting {len(METRO_AREA_BY_CITY)} metro areas:")
             clean_df = build_metro_dataframe(args.input_xlsx)
             index_df = build_metro_wage_index(args.input_xlsx, national_xlsx=args.national)
+        elif args.all_states:
+            print(f"Extracting all {len(STATE_ABBR_TO_NAME)} states + DC:")
+            clean_df = build_all_states_dataframe(args.input_xlsx)
         else:
             clean_df = build_clean_dataframe(args.input_xlsx, state=args.state)
     except FileNotFoundError:
@@ -538,5 +593,11 @@ if __name__ == "__main__":
         vintage = release_vintage(args.input_xlsx) or "this"
         print(f"\nRegenerate cleaned_careers.csv and cleaned_careers_ca.csv from {vintage}'s "
               f"National/State releases too -- app.py compares them against these metro wages.")
+    elif args.all_states:
+        per_state = clean_df.groupby("state").size()
+        print(f"{clean_df.state.nunique()} states, "
+              f"{clean_df.occ_title.nunique()} distinct occupations, "
+              f"median {per_state.median():.0f} per state "
+              f"(min {per_state.min()} {per_state.idxmin()}, max {per_state.max()} {per_state.idxmax()}).")
     else:
         print_summary(clean_df)
