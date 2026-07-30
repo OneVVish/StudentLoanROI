@@ -31,6 +31,10 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import pandas as pd
 import plotly.express as px
+# graph_objects, not express: the wage-distribution histogram needs per-bar
+# widths (OEWS's percentile bins are unequal), which px.bar has no parameter
+# for.
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
@@ -251,6 +255,27 @@ SELECTION_LABEL = {DATASET_MODE_MAJOR: "Intended Major",
                    DATASET_MODE_CAREER: "Target Profession"}
 
 
+def wage_percentiles_from_row(row) -> dict:
+    """OEWS's published wage distribution for one occupation, as
+    {p10, p25, p50, p75, p90}, or None if this CSV doesn't carry the full set.
+
+    Returns None rather than a partial dict on purpose: every consumer draws a
+    distribution, and a distribution missing a percentile isn't a smaller
+    chart, it's a wrong-shaped one. getattr with a default keeps a cleaned CSV
+    generated before data_pipeline.py carried these columns working -- it just
+    shows no distribution, the same way an older CSV shows no
+    typical_education.
+    """
+    values = {
+        "p10": getattr(row, "a_pct10", None), "p25": getattr(row, "a_pct25", None),
+        "p50": getattr(row, "a_median", None), "p75": getattr(row, "a_pct75", None),
+        "p90": getattr(row, "a_pct90", None),
+    }
+    if any(v is None or pd.isna(v) for v in values.values()):
+        return None
+    return {k: float(v) for k, v in values.items()}
+
+
 @st.cache_data
 def load_bls_careers(csv_path: str) -> dict:
     try:
@@ -260,6 +285,7 @@ def load_bls_careers(csv_path: str) -> dict:
     return {
         row.occ_title: {
             "starting_salary": row.a_pct25, "median_salary": row.a_median,
+            "wage_percentiles": wage_percentiles_from_row(row),
             # First 2 digits of the 6-digit SOC code (e.g. "15-1252" -> "15")
             # -- the SOC "major group" level, used to look up AI_EXPOSURE_BY_
             # SOC_GROUP for the optional AI Employability Risk module.
@@ -314,7 +340,14 @@ def load_metro_wages(csv_path: str, city: str) -> dict:
         return {}
     city_rows = df[df["city"] == city]
     return {
-        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median}
+        # wage_percentiles rides along with the wage pair because the
+        # distribution is as local as the median is -- a New York nurse's
+        # spread is not the national spread. build_major_data's overlay then
+        # replaces the national distribution wholesale for cities BLS
+        # publishes, and leaves the national one in place for cities it
+        # suppresses, which is exactly the same fallback the wages take.
+        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median,
+                        "wage_percentiles": wage_percentiles_from_row(row)}
         for row in city_rows.itertuples()
     }
 
@@ -588,6 +621,67 @@ def render_major_careers(major_name: str, compact: bool = False) -> None:
         with st.expander("💼 Careers this major commonly leads to"):
             st.markdown(body)
             st.caption(caption)
+
+
+def get_wage_distribution_context(occupation_name: str) -> dict:
+    """Everything both the on-screen and PDF wage-distribution charts need for
+    one occupation, or None if it has no published distribution.
+
+    Career mode only. OEWS publishes percentiles per *occupation*; a major is
+    not an occupation, and the NY Fed major wages have no percentile
+    equivalent at all -- so Major mode has nothing to draw and this returns
+    None there rather than inventing a spread from a single median.
+
+    Kept separate from the chart builders so the "is there one?" decision is
+    made once, identically, on both surfaces.
+    """
+    if dataset_mode != DATASET_MODE_CAREER:
+        return None
+    entry = MAJOR_DATA.get(occupation_name, {})
+    percentiles = entry.get("wage_percentiles")
+    if not build_wage_distribution(percentiles):
+        return None
+    return {
+        "percentiles": percentiles,
+        "occupation_name": occupation_name,
+        "modelled_start": entry.get("starting_salary"),
+        # Which geography these percentiles describe -- the metro overlay
+        # replaces them wholesale for cities BLS publishes, so the label has
+        # to follow the data rather than the selected city.
+        "geography_label": entry.get("wage_geography") or "national",
+    }
+
+
+def render_wage_distribution(occupation_name: str, compact: bool = False) -> None:
+    """The wage-distribution histogram, rendered identically from both result
+    branches.
+
+    Called from the single-scenario branch and from render_scenario_panel, for
+    the same reason render_major_careers is: compare_mode IS the randomly
+    assigned contrast arm, so anything one branch shows and the other doesn't
+    becomes a difference between the arms that the paper's H2 doesn't account
+    for. Renders nothing at all in Major mode, on both branches equally.
+    """
+    context = get_wage_distribution_context(occupation_name)
+    if not context:
+        return
+    figure = build_wage_distribution_chart(**context)
+    if figure is None:
+        return
+    if compact:
+        # Drop the title (each compare column is already labelled with its
+        # scenario) and shorten the plot, but keep the bottom margin: it has to
+        # clear the x-title and the tail note, which get clipped without it.
+        # title_text="" rather than title=None -- Plotly renders a None title
+        # as the literal string "undefined".
+        figure.update_layout(title_text="", height=320, margin=dict(t=40, b=110))
+    st.plotly_chart(figure, use_container_width=True, config=PLOTLY_CHART_CONFIG)
+    st.caption(
+        "The median is a midpoint, not a promise — half of this workforce earns "
+        "less than it. Bar area is the share of workers, so a wide flat bar and a "
+        "narrow tall one hold the same number of people. "
+        "[BLS OEWS percentiles; see Methodology]"
+    )
 
 
 # Registered Apprenticeship benchmark for the "Alternative Pathway" card.
@@ -3112,6 +3206,73 @@ def adjust_for_cost_of_living(amount: float, col_index: float) -> float:
 # read-only report chart -- hiding it declutters both mobile and desktop.
 PLOTLY_CHART_CONFIG = {"displayModeBar": False}
 
+# The share of workers falling between consecutive published percentiles.
+# These are definitional, not estimates: if p25 is the 25th percentile and p50
+# the 50th, then exactly 25% of workers earn between them. This is the whole
+# reason a distribution is derivable from OEWS at all.
+WAGE_DISTRIBUTION_BINS = [
+    ("p10", "p25", 0.15),
+    ("p25", "p50", 0.25),
+    ("p50", "p75", 0.25),
+    ("p75", "p90", 0.15),
+]
+
+# The two open-ended tails. Each holds a known share of workers but has no
+# published bound on the far side, so neither can be drawn as a bar -- a bar
+# needs a width, and any width chosen for these would be invented. They're
+# annotated in words instead.
+WAGE_DISTRIBUTION_TAIL_SHARE = 0.10
+
+
+def build_wage_distribution(percentiles: dict) -> list:
+    """Turn OEWS's five published percentiles into area-truthful histogram
+    bins: [{low, high, share, density}], ordered low to high.
+
+    OEWS publishes percentiles and a mean, never microdata, so the frequency
+    counts a histogram normally needs simply don't exist -- and no amount of
+    processing conjures them. What the percentiles *do* pin down exactly is
+    how many workers sit between any two of them. Turning that into a bar
+    means dividing each bin's share of workers by its dollar width, so the
+    bar's AREA is the share and its HEIGHT is a density. Plotting share as
+    height instead would be wrong in a way that reads as right: the bins have
+    unequal widths, so equal-height bars would imply a $11k-wide range and a
+    $25k-wide range hold the same number of people per dollar when the wider
+    one is less than half as dense.
+
+    That distinction is the point of the chart. A career whose middle bins are
+    tall and narrow pays most people close to the median; one whose bins are
+    low and wide pays the same median to a much more scattered workforce, and
+    the median alone can't tell those apart.
+
+    Returns [] if any percentile is missing or the sequence isn't strictly
+    increasing -- a non-monotonic set means a suppressed or malformed row, and
+    a bin of zero or negative width would divide by zero or draw backwards.
+    """
+    if not percentiles:
+        return []
+    ordered = ["p10", "p25", "p50", "p75", "p90"]
+    try:
+        values = [float(percentiles[key]) for key in ordered]
+    except (KeyError, TypeError, ValueError):
+        return []
+    # NaN before monotonicity: every comparison against NaN is False, so a
+    # suppressed percentile would sail through the ordering check below and
+    # produce a bar of NaN width -- a broken chart rather than no chart.
+    if any(pd.isna(value) for value in values):
+        return []
+    if any(b <= a for a, b in zip(values, values[1:])):
+        return []
+
+    bins = []
+    for low_key, high_key, share in WAGE_DISTRIBUTION_BINS:
+        low, high = float(percentiles[low_key]), float(percentiles[high_key])
+        bins.append({
+            "low": low, "high": high, "share": share,
+            "density": share / (high - low),
+        })
+    return bins
+
+
 def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
     fig = px.line(
         schedule_df, x="year", y="balance",
@@ -3251,6 +3412,99 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
         title="Monthly Student Loan Payment Exceeds Take-Home Pay",
     )
     fig.update_layout(yaxis_title="Monthly $", xaxis_title=None, title_font_size=14)
+    return fig
+
+
+def wage_distribution_tail_notes(percentiles: dict) -> tuple:
+    """The two open-ended tails as plain sentences, shared by the on-screen and
+    PDF versions so the wording can't drift between them."""
+    return (
+        f"10% earn less than {fmt_money(percentiles['p10'])}",
+        f"10% earn more than {fmt_money(percentiles['p90'])}",
+    )
+
+
+def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
+                                   modelled_start: float = None,
+                                   geography_label: str = None):
+    """Where an occupation's pay actually lands, as an area-truthful histogram
+    over OEWS's percentile bins. Returns None when the distribution can't be
+    built, so callers render nothing rather than an empty axis.
+
+    The y-axis is deliberately unlabelled and untick-ed. Height here is a
+    density (workers per dollar), which is the correct quantity for unequal
+    bins and a meaningless one to a 17-year-old. Each bar states its share in
+    words instead -- "25% of workers" -- which is the number a reader actually
+    wants, and area already encodes it faithfully.
+
+    modelled_start marks where the app's own starting-salary assumption sits in
+    the distribution. That's the honest bit: this app projects ten years from a
+    single number, and showing that number's position among real wages says
+    more about the projection's uncertainty than any disclaimer.
+    """
+    bins = build_wage_distribution(percentiles)
+    if not bins:
+        return None
+
+    centers = [(b["low"] + b["high"]) / 2 for b in bins]
+    widths = [b["high"] - b["low"] for b in bins]
+    densities = [b["density"] for b in bins]
+
+    fig = go.Figure(go.Bar(
+        x=centers, y=densities, width=widths,
+        marker=dict(color="#4C78A8", line=dict(color="white", width=1)),
+        text=[f"{b['share']:.0%}" for b in bins],
+        textposition="inside", insidetextanchor="middle",
+        hovertemplate=(
+            "%{customdata[0]} of workers earn<br>"
+            "%{customdata[1]} – %{customdata[2]}<extra></extra>"
+        ),
+        customdata=[[f"{b['share']:.0%}", fmt_money(b["low"]), fmt_money(b["high"])]
+                     for b in bins],
+        showlegend=False,
+    ))
+
+    # The reference lines are labelled through the legend rather than with
+    # add_vline's own annotations, which sit inside the plot area and get
+    # clipped against the top margin -- and would collide with each other
+    # anyway whenever the median and the modelled start are close, which is
+    # the common case since the modelled start IS the 25th percentile.
+    # add_vline draws a layout shape, and shapes can't carry a legend entry,
+    # so each line gets a zero-point scatter trace purely to register one.
+    reference_lines = [(percentiles["p50"], "#333333", "solid",
+                        f"median {fmt_money(percentiles['p50'])}")]
+    if modelled_start:
+        reference_lines.append((modelled_start, "#E45756", "dash",
+                                 f"modelled start {fmt_money(modelled_start)}"))
+    for position, color, dash, label in reference_lines:
+        fig.add_vline(x=position, line=dict(color=color, width=2, dash=dash))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="lines", name=label,
+            line=dict(color=color, width=2, dash=dash), hoverinfo="skip",
+        ))
+
+    where = f" — {geography_label}" if geography_label else ""
+    below, above = wage_distribution_tail_notes(percentiles)
+    fig.update_layout(
+        title=f"Where {occupation_name} pay actually lands{where}",
+        title_font_size=14,
+        xaxis=dict(title="Annual wage", tickprefix="$", tickformat=","),
+        # Density is the right height and the wrong label for this audience --
+        # hide the scale, keep the shape.
+        yaxis=dict(title=None, showticklabels=False, showgrid=False),
+        bargap=0,
+        height=380,
+        # Bottom margin has to clear the x-title AND the tail note below it;
+        # at the default the note is clipped out of the plot entirely.
+        margin=dict(t=70, b=110),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0,
+                     xanchor="center", x=0.5, font=dict(size=11)),
+        annotations=[dict(
+            x=0, y=-0.30, xref="paper", yref="paper", showarrow=False,
+            xanchor="left", yanchor="top", font=dict(size=11, color="#666666"),
+            text=f"◄ {below}   ·   {above} ►",
+        )],
+    )
     return fig
 
 
@@ -3444,6 +3698,12 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
         ["Salaries by occupation",
          "U.S. Bureau of Labor Statistics, Occupational Employment and Wage Statistics (OEWS). "
          "Starting salary uses the 25th-percentile wage; mid-career uses the median."],
+        ["Wage distribution chart",
+         "The same OEWS release, which publishes five wage percentiles (10th, 25th, 50th, 75th, "
+         "90th) per occupation and no individual records. The share of workers between any two "
+         "published percentiles is exact by definition; bar heights are those shares divided by "
+         "each range's width, so area is the share. The bottom and top 10% have no published "
+         "bound and are stated in words rather than drawn."],
         ["High school graduate baseline",
          "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
          "for full-time workers age 25+ with a high school diploma and no college ($946/week, Q3 2024), "
@@ -3587,6 +3847,115 @@ def _pdf_image_from_figure(fig, max_width: float = PDF_CONTENT_WIDTH) -> Image:
     buf.seek(0)
     width_px, height_px = PILImage.open(io.BytesIO(buf.getvalue())).size
     return Image(buf, width=max_width, height=max_width * height_px / width_px)
+
+
+def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
+                                       modelled_start: float = None,
+                                       geography_label: str = None,
+                                       max_width: float = PDF_CONTENT_WIDTH) -> Image:
+    """PDF counterpart to build_wage_distribution_chart. Returns None when the
+    distribution can't be built, matching its on-screen twin so the caller's
+    "skip it" branch is the same on both surfaces.
+
+    Both read the same build_wage_distribution bins, so the bar geometry can't
+    drift; what's hand-kept in sync is the annotation wording and which
+    reference lines are drawn (see CLAUDE.md on the chart twins).
+    """
+    bins = build_wage_distribution(percentiles)
+    if not bins:
+        return None
+
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    for wage_bin in bins:
+        ax.bar(
+            x=wage_bin["low"], height=wage_bin["density"],
+            width=wage_bin["high"] - wage_bin["low"], align="edge",
+            color="#4C78A8", edgecolor="white", linewidth=1,
+        )
+        ax.text(
+            (wage_bin["low"] + wage_bin["high"]) / 2, wage_bin["density"] / 2,
+            f"{wage_bin['share']:.0%}", ha="center", va="center",
+            color="white", fontsize=9, fontweight="bold",
+        )
+
+    # The reference lines are labelled via the legend rather than inline text
+    # next to each line. Inline, they overlap each other and the bars whenever
+    # the median and the modelled start fall close together -- which is the
+    # common case, since the modelled start IS the 25th percentile.
+    ax.axvline(percentiles["p50"], color="#333333", linewidth=1.8,
+                label=f"median {fmt_money(percentiles['p50'])}")
+    if modelled_start:
+        ax.axvline(modelled_start, color="#E45756", linewidth=1.8, linestyle="--",
+                    label=f"modelled start {fmt_money(modelled_start)}")
+    # parse_math=False on every label carrying a dollar figure: matplotlib
+    # reads a matched pair of "$" as a mathtext expression, so a caption like
+    # "$68,940 - $137,470" is parsed as maths and raises rather than printing.
+    # The existing PDF charts never hit this because their money strings are
+    # tick labels with one "$" each, which is unpaired and passes through.
+    legend = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2,
+                        frameon=False, fontsize=8)
+    for text in legend.get_texts():
+        text.set_parse_math(False)
+
+    where = f" - {geography_label}" if geography_label else ""
+    ax.set_title(f"Where {occupation_name} pay actually lands{where}",
+                  fontsize=11, pad=28)
+    ax.set_xlabel("Annual wage")
+    ax.xaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    # Cap the tick count: at print width the default locator packs in enough
+    # "$110,000"-length labels to run them into each other.
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, prune="both"))
+    # Same reasoning as the Plotly twin: height is a density, which is correct
+    # for unequal bins and meaningless as a printed label.
+    ax.set_yticks([])
+    ax.spines[["left", "right", "top"]].set_visible(False)
+
+    below, above = wage_distribution_tail_notes(percentiles)
+    # Anchored to the axes in axes-fraction coords, below the x-label, so it
+    # can't land on top of it the way a figure-relative offset did.
+    ax.annotate(f"{below}  -  {above}", xy=(0, -0.32), xycoords="axes fraction",
+                 fontsize=8, color="#666666", annotation_clip=False,
+                 parse_math=False)
+    return _pdf_image_from_figure(fig, max_width=max_width)
+
+
+def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
+                                  scenario_label: str = None,
+                                  max_width: float = PDF_CONTENT_WIDTH) -> list:
+    """The wage-distribution chart plus its caption, for a report. Shared by
+    both generators for the same reason _pdf_breakeven_block is.
+
+    Returns [] whenever the on-screen render_wage_distribution would also show
+    nothing (Major mode, or an occupation with no published distribution), so
+    the report never gains or loses a section relative to the page the visitor
+    actually saw.
+
+    Recomputed here from MAJOR_DATA rather than carried in module_context:
+    that dict is spread straight into Supabase inserts and must stay
+    JSON-scalar-only, so a percentile dict has no business in it (see
+    CLAUDE.md).
+    """
+    context = get_wage_distribution_context(occupation_name)
+    if not context:
+        return []
+    chart = build_pdf_wage_distribution_chart(**context, max_width=max_width)
+    if chart is None:
+        return []
+
+    heading = "What this job actually pays"
+    if scenario_label:
+        heading = f"Scenario {scenario_label} -- {heading}"
+    return [
+        Spacer(1, 12),
+        Paragraph(heading, styles["section"]),
+        chart,
+        Paragraph(
+            "The median is a midpoint, not a promise -- half of this workforce earns less "
+            "than it. Each bar's area is its share of workers, so a wide flat bar and a "
+            "narrow tall one hold the same number of people. Source: BLS OEWS published "
+            "wage percentiles.",
+            styles["caption"]),
+    ]
 
 
 def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> Image:
@@ -4128,6 +4497,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
     )
     story += _pdf_breakeven_block(breakeven, styles)
+    story += _pdf_wage_distribution_block(major, styles)
 
     story += _pdf_module_sections(
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
@@ -4280,6 +4650,11 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         ),
         *_pdf_resources_section(styles, [("Scenario A", school_name_a), ("Scenario B", school_name_b)]),
     ]
+    # One per scenario, labelled -- in Career mode A and B are different
+    # occupations with genuinely different spreads, which is the comparison
+    # this chart is most useful for.
+    story += _pdf_wage_distribution_block(major, styles, scenario_label="A")
+    story += _pdf_wage_distribution_block(major_b, styles, scenario_label="B")
     story += _pdf_module_sections(
         module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
         scenario_b=scenario_b, major_name_b=major_b, interest_rate_b=interest_rate_b,
@@ -6234,6 +6609,12 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             # column shows its own. Same helper as the single-scenario view.
             render_major_careers(scenario["major"], compact=True)
 
+        # Career mode's wage distribution. Per-occupation and therefore
+        # genuinely different between A and B, so each column draws its own --
+        # unlike the underemployment text above, which is national in Career
+        # mode and rendered once below the columns.
+        render_wage_distribution(scenario["major"], compact=True)
+
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
     """AI Employability Risk Analysis container (only rendered when
@@ -6895,6 +7276,12 @@ else:
     if dataset_mode == DATASET_MODE_MAJOR:
         render_major_careers(major)
 
+    # What this occupation's pay actually spreads across, rather than the one
+    # median the projection runs on. Career mode only (see
+    # get_wage_distribution_context); the same call sits in
+    # render_scenario_panel so Compare Mode shows it too.
+    render_wage_distribution(major)
+
     # Which geography the salary above actually came from. BLS suppresses
     # roughly a fifth of occupation-by-metro cells, so those fall back to a
     # national wage -- and a national number standing in for a local one,
@@ -7196,6 +7583,23 @@ the national level regardless of the California/National salary toggle so the
 typically lead to (those BLS marks as needing less than a bachelor's) are
 filtered out. This is our own summary of public BLS data — it is not drawn
 from any subscription careers guide.
+
+**Where the pay actually lands (Target Profession mode).** Under the salary
+figures we draw the spread of what people in that occupation really earn. BLS
+publishes five points for each one — the 10th, 25th, 50th, 75th and 90th
+percentile wage — and no individual worker records at all, so a true
+count-the-people histogram isn't something anyone can build from it, us
+included. What the percentiles *do* fix exactly is how many workers sit
+between any two of them: a quarter of the workforce earns between the 25th and
+the 50th, by definition. Each bar covers one of those ranges, and its height is
+that share divided by how many dollars wide the range is — so the **area** of a
+bar is the share of workers, and a wide flat bar holds just as many people as a
+narrow tall one. The bottom and top 10% have no published cutoff on the far
+side, so we state them in words instead of inventing a bar width for them.
+Percentiles follow the same city as the salary above when BLS publishes them
+for that metro. There's no equivalent for Intended Major mode: a major isn't
+an occupation, and the wage data behind it has no percentiles, so the chart
+simply doesn't appear there.
 
 **What if you skip college? The high school graduate baseline.** We
 compare every major against $49,192/year — real median pay for full-time

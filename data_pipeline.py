@@ -134,6 +134,18 @@ DEFAULT_GROWTH_RATE = 0.03
 
 REQUIRED_COLUMNS = ["occ_code", "occ_title", "o_group", "a_median", "a_pct25"]
 
+# The rest of OEWS's published wage distribution, carried through so the app
+# can show what an occupation's pay actually spreads across rather than just a
+# starting/median pair. These are NOT in REQUIRED_COLUMNS: the model runs
+# entirely off a_pct25 and a_median, so a release missing them should still
+# produce a usable dataset -- the app treats absent percentiles as "no
+# distribution chart for this career" and carries on.
+#
+# OEWS publishes only these five points, never microdata, so a real frequency
+# histogram is not derivable from it; what IS derivable is the share of workers
+# between consecutive percentiles. See build_wage_distribution in app.py.
+DISTRIBUTION_COLUMNS = ["a_pct10", "a_pct75", "a_pct90"]
+
 # Candidate column names BLS has used to hold the state for each row in the
 # State release, checked in order -- whichever one is actually present in
 # the loaded file is used, so this script isn't locked to one exact release.
@@ -273,6 +285,15 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
     detailed["a_median"] = clean_wage_column(detailed["a_median"])
     detailed["a_pct25"] = clean_wage_column(detailed["a_pct25"])
 
+    # The rest of the distribution, where this release publishes it. Left as
+    # NaN when suppressed rather than back-filled the way a_pct25 is above:
+    # a_pct25 feeds the growth model and must have a number, but these are
+    # display-only, and inventing a percentile would draw a distribution that
+    # BLS never measured.
+    present_distribution = [c for c in DISTRIBUTION_COLUMNS if c in detailed.columns]
+    for column in present_distribution:
+        detailed[column] = clean_wage_column(detailed[column])
+
     # No usable median wage at all -- this occupation can't be modeled,
     # drop it (mirrors clean_college_scorecard.py dropping schools with no
     # usable COA figure).
@@ -294,7 +315,14 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
         (detailed["a_median"] / detailed["a_pct25"]) ** (1 / GROWTH_WINDOW_YEARS) - 1
     )
 
-    final_columns = ["occ_code", "occ_title", "o_group", "a_pct25", "a_median", "annual_growth_rate"]
+    # a_pct10 ... a_pct90 in ascending order, so the CSV reads as the
+    # distribution it is. Columns the release didn't publish are simply absent.
+    final_columns = (
+        ["occ_code", "occ_title", "o_group"]
+        + [c for c in ["a_pct10", "a_pct25", "a_median", "a_pct75", "a_pct90"]
+           if c == "a_pct25" or c == "a_median" or c in present_distribution]
+        + ["annual_growth_rate"]
+    )
     result = detailed[final_columns].reset_index(drop=True)
 
     if dropped_no_median and not quiet:
