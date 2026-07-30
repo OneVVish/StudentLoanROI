@@ -195,10 +195,32 @@ for _title in ["Oral and Maxillofacial Surgeons", "Prosthodontists", "Dentists, 
 # above, so every existing calculation (get_major_growth_rate,
 # get_annual_salary_for_year, etc.) works on them identically -- no
 # special-casing needed anywhere else in the app. Two geographic scopes are
-# available (see the "Career Salary Data" sidebar selector in section 4,
-# which picks one of these paths and builds the final MAJOR_DATA from it).
+# available. The national file is the base MAJOR_DATA is built from; the state
+# and metro files below overlay it (see build_major_data).
 CAREERS_CSV_PATH_NATIONAL = "cleaned_careers.csv"
+# Kept for analyze_model.py, which still offers a --state CA run against this
+# single-state file. The app itself no longer reads it: see
+# STATE_CAREERS_CSV_PATH, which covers every state and is selected by the
+# city rather than by a sidebar control.
 CAREERS_CSV_PATH_CA = "cleaned_careers_ca.csv"
+
+# Per-STATE occupation wages, via `data_pipeline.py --all-states`. Long-format,
+# one row per (state, occupation), same shape as the metro file.
+#
+# This is the middle rung of a three-level fallback: national -> state -> metro,
+# each overlaying the one before, so every occupation shows the finest geography
+# BLS actually publishes for it. Metros carry a median 82% of occupations
+# (72-92% by city); before this file existed the other ~18% dropped straight to
+# a national average even though the state figure was sitting right there.
+#
+# It also replaced a sidebar control that shouldn't have been one. "Career
+# Salary Data: National / California" let a visitor pick a wage basis
+# independently of the city they'd already chosen, so California + New York was
+# reachable -- and the 51 occupations New York suppresses then showed
+# California wages while the page labelled them national figures (Craft
+# Artists: $46,080 nationally, shown as $100,540). A state isn't a preference,
+# it's a fact about the selected city, so it's derived from it now.
+STATE_CAREERS_CSV_PATH = "data/state_careers_clean.csv"
 
 # Per-MAJOR wages from the NY Fed, via nyfed_pipeline.py. The counterpart to
 # the BLS per-OCCUPATION files above, and the basis of the sidebar's "Choose
@@ -353,6 +375,31 @@ def load_metro_wages(csv_path: str, city: str) -> dict:
 
 
 @st.cache_data
+def load_state_wages(csv_path: str, state: str) -> dict:
+    """One state's own BLS wages, as {occ_title: {starting_salary,
+    median_salary, wage_percentiles}}, from `data_pipeline.py --all-states`.
+
+    Same shape and same rules as load_metro_wages -- wages only, since
+    everything else about an occupation is a property of the occupation rather
+    than of where it's done. Returns {} for an unknown state or a missing file,
+    which callers must treat as "use the national figure", so a deploy without
+    the state file degrades to the previous behaviour instead of to nonsense.
+    """
+    if not state:
+        return {}
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return {}
+    state_rows = df[df["state"] == state]
+    return {
+        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median,
+                        "wage_percentiles": wage_percentiles_from_row(row)}
+        for row in state_rows.itertuples()
+    }
+
+
+@st.cache_data
 def load_nyfed_majors(csv_path: str) -> dict:
     """Per-major wages/outcomes from nyfed_pipeline.py's output, in the same
     {name: {starting_salary, median_salary, ...}} shape load_bls_careers
@@ -463,15 +510,32 @@ def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER, city: str =
     # it's done.
     #
     # Occupations BLS suppresses for a metro (roughly 20% -- small
-    # occupation-by-city cells) keep their national wage and are FLAGGED, so
-    # the page can say which figure it's showing instead of passing a
-    # national number off as local. Curated majors have no metro equivalent
-    # and stay national by the same rule.
+    # occupation-by-city cells) fall back to the STATE figure, and only to the
+    # national one if the state suppresses them too. Each level is FLAGGED via
+    # wage_geography, so the page can say which figure it's showing instead of
+    # passing a non-local number off as local. Curated majors have neither a
+    # state nor a metro equivalent and stay national by the same rule.
+    #
+    # Order is load-bearing: national is the spine that defines the dropdown
+    # (a state file alone would drop the occupations that state suppresses out
+    # of the list entirely), then state overlays it, then metro overlays that.
+    # Applying them in any other order would let a coarser geography overwrite
+    # a finer one.
+    state = CITY_DATA.get(city, {}).get("state_key") if city else None
+    if state:
+        state_wages = load_state_wages(STATE_CAREERS_CSV_PATH, state)
+        for occupation, wages in state_wages.items():
+            if occupation in data:
+                data[occupation] = {**data[occupation], **wages,
+                                     "wage_geography": US_STATES.get(state, state),
+                                     "wage_geography_level": "state"}
+
     if city:
         metro_wages = load_metro_wages(METRO_CAREERS_CSV_PATH, city)
         for occupation, wages in metro_wages.items():
             if occupation in data:
-                data[occupation] = {**data[occupation], **wages, "wage_geography": city}
+                data[occupation] = {**data[occupation], **wages, "wage_geography": city,
+                                     "wage_geography_level": "metro"}
 
     for major_name, training_fields in ADVANCED_TRAINING_OVERLAY.items():
         if major_name in data:
@@ -652,6 +716,50 @@ def get_wage_distribution_context(occupation_name: str) -> dict:
     }
 
 
+def render_wage_geography_note(occupation_name: str) -> None:
+    """Which geography the salary shown for this occupation actually came from.
+
+    BLS suppresses roughly a fifth of occupation-by-metro cells, so those fall
+    back a level -- and a non-local number standing in for a local one,
+    unlabelled, is the same class of hidden assumption as the underemployment
+    rate was.
+
+    Three outcomes, not two: the metro's own figure, the state's (metro
+    suppresses it, state publishes it), or the national one (both suppress it).
+    Naming the level matters -- the two-branch version this replaced said
+    "national" for anything that wasn't metro, which became a false statement
+    the moment a state layer existed underneath it.
+
+    Shared between both result branches. It was previously inline in the
+    single-scenario branch only, so Compare Mode -- the randomly assigned
+    contrast arm -- never showed it: half of visitors got a state or national
+    wage with nothing saying so, which is exactly the asymmetry CLAUDE.md
+    warns turns into an H2 confound.
+    """
+    if dataset_mode != DATASET_MODE_CAREER or city == "National Average":
+        return
+    entry = MAJOR_DATA.get(occupation_name, {})
+    level = entry.get("wage_geography_level")
+    if level == "metro":
+        st.caption(
+            f"💡 Salaries are **{city}**'s own BLS figures, not national ones — so this "
+            f"weighs {city}'s pay against {city}'s cost of living."
+        )
+    elif level == "state":
+        st.caption(
+            f"💡 BLS doesn't publish a separate **{occupation_name}** wage for {city} (too "
+            f"few workers to report there), so the salary above is "
+            f"**{entry.get('wage_geography')}**'s statewide figure — closer than a "
+            f"national average, and adjusted for {city}'s cost of living."
+        )
+    else:
+        st.caption(
+            f"⚠️ BLS doesn't publish a separate **{occupation_name}** wage for {city} or for "
+            f"its state (too few workers to report), so the salary above is the **national** "
+            f"figure adjusted for {city}'s cost of living. Treat it as an approximation."
+        )
+
+
 def render_wage_distribution(occupation_name: str, compact: bool = False) -> None:
     """The wage-distribution histogram, rendered identically from both result
     branches.
@@ -768,6 +876,50 @@ ROI_HORIZON_OPTIONS = [10, 15, 20, 30]
 # you're *repaying*.
 UNDERGRAD_YEARS = 4
 
+# Enrollment length by BLS typical-entry-education, for occupations whose real
+# program isn't four years. Only the levels with a defensible standard length
+# belong here: an associate's degree is two years essentially everywhere, so
+# charging four years of Cost of Attendance to reach one overstated the debt by
+# roughly double at a public school, and by ~23x for the common case of a
+# two-year program done at a community college against a private four-year COA.
+#
+# The other sub-baccalaureate levels are deliberately absent. "Postsecondary
+# nondegree award" spans a six-week certificate and an eighteen-month program;
+# "High school diploma or equivalent" implies no college cost at all, which
+# isn't a shorter program but a different model entirely (zero cost makes ROI%
+# divide by zero). Those stay flagged as mismodelled rather than guessed at --
+# see MISMODELLED_EDUCATION_LEVELS.
+PROGRAM_YEARS_BY_EDUCATION = {
+    "Associate's degree": 2,
+}
+
+# The sub-baccalaureate levels this app still models with the wrong program
+# length -- i.e. everything it hasn't been taught a real length for. This is
+# what gates the "we're charging you four years you don't need" disclosure and
+# the break-even suppression, so teaching the app a new length above
+# automatically stops treating that level as broken.
+MISMODELLED_EDUCATION_LEVELS = (
+    SUB_BACHELORS_EDUCATION_LEVELS - set(PROGRAM_YEARS_BY_EDUCATION)
+)
+
+
+def program_years_for_education(typical_education: str) -> int:
+    """How many years of enrollment the cost model should charge for an
+    occupation with this BLS typical-entry-education. UNDERGRAD_YEARS for
+    anything without a specific length, which is every bachelor's-and-above
+    occupation and every major."""
+    return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
+
+
+def program_years_for_major(major_name: str) -> int:
+    """Enrollment length for a selection, read off MAJOR_DATA. The counterpart
+    to resolve_program_years for code that runs *after* the Career section has
+    built that dict -- the results page and the PDF generators. Both funnel
+    through program_years_for_education so the two paths can't disagree about
+    what an associate's degree costs."""
+    return program_years_for_education(
+        MAJOR_DATA.get(major_name, {}).get("typical_education"))
+
 # Community-college-transfer path ("2+2"): a student spends the first
 # COMMUNITY_COLLEGE_YEARS years at a community college, then transfers to the
 # 4-year school to finish the SAME bachelor's. The degree, earnings, and the
@@ -783,6 +935,68 @@ UNDERGRAD_YEARS = 4
 # college differs.
 COMMUNITY_COLLEGE_YEARS = 2
 COMMUNITY_COLLEGE_COA_DEFAULT = 3890  # national in-district avg (NCES 2025)
+
+# Every cc_mode that means "some or all of this happens at a community
+# college". Gated on in four separate places (the chart label, the on-screen
+# note, the PDF bundle and the PDF rows), so it lives here rather than being
+# spelled out inline each time -- a mode added to the radio and missed in one
+# of those reads as a straight four-year start in that one surface only.
+CC_PATH_MODES = ("fulltime", "parttime", "associate")
+
+
+def cc_path_options(program_years: int) -> tuple:
+    """(options, labels) for the Community college path radio, given how long
+    the selected program actually runs.
+
+    A transfer is meaningless when the whole program fits inside community
+    college: an associate's degree earned there *is* the degree, and there's no
+    four-year school to move on to. So a two-year program gets an explicit
+    no-transfer option in place of the 2+2 one, rather than a fourth choice
+    sitting alongside it that quietly does the same thing.
+
+    Worth being precise about what this changes: once cc_years got clamped to
+    the program length, "full-time community college, then transfer" already
+    produced exactly this outcome for a two-year program -- two community
+    college years, no university years, no loan. The arithmetic was right and
+    the label was a lie, promising a transfer that never happened and a "2+2"
+    that was really 2+0. This makes the option say what the model already did.
+    """
+    if program_years <= COMMUNITY_COLLEGE_YEARS:
+        return (
+            ["none", "associate", "parttime"],
+            {
+                "none": "None — earn the whole degree at the school above",
+                "associate": f"Full-time community college — the entire "
+                             f"{program_years}-year degree, no transfer",
+                "parttime": "Part-time community college while working — no transfer",
+            },
+        )
+    return (
+        ["none", "fulltime", "parttime"],
+        {
+            "none": "None — start at the 4-year school",
+            "fulltime": "Full-time community college, then transfer (2+2)",
+            "parttime": "Part-time community college while working, then transfer",
+        },
+    )
+
+
+def reconcile_cc_mode(state_key: str, options: list) -> None:
+    """Keep a stored cc_mode valid when the option list changes under it.
+
+    Switching the selected occupation between a bachelor's one and an
+    associate's one swaps "fulltime" for "associate"; leaving the stale value
+    in session_state makes Streamlit raise on a radio whose current value isn't
+    among its options. The two mean the same thing to the visitor (full-time
+    community college), so they map across rather than silently resetting a
+    chosen path back to "none".
+    """
+    current = st.session_state.get(state_key)
+    if current in options:
+        return
+    equivalent = {"fulltime": "associate", "associate": "fulltime"}.get(current)
+    st.session_state[state_key] = equivalent if equivalent in options else "none"
+
 
 # Per-state average in-district community-college tuition & fees, keyed by
 # 2-letter abbreviation to match STATE_TAX_BRACKETS and CITY_DATA["state_key"].
@@ -1722,7 +1936,11 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     to that single school directly, no picker shown."""
     params = {
         "mode": dataset_mode,
-        "career_source": career_data_source,
+        # No career_source: the wage basis follows the city, so `city` already
+        # carries it. Emitting a derived value would recreate a field nothing
+        # reads back -- and older links that still carry ?career_source= are
+        # simply ignored, which is the right outcome now that a state is not
+        # something a visitor can choose independently of where they live.
         "major": major,
         "city": city,
         "school": school_name_a,
@@ -2918,10 +3136,10 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
     career_data_source is never read in the body — it exists purely to key
     the cache. st.cache_data hashes arguments, but the work here depends on
     the MAJOR_DATA global, which is rebuilt when the visitor switches the
-    Career Salary Data source (a Software Developer earns differently in
-    California than nationally). Without this parameter the cache would
-    happily serve a national break-even to someone who just switched to
-    California.
+    city, and with it the state/metro wage overlays (a Software Developer
+    earns differently in Austin than in New York). Without this parameter the
+    cache would happily serve one city's break-even to someone who just
+    switched to another.
     """
     def premium_at(loan: float) -> float:
         return compute_scenario_results(
@@ -2964,15 +3182,18 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     the two can't drift.
 
     Returns None for `headline` when the break-even shouldn't be shown at
-    all. That's the sub-baccalaureate case: for an occupation BLS says needs
-    less than a bachelor's, "this degree stops paying off at $X" is not
-    unfavourable, it's malformed — the model charged four financed years to
-    reach a job that never asked for them. The apprenticeship module already
-    makes that point properly (see SUB_BACHELORS_EDUCATION_LEVELS), so this
-    defers to it rather than printing a number that answers no question.
+    all: "this degree stops paying off at $X" is malformed when the model
+    charged four financed years to reach a job that never asked for them. The
+    apprenticeship module makes that point properly instead.
+
+    That gate is MISMODELLED_EDUCATION_LEVELS, not every sub-baccalaureate
+    level. An associate's degree now costs the two years it actually takes
+    (PROGRAM_YEARS_BY_EDUCATION), so its break-even is a real number about a
+    real program and is shown. The levels still charged four wrong years are
+    the ones with no defensible standard length -- those stay suppressed.
     """
     typical_education = MAJOR_DATA.get(major_name, {}).get("typical_education", "")
-    if typical_education in SUB_BACHELORS_EDUCATION_LEVELS:
+    if typical_education in MISMODELLED_EDUCATION_LEVELS:
         return {"headline": None, "detail": None, "status": "not_applicable"}
 
     result = find_breakeven_loan(major_name, interest_rate, repayment_strategy,
@@ -3310,6 +3531,8 @@ def cc_chart_label_suffix(cc_mode) -> str:
     render_cc_path_note, which shows nothing then too."""
     if cc_mode == "fulltime":
         return " (via comm. college)"
+    if cc_mode == "associate":
+        return " (comm. college only)"
     if cc_mode == "parttime":
         return " (via comm. college, working)"
     return ""
@@ -4159,7 +4382,7 @@ def _cc_info_for_pdf(cc_mode, cc_state_key, cost_per_year, oop, cc_years):
     """Small {mode,state_label,cost,oop,cc_years} bundle for the PDF profile's
     community-college disclosure rows (see _pdf_profile_rows). Returns None when
     no CC path is active, so the rows are simply omitted."""
-    if cc_mode not in ("fulltime", "parttime"):
+    if cc_mode not in CC_PATH_MODES:
         return None
     state_label = ("National average" if cc_state_key == "__national__"
                    else US_STATES.get(cc_state_key, "National average"))
@@ -4186,13 +4409,19 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     # Community-college path disclosure: without these rows the report shows a
     # single 4-year Cost of Attendance and a reduced loan with no explanation of
     # where the reduction came from. Only added when a CC path is active.
-    if cc_info and cc_info.get("mode") in ("fulltime", "parttime"):
-        _mode_label = ("Full-time, then transfer" if cc_info["mode"] == "fulltime"
-                       else "Part-time while working, then transfer")
+    if cc_info and cc_info.get("mode") in CC_PATH_MODES:
+        _mode_label = {
+            "fulltime": "Full-time, then transfer",
+            "associate": "Full-time, entire degree — no transfer",
+            "parttime": "Part-time while working, then transfer",
+        }[cc_info["mode"]]
         rows.append([f"Community College Path ({cc_info['cc_years']} yrs)", _mode_label])
         rows.append(["Community College",
                      f"{cc_info['state_label']} — {fmt_money(cc_info['cost'])}/yr, paid out of "
                      f"pocket ({fmt_money(cc_info['oop'])} total, no loan)"])
+    # The 4-year-school qualifier only makes sense when there IS a transfer --
+    # an associate-only path never reaches one, and its COA row describes the
+    # school that would have been used had the visitor not chosen this path.
     _coa_label = ("Cost of Attendance (per year, 4-year school)"
                   if cc_info and cc_info.get("mode") in ("fulltime", "parttime")
                   else "Cost of Attendance (per year)")
@@ -4419,7 +4648,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["section"]),
         *loan_detail,
         Spacer(1, 6),
-        Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["body"]),
+        Paragraph(f"Total Loan Amount (all {program_years_for_major(major)} years): "
+                   f"{fmt_money(loan_amount)}", styles["body"]),
         *financing_line,
         Spacer(1, 6),
         _pdf_table(full_width=True, rows=[
@@ -4834,7 +5064,7 @@ scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 # below needs to know enable_prestige_mode before that point to decide
 # whether to show a school lookup or a college-tier picker -- so each
 # flag's current value is read from session_state here, before its widget
-# exists, exactly like Career Salary Data's radio further down. See the
+# exists, the same pattern the Career section's controls use. See the
 # Methodology footer for what each module models and, just as importantly,
 # what it deliberately does NOT claim.
 st.session_state.setdefault("enable_prestige_mode", False)
@@ -4845,6 +5075,41 @@ enable_ai_mode = st.session_state["enable_ai_mode"]
 enable_future_proofing = st.session_state["enable_future_proofing"]
 prestige_tier_a = None
 prestige_tier_b = None
+
+
+def resolve_program_years(selection_key: str, fallback: str) -> int:
+    """Enrollment length for whichever occupation this scenario currently has
+    selected, resolved from session_state before the Career section builds
+    MAJOR_DATA.
+
+    Financing renders above Career, so the cost model runs before MAJOR_DATA
+    exists -- the loan was therefore computed without knowing which occupation
+    it was paying for, which is exactly why an associate's-degree career was
+    charged four years of tuition. Reading the selection early is the same
+    before-the-widget pattern dataset_mode and city already use; the
+    typical_education lookup goes straight to the cached careers CSV rather
+    than to MAJOR_DATA, since that dict isn't built yet.
+
+    Always the national file: typical entry-level education is a property of
+    the occupation, not of where it's practised, so the state and metro
+    overlays carry wages only and have nothing to say about program length.
+
+    Major mode has no education field at all (a major isn't an occupation), and
+    an unrecognised or not-yet-chosen selection falls through to
+    UNDERGRAD_YEARS -- so anything this can't resolve keeps the old behaviour.
+    """
+    if st.session_state.get("dataset_mode_radio") != DATASET_MODE_CAREER:
+        return UNDERGRAD_YEARS
+    selection = st.session_state.get(selection_key) or fallback
+    careers = load_bls_careers(CAREERS_CSV_PATH_NATIONAL)
+    return program_years_for_education(careers.get(selection, {}).get("typical_education"))
+
+
+# Scenario B's own selection is made above its financing block, so it could read
+# it directly -- it goes through the same helper anyway so both scenarios can't
+# drift apart on how a program length is decided.
+program_years_a = resolve_program_years("major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER])
+program_years_b = resolve_program_years("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER])
 
 st.sidebar.subheader("💰 Financing")
 
@@ -5077,29 +5342,37 @@ else:
 _legacy_cc_a = get_shared_default("cc_a", "0") == "1"
 st.session_state.setdefault(
     "cc_mode_a", get_shared_default("cc_mode_a", "fulltime" if _legacy_cc_a else "none"))
+_cc_options_a, _cc_labels_a = cc_path_options(program_years_a)
+reconcile_cc_mode("cc_mode_a", _cc_options_a)
 cc_mode_a = st.sidebar.radio(
     "Community college path",
-    options=["none", "fulltime", "parttime"],
-    format_func=lambda c: {
-        "none": "None — start at the 4-year school",
-        "fulltime": "Full-time community college, then transfer (2+2)",
-        "parttime": "Part-time community college while working, then transfer",
-    }[c],
+    options=_cc_options_a,
+    format_func=lambda c: _cc_labels_a[c],
     key="cc_mode_a",
-    help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
-         "college, then transferring to the 4-year school above to finish the "
-         "SAME bachelor's -- earnings and the degree are unchanged, only the "
-         "cost of those years drops. Community college is assumed paid without "
-         "loans (Pell/work/out-of-pocket), so it adds nothing to your debt. "
-         "'Part-time while working' means you work full-time during the "
-         "community-college years (earning, not foregoing income) -- its "
-         "earnings advantage shows up when 'count foregone earnings' is on. "
-         "Put a different path in each scenario to compare them. See Methodology.",
+    help=(
+        f"This profession is entered with a {program_years_a}-year degree, which a "
+        "community college can award on its own -- so there's no transfer, and "
+        "choosing this models the WHOLE program at community-college prices. "
+        if program_years_a <= COMMUNITY_COLLEGE_YEARS else
+        f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
+        "college, then transferring to the 4-year school above to finish the "
+        "SAME bachelor's -- earnings and the degree are unchanged, only the "
+        "cost of those years drops. "
+    ) +
+    "Community college is assumed paid without loans "
+    "(Pell/work/out-of-pocket), so it adds nothing to your debt. "
+    "'Part-time while working' means you work full-time during the "
+    "community-college years (earning, not foregoing income) -- its "
+    "earnings advantage shows up when 'count foregone earnings' is on. "
+    "Put a different path in each scenario to compare them. See Methodology.",
 )
 cc_transfer_a = cc_mode_a != "none"
 is_parttime_a = cc_mode_a == "parttime"
-cc_years_a = COMMUNITY_COLLEGE_YEARS if cc_transfer_a else 0
-university_years_a = max(UNDERGRAD_YEARS - cc_years_a, 0)
+# Clamped to the program length: a 2-year program done at a community college
+# is entirely community college, not 2 years of CC plus a negative number of
+# university years.
+cc_years_a = min(COMMUNITY_COLLEGE_YEARS, program_years_a) if cc_transfer_a else 0
+university_years_a = max(program_years_a - cc_years_a, 0)
 if cc_transfer_a:
     # Default CC state: the selected 4-year school's state (you transfer within
     # a state), then the work city's state, then national. coa_match_a.get is a
@@ -5167,6 +5440,7 @@ effective_cc_coa_per_year_a = cc_coa_per_year_a * (1 + inflation_rate_a) ** year
 # CC out-of-pocket from it -- single source of truth, no drift.
 _schedule_a = compute_loan_schedule_by_year(
     effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+    years=program_years_a,
     cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False)
 computed_loan_amount_a = sum(r["loan_amount"] for r in _schedule_a)
 cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college")
@@ -5198,9 +5472,14 @@ else:
 if cc_transfer_a:
     _work_note_a = "working full-time, " if is_parttime_a else ""
     cc_note_a = (
-        f"{COMMUNITY_COLLEGE_YEARS} yrs community college ({_work_note_a}"
-        f"{fmt_money(effective_cc_coa_per_year_a)}/yr, no loan → {fmt_money(cc_oop_a)} out-of-pocket), "
-        f"then {university_years_a} yrs at the 4-year school ({fmt_money(effective_coa_per_year_a)}/yr, financed). "
+        f"{cc_years_a} yrs community college ({_work_note_a}"
+        f"{fmt_money(effective_cc_coa_per_year_a)}/yr, no loan → {fmt_money(cc_oop_a)} out-of-pocket)"
+        # No transfer clause when the program is short enough to finish at the
+        # community college -- a 2-year associate's has no 4-year school to
+        # transfer into, and university_years_a is 0.
+        + (f", then {university_years_a} yrs at the 4-year school "
+           f"({fmt_money(effective_coa_per_year_a)}/yr, financed). "
+           if university_years_a else " — the whole program. ")
     )
 else:
     cc_note_a = ""
@@ -5214,7 +5493,7 @@ st.sidebar.caption((
     f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
     f"{fmt_money(personal_contribution_per_year_a)} personal "
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
-    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
+    f"→ over {program_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
 # The loan field default follows the active loan source (set by the Loan estimate
 # toggle above): the college-reported median debt in Simplified, the cost-based
@@ -5314,43 +5593,28 @@ roi_horizon_years = st.sidebar.selectbox(
 
 st.sidebar.subheader("💼 Career")
 
-# Which BLS OEWS geographic release backs the career dropdown below --
-# National (every state combined into one nationwide figure per occupation)
-# or California (that state's own wages, which run higher for many careers,
-# e.g. tech and healthcare). Affects every curated-major lookup too, since
-# MAJOR_DATA is rebuilt from this choice on every rerun -- picking a source
-# here is a data-source preference for the whole session, not per-scenario.
-# The widget itself renders at the bottom of this section (after Career
-# Stage Snapshot) -- its value is read from session_state here, before that
-# widget exists, so Target Profession's options below can be built from the
-# right MAJOR_DATA even on the very first render.
+# The wage basis is no longer a sidebar control. It used to be "Career Salary
+# Data: National / California", chosen independently of the city -- which made
+# California + New York reachable, and the ~51 occupations New York suppresses
+# then showed California wages while the page called them national figures
+# (Craft Artists: $46,080 nationally, displayed as $100,540). A state is a fact
+# about the selected city, not a preference, so it's derived from it.
 #
-# Career mode only: Major mode's NY Fed data is national, since the NY Fed
-# publishes no state breakdown. The radio is disabled rather than hidden in
-# Major mode, so the sidebar doesn't reflow on every toggle.
-#
-# Defaults to National, for three reasons. It's a publicly shared tool, so
-# most visitors aren't Californian. It's the only geography Major mode can
-# offer, so a National default means the two modes are comparable out of the
-# box rather than differing by both dataset AND geography -- comparing them
-# at a California default mixes the two, which overstates the major-vs-career
-# gap by more than 2x. And the companion paper's simulation study is
-# national, so this keeps the app's default figures and the paper's figures
-# the same numbers.
-career_source_options = ["National", "California"]
-shared_career_source = get_shared_default("career_source", "National")
-st.session_state.setdefault(
-    "career_source_radio",
-    shared_career_source if shared_career_source in career_source_options else "National",
-)
-career_data_source = st.session_state["career_source_radio"]
-careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
+# The national file stays the base that MAJOR_DATA is built from -- it defines
+# the dropdown's full 825-occupation list. build_major_data then overlays the
+# city's state and the city's metro on top, finest geography winning.
+careers_csv_path = CAREERS_CSV_PATH_NATIONAL
 
 # Which question the visitor is asking: "what if I study X?" (Major, NY Fed's
-# 73 majors) or "what if I become X?" (Career, BLS's 836 occupations). Read
-# from session_state before its own widget renders, same as the career source
-# above, so the Target Profession dropdown below can be built from the right
-# dataset on the very first pass.
+# 73 majors) or "what if I become X?" (Career, BLS's 836 occupations). Seeded
+# here and read once so MAJOR_DATA can be built below; the radio itself is the
+# first thing rendered in this section, just after that build (see there for
+# why it can't move any earlier).
+#
+# Note this is NOT the read-before-render pattern the career source above uses
+# -- resolve_program_years up in Financing does read this key that way, but
+# within this section the widget genuinely renders before every control that
+# depends on it.
 #
 # Defaults to Major because that's the choice a 17-year-old is actually
 # making -- they pick a major and a school, and the occupation is a
@@ -5390,10 +5654,40 @@ MAJOR_DATA = build_major_data(careers_csv_path, mode=dataset_mode, city=city)
 # Major mode is a single national dataset -- the NY Fed doesn't publish
 # per-state figures -- so fall back to Career mode's data if the majors CSV
 # is missing rather than rendering an empty dropdown.
+#
+# This write has to happen BEFORE the radio below is instantiated: Streamlit
+# raises if a widget's session_state key is assigned to after the widget
+# exists. It's the reason the radio renders here rather than immediately after
+# the subheader -- everything above it in this section is computation, not
+# output, so it still lands first on screen.
 if not MAJOR_DATA:
     MAJOR_DATA = build_major_data(careers_csv_path, mode=DATASET_MODE_CAREER, city=city)
     dataset_mode = DATASET_MODE_CAREER
     st.session_state["dataset_mode_radio"] = DATASET_MODE_CAREER
+
+# First control in the Career section: it decides what the dropdown below is
+# even a list of, so asking it first matches the order the visitor thinks in
+# ("what am I choosing?" then "which one?"). No index= -- session_state already
+# holds this widget's value from the setdefault above, and passing both would
+# trigger Streamlit's widget-default-conflict warning.
+dataset_mode = st.sidebar.radio(
+    "Choose by", dataset_mode_options, key="dataset_mode_radio",
+    help="Major: what people who studied that subject actually earn, "
+         "including those who ended up working outside it (NY Fed, 73 "
+         "majors). This is the choice you're actually making at 17. "
+         "Career: what people already doing a specific job earn (BLS, 836 "
+         "occupations) -- richer, but it assumes you get that job.",
+)
+if dataset_mode == DATASET_MODE_MAJOR:
+    st.sidebar.caption(
+        "Salaries reflect everyone who studied this — including the "
+        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
+    )
+else:
+    st.sidebar.caption(
+        "Salaries assume you land this job. Switch to **Major** to see what "
+        "everyone who studied a subject earns, not just those working in it."
+    )
 
 # Defaults below assume a popular, concrete profile (Software Developer in
 # San Francisco, in-state at UC Berkeley, 10 years in) instead of generic
@@ -5419,22 +5713,52 @@ default_major_index = major_options.index(shared_major) if shared_major in major
 # selectbox start empty would observe the same thing, at the cost of the
 # blank-page-until-you-pick friction this app exists to avoid. See
 # get_major_explicitly_selected (section 2b).
+# Keyed (and seeded by assignment rather than index=) so the Financing section
+# above can read the current selection before this widget renders -- see
+# resolve_program_years. Passing both key and index= is what triggers
+# Streamlit's widget-default-conflict warning, hence the assignment.
+#
+# Re-pinned on a MODE SWITCH, not merely when the stored name is absent from
+# the new list. A validity check alone isn't enough: a handful of names exist
+# in both datasets ("Computer Science" is an NY Fed major and also present in
+# the 836-entry career set), so switching Major -> Career would silently leave
+# the visitor on their Major-mode pick while the number behind that identical
+# label quietly became a different dataset's. Keying on the mode restores what
+# index= did before this widget was given a key -- land on the new mode's own
+# default.
+if (st.session_state.get("major_select_a") not in major_options
+        or st.session_state.get("major_select_a_mode") != dataset_mode):
+    st.session_state["major_select_a"] = major_options[default_major_index]
+st.session_state["major_select_a_mode"] = dataset_mode
 major = st.sidebar.selectbox(
-    SELECTION_LABEL[dataset_mode], major_options, index=default_major_index,
+    SELECTION_LABEL[dataset_mode], major_options, key="major_select_a",
     on_change=mark_major_explicitly_selected,
     help="Pick what you're evaluating -- this determines the salary numbers "
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
 )
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
-if typical_education_a in SUB_BACHELORS_EDUCATION_LEVELS:
+if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
     st.sidebar.caption((
         f"ℹ️ {major}'s typical entry-level education (BLS: "
         f"\"{typical_education_a}\") is below a bachelor's degree. This "
-        "app's Cost of Attendance/loan model below still assumes 4 years "
-        "of undergraduate cost -- see Alternative Pathway: Trade "
-        "Apprenticeship (if enabled) for a comparison using this "
-        "profession's real path instead."
+        f"app's Cost of Attendance/loan model below still assumes "
+        f"{UNDERGRAD_YEARS} years of undergraduate cost -- see Alternative "
+        "Pathway: Trade Apprenticeship (if enabled) for a comparison using "
+        "this profession's real path instead."
+    ).replace("$", r"\$"))
+elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
+    # Not a warning: the cost model matches the real program here, so this
+    # says what it's charging rather than apologising for what it isn't.
+    # Possessive phrasing, matching the sibling caption above: Career-mode
+    # names are plural BLS occupations ("Radiologic Technologists and
+    # Technicians"), so "{major} typically needs" disagrees in number.
+    st.sidebar.caption((
+        f"ℹ️ {major}'s typical entry-level education (BLS: "
+        f"\"{typical_education_a}\") is below a bachelor's degree, so costs "
+        f"below are modelled over {program_years_for_education(typical_education_a)} "
+        f"years rather than {UNDERGRAD_YEARS} -- and the community-college path "
+        "covers the whole program."
     ).replace("$", r"\$"))
 if enable_prestige_mode:
     # Apply the tier's salary premium (chosen above, in Financing) to
@@ -5476,41 +5800,20 @@ career_stage_label = st.sidebar.radio(
 )
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
-# Rendered last in this section: its current value was already read from
-# session_state above (before Target Profession) so MAJOR_DATA could be
-# built in time. No index= here since session_state already holds this
-# widget's value (seeded via setdefault above) -- passing both would
-# trigger Streamlit's widget-policy warning.
-# Same read-before-render pattern as Career Salary Data below: the value was
-# taken from session_state up in Financing so the dropdown's options could be
-# built from the right dataset on the first pass.
-dataset_mode = st.sidebar.radio(
-    "Choose by", dataset_mode_options, key="dataset_mode_radio",
-    help="Major: what people who studied that subject actually earn, "
-         "including those who ended up working outside it (NY Fed, 73 "
-         "majors). This is the choice you're actually making at 17. "
-         "Career: what people already doing a specific job earn (BLS, 836 "
-         "occupations) -- richer, but it assumes you get that job.",
-)
-if dataset_mode == DATASET_MODE_MAJOR:
-    st.sidebar.caption(
-        "Salaries reflect everyone who studied this — including the "
-        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
-    )
-else:
-    st.sidebar.caption(
-        "Salaries assume you land this job. Switch to **Major** to see what "
-        "everyone who studied a subject earns, not just those working in it."
-    )
-
-career_data_source = st.sidebar.radio(
-    "Career Salary Data", career_source_options, key="career_source_radio",
-    disabled=(dataset_mode == DATASET_MODE_MAJOR),
-    help="National: nationwide BLS OEWS wage estimates (cleaned_careers.csv). "
-         "California: that state's own BLS OEWS wage estimates "
-         "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`. "
-         "Applies to Career mode only -- the NY Fed's per-major data is national.",
-)
+# Replaces the old National/California radio. It is NOT a widget any more --
+# the wage basis follows the selected city -- but the value is still computed,
+# for two reasons that both still hold:
+#
+#  1. It keys the break-even cache. find_breakeven_loan's work depends on the
+#     MAJOR_DATA global, which st.cache_data can't see; without an argument
+#     that moves when the wages move, the cache would serve a New York
+#     break-even to someone who just switched to Austin.
+#  2. It's logged to Supabase (career_data_source) and shown in the admin
+#     dashboard. The column is retained rather than dropped, with its meaning
+#     changed from a chosen source to the derived basis -- see migrations.sql,
+#     and treat rows either side of that change as different series.
+_career_state = CITY_DATA.get(city, {}).get("state_key")
+career_data_source = US_STATES.get(_career_state, "National") if _career_state else "National"
 
 # Rendered last in the sidebar: each flag's current value was already read
 # from session_state above (before Financing) so Financing could branch on
@@ -5660,8 +5963,17 @@ if compare_mode:
         default_major_b_index = major_options.index(shared_major_b) if shared_major_b in major_options else (
             major_options.index(_default_b) if _default_b in major_options else 0
         )
+        # Same mode-switch re-pin as Scenario A above, and for the same reason
+        # -- a name valid in both datasets would otherwise survive a switch and
+        # change meaning underneath the visitor. Also drops index=, which was
+        # being passed alongside key= and triggering Streamlit's
+        # widget-default-conflict warning.
+        if (st.session_state.get("major_b") not in major_options
+                or st.session_state.get("major_b_mode") != dataset_mode):
+            st.session_state["major_b"] = major_options[default_major_b_index]
+        st.session_state["major_b_mode"] = dataset_mode
         major_b = st.selectbox(
-            SELECTION_LABEL[dataset_mode], major_options, index=default_major_b_index, key="major_b",
+            SELECTION_LABEL[dataset_mode], major_options, key="major_b",
             help="Pick the career you're evaluating -- this determines the "
                  "salary numbers used everywhere else in the app. There are "
                  "hundreds of options, so instead of scrolling, click the "
@@ -5669,14 +5981,22 @@ if compare_mode:
                  "straight to it.",
         )
         typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
-        if typical_education_b in SUB_BACHELORS_EDUCATION_LEVELS:
+        if typical_education_b in MISMODELLED_EDUCATION_LEVELS:
             st.caption((
                 f"ℹ️ {major_b}'s typical entry-level education (BLS: "
                 f"\"{typical_education_b}\") is below a bachelor's degree. "
-                "This app's Cost of Attendance/loan model below still "
-                "assumes 4 years of undergraduate cost -- see Alternative "
-                "Pathway: Trade Apprenticeship (if enabled) for a "
+                f"This app's Cost of Attendance/loan model below still "
+                f"assumes {UNDERGRAD_YEARS} years of undergraduate cost -- see "
+                "Alternative Pathway: Trade Apprenticeship (if enabled) for a "
                 "comparison using this profession's real path instead."
+            ).replace("$", r"\$"))
+        elif typical_education_b in PROGRAM_YEARS_BY_EDUCATION:
+            st.caption((
+                f"ℹ️ {major_b}'s typical entry-level education (BLS: "
+                f"\"{typical_education_b}\") is below a bachelor's degree, so "
+                f"costs below are modelled over "
+                f"{program_years_for_education(typical_education_b)} years "
+                f"rather than {UNDERGRAD_YEARS}."
             ).replace("$", r"\$"))
 
         st.subheader("💰 Financing")
@@ -5809,26 +6129,31 @@ if compare_mode:
         _legacy_cc_b = get_shared_default("cc_b", "0") == "1"
         st.session_state.setdefault(
             "cc_mode_b", get_shared_default("cc_mode_b", "fulltime" if _legacy_cc_b else "none"))
+        _cc_options_b, _cc_labels_b = cc_path_options(program_years_b)
+        reconcile_cc_mode("cc_mode_b", _cc_options_b)
         cc_mode_b = st.radio(
             "Community college path",
-            options=["none", "fulltime", "parttime"],
-            format_func=lambda c: {
-                "none": "None — start at the 4-year school",
-                "fulltime": "Full-time community college, then transfer (2+2)",
-                "parttime": "Part-time community college while working, then transfer",
-            }[c],
+            options=_cc_options_b,
+            format_func=lambda c: _cc_labels_b[c],
             key="cc_mode_b",
-            help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
-                 "community college, then transferring to finish the SAME "
-                 "bachelor's. Community college is assumed paid without loans, "
-                 "so it adds nothing to the debt. 'Part-time while working' "
-                 "means you work full-time during the community-college years. "
-                 "See Methodology.",
+            help=(
+                f"This profession is entered with a {program_years_b}-year degree, "
+                "which a community college can award on its own -- no transfer, so "
+                "this models the WHOLE program at community-college prices. "
+                if program_years_b <= COMMUNITY_COLLEGE_YEARS else
+                f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
+                "community college, then transferring to finish the SAME "
+                "bachelor's. "
+            ) +
+            "Community college is assumed paid without loans, "
+            "so it adds nothing to the debt. 'Part-time while working' "
+            "means you work full-time during the community-college years. "
+            "See Methodology.",
         )
         cc_transfer_b = cc_mode_b != "none"
         is_parttime_b = cc_mode_b == "parttime"
-        cc_years_b = COMMUNITY_COLLEGE_YEARS if cc_transfer_b else 0
-        university_years_b = max(UNDERGRAD_YEARS - cc_years_b, 0)
+        cc_years_b = min(COMMUNITY_COLLEGE_YEARS, program_years_b) if cc_transfer_b else 0
+        university_years_b = max(program_years_b - cc_years_b, 0)
         if cc_transfer_b:
             _school_state_b = coa_match_b.get("STABBR") if coa_match_b is not None else None
             if _school_state_b not in US_STATES:
@@ -5877,6 +6202,7 @@ if compare_mode:
         effective_cc_coa_per_year_b = cc_coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
         _schedule_b = compute_loan_schedule_by_year(
             effective_coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b, inflation_rate_b,
+            years=program_years_b,
             cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b, finance_cc_years=False)
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
         cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
@@ -5897,9 +6223,11 @@ if compare_mode:
         if cc_transfer_b:
             _work_note_b = "working full-time, " if is_parttime_b else ""
             cc_note_b = (
-                f"{COMMUNITY_COLLEGE_YEARS} yrs community college ({_work_note_b}"
-                f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan → {fmt_money(cc_oop_b)} out-of-pocket), "
-                f"then {university_years_b} yrs at the 4-year school ({fmt_money(effective_coa_per_year_b)}/yr, financed). "
+                f"{cc_years_b} yrs community college ({_work_note_b}"
+                f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan → {fmt_money(cc_oop_b)} out-of-pocket)"
+                + (f", then {university_years_b} yrs at the 4-year school "
+                   f"({fmt_money(effective_coa_per_year_b)}/yr, financed). "
+                   if university_years_b else " — the whole program. ")
             )
         else:
             cc_note_b = ""
@@ -5913,7 +6241,7 @@ if compare_mode:
             f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
             f"{fmt_money(personal_contribution_per_year_b)} personal "
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
-            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
+            f"→ over {program_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
         # Mirrors Scenario A: default to the college-reported median debt when
         # available, else the cost-based personal calc. See A's block for why
@@ -6521,6 +6849,13 @@ def render_cc_path_note(cc_mode: str) -> None:
             "community college, then transfer to finish the same degree — the "
             "community-college years are paid out of pocket, not financed."
         )
+    elif cc_mode == "associate":
+        st.caption(
+            "🏫 **Community-college path:** the entire degree at a community "
+            "college — no transfer, because this profession is entered with a "
+            "degree a community college awards on its own. Paid out of pocket, "
+            "not financed."
+        )
     elif cc_mode == "parttime":
         st.caption(
             f"🏫 **Community-college path:** {COMMUNITY_COLLEGE_YEARS} years at a "
@@ -6609,11 +6944,12 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             # column shows its own. Same helper as the single-scenario view.
             render_major_careers(scenario["major"], compact=True)
 
-        # Career mode's wage distribution. Per-occupation and therefore
-        # genuinely different between A and B, so each column draws its own --
-        # unlike the underemployment text above, which is national in Career
-        # mode and rendered once below the columns.
+        # Career mode's wage distribution and its geography note. Both are
+        # per-occupation and therefore genuinely different between A and B, so
+        # each column draws its own -- unlike the underemployment text above,
+        # which is national in Career mode and rendered once below the columns.
         render_wage_distribution(scenario["major"], compact=True)
+        render_wage_geography_note(scenario["major"])
 
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
@@ -7115,6 +7451,7 @@ else:
     # on-screen table below is what's shown conditionally.
     loan_schedule_a = compute_loan_schedule_by_year(
         effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+        years=program_years_a,
         cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
     )
     if loan_source_a == "college":
@@ -7141,7 +7478,7 @@ else:
              "Loan Amount This Year": fmt_money(row["loan_amount"])}
             for row in loan_schedule_a
         ]))
-    st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
+    st.metric(f"Total Loan Amount (all {program_years_a} years)", fmt_money(loan_amount))
     # "Overridden" is measured against whichever default is active, so the note
     # only fires on a real manual change (not on the expected college-vs-personal
     # gap that exists by design).
@@ -7282,23 +7619,9 @@ else:
     # render_scenario_panel so Compare Mode shows it too.
     render_wage_distribution(major)
 
-    # Which geography the salary above actually came from. BLS suppresses
-    # roughly a fifth of occupation-by-metro cells, so those fall back to a
-    # national wage -- and a national number standing in for a local one,
-    # unlabelled, is the same class of hidden assumption as the
-    # underemployment rate was.
-    if dataset_mode == DATASET_MODE_CAREER and city != "National Average":
-        if MAJOR_DATA.get(major, {}).get("wage_geography") == city:
-            st.caption(
-                f"💡 Salaries are **{city}**'s own BLS figures, not national ones — so this "
-                f"weighs {city}'s pay against {city}'s cost of living."
-            )
-        else:
-            st.caption(
-                f"⚠️ BLS doesn't publish a separate **{major}** wage for {city} (too few "
-                f"workers to report), so the salary above is the **national** figure adjusted "
-                f"for {city}'s cost of living. Treat it as an approximation."
-            )
+    # Which geography the salary above came from -- shared helper, called from
+    # render_scenario_panel too so Compare Mode shows it as well.
+    render_wage_geography_note(major)
 
     ai_context = {}
     if enable_ai_mode:
@@ -7520,11 +7843,26 @@ student might be evaluating. See Alternative Pathway: Trade Apprenticeship
 below, which uses that profession's own real BLS earnings instead of the
 generic national trade benchmark whenever this applies.
 
-The **"Career Salary Data" sidebar selector** lets you pick
-whether these extra careers use *National* average wages or
-*California*-specific wages, which can be noticeably higher for some jobs
-(tech and healthcare especially). This is real state-level government
-data, not just the national number scaled up.
+**Which geography a salary comes from.** You don't pick this — it follows the
+city you pick. For each occupation we take the finest geography BLS actually
+publishes: your **metro** if it reports that job, otherwise your **state**,
+otherwise the **national** figure. Every one of those is real government data
+for that place, not a national number scaled up, and the page says underneath
+the salary which of the three you're looking at.
+
+The fallbacks matter more than they sound. BLS won't publish a wage for a job
+in a metro where too few people do it, and that's roughly a fifth of
+occupations in a typical city — 227 of 836 in Austin, for instance. Those used
+to drop straight to a national average; now all but 41 of them land on Texas's
+own statewide figure first, which is much closer to the truth. Only when both
+the metro and the state suppress a job do you see a national number, and it's
+labelled as one.
+
+This replaced a "Career Salary Data: National / California" control that let
+you choose a wage basis independently of your city. That combination could
+disagree with itself — picking California while living in New York showed
+California wages for the jobs New York doesn't report, while the page called
+them national figures.
 
 **Majors that need school beyond a 4-year degree.** In real life,
 Athletic Training, Medicine, and Law don't pay a professional salary
@@ -7578,11 +7916,29 @@ occupation major group the major maps to (the SOC group described in the AI
 module note below) — a **representative sample of the field, not an
 exhaustive or guaranteed list**, since a major spreads across many jobs.
 Wages are the national BLS medians already used throughout this app, shown at
-the national level regardless of the California/National salary toggle so the
-"leads to" set stays stable. Occupations that a four-year degree doesn't
+the national level regardless of your selected city so the "leads to" set
+stays stable. Occupations that a four-year degree doesn't
 typically lead to (those BLS marks as needing less than a bachelor's) are
 filtered out. This is our own summary of public BLS data — it is not drawn
 from any subscription careers guide.
+
+**How long we assume you're enrolled.** Cost of Attendance is a per-year
+figure, so turning it into a total needs a program length. We use four years
+for a bachelor's — and **two years for an occupation BLS says is typically
+entered with an associate's degree**, because charging four years of tuition
+to reach a two-year credential roughly doubles the debt, and against a private
+four-year sticker price it overstates it by far more. That shorter length
+flows through everything: the loan total, the federal borrowing cap (which is
+set per year in school), the foregone-earnings option, and the break-even.
+Picking the community-college path on a two-year program covers the whole
+program rather than half of it.
+
+We don't guess at the other sub-bachelor's levels. "Postsecondary nondegree
+award" covers everything from a six-week certificate to an eighteen-month
+program, and "high school diploma" implies no college cost at all — which is a
+different model, not a shorter one. Those still get four years and say so on
+screen, and we suppress the break-even for them rather than print a number
+built on a length we don't believe.
 
 **Where the pay actually lands (Target Profession mode).** Under the salary
 figures we draw the spread of what people in that occupation really earn. BLS
@@ -7852,6 +8208,15 @@ are two on modes:
   earnings during enrollment* is on (which puts every path on one age-18
   timeline); its lower debt shows up either way.
 
+When the profession you picked is entered with an **associate's degree**, there
+is nothing to transfer to — a community college awards that degree itself — so
+the selector offers **"the entire degree, no transfer"** in place of the 2+2
+option. Choosing it puts the whole program at community-college prices, which
+is what most people in these fields actually do, and typically brings the loan
+to **$0**. The comparison is still against the same high-school-graduate
+baseline, so this isn't a way to make a career look good by spending less: the
+earnings side is untouched.
+
 **Community college is assumed paid without loans.** In both modes the
 community-college years add **$0 to the loan** — most community-college
 students don't borrow (it's low-cost, and Pell grants or part-time work
@@ -8043,10 +8408,12 @@ behaves exactly as described above when all five are left off.
   largest real cost of a bachelor's degree is usually not tuition — it's the
   roughly four years of wages given up while enrolled full-time, during which
   the debt-free high-school graduate is already working, earning raises, and
-  banking that income. Turning this option on adds those ~4 foregone years
-  (UNDERGRAD_YEARS) to the high-school baseline, so every path is compared on
-  one consistent timeline that starts at **age 18** rather than at
-  graduation. Concretely: the high-school graduate is credited with ~4 extra
+  banking that income. Turning this option on adds those foregone years to the
+  high-school baseline, so every path is compared on one consistent timeline
+  that starts at **age 18** rather than at graduation. The number of years is
+  the program's real length, not a flat four: an occupation BLS says is
+  entered with an associate's degree is charged two years of cost and two
+  years of foregone wages, because that is how long it takes. Concretely: the high-school graduate is credited with ~4 extra
   years of earnings at the front, the degree-seeker earns nothing during
   enrollment, and — when the Trade Apprenticeship module is also on — the
   apprentice, who *is* paid during those years, is credited with them too (a
