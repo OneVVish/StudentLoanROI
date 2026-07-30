@@ -52,10 +52,16 @@ Usage:
     python data_pipeline.py raw_bls_data.xlsx -o cleaned_careers.csv
     python data_pipeline.py state_M2025_dl.xlsx --state CA
     python data_pipeline.py state_M2025_dl.xlsx --state CA -o cleaned_careers_ca.csv
-    python data_pipeline.py MSA_M2024_dl.xlsx --metros -o data/metro_careers_clean.csv
+    python data_pipeline.py MSA_M2025_dl.xlsx --metros --national national_M2025_dl.xlsx
+
+Every geographic file must come from the same release year as the others --
+app.py shows metro and national wages side by side, so a metro file one
+release behind reads as a pay cut rather than as stale data. --metros
+enforces this where it can (see release_vintage).
 """
 
 import argparse
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -75,11 +81,17 @@ GROWTH_WINDOW_YEARS = 10
 
 # BLS's own national all-occupations median annual wage, the denominator of
 # the metro wage index (see build_metro_wage_index). Read straight off the
-# National release's o_group == "total" row -- "All Occupations", 154,187,380
-# workers, May 2024. Update it in the same pass as any release bump, and from
+# National release's o_group == "total" row -- "All Occupations", 155,495,730
+# workers, May 2025. Update it in the same pass as any release bump, and from
 # the SAME release as the metro file: mixing vintages here would tilt every
 # city's index by whatever wage growth happened in between.
-NATIONAL_ALL_OCCUPATIONS_MEDIAN = 49500
+#
+# Prefer `--metros --national national_M####_dl.xlsx`, which reads this figure
+# out of that file instead and refuses to run if the two releases disagree.
+# The constant is the fallback for when the National file isn't on hand, and
+# it is only correct while NATIONAL_MEDIAN_VINTAGE matches the metro release.
+NATIONAL_ALL_OCCUPATIONS_MEDIAN = 50980
+NATIONAL_MEDIAN_VINTAGE = "M2025"
 
 # The app's CITY_DATA keys mapped to their BLS OEWS metropolitan area
 # titles, for --metros. Hardcoded here rather than derived, because BLS's
@@ -174,6 +186,40 @@ def filter_to_state(df: pd.DataFrame, state_abbr: str) -> pd.DataFrame:
     else:
         matches = values.str.lower() == STATE_ABBR_TO_NAME[state_abbr].lower()
     return df[matches]
+
+
+def release_vintage(xlsx_path: str) -> str:
+    """The "M2025"-style release token out of a BLS filename
+    (national_M2025_dl.xlsx, MSA_M2024_dl.xlsx), or None if the file has been
+    renamed past recognition.
+
+    The filename is the only place the vintage lives -- OEWS's own columns
+    (AREA, OCC_CODE, A_MEDIAN, ...) carry no year field, so there is nothing
+    inside the workbook to check against. That makes a mismatch invisible at
+    read time and permanent once it's in a committed CSV, which is exactly
+    what happened here: the metro files were built from M2024 while
+    cleaned_careers.csv moved on to M2025, leaving 18% of New York
+    occupations reading *below* the national wage purely from a year of
+    wage growth."""
+    match = re.search(r"[_\b]M(\d{4})", Path(xlsx_path).stem, flags=re.IGNORECASE)
+    return f"M{match.group(1)}" if match else None
+
+
+def national_all_occupations_median(xlsx_path: str) -> float:
+    """The all-occupations median annual wage off a National release's
+    o_group == "total" row -- the metro wage index's denominator, taken from
+    a real file rather than the hardcoded constant."""
+    raw = load_bls_data(xlsx_path)
+    totals = raw[raw["o_group"].astype(str).str.strip().str.lower() == "total"]
+    if totals.empty:
+        raise ValueError(
+            f"'{xlsx_path}' has no o_group == 'total' row, so it can't supply the "
+            f"national all-occupations median. Pass the BLS *National* release."
+        )
+    median = clean_wage_column(totals["a_median"]).iloc[0]
+    if pd.isna(median):
+        raise ValueError(f"'{xlsx_path}' has no usable all-occupations median wage.")
+    return float(median)
 
 
 def load_bls_data(xlsx_path: str) -> pd.DataFrame:
@@ -317,7 +363,7 @@ def build_metro_dataframe(xlsx_path: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def build_metro_wage_index(xlsx_path: str) -> pd.DataFrame:
+def build_metro_wage_index(xlsx_path: str, national_xlsx: str = None) -> pd.DataFrame:
     """Each app city's overall wage level relative to the nation, from BLS's
     own all-occupations median (the o_group == "total" row per area).
 
@@ -345,11 +391,40 @@ def build_metro_wage_index(xlsx_path: str) -> pd.DataFrame:
 
     The denominator is BLS's published national all-occupations median from
     the SAME release, so the index is internally consistent rather than
-    mixing vintages.
+    mixing vintages. Pass national_xlsx (the National release paired with this
+    metro file) to read it from that file and have the vintage checked;
+    without it the NATIONAL_ALL_OCCUPATIONS_MEDIAN constant is used, which is
+    only right while its vintage still matches.
     """
     raw = load_bls_data(xlsx_path)
     if "area_title" not in raw.columns:
         raise ValueError("No 'area_title' column -- this isn't the BLS Metropolitan release.")
+
+    metro_vintage = release_vintage(xlsx_path)
+    if national_xlsx:
+        national_vintage = release_vintage(national_xlsx)
+        if metro_vintage and national_vintage and metro_vintage != national_vintage:
+            raise ValueError(
+                f"Release mismatch: the metro file is {metro_vintage} but "
+                f"'{national_xlsx}' is {national_vintage}. The index would divide one "
+                f"year's metro wages by another's national wage, tilting every city by "
+                f"whatever wage growth happened in between. Download the matching pair "
+                f"from bls.gov/oes/tables.htm."
+            )
+        national_median = national_all_occupations_median(national_xlsx)
+    else:
+        national_median = NATIONAL_ALL_OCCUPATIONS_MEDIAN
+        if metro_vintage and metro_vintage != NATIONAL_MEDIAN_VINTAGE:
+            raise ValueError(
+                f"The metro file is {metro_vintage} but NATIONAL_ALL_OCCUPATIONS_MEDIAN is "
+                f"{NATIONAL_MEDIAN_VINTAGE}. Either pass --national {metro_vintage}'s National "
+                f"release, or update the constant and NATIONAL_MEDIAN_VINTAGE from its "
+                f"o_group == 'total' row."
+            )
+        print(
+            f"Note: no --national file given, so the index uses the hardcoded "
+            f"${NATIONAL_ALL_OCCUPATIONS_MEDIAN:,} ({NATIONAL_MEDIAN_VINTAGE}) denominator."
+        )
 
     totals = raw[raw["o_group"].astype(str).str.strip().str.lower() == "total"].copy()
     totals["a_median"] = clean_wage_column(totals["a_median"])
@@ -361,7 +436,7 @@ def build_metro_wage_index(xlsx_path: str) -> pd.DataFrame:
             raise ValueError(f"No all-occupations median for {city} ({area!r}).")
         median = float(match["a_median"].iloc[0])
         rows.append({"city": city, "all_occupations_median": median,
-                     "wage_index": median / NATIONAL_ALL_OCCUPATIONS_MEDIAN})
+                     "wage_index": median / national_median})
     return pd.DataFrame(rows).sort_values("wage_index", ascending=False).reset_index(drop=True)
 
 
@@ -389,12 +464,19 @@ if __name__ == "__main__":
                          help="Produce one long-format dataset covering every city in the app's "
                               "CITY_DATA, with a `city` column. Requires the BLS OEWS "
                               "*Metropolitan* release (oesm##ma.zip -> MSA_M####_dl.xlsx).")
+    parser.add_argument("--national", default=None,
+                         help="With --metros: the National release from the SAME year, whose "
+                              "all-occupations median becomes the wage index's denominator. "
+                              "Recommended -- without it the hardcoded "
+                              "NATIONAL_ALL_OCCUPATIONS_MEDIAN is used instead.")
     parser.add_argument("-o", "--output", default=None,
                          help="Output CSV path (default: cleaned_careers.csv, or "
                               "cleaned_careers_<state>.csv when --state is given)")
     args = parser.parse_args()
     if args.metros and args.state:
         raise SystemExit("Error: --metros and --state are different releases; pass one or the other.")
+    if args.national and not args.metros:
+        raise SystemExit("Error: --national only applies to --metros (it supplies the wage index's denominator).")
     output_path = args.output or (
         "data/metro_careers_clean.csv" if args.metros else
         f"cleaned_careers_{args.state.lower()}.csv" if args.state else "cleaned_careers.csv"
@@ -404,7 +486,7 @@ if __name__ == "__main__":
         if args.metros:
             print(f"Extracting {len(METRO_AREA_BY_CITY)} metro areas:")
             clean_df = build_metro_dataframe(args.input_xlsx)
-            index_df = build_metro_wage_index(args.input_xlsx)
+            index_df = build_metro_wage_index(args.input_xlsx, national_xlsx=args.national)
         else:
             clean_df = build_clean_dataframe(args.input_xlsx, state=args.state)
     except FileNotFoundError:
@@ -425,5 +507,8 @@ if __name__ == "__main__":
               f"(all-occupations wage level vs the national ${NATIONAL_ALL_OCCUPATIONS_MEDIAN:,} median):")
         print(index_df.head(4).to_string(index=False))
         print(index_df.tail(2).to_string(index=False))
+        vintage = release_vintage(args.input_xlsx) or "this"
+        print(f"\nRegenerate cleaned_careers.csv and cleaned_careers_ca.csv from {vintage}'s "
+              f"National/State releases too -- app.py compares them against these metro wages.")
     else:
         print_summary(clean_df)
