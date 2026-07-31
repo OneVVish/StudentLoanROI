@@ -18,6 +18,7 @@ Architecture:
 
 import contextlib
 import hashlib
+import html
 import io
 import re
 import uuid
@@ -1599,6 +1600,47 @@ def fmt_money(value):
 
 def fmt_pct(value):
     return f"{value:.1f}%"
+
+
+# Colour for the panel headings that say WHICH scenario or career stage a
+# block of numbers belongs to (Compare Mode's "A: ..." / "B: ...", and the
+# career stages in Real-World Take-Home). Plain bold body text left those
+# reading as part of the numbers below them rather than as the label telling
+# you what you were looking at.
+#
+# There is no [theme] block in .streamlit/config.toml, so the app renders in
+# whichever theme the visitor has set. This is a mid-tone blue picked to clear
+# WCAG's 3:1 large-text contrast threshold against BOTH, measured: 3.68:1 on
+# the light theme's white and 5.14:1 on the dark theme's #0E1117 (3.28:1 and
+# 4.03:1 against their respective secondary/sidebar backgrounds). A colour
+# tuned for one theme disappears on the other, which is the trap here -- the
+# dark theme is what you see while developing.
+PANEL_HEADING_COLOR = "#3B82F6"
+
+
+def panel_heading(text: str, level: int = 1) -> None:
+    """A scenario/stage heading, rendered into the current container.
+
+    Shared by every result panel so the compare columns, the take-home stages
+    and the module sections can't drift into three different weights -- the
+    same reason the blocks themselves go through shared render helpers.
+
+    level=1 names a scenario ("A: Computer Science"); level=2 names something
+    nested inside one (a career stage). In Compare Mode both appear in the
+    same column, one inside the other, so they must not render identically --
+    at equal size the stage reads as a sibling of the scenario rather than as
+    part of it. Sizes differ rather than colours: two blues close enough to
+    sit together would be a distinction nobody can see.
+
+    html.escape because school and major names reach this from the College
+    Scorecard and from a free-text school box, and this writes raw HTML."""
+    size = "1.15rem" if level == 1 else "1.0rem"
+    space = "0.5rem 0 0.7rem" if level == 1 else "0.35rem 0 0.5rem"
+    st.markdown(
+        f"<div style='color:{PANEL_HEADING_COLOR};font-size:{size};"
+        f"font-weight:700;margin:{space};'>{html.escape(text)}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def financing_summary_text(financing: dict) -> str:
@@ -7330,7 +7372,7 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
                   else [contextlib.nullcontext()] * len(results))
     for i, ((label, figs), container) in enumerate(zip(results, containers)):
         with container:
-            st.markdown(f"**{label}**")
+            panel_heading(label, level=2)
             # Only the first stage carries the full threshold explanation --
             # repeating it under every stage is the same paragraph twice, and
             # the thresholds it cites differ only by that stage's effective
@@ -7489,7 +7531,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
     provoke.
     """
     with column:
-        st.markdown(f"**Scenario {label}: {scenario['major']} — {scenario['strategy_label']}**")
+        panel_heading(f"Scenario {label}: {scenario['major']} — {scenario['strategy_label']}")
         render_cc_path_note(cc_mode)
 
         for caption in get_investment_captions(scenario):
@@ -7713,10 +7755,10 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
     if scenario_b is not None:
         col_a, col_b = st.columns(2)
         with col_a:
-            st.markdown(f"**Scenario A: {major_name_a}**")
+            panel_heading(f"Scenario A: {major_name_a}")
             plan_a = _render_plans(scenario_a, major_name_a, interest_rate_a, "a")
         with col_b:
-            st.markdown(f"**Scenario B: {major_name_b}**")
+            panel_heading(f"Scenario B: {major_name_b}")
             plan_b = _render_plans(scenario_b, major_name_b, interest_rate_b, "b")
         context = {
             "future_forecasting_active": True, "future_plan_selected": plan_a,
@@ -7824,11 +7866,11 @@ if compare_mode:
     st.subheader(f"🏙️ Real-World Take-Home — {city}")
     th_col_a, th_col_b = st.columns(2)
     with th_col_a:
-        st.markdown(f"**A: {scenario_a['major']}**")
+        panel_heading(f"A: {scenario_a['major']}")
         render_takehome_block(scenario_a, major, city, city_info,
                                show_charts=False, heading=False, stage_layout="stacked")
     with th_col_b:
-        st.markdown(f"**B: {scenario_b['major']}**")
+        panel_heading(f"B: {scenario_b['major']}")
         render_takehome_block(scenario_b, major_b, city, city_info,
                                show_charts=False, heading=False, stage_layout="stacked")
 
