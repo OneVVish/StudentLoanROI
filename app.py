@@ -1339,6 +1339,45 @@ CITY_DATA = {
     "Minneapolis, MN": {"state_key": "MN", "col_index": 104.50, "local_tax_rate": 0.0},
 }
 
+# {state_key: metro} for the states holding exactly ONE of the cities above.
+# Built rather than hand-listed so adding a city to CITY_DATA can't leave a
+# stale mapping behind: a second Ohio metro would drop OH from this dict
+# automatically instead of silently keeping whichever was written down first.
+#
+# Deliberately excludes states with more than one metro. California, Texas
+# and Ohio hold nine cities between them, and a school's state does not say
+# which -- a Los Angeles school and a San Francisco school are both "CA", and
+# guessing between them would put the wrong wage level AND the wrong cost of
+# living on the page. The committed college dataset carries STABBR but no
+# city (see clean_college_scorecard.py), so state is the finest granularity
+# available offline; those states are left to the visitor.
+def _single_metro_states() -> dict:
+    by_state = {}
+    for metro, info in CITY_DATA.items():
+        # "National Average" carries state_key None -- it is a pseudo-city, not
+        # anywhere a school can be, so it must not become the answer for a
+        # school whose STABBR is missing.
+        if info["state_key"] in US_STATES:
+            by_state.setdefault(info["state_key"], []).append(metro)
+    return {state: metros[0] for state, metros in by_state.items() if len(metros) == 1}
+
+
+SINGLE_METRO_BY_STATE = _single_metro_states()
+
+
+def metro_for_school(coa_match) -> str:
+    """The app's metro area for the state a school sits in, or None when the
+    school is unknown, its state holds several metros, or it holds none.
+
+    "Where you study" is not "where you work", and this only seeds the City /
+    Metro Area control -- which drives post-graduation wages and cost of
+    living -- with the likelier of the two. The visitor can always change it,
+    and the sidebar says so whenever this has fired."""
+    if coa_match is None:
+        return None
+    state = coa_match.get("STABBR")
+    return SINGLE_METRO_BY_STATE.get(state) if state in US_STATES else None
+
 # Maps a UI-facing career-stage label to a 0-based year_index, fed straight
 # into get_annual_salary_for_year. This only ever drives the take-home/COL
 # snapshot (5d) -- never the loan amortization or ROI simulation, which
@@ -6058,6 +6097,31 @@ city_options = list(CITY_DATA.keys())
 shared_city = get_shared_default("city", "San Francisco, CA")
 st.session_state.setdefault(
     "city_select", shared_city if shared_city in city_options else "San Francisco, CA")
+
+# Seed the metro from the school's state, re-running whenever the school
+# changes. Writing city_select here is safe only because its widget is
+# instantiated further down (after Target Profession) -- Streamlit raises if a
+# key is assigned once its widget exists.
+#
+# This DOES overwrite a metro the visitor picked deliberately, which is why
+# render_inferred_city_note puts a line under the control saying so. The metro
+# drives post-graduation wages and cost of living, and "where you study" is
+# not "where you work", so the inference is stated rather than silent.
+#
+# A shared link carries an explicit city that must survive the visit opening
+# it: seeding _city_school with that link's school makes the first render
+# count as "no change", so the link's city stands.
+if "city" in st.query_params:
+    st.session_state.setdefault("_city_school", school_name_a)
+if st.session_state.get("_city_school") != school_name_a:
+    st.session_state["_city_school"] = school_name_a
+    _inferred_metro = metro_for_school(coa_match_a)
+    if _inferred_metro:
+        st.session_state["city_select"] = _inferred_metro
+        st.session_state["_city_inferred"] = (school_name_a, _inferred_metro)
+    else:
+        st.session_state.pop("_city_inferred", None)
+
 city = st.session_state["city_select"]
 
 # Metro wages are Career mode only: the NY Fed publishes no geography, so
@@ -6212,6 +6276,15 @@ city = st.sidebar.selectbox(
          "come out ahead or behind on its own merits. Major mode's wages are "
          "national, since the NY Fed publishes no per-city breakdown.",
 )
+# Say so when the metro above was set from the school rather than chosen. The
+# tuple has to still match the live selection: once the visitor moves the
+# control themselves, the value is theirs and this note would be a lie.
+if st.session_state.get("_city_inferred") == (school_name_a, city):
+    st.sidebar.caption(
+        f"Set to {city} because {school_name_a} is there. This is where you'd "
+        "*work*, not where you study — change it if you plan to leave. It "
+        "re-sets whenever you pick a different school."
+    )
 # Computed here (not just where it's first used, further down) so it's
 # available for every compute_scenario_results() call in section 5 --
 # including Compare Mode's, which run before the Real-World Take-Home
