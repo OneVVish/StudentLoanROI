@@ -122,13 +122,41 @@ def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str) -> dic
 
     Normalises the status names to the ones this script's table already uses.
     """
-    result = ns["find_breakeven_loan"](major, rate, strategy)
+    # Pass the SAME baseline the app uses, or this table stops being the app's
+    # number -- which is the one thing the docstring above says it must be.
+    #
+    # Two model changes broke the old bare call. The high-school baseline now
+    # follows an age-earnings curve rather than a flat all-ages median, and
+    # program length is per-occupation (0 years for a job needing no degree, 2
+    # for an associate's) rather than a flat four. baseline_start_age carries
+    # both: its offset is derived from program length. Omitting it understated
+    # every break-even here by 15-26% against what a visitor actually sees --
+    # Nuclear Power Reactor Operators read $431,289 against the app's $542,587.
+    #
+    # enrollment_years stays 0: this table is the default no-foregone-earnings
+    # view, matching the app's default.
+    program_years = ns["program_years_for_education"](
+        ns["MAJOR_DATA"].get(major, {}).get("typical_education"))
+    baseline_start_age = ns["baseline_start_age_for"](program_years, 0)
+    result = ns["find_breakeven_loan"](major, rate, strategy,
+                                        baseline_start_age=baseline_start_age)
     status = {"never": "never_breaks_even",
               "beyond_search_max": "breakeven_above_search_max"}.get(result["status"], "ok")
     premium_at_zero = ns["compute_scenario_results"](
-        major, 0.0, rate, strategy)["roi_result"]["earnings_premium"]
+        major, 0.0, rate, strategy,
+        baseline_start_age=baseline_start_age)["roi_result"]["earnings_premium"]
     return {"status": status, "breakeven_loan": result["breakeven_loan"],
-            "premium_at_zero_debt": premium_at_zero}
+            "premium_at_zero_debt": premium_at_zero,
+            "program_years": program_years,
+            # The app deliberately shows no break-even for these: a career you
+            # can enter with a diploma has no debt ceiling, and a level whose
+            # length we don't believe would give a number built on a wrong
+            # premise. The figure is still computed here because it's a valid
+            # research quantity -- but the paper must not report it as
+            # something a visitor saw.
+            "shown_in_app": not (
+                ns["MAJOR_DATA"].get(major, {}).get("typical_education", "")
+                in ns["MISMODELLED_EDUCATION_LEVELS"] or program_years == 0)}
 
 
 def build_breakeven_table(ns: dict, rate: float) -> pd.DataFrame:
@@ -163,6 +191,8 @@ def build_breakeven_table(ns: dict, rate: float) -> pd.DataFrame:
             row[f"status_{key}"] = result["status"]
             if key == "standard":
                 row["premium_at_zero_debt"] = round(result["premium_at_zero_debt"], 2)
+                row["program_years"] = result["program_years"]
+                row["shown_in_app"] = result["shown_in_app"]
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -199,7 +229,15 @@ def print_window_sensitivity(ns: dict, rate: float):
         for h in horizons:
             principal = ns["get_effective_principal"](m, 0.0)
             repay = ns["calculate_standard_repayment"](principal, rate)
-            roi = ns["calculate_roi"](m, repay["total_paid_in_roi_window"], principal or 1, years=h)
+            # Same baseline as the break-even table above and as the app --
+            # this panel is the sensitivity check ON the app's headline number,
+            # so running it against a different baseline would compare the
+            # horizon effect to the wrong thing.
+            _py = ns["program_years_for_education"](
+                ns["MAJOR_DATA"].get(m, {}).get("typical_education"))
+            roi = ns["calculate_roi"](m, repay["total_paid_in_roi_window"], principal or 1,
+                                       years=h,
+                                       baseline_start_age=ns["baseline_start_age_for"](_py, 0))
             cells += f"{roi['earnings_premium']:>16,.0f}"
         print(f"{m[:22]:22s}{cells}")
     print("\n  Medicine is negative at 10 years and strongly positive later: at year 10 it\n"
