@@ -886,6 +886,21 @@ def get_wage_distribution_context(occupation_name: str) -> dict:
     }
 
 
+def wage_distribution_rows(occupation_name: str) -> int:
+    """How many geography rows this occupation's chart will draw: 2 when the
+    city has its own published wages and a national row goes beneath, 1 when
+    the national figure is all there is, 0 when there's no chart at all.
+
+    Compare Mode uses the larger of its two scenarios so both columns reserve
+    the same vertical space. Without that, a national-only occupation beside a
+    metro one draws a shorter chart, and the two national curves -- the one
+    thing genuinely common to both columns -- sit at different heights."""
+    context = get_wage_distribution_context(occupation_name)
+    if not context:
+        return 0
+    return 2 if context.get("national_percentiles") else 1
+
+
 def render_wage_geography_note(occupation_name: str) -> None:
     """Which geography the salary shown for this occupation actually came from.
 
@@ -948,7 +963,7 @@ WAGE_DISTRIBUTION_CAPTION = (
 
 
 def render_wage_distribution(occupation_name: str, compact: bool = False,
-                             caption: bool = True) -> None:
+                             caption: bool = True, row_slots: int = None) -> None:
     """The wage-distribution histogram, rendered identically from both result
     branches.
 
@@ -961,7 +976,7 @@ def render_wage_distribution(occupation_name: str, compact: bool = False,
     context = get_wage_distribution_context(occupation_name)
     if not context:
         return
-    figure = build_wage_distribution_chart(**context)
+    figure = build_wage_distribution_chart(**context, row_slots=row_slots)
     if figure is None:
         return
     if compact:
@@ -979,7 +994,8 @@ def render_wage_distribution(occupation_name: str, compact: bool = False,
         # and dropping it also squeezes the p10 money label off the canvas.
         # The right margin is new here -- p90's label sits outside the curve,
         # which the full-width layout absorbs and a compare column doesn't.
-        rows_drawn = 2 if context.get("national_percentiles") else 1
+        rows_drawn = max(row_slots or 0,
+                          2 if context.get("national_percentiles") else 1)
         figure.update_layout(title_text="", height=180 + 110 * rows_drawn,
                               margin=dict(t=40, b=110, l=120, r=60))
     st.plotly_chart(figure, use_container_width=True, config=PLOTLY_CHART_CONFIG)
@@ -4212,7 +4228,8 @@ PANEL_WAGE_NATIONAL_COLOR = "#4C78A8"   # national, the app's existing chart blu
 def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
                                    modelled_start: float = None,
                                    geography_label: str = None,
-                                   national_percentiles: dict = None):
+                                   national_percentiles: dict = None,
+                                   row_slots: int = None):
     """Where an occupation's pay actually lands, as one filled curve per
     geography on a shared wage axis. Returns None when nothing can be built,
     so callers render nothing rather than an empty axis.
@@ -4242,6 +4259,12 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
     if not rows:
         return None
 
+    # row_slots lets a caller reserve vertical space it isn't using, so a
+    # national-only occupation lines up with a metro+national one beside it.
+    # Rows are drawn bottom-up with the national row last, so an empty slot on
+    # top leaves the two national curves on the same baseline rather than at
+    # different heights per column.
+    slots = max(row_slots or 0, len(rows))
     peak = max(max(r["ys"]) for r in rows) or 1.0
     # Each row sits on its own baseline. row_height exceeds fill_scale by
     # enough that a full-height curve still clears the baseline above it --
@@ -4293,14 +4316,23 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
             hoverinfo="skip", showlegend=False,
         ))
         fig.add_trace(go.Scatter(
-            x=mx, y=my, mode="markers+text",
+            x=mx, y=my, mode="markers",
             marker=dict(color=color, size=8, line=dict(color="white", width=1.5)),
-            text=[fmt_money(v) for v in mx], textposition=[p for _, p in marks],
-            textfont=dict(size=11, color=color),
             hovertemplate="%{customdata}: %{x:$,.0f}<extra></extra>",
             customdata=["10th percentile", "median", "90th percentile"],
             showlegend=False,
         ))
+        # Money labels as LAYOUT annotations, not scatter text. Plotly clips
+        # trace text at the plot-area edge, which chopped "$89,980" to "i,980"
+        # in Compare Mode's narrow columns however wide the margin got.
+        # Annotations are drawn over the whole canvas and are never clipped.
+        for (key, _), x_val, y_val, anchor, shift in zip(
+                marks, mx, my, ("right", "center", "left"), (-11, 0, 11)):
+            fig.add_annotation(
+                x=x_val, y=y_val, xref="x", yref="y", showarrow=False,
+                xanchor=anchor, yanchor="bottom" if key == "p50" else "middle",
+                yshift=8 if key == "p50" else 0, xshift=shift,
+                text=fmt_money(x_val), font=dict(size=11, color=color))
         fig.add_annotation(x=0, y=base + fill_scale / 2, xref="paper", yref="y",
                             xanchor="right", showarrow=False, text=f"<b>{row['label']}</b>",
                             font=dict(size=12, color=color), xshift=-8)
@@ -4337,8 +4369,8 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
         xaxis=dict(title="Annual wage", tickprefix="$", tickformat=",",
                     range=[_x_lo - _x_pad, _x_hi + _x_pad]),
         yaxis=dict(title=None, showticklabels=False, showgrid=False, zeroline=False,
-                    range=[-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34]),
-        height=200 + 130 * len(rows),
+                    range=[-0.12, (slots - 1) * row_height + fill_scale + 0.34]),
+        height=200 + 130 * slots,
         # Left margin holds the row labels; bottom clears the x-title AND the
         # tail note under it, which is clipped out of the plot at the default.
         margin=dict(t=70, b=110, l=130, r=70),
@@ -4720,6 +4752,7 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
                                        modelled_start: float = None,
                                        geography_label: str = None,
                                        national_percentiles: dict = None,
+                                       row_slots: int = None,
                                        max_width: float = PDF_CONTENT_WIDTH) -> Image:
     """PDF counterpart to build_wage_distribution_chart. Returns None when
     nothing can be built, matching its on-screen twin so the caller's "skip
@@ -4734,12 +4767,15 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
     if not rows:
         return None
 
+    # Mirrors the Plotly twin: reserved slots, not drawn rows, so the two
+    # renderers size a chart identically for the same inputs.
+    slots = max(row_slots or 0, len(rows))
     peak = max(max(r["ys"]) for r in rows) or 1.0
     row_height, fill_scale = 1.25, 0.78
     colors = ([PANEL_WAGE_LOCAL_COLOR, PANEL_WAGE_NATIONAL_COLOR] if len(rows) > 1
               else [PANEL_WAGE_NATIONAL_COLOR])
 
-    fig, ax = plt.subplots(figsize=(6, 2.1 + 1.15 * len(rows)))
+    fig, ax = plt.subplots(figsize=(6, 2.1 + 1.15 * slots))
     for i, row in enumerate(reversed(rows)):
         base = i * row_height
         color = colors[len(rows) - 1 - i]
@@ -4794,7 +4830,7 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
     # Cap the tick count: at print width the default locator packs in enough
     # "$110,000"-length labels to run them into each other.
     ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, prune="both"))
-    ax.set_ylim(-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34)
+    ax.set_ylim(-0.12, (slots - 1) * row_height + fill_scale + 0.34)
     # Same padding reasoning as the Plotly twin: the outer money labels sit
     # beyond their markers and would otherwise be trimmed at the axes edge.
     _x_lo = min(r["xs"][0] for r in rows)
@@ -7753,7 +7789,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            col_index: float, career_data_source_name: str,
                            hs_wage_index: float = 1.0,
                            federal_cap: float = None, gap_rate: float = None,
-                           include_fees: bool = False, cc_mode: str = "none"):
+                           include_fees: bool = False, cc_mode: str = "none",
+                           wage_row_slots: int = None):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -7833,7 +7870,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # per-occupation and therefore genuinely different between A and B, so
         # each column draws its own -- unlike the underemployment text above,
         # which is national in Career mode and rendered once below the columns.
-        render_wage_distribution(scenario["major"], compact=True, caption=False)
+        render_wage_distribution(scenario["major"], compact=True, caption=False,
+                                  row_slots=wage_row_slots)
         render_wage_geography_note(scenario["major"])
 
 
@@ -8078,6 +8116,13 @@ if compare_mode:
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
                                            federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
 
+    # Both wage charts reserve the same number of geography rows, so the
+    # national curve -- the one series genuinely common to A and B -- sits at
+    # the same height in each column. Computed before either panel renders,
+    # since neither can see the other's occupation.
+    _wage_slots = max(wage_distribution_rows(scenario_a["major"]),
+                       wage_distribution_rows(scenario_b["major"]))
+
     col_a, col_b = st.columns(2)
     render_scenario_panel(
         col_a, scenario_a, "A", roi_horizon_years,
@@ -8085,7 +8130,7 @@ if compare_mode:
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
-        cc_mode=cc_mode_a,
+        cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -8093,7 +8138,7 @@ if compare_mode:
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
-        cc_mode=cc_mode_b,
+        cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
     )
 
     # Career mode's underemployment text is national and identical for both
