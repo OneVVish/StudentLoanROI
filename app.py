@@ -4782,10 +4782,12 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
                 dependents = st.session_state.get(f"rap_dependents_{suffix}", 0)
                 tiered_res, tiered_roi = compute_future_plan_result(
                     scenario, major_name, rate, "2026 Tiered Standard Plan", dependents,
-                    col_index=col_index, roi_window_years=roi_window_years)
+                    col_index=col_index, hs_wage_index=hs_wage_index,
+                    roi_window_years=roi_window_years)
                 rap_res, rap_roi = compute_future_plan_result(
                     scenario, major_name, rate, "2026 Repayment Assistance Plan (RAP)", dependents,
-                    col_index=col_index, roi_window_years=roi_window_years)
+                    col_index=col_index, hs_wage_index=hs_wage_index,
+                    roi_window_years=roi_window_years)
                 term_years = calculate_tiered_standard_term(scenario["effective_principal"])
                 rap_pay = calculate_rap_payment(get_annual_salary_for_year(major_name, 0), dependents)
                 if label:
@@ -7317,6 +7319,7 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
 
 def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: float,
                                 future_plan: str, dependents: int, col_index: float = 100.0,
+                                hs_wage_index: float = 1.0,
                                 roi_window_years: int = ROI_WINDOW_YEARS) -> tuple:
     """Recomputes a 2026 plan's repayment schedule + ROI position -- shared
     by the on-screen render (_render_plan, inside
@@ -7340,13 +7343,15 @@ def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: f
     # they all defaulted, which quietly compared these plans' premiums against
     # a no-head-start baseline while the rest of the page used one with it.
     #
-    # hs_wage_index is still NOT passed here -- this module's premium remains
-    # on a national baseline while the main page's is city-scaled. That is a
-    # separate pre-existing gap, left alone deliberately rather than folded
-    # into a change about age.
+    # hs_wage_index matters as much as the rest: without it this module
+    # compared a city-scaled graduate salary against a NATIONAL high-school
+    # baseline, so the metro wage premium landed on the degree's side of the
+    # scale only -- the same asymmetry calculate_roi's own comment describes,
+    # reappearing here because the argument simply wasn't forwarded.
     roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
                                      scenario["total_investment"], col_index=col_index,
                                      years=roi_window_years,
+                                     hs_wage_index=hs_wage_index,
                                      enrollment_years=scenario["enrollment_years"],
                                      working_years=scenario["working_years"],
                                      baseline_start_age=scenario["baseline_start_age"])
@@ -7356,6 +7361,7 @@ def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: f
 def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest_rate_a: float,
                                     scenario_b: dict = None, major_name_b: str = None,
                                     interest_rate_b: float = None, col_index: float = 100.0,
+                                    hs_wage_index: float = 1.0,
                                     roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """2026 Federal Repayment Plans container: compares the RAP and Tiered
     Standard plans side by side (only rendered when enable_future_proofing is
@@ -7384,11 +7390,13 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
         )
         tiered_res, tiered_roi = compute_future_plan_result(
             scenario, major_name, interest_rate, "2026 Tiered Standard Plan", dependents,
-            col_index=col_index, roi_window_years=roi_window_years,
+            col_index=col_index, hs_wage_index=hs_wage_index,
+            roi_window_years=roi_window_years,
         )
         rap_res, rap_roi = compute_future_plan_result(
             scenario, major_name, interest_rate, "2026 Repayment Assistance Plan (RAP)", dependents,
-            col_index=col_index, roi_window_years=roi_window_years,
+            col_index=col_index, hs_wage_index=hs_wage_index,
+            roi_window_years=roi_window_years,
         )
         term_years = calculate_tiered_standard_term(scenario["effective_principal"])
         rap_pay = calculate_rap_payment(get_annual_salary_for_year(major_name, 0), dependents)
@@ -7680,7 +7688,9 @@ if compare_mode:
     if enable_future_proofing:
         future_context = render_future_proofing_section(scenario_a, major, interest_rate,
                                                           scenario_b, major_b, interest_rate_b,
-                                                          col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
+                                                          col_index=city_info["col_index"],
+                                                          hs_wage_index=get_metro_wage_index(city),
+                                                          roi_window_years=roi_horizon_years)
 
     apprenticeship_context = {}
     if enable_apprenticeship:
@@ -7979,7 +7989,9 @@ else:
     future_context = {}
     if enable_future_proofing:
         future_context = render_future_proofing_section(scenario, major, interest_rate,
-                                                          col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
+                                                          col_index=city_info["col_index"],
+                                                          hs_wage_index=get_metro_wage_index(city),
+                                                          roi_window_years=roi_horizon_years)
 
     apprenticeship_context = {}
     if enable_apprenticeship:
