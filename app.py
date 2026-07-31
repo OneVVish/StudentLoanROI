@@ -375,6 +375,54 @@ def load_metro_wages(csv_path: str, city: str) -> dict:
 
 
 @st.cache_data
+def load_hs_age_profile(csv_path: str) -> list:
+    """Age bands for high-school graduates, ascending, from
+    build_hs_age_profile.py. [] when the file is absent -- callers must render
+    nothing rather than fail, since this is disclosure, not model input."""
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return []
+    return df.sort_values("age_low").to_dict("records")
+
+
+def hs_young_wage_disclosure() -> str:
+    """One sentence sizing the gap between the all-ages baseline and what a
+    young high school graduate actually earns. Empty string when the profile
+    is missing, so the paragraph around it still reads.
+
+    Scales HS_GRAD_SALARY by the band's ratio_to_25plus rather than quoting the
+    profile's own dollar median. The ratio is a shape and survives a vintage
+    change; the dollars are in the microdata's income year and quoting them
+    beside a baseline from a newer quarter would mix vintages -- the exact
+    error that made the metro wages read as a pay cut earlier in this file's
+    history. Doing it this way also means refreshing HS_GRAD_SALARY alone keeps
+    this sentence correct.
+    """
+    bands = load_hs_age_profile(HS_AGE_PROFILE_CSV_PATH)
+    if not bands:
+        return ""
+    band = bands[0]
+    try:
+        ratio = float(band["ratio_to_25plus"])
+        low, high = int(band["age_low"]), int(band["age_high"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    if not 0 < ratio < 1:
+        # A ratio at or above 1 would make the sentence claim young workers
+        # out-earn the all-ages median, which would mean the profile is wrong
+        # rather than surprising. Say nothing instead.
+        return ""
+    article = "an" if str(low).startswith(("8", "11", "18")) else "a"
+    return (
+        f" In Census microdata for that exact group, {article} "
+        f"{low}-to-{high}-year-old high school graduate working full time earns "
+        f"about **{(1 - ratio) * 100:.0f}% less** than that — roughly "
+        f"{fmt_money(HS_GRAD_SALARY * ratio)} against the baseline above."
+    )
+
+
+@st.cache_data
 def load_state_wages(csv_path: str, state: str) -> dict:
     """One state's own BLS wages, as {occ_title: {starting_salary,
     median_salary, wage_percentiles}}, from `data_pipeline.py --all-states`.
@@ -544,15 +592,36 @@ def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER, city: str =
 
 # Baseline comparison group: a high school graduate (no college) who takes on
 # no loans. Annual figure is real BLS Current Population Survey data: median
-# usual weekly earnings for full-time workers age 25+ with a high school
-# diploma and no college, Q3 2024, was $946/week (bls.gov/opub/ted/2024/
-# median-weekly-earnings-946-for-workers-with-high-school-diploma...htm),
-# annualized as $946 * 52. BLS does not publish a matching by-experience wage
-# growth trajectory for this group, so growth_rate remains a modest assumption
+# usual weekly earnings for full-time wage and salary workers age 25+ with a
+# high school diploma and no college -- $994/week in 2026 Q2, annualized as
+# $994 * 52. BLS does not publish a matching by-experience wage growth
+# trajectory for this group, so growth_rate remains a modest assumption
 # reflecting ordinary cost-of-living/seniority raises rather than freezing pay
 # for a decade.
-HS_GRAD_SALARY = 49192
+#
+# To refresh: CPS series LEU0252917300, quarterly, from BLS's own public API
+# (api.bls.gov/publicAPI/v1/timeseries/data/LEU0252917300). Cite the series ID
+# rather than a news-release URL -- the "Usual Weekly Earnings" release lives
+# at one address that is overwritten every quarter, so a link pinned to a
+# figure goes stale silently while still resolving. bls.gov itself returns 403
+# to programmatic fetches; the API host does not.
+#
+# The series is noisy quarter to quarter (it fell from $977 to $953 across the
+# 2024->2025 turn), so a single quarter's move is not a trend. Note also that
+# 2025 Q4 does not exist: October 2025 CPS data was never collected due to the
+# federal government shutdown, and BLS did not produce that quarter. The 2025
+# annual average is an 11-month figure.
+HS_GRAD_SALARY = 51688
 HS_GRAD_GROWTH_RATE = 0.02
+
+# Age-earnings profile for that same population, from build_hs_age_profile.py.
+# Read for DISCLOSURE ONLY -- it does not feed the model, and the ROI numbers
+# are identical whether or not this file exists. HS_GRAD_SALARY is an all-ages
+# (25+) median while the app compares someone aged roughly 18 to 32, and this
+# is what lets the Methodology state the size of that gap as a measured figure
+# instead of a hardcoded one that goes stale the moment either the baseline or
+# the microdata is refreshed.
+HS_AGE_PROFILE_CSV_PATH = "data/hs_age_profile.csv"
 
 # Underemployment: the share of college graduates working in jobs that don't
 # require a degree at all. From the Federal Reserve Bank of New York's "The
@@ -3929,7 +3998,8 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
          "bound and are stated in words rather than drawn."],
         ["High school graduate baseline",
          "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
-         "for full-time workers age 25+ with a high school diploma and no college ($946/week, Q3 2024), "
+         "for full-time workers age 25+ with a high school diploma and no college ($994/week, "
+         "2026 Q2, series LEU0252917300), "
          "annualised. This is an all-ages median, not a young graduate's starting pay, so the "
          "comparison is against a typical working adult without a degree — the more demanding test. "
          "Wage growth of 2%/yr is an assumption, not a BLS figure."],
@@ -7958,23 +8028,21 @@ an occupation, and the wage data behind it has no percentiles, so the chart
 simply doesn't appear there.
 
 **What if you skip college? The high school graduate baseline.** We
-compare every major against $49,192/year — real median pay for full-time
-workers 25 and older who only finished high school (based on $946/week in
-late 2024, annualized).
-[Source: BLS](https://www.bls.gov/opub/ted/2024/median-weekly-earnings-946-for-workers-with-high-school-diploma-1533-for-bachelors-degree.htm).
+compare every major against $51,688/year — real median pay for full-time
+workers 25 and older who only finished high school (based on $994/week in the
+second quarter of 2026, annualized).
+[Source: BLS Current Population Survey, series LEU0252917300](https://www.bls.gov/news.release/wkyeng.htm).
 We assume this grows a modest 2%/year (a stand-in for normal raises and
 cost-of-living bumps) since BLS doesn't publish a real year-by-year
 trajectory for this group the way it does for individual careers.
 
-**One thing to know about that baseline: it's an all-ages figure.** $49,192
+**One thing to know about that baseline: it's an all-ages figure.** $51,688
 is the median across *every* high school graduate aged 25 and up — someone
 two years out of school and someone thirty years into a career, averaged
 together. Earnings typically peak in the late 40s and early 50s, so that
 blended median sits above what a young worker actually takes home. Meanwhile
 the person this app models is roughly 18 to 32 across the whole comparison
-window. In Census microdata for that exact group, an 18-to-20-year-old high
-school graduate working full time has a median wage near $31,000 — about 40%
-below the all-ages figure we start from.
+window.""" + hs_young_wage_disclosure() + """
 
 That cuts both ways over ten years. Early on our baseline is too generous,
 which makes the degree look *worse* than it is. Later on it's too stingy: we
@@ -7985,8 +8053,8 @@ partly cancel, and we don't claim to know what the net effect is.
 We still headline the published BLS number, because it's the one a reader can
 look up and check. BLS itself only breaks earnings out by education for ages
 25 and up, so there's no official under-25 figure for high school graduates;
-the $31,000 above comes from the underlying Census survey records rather than
-a published table. What we won't do is manufacture a starting wage by running
+the one quoted above comes from the underlying Census survey records rather
+than a published table. What we won't do is manufacture a starting wage by running
 our own 2%/year assumption backwards — that 2% describes how wages drift over
 *calendar time*, not how one person's pay climbs with *age*, and the two
 aren't interchangeable. So read
@@ -8137,8 +8205,8 @@ model those.
 Contribution, and Grants & Scholarships** (entered per year). Cost of
 Attendance grows a little each year (an estimated inflation rate) while
 Personal Contribution and Grants stay flat; each year's loan is whatever's
-left after subtracting them, never below $0, summed across the 4 years of an
-assumed bachelor's:
+left after subtracting them, never below $0, summed across the program's real
+length (4 years for a bachelor's, 2 for an associate's):
 `Loan (Year N) = max(Cost of Attendance × (1 + inflation rate)^(N-1) − Personal Contribution − Grants & Scholarships, 0)`.
 Detailed also shows the year-by-year breakdown. When a school has no reported
 debt (one that reports none, the College Tier estimator, or the live lookup
