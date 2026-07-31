@@ -4307,10 +4307,18 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
 
     if modelled_start:
         fig.add_vline(x=modelled_start, line=dict(color="#E45756", width=2, dash="dash"))
-        fig.add_annotation(x=modelled_start, y=(len(rows) - 1) * row_height + fill_scale + 0.13, yref="y",
+        # Sits low in the top row's band, deliberately below every median
+        # label. Those sit at each curve's apex, and at equal height the two
+        # read as the same kind of marker -- which they are not: the median is
+        # a published BLS figure, this is the single number the app's own
+        # ten-year projection starts from.
+        fig.add_annotation(x=modelled_start, y=(len(rows) - 1) * row_height + 0.05, yref="y",
                             showarrow=False, yanchor="bottom",
-                            text=f"modelled start {fmt_money(modelled_start)}",
-                            font=dict(size=11, color="#E45756"))
+                            text=f"Starting salary {fmt_money(modelled_start)}",
+                            font=dict(size=11, color="#E45756"),
+                            # Sitting low in the band puts this on top of the
+                            # fill, where red on orange is hard to read.
+                            bgcolor="rgba(255,255,255,0.78)", borderpad=2)
 
     below, above = wage_distribution_tail_notes(percentiles)
     where = rows[0]["label"]
@@ -4329,7 +4337,7 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
         xaxis=dict(title="Annual wage", tickprefix="$", tickformat=",",
                     range=[_x_lo - _x_pad, _x_hi + _x_pad]),
         yaxis=dict(title=None, showticklabels=False, showgrid=False, zeroline=False,
-                    range=[-0.12, (len(rows) - 1) * row_height + fill_scale + 0.46]),
+                    range=[-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34]),
         height=200 + 130 * len(rows),
         # Left margin holds the row labels; bottom clears the x-title AND the
         # tail note under it, which is clipped out of the plot at the default.
@@ -4767,9 +4775,14 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
 
     if modelled_start:
         ax.axvline(modelled_start, color="#E45756", linewidth=1.6, linestyle="--")
-        ax.annotate(f"modelled start {fmt_money(modelled_start)}",
-                     xy=(modelled_start, (len(rows) - 1) * row_height + fill_scale + 0.13), ha="center",
-                     va="bottom", fontsize=7.5, color="#E45756", parse_math=False)
+        # Same placement reasoning as the Plotly twin: low in the top row's
+        # band, below every median label.
+        ax.annotate(f"Starting salary {fmt_money(modelled_start)}",
+                     xy=(modelled_start, (len(rows) - 1) * row_height + 0.05), ha="center",
+                     va="bottom", fontsize=7.5, color="#E45756", parse_math=False,
+                     # Same reason as the Plotly twin: the label now overlaps
+                     # the fill it used to sit above.
+                     bbox=dict(facecolor="white", edgecolor="none", alpha=0.78, pad=1.4))
 
     where = rows[0]["label"]
     title = f"Where {occupation_name} pay actually lands - {where}"
@@ -4781,7 +4794,7 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
     # Cap the tick count: at print width the default locator packs in enough
     # "$110,000"-length labels to run them into each other.
     ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, prune="both"))
-    ax.set_ylim(-0.12, (len(rows) - 1) * row_height + fill_scale + 0.46)
+    ax.set_ylim(-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34)
     # Same padding reasoning as the Plotly twin: the outer money labels sit
     # beyond their markers and would otherwise be trimmed at the axes edge.
     _x_lo = min(r["xs"][0] for r in rows)
