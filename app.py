@@ -16,6 +16,7 @@ Architecture:
                                 and the impact survey.
 """
 
+import contextlib
 import hashlib
 import io
 import re
@@ -2083,7 +2084,7 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
     return context
 
 
-def build_share_params(career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+def build_share_params(career_data_source, major, city, school_name_a, in_state_a,
                         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                         interest_rate, repayment_strategy, compare_mode, major_b=None, school_name_b=None,
                         in_state_b=None, coa_per_year_b=None, personal_contribution_per_year_b=None,
@@ -2114,7 +2115,6 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "city": city,
         "school": school_name_a,
         "in_state": "1" if in_state_a else "0",
-        "stage": career_stage_label,
         "coa": str(coa_per_year_a),
         "pc": str(personal_contribution_per_year_a),
         "grants": str(grants_per_year_a),
@@ -4729,7 +4729,7 @@ def _cc_info_for_pdf(cc_mode, cc_state_key, cost_per_year, oop, cc_years):
 def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
                        personal_contribution_per_year, grants_per_year,
                        interest_rate_pct, repayment_strategy_label,
-                       career_stage=None, city_name=None, start_year=None,
+                       city_name=None, start_year=None,
                        cc_info=None, loan_source: str = "personal") -> list:
     rows = [
         ["Profession", major_name],
@@ -4738,8 +4738,6 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     ]
     if city_name is not None:
         rows.append(["City / Metro Area", city_name])
-    if career_stage is not None:
-        rows.append(["Career Stage Snapshot", career_stage])
     if start_year is not None:
         rows.append(["Year Starting Undergraduate School", str(start_year)])
     # Community-college path disclosure: without these rows the report shows a
@@ -4899,11 +4897,10 @@ def _pdf_resources_section(styles: dict, schools: list) -> list:
     return parts
 
 
-def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_stage_label,
+def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_stages,
                                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                                 interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
-                                scenario, take_home, gross, disposable_nominal,
-                                disposable_col_adjusted, module_context: dict = None,
+                                scenario, module_context: dict = None,
                                 start_year_a=None, monthly_payment=None, col_index: float = 100.0,
                               loan_basis_a: str = "cost_based", reported_debt_a=None,
                                 roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None,
@@ -4973,7 +4970,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         _pdf_table(
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
-                               interest_rate, repayment_strategy, career_stage_label, city,
+                               interest_rate, repayment_strategy, city,
                                start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a),
             header=False, full_width=True,
         ),
@@ -5004,13 +5001,21 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         # section so it no longer splits it.
         *_pdf_resources_section(styles, [(None, school_name_a)]),
         Spacer(1, 12),
-        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major}, {career_stage_label} in {city}"), styles["section"]),
+        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major} in {city}"), styles["section"]),
+        # One row per career stage, matching the on-screen block, which renders
+        # them side by side rather than behind a selector.
         _pdf_table(full_width=True, rows=[
-            ["Gross Salary", "Take-Home Pay (annual)", "Monthly Disposable", "COL-Adjusted Disposable"],
-            [fmt_money(gross), fmt_money(take_home["net_take_home"]),
-             fmt_money(disposable_nominal), fmt_money(disposable_col_adjusted)],
+            ["Career Stage", "Gross Salary", "Take-Home Pay (annual)",
+             "Monthly Disposable", "COL-Adjusted Disposable"],
+            *[[label, fmt_money(f["gross"]), fmt_money(f["take_home"]["net_take_home"]),
+               fmt_money(f["disposable_nominal"]), fmt_money(f["disposable_col_adjusted"])]
+              for label, f in takehome_stages],
         ]),
     ]
+    # Charts describe the first stage only, exactly as on screen.
+    _first_label, _first = takehome_stages[0]
+    take_home, gross = _first["take_home"], _first["gross"]
+    monthly_payment = _first["monthly_payment"]
     if gross > 0 and monthly_payment is not None:
         # Both take-home charts side by side, so the pair fits on a single page
         # -- stacked at full width they're each taller than half a page and the
@@ -5018,6 +5023,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         _chart_w = (PDF_CONTENT_WIDTH - 18) / 2
         story += [
             Spacer(1, 12),
+            Paragraph(_strip_emoji(
+                f"Charts below show {_first_label} — the stage where the payment is "
+                "largest relative to take-home pay."), styles["caption"]),
             KeepTogether(Table(
                 [[build_pdf_takehome_pie_chart(take_home, max_width=_chart_w),
                   build_pdf_takehome_vs_loan_chart(take_home["net_take_home"] / 12, monthly_payment,
@@ -6214,17 +6222,14 @@ city_info = CITY_DATA[city]
 # (5d) snapshots -- has no functional dependency on School/In-State or
 # Financing above, so its position here is purely about profile layout
 # (career-identity fields together), not calculation order.
-career_stage_options = list(CAREER_STAGE_OPTIONS.keys())
-shared_career_stage = get_shared_default("stage", "Mid-Career (Year 10)")
-default_career_stage_index = career_stage_options.index(shared_career_stage) if shared_career_stage in career_stage_options else (
-    career_stage_options.index("Mid-Career (Year 10)") if "Mid-Career (Year 10)" in career_stage_options else 0
-)
-career_stage_label = st.sidebar.radio(
-    "Career Stage Snapshot", career_stage_options, index=default_career_stage_index,
-    help="Preview your income right after graduating (Year 1) or 10 years "
-         "into this career, in the Real-World Take-Home section below.",
-)
-career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
+# No "Career Stage Snapshot" control any more: the Real-World Take-Home
+# section renders every stage in CAREER_STAGE_OPTIONS side by side. A radio
+# that sampled one stage at a time made the year-1-vs-year-10 comparison
+# something you had to toggle for and hold in your head -- nothing on the page
+# ever showed both -- and its default sat on Mid-Career, so the harder year was
+# the one a visitor had to go looking for. Old share links carrying ?stage= are
+# simply ignored; get_shared_default is only consulted for inputs that still
+# exist, so a stale key costs nothing.
 
 # Replaces the old National/California radio. It is NOT a widget any more --
 # the wage basis follows the selected city -- but the value is still computed,
@@ -7190,12 +7195,31 @@ def get_investment_captions(scenario: dict) -> list:
     return [c for c in (get_loan_principal_caption(scenario), get_total_investment_caption(scenario)) if c]
 
 
-def render_takehome_block(scenario: dict, major_name: str, career_stage_key: int,
-                           career_stage_label: str, city_name: str, city: dict,
-                           show_charts: bool = True, heading: bool = True) -> dict:
-    """Compute and render one scenario's take-home snapshot, returning the
-    figures the caller needs (the PDF generators take gross/take_home/
-    disposable/monthly_payment as arguments).
+def takehome_figures(scenario: dict, major_name: str, stage_key: int, city: dict) -> dict:
+    """Every take-home number for ONE career stage. Pure computation, no
+    rendering, so the on-screen block and the PDF builder read the same
+    figures from one place instead of deriving them twice -- the chart-twin
+    drift CLAUDE.md warns about, which here would put different take-home
+    numbers on screen and in the download."""
+    gross = get_annual_salary_for_year(major_name, stage_key)
+    take_home = calculate_take_home_pay(gross, city["state_key"], city["local_tax_rate"])
+    monthly_payment = get_monthly_payment_for_stage(
+        scenario["repayment_result"], scenario["strategy_label"], (stage_key + 1) * 12)
+    disposable_nominal = take_home["net_take_home"] / 12 - monthly_payment
+    return {
+        "gross": gross, "take_home": take_home, "monthly_payment": monthly_payment,
+        "disposable_nominal": disposable_nominal,
+        "disposable_col_adjusted": adjust_for_cost_of_living(
+            disposable_nominal, city["col_index"]),
+    }
+
+
+def render_takehome_block(scenario: dict, major_name: str, city_name: str, city: dict,
+                           show_charts: bool = True, heading: bool = True,
+                           stage_layout: str = "columns") -> dict:
+    """Compute and render one scenario's take-home figures for EVERY career
+    stage side by side, returning {"stages": [(label, figures), ...]} for the
+    PDF generators.
 
     Extracted so Compare Mode can render it too. It previously couldn't:
     compare_mode took a separate branch that skipped take-home entirely, and
@@ -7205,103 +7229,135 @@ def render_takehome_block(scenario: dict, major_name: str, career_stage_key: int
     codebase already warns about (see CLAUDE.md on the chart twins), so both
     branches call this.
 
-    show_charts=False drops the two pie charts for the narrow Compare Mode
-    columns while keeping every NUMBER. That's the one deliberate asymmetry
-    left between the arms: the figures are identical, the redundant chart is
-    not repeated four times on one page. The charts encode the same split the
+    Both stages are rendered together because there is no chart anywhere that
+    contrasts them. This replaced a sidebar "Career Stage Snapshot" radio that
+    sampled one stage at a time: comparing year 1 against year 10 meant
+    toggling it and holding two numbers in your head, and its default landed
+    on Mid-Career -- the flattering end -- so the harder year was the one a
+    visitor had to go looking for.
+
+    stage_layout="stacked" is required inside Compare Mode's scenario columns:
+    Streamlit allows only one level of column nesting, and those callers have
+    already spent it on the A/B split.
+
+    show_charts=False drops the pie charts for the narrow Compare Mode columns
+    while keeping every NUMBER. That's the one deliberate asymmetry left
+    between the arms: the figures are identical, the redundant chart is not
+    repeated four times on one page. The charts encode the same split the
     ratio metric states numerically, so no information is lost.
     """
     if heading:
-        st.subheader(f"🏙️ Real-World Take-Home — {major_name}, {career_stage_label} in {city_name}")
+        st.subheader(f"🏙️ Real-World Take-Home — {major_name} in {city_name}")
 
-    gross = get_annual_salary_for_year(major_name, career_stage_key)
-    take_home = calculate_take_home_pay(gross, city["state_key"], city["local_tax_rate"])
-    target_month = (career_stage_key + 1) * 12
-    monthly_payment = get_monthly_payment_for_stage(
-        scenario["repayment_result"], scenario["strategy_label"], target_month)
-    disposable_nominal = take_home["net_take_home"] / 12 - monthly_payment
-    disposable_col_adjusted = adjust_for_cost_of_living(disposable_nominal, city["col_index"])
+    stages = list(CAREER_STAGE_OPTIONS.items())
+    results = [(label, takehome_figures(scenario, major_name, key, city))
+               for label, key in stages]
+
+    containers = (st.columns(len(results)) if stage_layout == "columns"
+                  else [contextlib.nullcontext()] * len(results))
+    for i, ((label, figs), container) in enumerate(zip(results, containers)):
+        with container:
+            st.markdown(f"**{label}**")
+            # Only the first stage carries the full threshold explanation --
+            # repeating it under every stage is the same paragraph twice, and
+            # the thresholds it cites differ only by that stage's effective
+            # tax rate. Later stages get the one-line form.
+            _render_takehome_stage(figs, major_name, verbose=show_charts and i == 0)
+
+    # Charts describe the FIRST stage only. Four pies (two stages x two
+    # charts) crowd the page and the PDF alike, and year 1 is the stage worth
+    # drawing: it is where the payment takes its largest bite out of
+    # take-home pay. Year 10's split is stated numerically directly above.
+    first_label, first = results[0]
+    if show_charts and first["gross"] > 0:
+        st.caption(f"Charts below show **{first_label}** — the stage where the "
+                   "payment is largest relative to take-home pay.")
+        st.plotly_chart(build_takehome_pie_chart(first["take_home"]),
+                         use_container_width=True, config=PLOTLY_CHART_CONFIG)
+        st.plotly_chart(
+            build_takehome_vs_loan_chart(first["take_home"]["net_take_home"] / 12,
+                                          first["monthly_payment"]),
+            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+            key=f"takehome_vs_loan_{major_name}_{stages[0][1]}",
+        )
+
+    return {"stages": results}
+
+
+def _render_takehome_stage(figs: dict, major_name: str, verbose: bool = True) -> None:
+    """One career stage's metrics and payment/take-home ratio, rendered into
+    whatever container the caller is inside. Metrics stack vertically rather
+    than spreading across st.columns: this is called once per stage, and the
+    stages themselves already occupy the horizontal axis (or, in Compare Mode,
+    a column that has no nesting budget left)."""
+    gross, take_home = figs["gross"], figs["take_home"]
+    monthly_payment = figs["monthly_payment"]
 
     if gross == 0:
-        st.info(f"At this career stage, {major_name} has $0 gross income (still in training) — see Methodology for why.")
+        st.info(f"At this career stage, {major_name} has $0 gross income "
+                "(still in training) — see Methodology for why.")
 
-    # Four across when there's a full page; stacked inside a Compare column,
-    # where four metrics side by side would be unreadable.
-    cols = st.columns(4) if show_charts else st.columns(2)
-    cols[0].metric("Gross Salary", fmt_money(gross))
-    cols[1].metric(
-        "Take-Home Pay (annual, after tax)",
-        fmt_money(take_home["net_take_home"]),
+    st.metric("Gross Salary", fmt_money(gross))
+    st.metric(
+        "Take-Home Pay (annual, after tax)", fmt_money(take_home["net_take_home"]),
         delta=fmt_pct(take_home["effective_tax_rate"] * 100) + " effective tax rate" if gross > 0 else None,
     )
-    cols[2 if show_charts else 0].metric("Monthly Disposable Income", fmt_money(disposable_nominal))
-    cols[3 if show_charts else 1].metric(
-        "COL-Adjusted Disposable Income", fmt_money(disposable_col_adjusted),
+    st.metric("Monthly Disposable Income", fmt_money(figs["disposable_nominal"]))
+    st.metric(
+        "COL-Adjusted Disposable Income", fmt_money(figs["disposable_col_adjusted"]),
         help="Normalized to national-average purchasing power, so cities are comparable",
     )
 
     if not take_home["state_modeled"]:
         st.caption("State tax: N/A (National Average city has no specific state to model)")
-    if disposable_nominal < 0:
+    if figs["disposable_nominal"] < 0:
         st.warning("At this salary, city, and loan combination, disposable income is negative.")
 
-    monthly_net_take_home = take_home["net_take_home"] / 12
-    if gross > 0:
-        if show_charts:
-            st.plotly_chart(build_takehome_pie_chart(take_home),
-                             use_container_width=True, config=PLOTLY_CHART_CONFIG)
-            st.plotly_chart(
-                build_takehome_vs_loan_chart(monthly_net_take_home, monthly_payment),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
-                key=f"takehome_vs_loan_{major_name}_{career_stage_key}",
-            )
-        # Student Loan Payment / Take-Home Pay -- the same split the charts
-        # encode visually, stated as a number. Guarded against a $0 take-home
-        # edge case rather than assuming gross > 0 implies positive net pay.
-        ratio = monthly_payment / monthly_net_take_home * 100 if monthly_net_take_home > 0 else None
-        if ratio is not None:
-            risk = get_loan_to_income_risk_tier(ratio, take_home["effective_tax_rate"])
-            st.markdown(
-                f"""
-                <div>
-                    <div style="font-size: 0.875rem; color: #808495;">Student Loan Payment / Take-Home Ratio</div>
-                    <div style="font-size: 2rem; font-weight: 600; color: {risk['color']}; line-height: 1.2;">
-                        {fmt_pct(ratio)}
-                    </div>
-                    <div style="font-size: 0.8rem; color: {risk['color']};">{risk['tier']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            # A hover title="..." tooltip is invisible on touch devices -- shown
-            # as a permanent caption instead, matching every other explanation
-            # in this app. Abbreviated in the narrow Compare columns.
-            if show_charts:
-                st.caption((
-                    f"This is a ratio: your monthly loan payment as a percentage of your "
-                    "monthly take-home pay (the same split shown in the chart above). "
-                    "Industry guideline (converted to your take-home basis using this "
-                    "scenario's own effective tax rate): under "
-                    f"{fmt_pct(risk['manageable_threshold'])} is considered manageable "
-                    "(common student-loan-budgeting guidance -- e.g. SoFi); over "
-                    f"{fmt_pct(risk['caution_threshold'])} matches the standard 36%-of-gross-"
-                    "income \"qualified borrower\" debt-to-income ceiling mortgage lenders use "
-                    "for ALL debts combined. Over 100% means the payment exceeds your take-home "
-                    "pay."
-                ))
-            else:
-                st.caption(
-                    f"Monthly loan payment as a share of monthly take-home pay. Under "
-                    f"{fmt_pct(risk['manageable_threshold'])} is considered manageable."
-                )
-        else:
-            st.metric("Student Loan Payment / Take-Home Ratio", "N/A")
+    if gross <= 0:
+        return
 
-    return {
-        "gross": gross, "take_home": take_home, "monthly_payment": monthly_payment,
-        "disposable_nominal": disposable_nominal,
-        "disposable_col_adjusted": disposable_col_adjusted,
-    }
+    # Student Loan Payment / Take-Home Pay -- the same split the charts encode
+    # visually, stated as a number. Guarded against a $0 take-home edge case
+    # rather than assuming gross > 0 implies positive net pay.
+    monthly_net_take_home = take_home["net_take_home"] / 12
+    ratio = monthly_payment / monthly_net_take_home * 100 if monthly_net_take_home > 0 else None
+    if ratio is None:
+        st.metric("Student Loan Payment / Take-Home Ratio", "N/A")
+        return
+
+    risk = get_loan_to_income_risk_tier(ratio, take_home["effective_tax_rate"])
+    st.markdown(
+        f"""
+        <div>
+            <div style="font-size: 0.875rem; color: #808495;">Student Loan Payment / Take-Home Ratio</div>
+            <div style="font-size: 2rem; font-weight: 600; color: {risk['color']}; line-height: 1.2;">
+                {fmt_pct(ratio)}
+            </div>
+            <div style="font-size: 0.8rem; color: {risk['color']};">{risk['tier']}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    # A hover title="..." tooltip is invisible on touch devices -- shown as a
+    # permanent caption instead, matching every other explanation in this app.
+    # Abbreviated in the narrow Compare columns.
+    if verbose:
+        st.caption((
+            "This is a ratio: your monthly loan payment as a percentage of your "
+            "monthly take-home pay. Industry guideline (converted to your take-home "
+            "basis using this scenario's own effective tax rate): under "
+            f"{fmt_pct(risk['manageable_threshold'])} is considered manageable "
+            "(common student-loan-budgeting guidance -- e.g. SoFi); over "
+            f"{fmt_pct(risk['caution_threshold'])} matches the standard 36%-of-gross-"
+            "income \"qualified borrower\" debt-to-income ceiling mortgage lenders use "
+            "for ALL debts combined. Over 100% means the payment exceeds your take-home "
+            "pay."
+        ))
+    else:
+        st.caption(
+            "Monthly loan payment as a share of monthly take-home pay. Under "
+            f"{fmt_pct(risk['manageable_threshold'])} is considered manageable."
+        )
 
 
 def render_cc_path_note(cc_mode: str) -> None:
@@ -7692,16 +7748,16 @@ if compare_mode:
     # income, which made the two arms differ by more than the contrast H2
     # claims to measure. Charts off -- the columns are narrow and the same
     # split is stated numerically by the ratio metric.
-    st.subheader(f"🏙️ Real-World Take-Home — {career_stage_label} in {city}")
+    st.subheader(f"🏙️ Real-World Take-Home — {city}")
     th_col_a, th_col_b = st.columns(2)
     with th_col_a:
         st.markdown(f"**A: {scenario_a['major']}**")
-        render_takehome_block(scenario_a, major, career_stage_key, career_stage_label,
-                               city, city_info, show_charts=False, heading=False)
+        render_takehome_block(scenario_a, major, city, city_info,
+                               show_charts=False, heading=False, stage_layout="stacked")
     with th_col_b:
         st.markdown(f"**B: {scenario_b['major']}**")
-        render_takehome_block(scenario_b, major_b, career_stage_key, career_stage_label,
-                               city, city_info, show_charts=False, heading=False)
+        render_takehome_block(scenario_b, major_b, city, city_info,
+                               show_charts=False, heading=False, stage_layout="stacked")
 
     st.plotly_chart(
         build_comparison_balance_chart(
@@ -7791,7 +7847,7 @@ if compare_mode:
         )
         if compare_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_compare"):
             st.query_params.from_dict(build_share_params(
-                career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+                career_data_source, major, city, school_name_a, in_state_a,
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                 interest_rate, repayment_strategy, True, major_b=major_b, school_name_b=school_name_b,
                 in_state_b=in_state_b, coa_per_year_b=coa_per_year_b,
@@ -7932,14 +7988,8 @@ else:
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
     # Rendered via the shared helper so Compare Mode shows the same figures --
     # see render_takehome_block. The returned values feed the PDF below.
-    _th = render_takehome_block(
-        scenario, major, career_stage_key, career_stage_label, city, city_info,
-    )
-    gross = _th["gross"]
-    take_home = _th["take_home"]
-    monthly_payment = _th["monthly_payment"]
-    disposable_nominal = _th["disposable_nominal"]
-    disposable_col_adjusted = _th["disposable_col_adjusted"]
+    _th = render_takehome_block(scenario, major, city, city_info)
+    takehome_stages = _th["stages"]
 
     # ---- 5e. Financial Position (horizon per the sidebar's ROI Horizon) -----
 
@@ -8066,11 +8116,11 @@ else:
     ), **module_context})
 
     single_pdf_bytes = generate_pdf_report_single(
-        major, city, school_name_a, in_state_a, career_stage_label,
+        major, city, school_name_a, in_state_a, takehome_stages,
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
         interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
-        scenario, take_home, gross, disposable_nominal, disposable_col_adjusted,
-        module_context=module_context, start_year_a=start_year_a, monthly_payment=monthly_payment,
+        scenario,
+        module_context=module_context, start_year_a=start_year_a,
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
         loan_source_a=loan_source_a,
         loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
@@ -8092,7 +8142,7 @@ else:
         )
         if single_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_single"):
             st.query_params.from_dict(build_share_params(
-                career_data_source, major, city, school_name_a, in_state_a, career_stage_label,
+                career_data_source, major, city, school_name_a, in_state_a,
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                 interest_rate, repayment_strategy, False, start_year_a=start_year_a,
                 roi_horizon_years=roi_horizon_years,
@@ -8556,13 +8606,13 @@ cost-of-living number goes up. "National Average" doesn't correspond to
 any one state, which is why we show its tax rate as "N/A" instead of "$0"
 — those mean different things.
 
-**What "Career Stage Snapshot" actually changes.** Switching between
-"Starting" and "Mid-Career" only changes what you see in the Real-World
-Take-Home section above — it does not change your loan payoff schedule or
-your 10-Year ROI numbers, which always simulate a full, real year-by-year
-path starting from year 1 no matter which snapshot you're looking at.
-Think of it as a window into one moment of a story that's always the same
-story — not a way to start the story over from a different point.
+**What the two career stages in Real-World Take-Home mean.** That section
+shows "Starting (Year 1)" and "Mid-Career (Year 10)" side by side. They are
+two windows into one story, not two different stories: your loan payoff
+schedule and your ROI numbers always simulate a full, real year-by-year path
+from year 1, and neither stage restarts it from a different point. Year 1 is
+the harder year — the loan payment takes its largest bite out of take-home
+pay then — which is why the charts below the figures describe that stage.
 
 **How the "Student Loan Payment / Take-Home Ratio" color coding works.** This
 percentage (shown below the take-home chart) is color-coded against two real, commonly-cited
