@@ -1653,6 +1653,51 @@ def fmt_money(value):
     return f"${value:,.0f}"
 
 
+def fmt_money_k(value) -> str:
+    """A money axis tick in thousands: 250000 -> "$250k".
+
+    Plotly picks its own SI prefix and flips to "M" once a series passes a
+    million, so a ten-year net position read "$0.2M ... $1M" while the loan
+    balance beside it read "$2k ... $10k" -- two money axes on one page in two
+    different units. Fixing the unit to thousands makes them directly
+    comparable, and "$250k" is the register the rest of this app already
+    speaks in.
+
+    Sub-thousand values keep their dollars ("$500"), since rounding them to
+    "$1k" or "$0k" would be worse than the inconsistency."""
+    if value is None:
+        return ""
+    # Sign outside the dollar sign: "-$49k", not "$-49k". Negative values are
+    # not an edge case here -- a training-heavy path like medicine sits below
+    # zero for years on the net-position chart.
+    sign = "-" if value < 0 else ""
+    magnitude = abs(value)
+    if magnitude < 1000:
+        return f"{sign}${magnitude:,.0f}"
+    return f"{sign}${magnitude / 1000:,.0f}k"
+
+
+def money_k_ticks(values) -> tuple:
+    """(tickvals, ticktext) in thousands for a Plotly money axis, spanning the
+    data. Plotly has no "always use k" option -- tickformat is a d3 format
+    string and cannot divide -- so the ticks are placed explicitly."""
+    finite = [v for v in values if v is not None and v == v]
+    if not finite:
+        return [], []
+    low, high = min(0, min(finite)), max(finite)
+    span = high - low or 1
+    # A step from the 1/2/5 ladder that yields roughly 6 ticks.
+    rough = span / 6
+    magnitude = 10 ** math.floor(math.log10(rough)) if rough > 0 else 1
+    step = next((m * magnitude for m in (1, 2, 5, 10) if m * magnitude >= rough),
+                 10 * magnitude)
+    start = math.floor(low / step) * step
+    vals, v = [], start
+    while v <= high + step * 0.5:
+        vals.append(v); v += step
+    return vals, [fmt_money_k(v) for v in vals]
+
+
 def fmt_pct(value):
     return f"{value:.1f}%"
 
@@ -3940,7 +3985,11 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
         labels={"year": "Years", "balance": "Remaining Balance ($)"},
     )
     fig.update_traces(line=dict(width=3))
-    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified", title_font_size=14)
+    _tickvals, _ticktext = money_k_ticks(schedule_df["balance"])
+    fig.update_layout(
+        hovermode="x unified", title_font_size=14,
+        yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
+    )
     return fig
 
 
@@ -4000,21 +4049,26 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         # The frame's COLUMN stays "Net Position" -- it is the key the PDF
         # twin and net_position_frame both read -- and only the displayed
         # name changes here.
-        title=f"Money earned so far, after loan payments (through year {roi_window_years})",
+        title=f"Total pay before tax, minus loan payments (through year {roi_window_years})",
         # "after graduation" rather than "after starting": with foregone
         # earnings counted, year 1 is the graduate's first working year while
         # the baseline already carries the enrolled years' wages, so the two
         # series do NOT begin level. Saying "starting" would misread that head
         # start as the degree simply being behind.
         labels={"year": "Years after graduation",
-                 "Net Position": "Earned so far, after loan payments ($)"},
+                 "Net Position": "Pay before tax, minus loan payments ($)"},
     )
     fig.update_traces(line=dict(width=3))
     # Zero line: the training-debt paths sit below it for years, and "below
     # zero" is a different statement from "below the baseline".
     fig.add_hline(y=0, line=dict(color="#999999", width=1, dash="dot"))
+    _tickvals, _ticktext = money_k_ticks(frame["Net Position"])
     fig.update_layout(
-        yaxis_tickprefix="$", title_font_size=14, hovermode="x unified",
+        title_font_size=14, hovermode="x unified",
+        # Explicit ticks, not yaxis_tickprefix: Plotly's own SI prefix flips to
+        # "M" past a million, which put this axis in different units from the
+        # loan-balance chart directly above it.
+        yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
         legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5),
         margin=dict(t=80 if baseline_head_start_years else 60, b=90),
     )
@@ -4060,8 +4114,10 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
         title="Loan Balance Over Time",
         labels={"year": "Years", "balance": "Remaining Balance ($)"},
     )
+    _tickvals, _ticktext = money_k_ticks(combined["balance"])
     fig.update_layout(
-        yaxis_tickprefix="$", hovermode="x unified", title_font_size=14,
+        hovermode="x unified", title_font_size=14,
+        yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
         # Legend below rather than at the right, matching the net-position
         # chart. Occupation names run long ("News Analysts, Reporters, and
         # Journalists"), and a right-hand legend takes its width out of the
@@ -4747,6 +4803,10 @@ _PDF_CELL_HEADER_STYLE = ParagraphStyle("pdf_cell_header", fontName="Helvetica-B
                                          textColor=colors.white)
 
 _PDF_MONEY_FORMATTER = mticker.FuncFormatter(lambda value, _pos: f"${value:,.0f}")
+# Thousands variant for money AXES, matching the on-screen charts. The plain
+# formatter above stays for the wage axis, where the values are salaries a
+# reader wants in full dollars.
+_PDF_MONEY_K_FORMATTER = mticker.FuncFormatter(lambda value, _pos: fmt_money_k(value))
 
 
 def _pdf_image_from_figure(fig, max_width: float = PDF_CONTENT_WIDTH) -> Image:
@@ -4913,7 +4973,7 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> I
     ax.set_title("Loan Balance Over Time")
     ax.set_xlabel("Years")
     ax.set_ylabel("Remaining Balance ($)")
-    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
     return _pdf_image_from_figure(fig)
 
@@ -4927,7 +4987,7 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     ax.set_title("Loan Balance Over Time")
     ax.set_xlabel("Years")
     ax.set_ylabel("Remaining Balance ($)")
-    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
     ax.legend()
     return _pdf_image_from_figure(fig)
@@ -4943,11 +5003,11 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int) -> 
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
                 linewidth=2, label=label)
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
-    ax.set_title(f"Money earned so far, after loan payments (through year {roi_window_years})",
+    ax.set_title(f"Total pay before tax, minus loan payments (through year {roi_window_years})",
                   fontsize=11)
     ax.set_xlabel("Years after graduation")
-    ax.set_ylabel("Earned so far, after loan payments ($)")
-    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.set_ylabel("Pay before tax, minus loan payments ($)")
+    ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
     legend = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
                        ncol=2, frameon=False, fontsize=8)
@@ -8963,9 +9023,17 @@ copy of federal rules. For Medicine, Law, and Athletic Training, both
 options are calculated using your loan *plus* the extra training debt
 described above — not just the loan by itself.
 
-**Money earned so far, after loan payments.** The chart under the headline
-figures plots each path's position at the end of every year, not just at
-year 10. That's
+**Total pay before tax, minus loan payments.** These figures are **before
+tax**. The ROI model sums each year's gross salary and subtracts the loan
+payments made in that window — it never applies income tax, because tax
+depends on where you live and filing status, and applying it to one side of
+a comparison and not the other would distort it. The Real-World Take-Home
+section above is where tax is modelled, on a single year at a time. The same
+holds for the Earnings Premium and ROI% headline figures, which come from
+this identical calculation.
+
+The chart under the headline figures plots each path's position at the end
+of every year, not just at year 10. That's
 there because "who is ahead after ten years" and "when did they get ahead" are
 different questions, and the second one is usually the one being decided. A
 path that trains before it earns — medicine most of all — sits below zero for
