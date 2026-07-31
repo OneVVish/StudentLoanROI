@@ -861,6 +861,18 @@ def get_wage_distribution_context(occupation_name: str) -> dict:
     percentiles = entry.get("wage_percentiles")
     if not build_wage_distribution(percentiles):
         return None
+    # The national figures for the same occupation, so the chart can put the
+    # local distribution against the country's. Read from the national CSV
+    # rather than MAJOR_DATA because the state/metro overlay has already
+    # replaced MAJOR_DATA's entry wholesale -- asking it for "the national
+    # percentiles" would hand back the local ones. None when the local wage IS
+    # the national one, which is what suppresses the second row.
+    national = None
+    if entry.get("wage_geography_level") in ("metro", "state"):
+        national_entry = load_bls_careers(CAREERS_CSV_PATH_NATIONAL).get(occupation_name, {})
+        candidate = national_entry.get("wage_percentiles")
+        if build_wage_distribution(candidate):
+            national = candidate
     return {
         "percentiles": percentiles,
         "occupation_name": occupation_name,
@@ -869,6 +881,7 @@ def get_wage_distribution_context(occupation_name: str) -> dict:
         # replaces them wholesale for cities BLS publishes, so the label has
         # to follow the data rather than the selected city.
         "geography_label": entry.get("wage_geography") or "national",
+        "national_percentiles": national,
     }
 
 
@@ -938,12 +951,25 @@ def render_wage_distribution(occupation_name: str, compact: bool = False) -> Non
         # clear the x-title and the tail note, which get clipped without it.
         # title_text="" rather than title=None -- Plotly renders a None title
         # as the literal string "undefined".
-        figure.update_layout(title_text="", height=320, margin=dict(t=40, b=110))
+        #
+        # Height scales with the row count rather than being a fixed 320: a
+        # two-geography chart squashed into one row's worth of space overlaps
+        # its own money labels. Derived from the trace count so it can't fall
+        # out of step with how many rows the builder actually drew.
+        # The left margin must survive this override: it holds the row labels,
+        # and dropping it also squeezes the p10 money label off the canvas.
+        # The right margin is new here -- p90's label sits outside the curve,
+        # which the full-width layout absorbs and a compare column doesn't.
+        rows_drawn = 2 if context.get("national_percentiles") else 1
+        figure.update_layout(title_text="", height=180 + 110 * rows_drawn,
+                              margin=dict(t=40, b=110, l=120, r=60))
     st.plotly_chart(figure, use_container_width=True, config=PLOTLY_CHART_CONFIG)
     st.caption(
         "The median is a midpoint, not a promise — half of this workforce earns "
-        "less than it. Bar area is the share of workers, so a wide flat bar and a "
-        "narrow tall one hold the same number of people. "
+        "less than it. The area under each curve is the share of workers, so a "
+        "wide flat stretch holds just as many people as a narrow tall one — where "
+        "the curve is highest is where pay actually clusters, which is often not "
+        "at the median. "
         "[BLS OEWS percentiles; see Methodology]"
     )
 
@@ -4064,6 +4090,111 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
     return fig
 
 
+def wage_ridgeline_curve(percentiles: dict, points: int = 160) -> tuple:
+    """(xs, ys) tracing one occupation's pay distribution from the 10th to the
+    90th percentile as a smooth silhouette. ys are densities on the same
+    workers-per-dollar scale build_wage_distribution produces, so two curves
+    drawn against a shared maximum are directly comparable.
+
+    Shared by the Plotly and matplotlib versions so both draw the SAME
+    geometry. Each smoothing its own curve is the chart-twin drift CLAUDE.md
+    warns about, and here it would put visibly different shapes on screen and
+    in the PDF from identical data.
+
+    The curve closes to the baseline at p10 and p90. That is a drawing
+    convention marking where published data ends, NOT a claim that nobody
+    earns beyond them -- 10% of workers sit past each end, which is why
+    wage_distribution_tail_notes states both in words beside every chart. The
+    same reasoning already keeps the tails out of the bar version: OEWS
+    publishes no bound on the far side, so any width drawn for them would be
+    invented.
+
+    The peak lands wherever workers are densest, which is usually NOT the
+    median -- wage distributions are right-skewed, so the narrow low bins
+    often out-densify the wide high ones. O*NET's version of this chart always
+    peaks at the median, because its curve is a stylised fit rather than a
+    density; ours says something the median cannot, which is where in the
+    range people actually cluster. Radiologic Technologists nationally peak
+    near $63k against an $80k median; Registered Nurses peak above theirs.
+
+    Pure Python on purpose. scipy would give a nicer monotone interpolant but
+    is NOT in requirements.txt, and this file only gets to use what production
+    installs.
+    """
+    bins = build_wage_distribution(percentiles)
+    if not bins:
+        return [], []
+
+    low, high = bins[0]["low"], bins[-1]["high"]
+    # Anchor at each bin's midpoint, where that bin's density is most nearly
+    # its own rather than a blend with its neighbour's.
+    anchors = [(low, 0.0)]
+    anchors += [((b["low"] + b["high"]) / 2, b["density"]) for b in bins]
+    anchors.append((high, 0.0))
+
+    step = (high - low) / (points - 1)
+    xs = [low + step * i for i in range(points)]
+    ax = [a[0] for a in anchors]
+    ay = [a[1] for a in anchors]
+
+    raw = []
+    for x in xs:                                    # piecewise-linear resample
+        if x <= ax[0]:
+            raw.append(ay[0]); continue
+        if x >= ax[-1]:
+            raw.append(ay[-1]); continue
+        for i in range(len(ax) - 1):
+            if ax[i] <= x <= ax[i + 1]:
+                span = ax[i + 1] - ax[i]
+                t = 0.0 if span == 0 else (x - ax[i]) / span
+                raw.append(ay[i] + t * (ay[i + 1] - ay[i]))
+                break
+
+    # Moving average to round the corners the linear pass leaves at each
+    # anchor. Endpoints are pinned back to zero afterwards: the window pulls
+    # them up, which would reopen the silhouette at exactly the two points the
+    # tail notes are describing.
+    window = max(3, points // 14)
+    half = window // 2
+    ys = []
+    for i in range(points):
+        lo, hi = max(0, i - half), min(points, i + half + 1)
+        ys.append(sum(raw[lo:hi]) / (hi - lo))
+    ys[0] = ys[-1] = 0.0
+
+    # Smoothing and the pinned endpoints together shed roughly a tenth of the
+    # area, so rescale to put it back. Without this the curve is no longer
+    # area-truthful and the shared density scale two rows are compared on
+    # means slightly different things per row -- the smoothing loss depends on
+    # the shape being smoothed, so a wide flat distribution loses less than a
+    # narrow peaked one and would be drawn relatively too tall.
+    target = sum(share for _, _, share in WAGE_DISTRIBUTION_BINS)
+    area = sum((ys[i] + ys[i + 1]) / 2 * (xs[i + 1] - xs[i]) for i in range(points - 1))
+    if area > 0:
+        ys = [y * target / area for y in ys]
+    return xs, ys
+
+
+def wage_ridgeline_rows(percentiles: dict, geography_label: str,
+                         national_percentiles: dict = None) -> list:
+    """The rows a ridgeline draws, local first: [{label, xs, ys, percentiles}].
+
+    Two rows when the selected city resolved to a metro or state wage, one
+    when it was already the national figure -- comparing national against
+    itself would draw the same curve twice and imply a difference that isn't
+    there. build_major_data's overlay decides which, so this follows the data
+    rather than the selected city (see get_wage_distribution_context)."""
+    rows = []
+    for label, pct in ((geography_label, percentiles),
+                        ("United States", national_percentiles)):
+        if not pct:
+            continue
+        xs, ys = wage_ridgeline_curve(pct)
+        if xs:
+            rows.append({"label": label, "xs": xs, "ys": ys, "percentiles": pct})
+    return rows
+
+
 def wage_distribution_tail_notes(percentiles: dict) -> tuple:
     """The two open-ended tails as plain sentences, shared by the on-screen and
     PDF versions so the wording can't drift between them."""
@@ -4073,88 +4204,165 @@ def wage_distribution_tail_notes(percentiles: dict) -> tuple:
     )
 
 
+PANEL_WAGE_LOCAL_COLOR = "#E8843C"      # local geography, warm -- reads as "yours"
+PANEL_WAGE_NATIONAL_COLOR = "#4C78A8"   # national, the app's existing chart blue
+
+
 def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
                                    modelled_start: float = None,
-                                   geography_label: str = None):
-    """Where an occupation's pay actually lands, as an area-truthful histogram
-    over OEWS's percentile bins. Returns None when the distribution can't be
-    built, so callers render nothing rather than an empty axis.
+                                   geography_label: str = None,
+                                   national_percentiles: dict = None):
+    """Where an occupation's pay actually lands, as one filled curve per
+    geography on a shared wage axis. Returns None when nothing can be built,
+    so callers render nothing rather than an empty axis.
 
-    The y-axis is deliberately unlabelled and untick-ed. Height here is a
-    density (workers per dollar), which is the correct quantity for unequal
-    bins and a meaningless one to a 17-year-old. Each bar states its share in
-    words instead -- "25% of workers" -- which is the number a reader actually
-    wants, and area already encodes it faithfully.
+    Replaces a single-series histogram. The bars were area-truthful and still
+    answered only "how spread out is this job's pay", when the question a
+    visitor is actually holding is "does it pay better HERE" -- the app
+    already picks a metro or state wage for them and says so in a caption, but
+    nothing showed what that choice was worth. Two curves on one axis show the
+    whole shift at once: how much higher, and whether the spread widens with
+    it.
 
-    modelled_start marks where the app's own starting-salary assumption sits in
-    the distribution. That's the honest bit: this app projects ten years from a
-    single number, and showing that number's position among real wages says
-    more about the projection's uncertainty than any disclaimer.
+    Both rows share one density scale, so their heights mean the same thing. A
+    local distribution that is wider AND flatter than the national one is a
+    real finding about that metro, and normalising each row to its own peak
+    would erase exactly that.
+
+    The y-axis stays unlabelled and untick-ed. Height is a density (workers
+    per dollar), which is the right quantity over unequal bins and a
+    meaningless one to a 17-year-old; the marked percentiles carry the
+    numbers, and the shape carries the comparison.
+
+    modelled_start marks where the app's own starting-salary assumption sits.
+    That's the honest bit: this app projects ten years from a single number,
+    and showing that number's position among real wages says more about the
+    projection's uncertainty than any disclaimer.
     """
-    bins = build_wage_distribution(percentiles)
-    if not bins:
+    rows = wage_ridgeline_rows(percentiles, geography_label, national_percentiles)
+    if not rows:
         return None
 
-    centers = [(b["low"] + b["high"]) / 2 for b in bins]
-    widths = [b["high"] - b["low"] for b in bins]
-    densities = [b["density"] for b in bins]
+    peak = max(max(r["ys"]) for r in rows) or 1.0
+    # Each row sits on its own baseline. row_height exceeds fill_scale by
+    # enough that a full-height curve still clears the baseline above it --
+    # at 1.0/0.78 a tall row's peak landed level with the next row's p10
+    # marker and their money labels overprinted each other.
+    row_height, fill_scale = 1.25, 0.78
+    colors = [PANEL_WAGE_LOCAL_COLOR, PANEL_WAGE_NATIONAL_COLOR] if len(rows) > 1 \
+        else [PANEL_WAGE_NATIONAL_COLOR]
 
-    fig = go.Figure(go.Bar(
-        x=centers, y=densities, width=widths,
-        marker=dict(color="#4C78A8", line=dict(color="white", width=1)),
-        text=[f"{b['share']:.0%}" for b in bins],
-        textposition="inside", insidetextanchor="middle",
-        hovertemplate=(
-            "%{customdata[0]} of workers earn<br>"
-            "%{customdata[1]} – %{customdata[2]}<extra></extra>"
-        ),
-        customdata=[[f"{b['share']:.0%}", fmt_money(b["low"]), fmt_money(b["high"])]
-                     for b in bins],
-        showlegend=False,
-    ))
-
-    # The reference lines are labelled through the legend rather than with
-    # add_vline's own annotations, which sit inside the plot area and get
-    # clipped against the top margin -- and would collide with each other
-    # anyway whenever the median and the modelled start are close, which is
-    # the common case since the modelled start IS the 25th percentile.
-    # add_vline draws a layout shape, and shapes can't carry a legend entry,
-    # so each line gets a zero-point scatter trace purely to register one.
-    reference_lines = [(percentiles["p50"], "#333333", "solid",
-                        f"median {fmt_money(percentiles['p50'])}")]
-    if modelled_start:
-        reference_lines.append((modelled_start, "#E45756", "dash",
-                                 f"modelled start {fmt_money(modelled_start)}"))
-    for position, color, dash, label in reference_lines:
-        fig.add_vline(x=position, line=dict(color=color, width=2, dash=dash))
+    fig = go.Figure()
+    for i, row in enumerate(reversed(rows)):        # first row drawn topmost
+        base = i * row_height
+        color = colors[len(rows) - 1 - i]
+        ys = [base + (y / peak) * fill_scale for y in row["ys"]]
+        # A closed polygon with fill="toself" rather than tozeroy/tonexty:
+        # both of those fill relative to the axis or the previous trace, so
+        # once rows are stacked they spill outside their own band. This one
+        # is self-contained and can't be affected by trace order.
         fig.add_trace(go.Scatter(
-            x=[None], y=[None], mode="lines", name=label,
-            line=dict(color=color, width=2, dash=dash), hoverinfo="skip",
+            x=row["xs"] + row["xs"][::-1],
+            y=ys + [base] * len(row["xs"]),
+            mode="lines", line=dict(width=0), fill="toself",
+            fillcolor=_rgba(color, 0.45), hoverinfo="skip", showlegend=False,
         ))
+        fig.add_trace(go.Scatter(
+            x=row["xs"], y=ys, mode="lines", line=dict(color=color, width=2),
+            name=row["label"], hoverinfo="skip", showlegend=False,
+        ))
+        fig.add_trace(go.Scatter(
+            x=[row["xs"][0], row["xs"][-1]], y=[base, base], mode="lines",
+            line=dict(color=color, width=1), hoverinfo="skip", showlegend=False,
+        ))
+        pct = row["percentiles"]
+        # p10 reads left of its marker and p90 right of it, so the outer two
+        # labels sit outside the silhouette instead of on top of the curve --
+        # and, more to the point, out of the way of the neighbouring row's.
+        marks = [("p10", "middle left"), ("p50", "top center"), ("p90", "middle right")]
+        mx = [pct[k] for k, _ in marks]
+        my = [base + (_density_at(row, pct[k]) / peak) * fill_scale for k, _ in marks]
+        # A median line PER ROW, drawn only across that row's own band. One
+        # full-height line can't work here: each geography has its own median
+        # and a single line would have to pick one, or straddle both and
+        # belong to neither. Two short lines also put the shift between them
+        # on the page, which is the comparison the chart exists for.
+        median_y = base + (_density_at(row, pct["p50"]) / peak) * fill_scale
+        fig.add_trace(go.Scatter(
+            x=[pct["p50"], pct["p50"]], y=[base, median_y], mode="lines",
+            line=dict(color=color, width=2, dash="dot"),
+            hoverinfo="skip", showlegend=False,
+        ))
+        fig.add_trace(go.Scatter(
+            x=mx, y=my, mode="markers+text",
+            marker=dict(color=color, size=8, line=dict(color="white", width=1.5)),
+            text=[fmt_money(v) for v in mx], textposition=[p for _, p in marks],
+            textfont=dict(size=11, color=color),
+            hovertemplate="%{customdata}: %{x:$,.0f}<extra></extra>",
+            customdata=["10th percentile", "median", "90th percentile"],
+            showlegend=False,
+        ))
+        fig.add_annotation(x=0, y=base + fill_scale / 2, xref="paper", yref="y",
+                            xanchor="right", showarrow=False, text=f"<b>{row['label']}</b>",
+                            font=dict(size=12, color=color), xshift=-8)
 
-    where = f" — {geography_label}" if geography_label else ""
+    if modelled_start:
+        fig.add_vline(x=modelled_start, line=dict(color="#E45756", width=2, dash="dash"))
+        fig.add_annotation(x=modelled_start, y=(len(rows) - 1) * row_height + fill_scale, yref="y",
+                            showarrow=False, yanchor="bottom",
+                            text=f"modelled start {fmt_money(modelled_start)}",
+                            font=dict(size=11, color="#E45756"))
+
     below, above = wage_distribution_tail_notes(percentiles)
+    where = rows[0]["label"]
+    _x_lo = min(r["xs"][0] for r in rows)
+    _x_hi = max(r["xs"][-1] for r in rows)
+    _x_pad = (_x_hi - _x_lo) * 0.13
     fig.update_layout(
-        title=f"Where {occupation_name} pay actually lands{where}",
+        title=f"Where {occupation_name} pay actually lands — {where}"
+               + (" vs the U.S." if len(rows) > 1 else ""),
         title_font_size=14,
-        xaxis=dict(title="Annual wage", tickprefix="$", tickformat=","),
-        # Density is the right height and the wrong label for this audience --
-        # hide the scale, keep the shape.
-        yaxis=dict(title=None, showticklabels=False, showgrid=False),
-        bargap=0,
-        height=380,
-        # Bottom margin has to clear the x-title AND the tail note below it;
-        # at the default the note is clipped out of the plot entirely.
-        margin=dict(t=70, b=110),
-        legend=dict(orientation="h", yanchor="bottom", y=1.0,
-                     xanchor="center", x=0.5, font=dict(size=11)),
-        annotations=[dict(
-            x=0, y=-0.30, xref="paper", yref="paper", showarrow=False,
+        # Pad the x-range rather than relying on margins alone. The p10/p90
+        # money labels are anchored outside their markers, and Plotly clips
+        # scatter text at the PLOT AREA edge, not the canvas edge -- so a
+        # wider margin moves the axis inward without stopping "$89,980" from
+        # being chopped to "i,980". Padding the domain puts the labels inside.
+        xaxis=dict(title="Annual wage", tickprefix="$", tickformat=",",
+                    range=[_x_lo - _x_pad, _x_hi + _x_pad]),
+        yaxis=dict(title=None, showticklabels=False, showgrid=False, zeroline=False,
+                    range=[-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34]),
+        height=200 + 130 * len(rows),
+        # Left margin holds the row labels; bottom clears the x-title AND the
+        # tail note under it, which is clipped out of the plot at the default.
+        margin=dict(t=70, b=110, l=130, r=70),
+        annotations=list(fig.layout.annotations) + [dict(
+            x=0, y=-0.34, xref="paper", yref="paper", showarrow=False,
             xanchor="left", yanchor="top", font=dict(size=11, color="#666666"),
-            text=f"◄ {below}   ·   {above} ►",
+            text=f"◄ {below}   ·   {above} ►   (for {where})",
         )],
     )
     return fig
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _density_at(row: dict, x: float) -> float:
+    """The drawn curve's height at a wage, so a marker sits ON the silhouette
+    instead of at the density the bin table would give -- the curve is
+    smoothed, and a marker placed from unsmoothed data floats off it."""
+    xs, ys = row["xs"], row["ys"]
+    if x <= xs[0] or x >= xs[-1]:
+        return 0.0
+    for i in range(len(xs) - 1):
+        if xs[i] <= x <= xs[i + 1]:
+            span = xs[i + 1] - xs[i]
+            t = 0.0 if span == 0 else (x - xs[i]) / span
+            return ys[i] + t * (ys[i + 1] - ys[i])
+    return 0.0
 
 
 # ---- 2k. PDF Report Generation --------------------------------------------
@@ -4502,70 +4710,92 @@ def _pdf_image_from_figure(fig, max_width: float = PDF_CONTENT_WIDTH) -> Image:
 def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
                                        modelled_start: float = None,
                                        geography_label: str = None,
+                                       national_percentiles: dict = None,
                                        max_width: float = PDF_CONTENT_WIDTH) -> Image:
-    """PDF counterpart to build_wage_distribution_chart. Returns None when the
-    distribution can't be built, matching its on-screen twin so the caller's
-    "skip it" branch is the same on both surfaces.
+    """PDF counterpart to build_wage_distribution_chart. Returns None when
+    nothing can be built, matching its on-screen twin so the caller's "skip
+    it" branch is the same on both surfaces.
 
-    Both read the same build_wage_distribution bins, so the bar geometry can't
-    drift; what's hand-kept in sync is the annotation wording and which
+    Both take their geometry from wage_ridgeline_rows, so the curve shapes
+    cannot drift -- the smoothing happens once, in shared code, rather than
+    twice. What stays hand-kept in sync is the annotation wording and which
     reference lines are drawn (see CLAUDE.md on the chart twins).
     """
-    bins = build_wage_distribution(percentiles)
-    if not bins:
+    rows = wage_ridgeline_rows(percentiles, geography_label, national_percentiles)
+    if not rows:
         return None
 
-    fig, ax = plt.subplots(figsize=(6, 3.2))
-    for wage_bin in bins:
-        ax.bar(
-            x=wage_bin["low"], height=wage_bin["density"],
-            width=wage_bin["high"] - wage_bin["low"], align="edge",
-            color="#4C78A8", edgecolor="white", linewidth=1,
-        )
-        ax.text(
-            (wage_bin["low"] + wage_bin["high"]) / 2, wage_bin["density"] / 2,
-            f"{wage_bin['share']:.0%}", ha="center", va="center",
-            color="white", fontsize=9, fontweight="bold",
-        )
+    peak = max(max(r["ys"]) for r in rows) or 1.0
+    row_height, fill_scale = 1.25, 0.78
+    colors = ([PANEL_WAGE_LOCAL_COLOR, PANEL_WAGE_NATIONAL_COLOR] if len(rows) > 1
+              else [PANEL_WAGE_NATIONAL_COLOR])
 
-    # The reference lines are labelled via the legend rather than inline text
-    # next to each line. Inline, they overlap each other and the bars whenever
-    # the median and the modelled start fall close together -- which is the
-    # common case, since the modelled start IS the 25th percentile.
-    ax.axvline(percentiles["p50"], color="#333333", linewidth=1.8,
-                label=f"median {fmt_money(percentiles['p50'])}")
+    fig, ax = plt.subplots(figsize=(6, 2.1 + 1.15 * len(rows)))
+    for i, row in enumerate(reversed(rows)):
+        base = i * row_height
+        color = colors[len(rows) - 1 - i]
+        ys = [base + (y / peak) * fill_scale for y in row["ys"]]
+        ax.fill_between(row["xs"], base, ys, color=color, alpha=0.45, linewidth=0)
+        ax.plot(row["xs"], ys, color=color, linewidth=1.6)
+        ax.plot([row["xs"][0], row["xs"][-1]], [base, base], color=color, linewidth=0.8)
+        pct = row["percentiles"]
+        # Median line across this row's own band only -- see the Plotly twin
+        # for why a single full-height line can't serve two geographies.
+        median_y = base + (_density_at(row, pct["p50"]) / peak) * fill_scale
+        ax.plot([pct["p50"], pct["p50"]], [base, median_y], color=color,
+                 linewidth=1.6, linestyle=":")
+        # p10 left of its marker, p90 right of it, median above: the outer two
+        # sit outside the silhouette and clear of the neighbouring row.
+        for key, ha, va, dx, dy in (("p10", "right", "center", -6, 0),
+                                     ("p50", "center", "bottom", 0, 4),
+                                     ("p90", "left", "center", 6, 0)):
+            x = pct[key]
+            y = base + (_density_at(row, x) / peak) * fill_scale
+            ax.plot([x], [y], marker="o", markersize=5, color=color,
+                     markeredgecolor="white", markeredgewidth=1.2)
+            # parse_math=False: matplotlib reads a matched pair of "$" as a
+            # mathtext expression, so two money labels in one string raise.
+            ax.annotate(fmt_money(x), xy=(x, y), xytext=(dx, dy),
+                         textcoords="offset points", ha=ha, va=va,
+                         fontsize=7.5, color=color, parse_math=False)
+        ax.annotate(row["label"], xy=(0, base + fill_scale / 2),
+                     xycoords=("axes fraction", "data"), xytext=(-8, 0),
+                     textcoords="offset points", ha="right", va="center",
+                     fontsize=8.5, fontweight="bold", color=color,
+                     annotation_clip=False, parse_math=False)
+
     if modelled_start:
-        ax.axvline(modelled_start, color="#E45756", linewidth=1.8, linestyle="--",
-                    label=f"modelled start {fmt_money(modelled_start)}")
-    # parse_math=False on every label carrying a dollar figure: matplotlib
-    # reads a matched pair of "$" as a mathtext expression, so a caption like
-    # "$68,940 - $137,470" is parsed as maths and raises rather than printing.
-    # The existing PDF charts never hit this because their money strings are
-    # tick labels with one "$" each, which is unpaired and passes through.
-    legend = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2,
-                        frameon=False, fontsize=8)
-    for text in legend.get_texts():
-        text.set_parse_math(False)
+        ax.axvline(modelled_start, color="#E45756", linewidth=1.6, linestyle="--")
+        ax.annotate(f"modelled start {fmt_money(modelled_start)}",
+                     xy=(modelled_start, (len(rows) - 1) * row_height + fill_scale), ha="center",
+                     va="bottom", fontsize=7.5, color="#E45756", parse_math=False)
 
-    where = f" - {geography_label}" if geography_label else ""
-    ax.set_title(f"Where {occupation_name} pay actually lands{where}",
-                  fontsize=11, pad=28)
+    where = rows[0]["label"]
+    title = f"Where {occupation_name} pay actually lands - {where}"
+    if len(rows) > 1:
+        title += " vs the U.S."
+    ax.set_title(title, fontsize=10.5, pad=16)
     ax.set_xlabel("Annual wage")
     ax.xaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
     # Cap the tick count: at print width the default locator packs in enough
     # "$110,000"-length labels to run them into each other.
     ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, prune="both"))
+    ax.set_ylim(-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34)
+    # Same padding reasoning as the Plotly twin: the outer money labels sit
+    # beyond their markers and would otherwise be trimmed at the axes edge.
+    _x_lo = min(r["xs"][0] for r in rows)
+    _x_hi = max(r["xs"][-1] for r in rows)
+    _x_pad = (_x_hi - _x_lo) * 0.13
+    ax.set_xlim(_x_lo - _x_pad, _x_hi + _x_pad)
     # Same reasoning as the Plotly twin: height is a density, which is correct
-    # for unequal bins and meaningless as a printed label.
+    # over unequal bins and meaningless as a printed label.
     ax.set_yticks([])
     ax.spines[["left", "right", "top"]].set_visible(False)
 
     below, above = wage_distribution_tail_notes(percentiles)
-    # Anchored to the axes in axes-fraction coords, below the x-label, so it
-    # can't land on top of it the way a figure-relative offset did.
-    ax.annotate(f"{below}  -  {above}", xy=(0, -0.32), xycoords="axes fraction",
-                 fontsize=8, color="#666666", annotation_clip=False,
-                 parse_math=False)
+    ax.annotate(f"{below}  -  {above}  (for {where})", xy=(0, -0.30),
+                 xycoords="axes fraction", fontsize=8, color="#666666",
+                 annotation_clip=False, parse_math=False)
     return _pdf_image_from_figure(fig, max_width=max_width)
 
 
@@ -4601,9 +4831,10 @@ def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
         chart,
         Paragraph(
             "The median is a midpoint, not a promise -- half of this workforce earns less "
-            "than it. Each bar's area is its share of workers, so a wide flat bar and a "
-            "narrow tall one hold the same number of people. Source: BLS OEWS published "
-            "wage percentiles.",
+            "than it. The area under each curve is the share of workers, so a wide flat "
+            "stretch holds just as many people as a narrow tall one; where the curve is "
+            "highest is where pay actually clusters, which is often not at the median. "
+            "Source: BLS OEWS published wage percentiles.",
             styles["caption"]),
     ]
 
@@ -8560,11 +8791,14 @@ percentile wage — and no individual worker records at all, so a true
 count-the-people histogram isn't something anyone can build from it, us
 included. What the percentiles *do* fix exactly is how many workers sit
 between any two of them: a quarter of the workforce earns between the 25th and
-the 50th, by definition. Each bar covers one of those ranges, and its height is
-that share divided by how many dollars wide the range is — so the **area** of a
-bar is the share of workers, and a wide flat bar holds just as many people as a
-narrow tall one. The bottom and top 10% have no published cutoff on the far
-side, so we state them in words instead of inventing a bar width for them.
+the 50th, by definition. The curve's height at any wage is that share divided by
+how many dollars wide the range is — so the **area** under it is the share of
+workers, and a wide flat stretch holds just as many people as a narrow tall one.
+The curve therefore peaks where workers are most tightly packed, which for most
+occupations is **below** the median, since pay ranges spread out as they rise.
+When your city has its own published figures, the national curve is drawn beneath
+it for comparison. The bottom and top 10% have no published cutoff on the far
+side, so we state them in words rather than inventing a width for them.
 Percentiles follow the same city as the salary above when BLS publishes them
 for that metro. There's no equivalent for Intended Major mode: a major isn't
 an occupation, and the wage data behind it has no percentiles, so the chart
