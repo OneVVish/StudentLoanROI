@@ -31,6 +31,10 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import pandas as pd
 import plotly.express as px
+# graph_objects, not express: the wage-distribution histogram needs per-bar
+# widths (OEWS's percentile bins are unequal), which px.bar has no parameter
+# for.
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
@@ -191,10 +195,32 @@ for _title in ["Oral and Maxillofacial Surgeons", "Prosthodontists", "Dentists, 
 # above, so every existing calculation (get_major_growth_rate,
 # get_annual_salary_for_year, etc.) works on them identically -- no
 # special-casing needed anywhere else in the app. Two geographic scopes are
-# available (see the "Career Salary Data" sidebar selector in section 4,
-# which picks one of these paths and builds the final MAJOR_DATA from it).
+# available. The national file is the base MAJOR_DATA is built from; the state
+# and metro files below overlay it (see build_major_data).
 CAREERS_CSV_PATH_NATIONAL = "cleaned_careers.csv"
+# Kept for analyze_model.py, which still offers a --state CA run against this
+# single-state file. The app itself no longer reads it: see
+# STATE_CAREERS_CSV_PATH, which covers every state and is selected by the
+# city rather than by a sidebar control.
 CAREERS_CSV_PATH_CA = "cleaned_careers_ca.csv"
+
+# Per-STATE occupation wages, via `data_pipeline.py --all-states`. Long-format,
+# one row per (state, occupation), same shape as the metro file.
+#
+# This is the middle rung of a three-level fallback: national -> state -> metro,
+# each overlaying the one before, so every occupation shows the finest geography
+# BLS actually publishes for it. Metros carry a median 82% of occupations
+# (72-92% by city); before this file existed the other ~18% dropped straight to
+# a national average even though the state figure was sitting right there.
+#
+# It also replaced a sidebar control that shouldn't have been one. "Career
+# Salary Data: National / California" let a visitor pick a wage basis
+# independently of the city they'd already chosen, so California + New York was
+# reachable -- and the 51 occupations New York suppresses then showed
+# California wages while the page labelled them national figures (Craft
+# Artists: $46,080 nationally, shown as $100,540). A state isn't a preference,
+# it's a fact about the selected city, so it's derived from it now.
+STATE_CAREERS_CSV_PATH = "data/state_careers_clean.csv"
 
 # Per-MAJOR wages from the NY Fed, via nyfed_pipeline.py. The counterpart to
 # the BLS per-OCCUPATION files above, and the basis of the sidebar's "Choose
@@ -251,6 +277,27 @@ SELECTION_LABEL = {DATASET_MODE_MAJOR: "Intended Major",
                    DATASET_MODE_CAREER: "Target Profession"}
 
 
+def wage_percentiles_from_row(row) -> dict:
+    """OEWS's published wage distribution for one occupation, as
+    {p10, p25, p50, p75, p90}, or None if this CSV doesn't carry the full set.
+
+    Returns None rather than a partial dict on purpose: every consumer draws a
+    distribution, and a distribution missing a percentile isn't a smaller
+    chart, it's a wrong-shaped one. getattr with a default keeps a cleaned CSV
+    generated before data_pipeline.py carried these columns working -- it just
+    shows no distribution, the same way an older CSV shows no
+    typical_education.
+    """
+    values = {
+        "p10": getattr(row, "a_pct10", None), "p25": getattr(row, "a_pct25", None),
+        "p50": getattr(row, "a_median", None), "p75": getattr(row, "a_pct75", None),
+        "p90": getattr(row, "a_pct90", None),
+    }
+    if any(v is None or pd.isna(v) for v in values.values()):
+        return None
+    return {k: float(v) for k, v in values.items()}
+
+
 @st.cache_data
 def load_bls_careers(csv_path: str) -> dict:
     try:
@@ -260,6 +307,7 @@ def load_bls_careers(csv_path: str) -> dict:
     return {
         row.occ_title: {
             "starting_salary": row.a_pct25, "median_salary": row.a_median,
+            "wage_percentiles": wage_percentiles_from_row(row),
             # First 2 digits of the 6-digit SOC code (e.g. "15-1252" -> "15")
             # -- the SOC "major group" level, used to look up AI_EXPOSURE_BY_
             # SOC_GROUP for the optional AI Employability Risk module.
@@ -314,8 +362,88 @@ def load_metro_wages(csv_path: str, city: str) -> dict:
         return {}
     city_rows = df[df["city"] == city]
     return {
-        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median}
+        # wage_percentiles rides along with the wage pair because the
+        # distribution is as local as the median is -- a New York nurse's
+        # spread is not the national spread. build_major_data's overlay then
+        # replaces the national distribution wholesale for cities BLS
+        # publishes, and leaves the national one in place for cities it
+        # suppresses, which is exactly the same fallback the wages take.
+        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median,
+                        "wage_percentiles": wage_percentiles_from_row(row)}
         for row in city_rows.itertuples()
+    }
+
+
+@st.cache_data
+def load_hs_age_profile(csv_path: str) -> list:
+    """Age bands for high-school graduates, ascending, from
+    build_hs_age_profile.py. [] when the file is absent -- callers must render
+    nothing rather than fail, since this is disclosure, not model input."""
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return []
+    return df.sort_values("age_low").to_dict("records")
+
+
+def hs_young_wage_disclosure() -> str:
+    """One sentence sizing the gap between the all-ages baseline and what a
+    young high school graduate actually earns. Empty string when the profile
+    is missing, so the paragraph around it still reads.
+
+    Scales HS_GRAD_SALARY by the band's ratio_to_25plus rather than quoting the
+    profile's own dollar median. The ratio is a shape and survives a vintage
+    change; the dollars are in the microdata's income year and quoting them
+    beside a baseline from a newer quarter would mix vintages -- the exact
+    error that made the metro wages read as a pay cut earlier in this file's
+    history. Doing it this way also means refreshing HS_GRAD_SALARY alone keeps
+    this sentence correct.
+    """
+    bands = load_hs_age_profile(HS_AGE_PROFILE_CSV_PATH)
+    if not bands:
+        return ""
+    band = bands[0]
+    try:
+        ratio = float(band["ratio_to_25plus"])
+        low, high = int(band["age_low"]), int(band["age_high"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    if not 0 < ratio < 1:
+        # A ratio at or above 1 would make the sentence claim young workers
+        # out-earn the all-ages median, which would mean the profile is wrong
+        # rather than surprising. Say nothing instead.
+        return ""
+    article = "an" if str(low).startswith(("8", "11", "18")) else "a"
+    return (
+        f" In Census microdata for that exact group, {article} "
+        f"{low}-to-{high}-year-old high school graduate working full time earns "
+        f"about **{(1 - ratio) * 100:.0f}% less** than that — roughly "
+        f"{fmt_money(HS_GRAD_SALARY * ratio)} against the baseline above."
+    )
+
+
+@st.cache_data
+def load_state_wages(csv_path: str, state: str) -> dict:
+    """One state's own BLS wages, as {occ_title: {starting_salary,
+    median_salary, wage_percentiles}}, from `data_pipeline.py --all-states`.
+
+    Same shape and same rules as load_metro_wages -- wages only, since
+    everything else about an occupation is a property of the occupation rather
+    than of where it's done. Returns {} for an unknown state or a missing file,
+    which callers must treat as "use the national figure", so a deploy without
+    the state file degrades to the previous behaviour instead of to nonsense.
+    """
+    if not state:
+        return {}
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return {}
+    state_rows = df[df["state"] == state]
+    return {
+        row.occ_title: {"starting_salary": row.a_pct25, "median_salary": row.a_median,
+                        "wage_percentiles": wage_percentiles_from_row(row)}
+        for row in state_rows.itertuples()
     }
 
 
@@ -430,15 +558,32 @@ def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER, city: str =
     # it's done.
     #
     # Occupations BLS suppresses for a metro (roughly 20% -- small
-    # occupation-by-city cells) keep their national wage and are FLAGGED, so
-    # the page can say which figure it's showing instead of passing a
-    # national number off as local. Curated majors have no metro equivalent
-    # and stay national by the same rule.
+    # occupation-by-city cells) fall back to the STATE figure, and only to the
+    # national one if the state suppresses them too. Each level is FLAGGED via
+    # wage_geography, so the page can say which figure it's showing instead of
+    # passing a non-local number off as local. Curated majors have neither a
+    # state nor a metro equivalent and stay national by the same rule.
+    #
+    # Order is load-bearing: national is the spine that defines the dropdown
+    # (a state file alone would drop the occupations that state suppresses out
+    # of the list entirely), then state overlays it, then metro overlays that.
+    # Applying them in any other order would let a coarser geography overwrite
+    # a finer one.
+    state = CITY_DATA.get(city, {}).get("state_key") if city else None
+    if state:
+        state_wages = load_state_wages(STATE_CAREERS_CSV_PATH, state)
+        for occupation, wages in state_wages.items():
+            if occupation in data:
+                data[occupation] = {**data[occupation], **wages,
+                                     "wage_geography": US_STATES.get(state, state),
+                                     "wage_geography_level": "state"}
+
     if city:
         metro_wages = load_metro_wages(METRO_CAREERS_CSV_PATH, city)
         for occupation, wages in metro_wages.items():
             if occupation in data:
-                data[occupation] = {**data[occupation], **wages, "wage_geography": city}
+                data[occupation] = {**data[occupation], **wages, "wage_geography": city,
+                                     "wage_geography_level": "metro"}
 
     for major_name, training_fields in ADVANCED_TRAINING_OVERLAY.items():
         if major_name in data:
@@ -447,15 +592,36 @@ def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER, city: str =
 
 # Baseline comparison group: a high school graduate (no college) who takes on
 # no loans. Annual figure is real BLS Current Population Survey data: median
-# usual weekly earnings for full-time workers age 25+ with a high school
-# diploma and no college, Q3 2024, was $946/week (bls.gov/opub/ted/2024/
-# median-weekly-earnings-946-for-workers-with-high-school-diploma...htm),
-# annualized as $946 * 52. BLS does not publish a matching by-experience wage
-# growth trajectory for this group, so growth_rate remains a modest assumption
+# usual weekly earnings for full-time wage and salary workers age 25+ with a
+# high school diploma and no college -- $994/week in 2026 Q2, annualized as
+# $994 * 52. BLS does not publish a matching by-experience wage growth
+# trajectory for this group, so growth_rate remains a modest assumption
 # reflecting ordinary cost-of-living/seniority raises rather than freezing pay
 # for a decade.
-HS_GRAD_SALARY = 49192
+#
+# To refresh: CPS series LEU0252917300, quarterly, from BLS's own public API
+# (api.bls.gov/publicAPI/v1/timeseries/data/LEU0252917300). Cite the series ID
+# rather than a news-release URL -- the "Usual Weekly Earnings" release lives
+# at one address that is overwritten every quarter, so a link pinned to a
+# figure goes stale silently while still resolving. bls.gov itself returns 403
+# to programmatic fetches; the API host does not.
+#
+# The series is noisy quarter to quarter (it fell from $977 to $953 across the
+# 2024->2025 turn), so a single quarter's move is not a trend. Note also that
+# 2025 Q4 does not exist: October 2025 CPS data was never collected due to the
+# federal government shutdown, and BLS did not produce that quarter. The 2025
+# annual average is an 11-month figure.
+HS_GRAD_SALARY = 51688
 HS_GRAD_GROWTH_RATE = 0.02
+
+# Age-earnings profile for that same population, from build_hs_age_profile.py.
+# Read for DISCLOSURE ONLY -- it does not feed the model, and the ROI numbers
+# are identical whether or not this file exists. HS_GRAD_SALARY is an all-ages
+# (25+) median while the app compares someone aged roughly 18 to 32, and this
+# is what lets the Methodology state the size of that gap as a measured figure
+# instead of a hardcoded one that goes stale the moment either the baseline or
+# the microdata is refreshed.
+HS_AGE_PROFILE_CSV_PATH = "data/hs_age_profile.csv"
 
 # Underemployment: the share of college graduates working in jobs that don't
 # require a degree at all. From the Federal Reserve Bank of New York's "The
@@ -590,6 +756,111 @@ def render_major_careers(major_name: str, compact: bool = False) -> None:
             st.caption(caption)
 
 
+def get_wage_distribution_context(occupation_name: str) -> dict:
+    """Everything both the on-screen and PDF wage-distribution charts need for
+    one occupation, or None if it has no published distribution.
+
+    Career mode only. OEWS publishes percentiles per *occupation*; a major is
+    not an occupation, and the NY Fed major wages have no percentile
+    equivalent at all -- so Major mode has nothing to draw and this returns
+    None there rather than inventing a spread from a single median.
+
+    Kept separate from the chart builders so the "is there one?" decision is
+    made once, identically, on both surfaces.
+    """
+    if dataset_mode != DATASET_MODE_CAREER:
+        return None
+    entry = MAJOR_DATA.get(occupation_name, {})
+    percentiles = entry.get("wage_percentiles")
+    if not build_wage_distribution(percentiles):
+        return None
+    return {
+        "percentiles": percentiles,
+        "occupation_name": occupation_name,
+        "modelled_start": entry.get("starting_salary"),
+        # Which geography these percentiles describe -- the metro overlay
+        # replaces them wholesale for cities BLS publishes, so the label has
+        # to follow the data rather than the selected city.
+        "geography_label": entry.get("wage_geography") or "national",
+    }
+
+
+def render_wage_geography_note(occupation_name: str) -> None:
+    """Which geography the salary shown for this occupation actually came from.
+
+    BLS suppresses roughly a fifth of occupation-by-metro cells, so those fall
+    back a level -- and a non-local number standing in for a local one,
+    unlabelled, is the same class of hidden assumption as the underemployment
+    rate was.
+
+    Three outcomes, not two: the metro's own figure, the state's (metro
+    suppresses it, state publishes it), or the national one (both suppress it).
+    Naming the level matters -- the two-branch version this replaced said
+    "national" for anything that wasn't metro, which became a false statement
+    the moment a state layer existed underneath it.
+
+    Shared between both result branches. It was previously inline in the
+    single-scenario branch only, so Compare Mode -- the randomly assigned
+    contrast arm -- never showed it: half of visitors got a state or national
+    wage with nothing saying so, which is exactly the asymmetry CLAUDE.md
+    warns turns into an H2 confound.
+    """
+    if dataset_mode != DATASET_MODE_CAREER or city == "National Average":
+        return
+    entry = MAJOR_DATA.get(occupation_name, {})
+    level = entry.get("wage_geography_level")
+    if level == "metro":
+        st.caption(
+            f"💡 Salaries are **{city}**'s own BLS figures, not national ones — so this "
+            f"weighs {city}'s pay against {city}'s cost of living."
+        )
+    elif level == "state":
+        st.caption(
+            f"💡 BLS doesn't publish a separate **{occupation_name}** wage for {city} (too "
+            f"few workers to report there), so the salary above is "
+            f"**{entry.get('wage_geography')}**'s statewide figure — closer than a "
+            f"national average, and adjusted for {city}'s cost of living."
+        )
+    else:
+        st.caption(
+            f"⚠️ BLS doesn't publish a separate **{occupation_name}** wage for {city} or for "
+            f"its state (too few workers to report), so the salary above is the **national** "
+            f"figure adjusted for {city}'s cost of living. Treat it as an approximation."
+        )
+
+
+def render_wage_distribution(occupation_name: str, compact: bool = False) -> None:
+    """The wage-distribution histogram, rendered identically from both result
+    branches.
+
+    Called from the single-scenario branch and from render_scenario_panel, for
+    the same reason render_major_careers is: compare_mode IS the randomly
+    assigned contrast arm, so anything one branch shows and the other doesn't
+    becomes a difference between the arms that the paper's H2 doesn't account
+    for. Renders nothing at all in Major mode, on both branches equally.
+    """
+    context = get_wage_distribution_context(occupation_name)
+    if not context:
+        return
+    figure = build_wage_distribution_chart(**context)
+    if figure is None:
+        return
+    if compact:
+        # Drop the title (each compare column is already labelled with its
+        # scenario) and shorten the plot, but keep the bottom margin: it has to
+        # clear the x-title and the tail note, which get clipped without it.
+        # title_text="" rather than title=None -- Plotly renders a None title
+        # as the literal string "undefined".
+        figure.update_layout(title_text="", height=320, margin=dict(t=40, b=110))
+    st.plotly_chart(figure, use_container_width=True, config=PLOTLY_CHART_CONFIG)
+    st.caption(
+        "The median is a midpoint, not a promise — half of this workforce earns "
+        "less than it. Bar area is the share of workers, so a wide flat bar and a "
+        "narrow tall one hold the same number of people. "
+        "[BLS OEWS percentiles; see Methodology]"
+    )
+
+
 # Registered Apprenticeship benchmark for the "Alternative Pathway" card.
 # Year-1 training wage ($52,000) and average starting salary upon
 # completion ($86,000) bookend a two-phase illustrative wage curve: pay
@@ -674,6 +945,50 @@ ROI_HORIZON_OPTIONS = [10, 15, 20, 30]
 # you're *repaying*.
 UNDERGRAD_YEARS = 4
 
+# Enrollment length by BLS typical-entry-education, for occupations whose real
+# program isn't four years. Only the levels with a defensible standard length
+# belong here: an associate's degree is two years essentially everywhere, so
+# charging four years of Cost of Attendance to reach one overstated the debt by
+# roughly double at a public school, and by ~23x for the common case of a
+# two-year program done at a community college against a private four-year COA.
+#
+# The other sub-baccalaureate levels are deliberately absent. "Postsecondary
+# nondegree award" spans a six-week certificate and an eighteen-month program;
+# "High school diploma or equivalent" implies no college cost at all, which
+# isn't a shorter program but a different model entirely (zero cost makes ROI%
+# divide by zero). Those stay flagged as mismodelled rather than guessed at --
+# see MISMODELLED_EDUCATION_LEVELS.
+PROGRAM_YEARS_BY_EDUCATION = {
+    "Associate's degree": 2,
+}
+
+# The sub-baccalaureate levels this app still models with the wrong program
+# length -- i.e. everything it hasn't been taught a real length for. This is
+# what gates the "we're charging you four years you don't need" disclosure and
+# the break-even suppression, so teaching the app a new length above
+# automatically stops treating that level as broken.
+MISMODELLED_EDUCATION_LEVELS = (
+    SUB_BACHELORS_EDUCATION_LEVELS - set(PROGRAM_YEARS_BY_EDUCATION)
+)
+
+
+def program_years_for_education(typical_education: str) -> int:
+    """How many years of enrollment the cost model should charge for an
+    occupation with this BLS typical-entry-education. UNDERGRAD_YEARS for
+    anything without a specific length, which is every bachelor's-and-above
+    occupation and every major."""
+    return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
+
+
+def program_years_for_major(major_name: str) -> int:
+    """Enrollment length for a selection, read off MAJOR_DATA. The counterpart
+    to resolve_program_years for code that runs *after* the Career section has
+    built that dict -- the results page and the PDF generators. Both funnel
+    through program_years_for_education so the two paths can't disagree about
+    what an associate's degree costs."""
+    return program_years_for_education(
+        MAJOR_DATA.get(major_name, {}).get("typical_education"))
+
 # Community-college-transfer path ("2+2"): a student spends the first
 # COMMUNITY_COLLEGE_YEARS years at a community college, then transfers to the
 # 4-year school to finish the SAME bachelor's. The degree, earnings, and the
@@ -689,6 +1004,68 @@ UNDERGRAD_YEARS = 4
 # college differs.
 COMMUNITY_COLLEGE_YEARS = 2
 COMMUNITY_COLLEGE_COA_DEFAULT = 3890  # national in-district avg (NCES 2025)
+
+# Every cc_mode that means "some or all of this happens at a community
+# college". Gated on in four separate places (the chart label, the on-screen
+# note, the PDF bundle and the PDF rows), so it lives here rather than being
+# spelled out inline each time -- a mode added to the radio and missed in one
+# of those reads as a straight four-year start in that one surface only.
+CC_PATH_MODES = ("fulltime", "parttime", "associate")
+
+
+def cc_path_options(program_years: int) -> tuple:
+    """(options, labels) for the Community college path radio, given how long
+    the selected program actually runs.
+
+    A transfer is meaningless when the whole program fits inside community
+    college: an associate's degree earned there *is* the degree, and there's no
+    four-year school to move on to. So a two-year program gets an explicit
+    no-transfer option in place of the 2+2 one, rather than a fourth choice
+    sitting alongside it that quietly does the same thing.
+
+    Worth being precise about what this changes: once cc_years got clamped to
+    the program length, "full-time community college, then transfer" already
+    produced exactly this outcome for a two-year program -- two community
+    college years, no university years, no loan. The arithmetic was right and
+    the label was a lie, promising a transfer that never happened and a "2+2"
+    that was really 2+0. This makes the option say what the model already did.
+    """
+    if program_years <= COMMUNITY_COLLEGE_YEARS:
+        return (
+            ["none", "associate", "parttime"],
+            {
+                "none": "None — earn the whole degree at the school above",
+                "associate": f"Full-time community college — the entire "
+                             f"{program_years}-year degree, no transfer",
+                "parttime": "Part-time community college while working — no transfer",
+            },
+        )
+    return (
+        ["none", "fulltime", "parttime"],
+        {
+            "none": "None — start at the 4-year school",
+            "fulltime": "Full-time community college, then transfer (2+2)",
+            "parttime": "Part-time community college while working, then transfer",
+        },
+    )
+
+
+def reconcile_cc_mode(state_key: str, options: list) -> None:
+    """Keep a stored cc_mode valid when the option list changes under it.
+
+    Switching the selected occupation between a bachelor's one and an
+    associate's one swaps "fulltime" for "associate"; leaving the stale value
+    in session_state makes Streamlit raise on a radio whose current value isn't
+    among its options. The two mean the same thing to the visitor (full-time
+    community college), so they map across rather than silently resetting a
+    chosen path back to "none".
+    """
+    current = st.session_state.get(state_key)
+    if current in options:
+        return
+    equivalent = {"fulltime": "associate", "associate": "fulltime"}.get(current)
+    st.session_state[state_key] = equivalent if equivalent in options else "none"
+
 
 # Per-state average in-district community-college tuition & fees, keyed by
 # 2-letter abbreviation to match STATE_TAX_BRACKETS and CITY_DATA["state_key"].
@@ -1628,7 +2005,11 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     to that single school directly, no picker shown."""
     params = {
         "mode": dataset_mode,
-        "career_source": career_data_source,
+        # No career_source: the wage basis follows the city, so `city` already
+        # carries it. Emitting a derived value would recreate a field nothing
+        # reads back -- and older links that still carry ?career_source= are
+        # simply ignored, which is the right outcome now that a state is not
+        # something a visitor can choose independently of where they live.
         "major": major,
         "city": city,
         "school": school_name_a,
@@ -2506,6 +2887,66 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     }
 
 
+def cumulative_loan_paid_by_year(repayment_result: dict, years: int) -> list:
+    """Loan dollars paid from month 1 through the end of each year 1..years.
+
+    The three repayment simulators emit different schedules -- IDR carries a
+    per-month `payment` column because its payment moves with income, while
+    Standard and RAP carry only the balance. So this reads the payment column
+    when it exists and reconstructs from the flat monthly payment when it
+    doesn't, rather than assuming one shape.
+
+    Naturally capped at payoff: every schedule stops at the month the balance
+    hits zero, so years past that repeat the final cumulative total instead of
+    charging payments that were never made.
+    """
+    schedule = repayment_result.get("schedule")
+    if schedule is None or schedule.empty:
+        return [0.0] * years
+    months = schedule["month"]
+    if "payment" in schedule.columns:
+        paid = schedule["payment"].cumsum()
+    else:
+        paid = months * repayment_result.get("monthly_payment", 0.0)
+
+    totals = []
+    for year in range(1, years + 1):
+        within = paid[months <= year * 12]
+        totals.append(float(within.iloc[-1]) if len(within) else 0.0)
+    return totals
+
+
+def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: float,
+                               years: int) -> list:
+    """Net position at the end of each year 1..years, for this scenario and for
+    the high-school baseline it's measured against: [{year, major, hs}].
+
+    Every point comes from calculate_roi with the window shortened to that
+    year, rather than from a second formula written for the chart. That is the
+    whole point -- a hand-rolled trajectory would be a third implementation of
+    the ROI model (after the on-screen and PDF paths) and would drift from the
+    headline figure it sits beside. Year `years` here is identical to the
+    metric above the chart by construction.
+
+    total_investment is passed as 0 because only the two net positions are
+    read; roi_pct comes back None and is discarded.
+    """
+    paid_by_year = cumulative_loan_paid_by_year(scenario["repayment_result"], years)
+    points = []
+    for year in range(1, years + 1):
+        result = calculate_roi(
+            scenario["major"], paid_by_year[year - 1], 0,
+            col_index=col_index, years=year, hs_wage_index=hs_wage_index,
+            personal_contribution=scenario["personal_contribution"],
+            enrollment_years=scenario["enrollment_years"],
+            working_years=scenario["working_years"],
+        )
+        points.append({"year": year,
+                       "major": result["major_net_position"],
+                       "hs": result["hs_net_position"]})
+    return points
+
+
 def get_apprenticeship_salary_for_year(year_index: int) -> float:
     """Two-phase illustrative wage curve for the Registered Apprenticeship
     benchmark -- ramps from the year-1 training wage to the completion
@@ -2824,10 +3265,10 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
     career_data_source is never read in the body — it exists purely to key
     the cache. st.cache_data hashes arguments, but the work here depends on
     the MAJOR_DATA global, which is rebuilt when the visitor switches the
-    Career Salary Data source (a Software Developer earns differently in
-    California than nationally). Without this parameter the cache would
-    happily serve a national break-even to someone who just switched to
-    California.
+    city, and with it the state/metro wage overlays (a Software Developer
+    earns differently in Austin than in New York). Without this parameter the
+    cache would happily serve one city's break-even to someone who just
+    switched to another.
     """
     def premium_at(loan: float) -> float:
         return compute_scenario_results(
@@ -2870,15 +3311,18 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     the two can't drift.
 
     Returns None for `headline` when the break-even shouldn't be shown at
-    all. That's the sub-baccalaureate case: for an occupation BLS says needs
-    less than a bachelor's, "this degree stops paying off at $X" is not
-    unfavourable, it's malformed — the model charged four financed years to
-    reach a job that never asked for them. The apprenticeship module already
-    makes that point properly (see SUB_BACHELORS_EDUCATION_LEVELS), so this
-    defers to it rather than printing a number that answers no question.
+    all: "this degree stops paying off at $X" is malformed when the model
+    charged four financed years to reach a job that never asked for them. The
+    apprenticeship module makes that point properly instead.
+
+    That gate is MISMODELLED_EDUCATION_LEVELS, not every sub-baccalaureate
+    level. An associate's degree now costs the two years it actually takes
+    (PROGRAM_YEARS_BY_EDUCATION), so its break-even is a real number about a
+    real program and is shown. The levels still charged four wrong years are
+    the ones with no defensible standard length -- those stay suppressed.
     """
     typical_education = MAJOR_DATA.get(major_name, {}).get("typical_education", "")
-    if typical_education in SUB_BACHELORS_EDUCATION_LEVELS:
+    if typical_education in MISMODELLED_EDUCATION_LEVELS:
         return {"headline": None, "detail": None, "status": "not_applicable"}
 
     result = find_breakeven_loan(major_name, interest_rate, repayment_strategy,
@@ -3112,6 +3556,73 @@ def adjust_for_cost_of_living(amount: float, col_index: float) -> float:
 # read-only report chart -- hiding it declutters both mobile and desktop.
 PLOTLY_CHART_CONFIG = {"displayModeBar": False}
 
+# The share of workers falling between consecutive published percentiles.
+# These are definitional, not estimates: if p25 is the 25th percentile and p50
+# the 50th, then exactly 25% of workers earn between them. This is the whole
+# reason a distribution is derivable from OEWS at all.
+WAGE_DISTRIBUTION_BINS = [
+    ("p10", "p25", 0.15),
+    ("p25", "p50", 0.25),
+    ("p50", "p75", 0.25),
+    ("p75", "p90", 0.15),
+]
+
+# The two open-ended tails. Each holds a known share of workers but has no
+# published bound on the far side, so neither can be drawn as a bar -- a bar
+# needs a width, and any width chosen for these would be invented. They're
+# annotated in words instead.
+WAGE_DISTRIBUTION_TAIL_SHARE = 0.10
+
+
+def build_wage_distribution(percentiles: dict) -> list:
+    """Turn OEWS's five published percentiles into area-truthful histogram
+    bins: [{low, high, share, density}], ordered low to high.
+
+    OEWS publishes percentiles and a mean, never microdata, so the frequency
+    counts a histogram normally needs simply don't exist -- and no amount of
+    processing conjures them. What the percentiles *do* pin down exactly is
+    how many workers sit between any two of them. Turning that into a bar
+    means dividing each bin's share of workers by its dollar width, so the
+    bar's AREA is the share and its HEIGHT is a density. Plotting share as
+    height instead would be wrong in a way that reads as right: the bins have
+    unequal widths, so equal-height bars would imply a $11k-wide range and a
+    $25k-wide range hold the same number of people per dollar when the wider
+    one is less than half as dense.
+
+    That distinction is the point of the chart. A career whose middle bins are
+    tall and narrow pays most people close to the median; one whose bins are
+    low and wide pays the same median to a much more scattered workforce, and
+    the median alone can't tell those apart.
+
+    Returns [] if any percentile is missing or the sequence isn't strictly
+    increasing -- a non-monotonic set means a suppressed or malformed row, and
+    a bin of zero or negative width would divide by zero or draw backwards.
+    """
+    if not percentiles:
+        return []
+    ordered = ["p10", "p25", "p50", "p75", "p90"]
+    try:
+        values = [float(percentiles[key]) for key in ordered]
+    except (KeyError, TypeError, ValueError):
+        return []
+    # NaN before monotonicity: every comparison against NaN is False, so a
+    # suppressed percentile would sail through the ordering check below and
+    # produce a bar of NaN width -- a broken chart rather than no chart.
+    if any(pd.isna(value) for value in values):
+        return []
+    if any(b <= a for a, b in zip(values, values[1:])):
+        return []
+
+    bins = []
+    for low_key, high_key, share in WAGE_DISTRIBUTION_BINS:
+        low, high = float(percentiles[low_key]), float(percentiles[high_key])
+        bins.append({
+            "low": low, "high": high, "share": share,
+            "density": share / (high - low),
+        })
+    return bins
+
+
 def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
     fig = px.line(
         schedule_df, x="year", y="balance",
@@ -3123,21 +3634,112 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
     return fig
 
 
-def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str,
-                         roi_window_years: int):
-    y_label = f"{roi_window_years}-Year Net Position ($)"
-    comparison_df = pd.DataFrame({
-        "Group": ["High School Graduate", major_name],
-        y_label: [hs_net_position, major_net_position],
-    })
-    fig = px.bar(
-        comparison_df, x="Group", y=y_label, color="Group",
-        title=f"{roi_window_years}-Year Net Position vs. High School Baseline",
-        text_auto=".2s",
+def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
+                        roi_window_years: int) -> pd.DataFrame:
+    """Tidy {year, Series, Net Position} frame for the net-position chart, from
+    one or two (label, scenario) pairs.
+
+    The high-school baseline is emitted once when both scenarios produce the
+    same one, and twice -- labelled by scenario -- when they don't. They differ
+    only when the two paths have different enrollment lengths AND foregone
+    earnings is on, since the baseline is credited the years the graduate spends
+    enrolled. Rare, but drawing a single line then would quietly show one
+    scenario's baseline as if it were both.
+    """
+    series = {}
+    baselines = {}
+    for label, scenario in scenarios:
+        points = build_net_position_series(scenario, col_index, hs_wage_index, roi_window_years)
+        series[label] = [p["major"] for p in points]
+        baselines[label] = [p["hs"] for p in points]
+
+    labels = list(baselines)
+    if len(labels) > 1 and baselines[labels[0]] != baselines[labels[1]]:
+        for label in labels:
+            series[f"High School Graduate ({label} timeline)"] = baselines[label]
+    else:
+        series["High School Graduate"] = baselines[labels[0]]
+
+    rows = []
+    for label, values in series.items():
+        for year, value in enumerate(values, start=1):
+            rows.append({"year": year, "Series": label, "Net Position": value})
+    return pd.DataFrame(rows)
+
+
+def apprenticeship_net_position_frame(scenario: dict, major_label: str, alt_label: str,
+                                       col_index: float, hs_wage_index: float,
+                                       roi_window_years: int) -> pd.DataFrame:
+    """The same tidy frame for the Trade Apprenticeship module: the degree
+    path, the high-school baseline, and the apprentice.
+
+    The apprentice's own year-by-year figure comes from
+    calculate_apprenticeship_roi with the window shortened the same way, and is
+    handed that year's baseline rather than the 10-year one -- so all three
+    lines are measured at the same point in time, which is the only way the
+    crossings mean anything.
+    """
+    points = build_net_position_series(scenario, col_index, hs_wage_index, roi_window_years)
+    rows = []
+    for point in points:
+        rows.append({"year": point["year"], "Series": "High School Graduate",
+                     "Net Position": point["hs"]})
+        rows.append({"year": point["year"], "Series": major_label,
+                     "Net Position": point["major"]})
+        alt = calculate_apprenticeship_roi(
+            point["hs"], col_index=col_index, years=point["year"],
+            enrollment_years=scenario.get("enrollment_years", 0))
+        rows.append({"year": point["year"], "Series": alt_label,
+                     "Net Position": alt["apprentice_net_position"]})
+    return pd.DataFrame(rows)
+
+
+def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
+                              baseline_head_start_years: int = 0):
+    """Net position year by year, for every path on the page plus the
+    high-school baseline.
+
+    Replaces the endpoint bar chart. A bar pair could only say who was ahead at
+    year N; the shape says *when* that became true, which is the question a
+    student is actually asking. It also makes the training-debt majors legible:
+    Medicine spends years below zero and below the baseline before crossing,
+    and a single year-10 bar reports that crossing as though it were the whole
+    story.
+
+    Takes a prebuilt frame rather than scenarios so the scenario comparison and
+    the apprenticeship module render through one function instead of two that
+    can drift apart.
+    """
+    fig = px.line(
+        frame, x="year", y="Net Position", color="Series", markers=True,
+        title=f"Net Position by Year (through year {roi_window_years})",
+        # "after graduation" rather than "after starting": with foregone
+        # earnings counted, year 1 is the graduate's first working year while
+        # the baseline already carries the enrolled years' wages, so the two
+        # series do NOT begin level. Saying "starting" would misread that head
+        # start as the degree simply being behind.
+        labels={"year": "Years after graduation"},
     )
+    fig.update_traces(line=dict(width=3))
+    # Zero line: the training-debt paths sit below it for years, and "below
+    # zero" is a different statement from "below the baseline".
+    fig.add_hline(y=0, line=dict(color="#999999", width=1, dash="dot"))
     fig.update_layout(
-        yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center", title_font_size=14,
+        yaxis_tickprefix="$", title_font_size=14, hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5),
+        margin=dict(t=80 if baseline_head_start_years else 60, b=90),
     )
+    if baseline_head_start_years:
+        # Without this the baseline's opening lead reads as a modelling error
+        # rather than as the head start the foregone-earnings option exists to
+        # represent.
+        fig.add_annotation(
+            x=0, y=1.10, xref="paper", yref="paper", showarrow=False,
+            xanchor="left", font=dict(size=11, color="#666666"),
+            text=(f"Baseline starts {baseline_head_start_years} years ahead — the high school "
+                  f"graduate was working while you were enrolled."),
+        )
+    fig.update_xaxes(dtick=1 if roi_window_years <= 15 else 5)
     return fig
 
 
@@ -3149,6 +3751,8 @@ def cc_chart_label_suffix(cc_mode) -> str:
     render_cc_path_note, which shows nothing then too."""
     if cc_mode == "fulltime":
         return " (via comm. college)"
+    if cc_mode == "associate":
+        return " (comm. college only)"
     if cc_mode == "parttime":
         return " (via comm. college, working)"
     return ""
@@ -3168,28 +3772,6 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
         labels={"year": "Years", "balance": "Remaining Balance ($)"},
     )
     fig.update_layout(yaxis_tickprefix="$", hovermode="x unified", title_font_size=14)
-    return fig
-
-
-def build_scenario_comparison_roi_chart(hs_net_position: float,
-                                         net_a: float, label_a: str,
-                                         net_b: float, label_b: str,
-                                         roi_window_years: int):
-    """3-bar version of build_roi_bar_chart: HS-grad baseline plus both
-    scenarios, for comparing net financial position directly."""
-    y_label = f"{roi_window_years}-Year Net Position ($)"
-    comparison_df = pd.DataFrame({
-        "Group": ["High School Graduate", label_a, label_b],
-        y_label: [hs_net_position, net_a, net_b],
-    })
-    fig = px.bar(
-        comparison_df, x="Group", y=y_label, color="Group",
-        title=f"{roi_window_years}-Year Net Position: Scenario Comparison",
-        text_auto=".2s",
-    )
-    fig.update_layout(
-        yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center", title_font_size=14,
-    )
     return fig
 
 
@@ -3251,6 +3833,99 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
         title="Monthly Student Loan Payment Exceeds Take-Home Pay",
     )
     fig.update_layout(yaxis_title="Monthly $", xaxis_title=None, title_font_size=14)
+    return fig
+
+
+def wage_distribution_tail_notes(percentiles: dict) -> tuple:
+    """The two open-ended tails as plain sentences, shared by the on-screen and
+    PDF versions so the wording can't drift between them."""
+    return (
+        f"10% earn less than {fmt_money(percentiles['p10'])}",
+        f"10% earn more than {fmt_money(percentiles['p90'])}",
+    )
+
+
+def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
+                                   modelled_start: float = None,
+                                   geography_label: str = None):
+    """Where an occupation's pay actually lands, as an area-truthful histogram
+    over OEWS's percentile bins. Returns None when the distribution can't be
+    built, so callers render nothing rather than an empty axis.
+
+    The y-axis is deliberately unlabelled and untick-ed. Height here is a
+    density (workers per dollar), which is the correct quantity for unequal
+    bins and a meaningless one to a 17-year-old. Each bar states its share in
+    words instead -- "25% of workers" -- which is the number a reader actually
+    wants, and area already encodes it faithfully.
+
+    modelled_start marks where the app's own starting-salary assumption sits in
+    the distribution. That's the honest bit: this app projects ten years from a
+    single number, and showing that number's position among real wages says
+    more about the projection's uncertainty than any disclaimer.
+    """
+    bins = build_wage_distribution(percentiles)
+    if not bins:
+        return None
+
+    centers = [(b["low"] + b["high"]) / 2 for b in bins]
+    widths = [b["high"] - b["low"] for b in bins]
+    densities = [b["density"] for b in bins]
+
+    fig = go.Figure(go.Bar(
+        x=centers, y=densities, width=widths,
+        marker=dict(color="#4C78A8", line=dict(color="white", width=1)),
+        text=[f"{b['share']:.0%}" for b in bins],
+        textposition="inside", insidetextanchor="middle",
+        hovertemplate=(
+            "%{customdata[0]} of workers earn<br>"
+            "%{customdata[1]} – %{customdata[2]}<extra></extra>"
+        ),
+        customdata=[[f"{b['share']:.0%}", fmt_money(b["low"]), fmt_money(b["high"])]
+                     for b in bins],
+        showlegend=False,
+    ))
+
+    # The reference lines are labelled through the legend rather than with
+    # add_vline's own annotations, which sit inside the plot area and get
+    # clipped against the top margin -- and would collide with each other
+    # anyway whenever the median and the modelled start are close, which is
+    # the common case since the modelled start IS the 25th percentile.
+    # add_vline draws a layout shape, and shapes can't carry a legend entry,
+    # so each line gets a zero-point scatter trace purely to register one.
+    reference_lines = [(percentiles["p50"], "#333333", "solid",
+                        f"median {fmt_money(percentiles['p50'])}")]
+    if modelled_start:
+        reference_lines.append((modelled_start, "#E45756", "dash",
+                                 f"modelled start {fmt_money(modelled_start)}"))
+    for position, color, dash, label in reference_lines:
+        fig.add_vline(x=position, line=dict(color=color, width=2, dash=dash))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode="lines", name=label,
+            line=dict(color=color, width=2, dash=dash), hoverinfo="skip",
+        ))
+
+    where = f" — {geography_label}" if geography_label else ""
+    below, above = wage_distribution_tail_notes(percentiles)
+    fig.update_layout(
+        title=f"Where {occupation_name} pay actually lands{where}",
+        title_font_size=14,
+        xaxis=dict(title="Annual wage", tickprefix="$", tickformat=","),
+        # Density is the right height and the wrong label for this audience --
+        # hide the scale, keep the shape.
+        yaxis=dict(title=None, showticklabels=False, showgrid=False),
+        bargap=0,
+        height=380,
+        # Bottom margin has to clear the x-title AND the tail note below it;
+        # at the default the note is clipped out of the plot entirely.
+        margin=dict(t=70, b=110),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0,
+                     xanchor="center", x=0.5, font=dict(size=11)),
+        annotations=[dict(
+            x=0, y=-0.30, xref="paper", yref="paper", showarrow=False,
+            xanchor="left", yanchor="top", font=dict(size=11, color="#666666"),
+            text=f"◄ {below}   ·   {above} ►",
+        )],
+    )
     return fig
 
 
@@ -3444,10 +4119,19 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
         ["Salaries by occupation",
          "U.S. Bureau of Labor Statistics, Occupational Employment and Wage Statistics (OEWS). "
          "Starting salary uses the 25th-percentile wage; mid-career uses the median."],
+        ["Wage distribution chart",
+         "The same OEWS release, which publishes five wage percentiles (10th, 25th, 50th, 75th, "
+         "90th) per occupation and no individual records. The share of workers between any two "
+         "published percentiles is exact by definition; bar heights are those shares divided by "
+         "each range's width, so area is the share. The bottom and top 10% have no published "
+         "bound and are stated in words rather than drawn."],
         ["High school graduate baseline",
          "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
-         "for full-time workers age 25+ with a high school diploma and no college ($946/week, Q3 2024), "
-         "annualised. Wage growth of 2%/yr is an assumption, not a BLS figure."],
+         "for full-time workers age 25+ with a high school diploma and no college ($994/week, "
+         "2026 Q2, series LEU0252917300), "
+         "annualised. This is an all-ages median, not a young graduate's starting pay, so the "
+         "comparison is against a typical working adult without a degree — the more demanding test. "
+         "Wage growth of 2%/yr is an assumption, not a BLS figure."],
         ["Cost of attendance & college debt",
          "U.S. Department of Education, College Scorecard."],
         ["Federal & state income tax",
@@ -3587,6 +4271,115 @@ def _pdf_image_from_figure(fig, max_width: float = PDF_CONTENT_WIDTH) -> Image:
     return Image(buf, width=max_width, height=max_width * height_px / width_px)
 
 
+def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
+                                       modelled_start: float = None,
+                                       geography_label: str = None,
+                                       max_width: float = PDF_CONTENT_WIDTH) -> Image:
+    """PDF counterpart to build_wage_distribution_chart. Returns None when the
+    distribution can't be built, matching its on-screen twin so the caller's
+    "skip it" branch is the same on both surfaces.
+
+    Both read the same build_wage_distribution bins, so the bar geometry can't
+    drift; what's hand-kept in sync is the annotation wording and which
+    reference lines are drawn (see CLAUDE.md on the chart twins).
+    """
+    bins = build_wage_distribution(percentiles)
+    if not bins:
+        return None
+
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    for wage_bin in bins:
+        ax.bar(
+            x=wage_bin["low"], height=wage_bin["density"],
+            width=wage_bin["high"] - wage_bin["low"], align="edge",
+            color="#4C78A8", edgecolor="white", linewidth=1,
+        )
+        ax.text(
+            (wage_bin["low"] + wage_bin["high"]) / 2, wage_bin["density"] / 2,
+            f"{wage_bin['share']:.0%}", ha="center", va="center",
+            color="white", fontsize=9, fontweight="bold",
+        )
+
+    # The reference lines are labelled via the legend rather than inline text
+    # next to each line. Inline, they overlap each other and the bars whenever
+    # the median and the modelled start fall close together -- which is the
+    # common case, since the modelled start IS the 25th percentile.
+    ax.axvline(percentiles["p50"], color="#333333", linewidth=1.8,
+                label=f"median {fmt_money(percentiles['p50'])}")
+    if modelled_start:
+        ax.axvline(modelled_start, color="#E45756", linewidth=1.8, linestyle="--",
+                    label=f"modelled start {fmt_money(modelled_start)}")
+    # parse_math=False on every label carrying a dollar figure: matplotlib
+    # reads a matched pair of "$" as a mathtext expression, so a caption like
+    # "$68,940 - $137,470" is parsed as maths and raises rather than printing.
+    # The existing PDF charts never hit this because their money strings are
+    # tick labels with one "$" each, which is unpaired and passes through.
+    legend = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=2,
+                        frameon=False, fontsize=8)
+    for text in legend.get_texts():
+        text.set_parse_math(False)
+
+    where = f" - {geography_label}" if geography_label else ""
+    ax.set_title(f"Where {occupation_name} pay actually lands{where}",
+                  fontsize=11, pad=28)
+    ax.set_xlabel("Annual wage")
+    ax.xaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    # Cap the tick count: at print width the default locator packs in enough
+    # "$110,000"-length labels to run them into each other.
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, prune="both"))
+    # Same reasoning as the Plotly twin: height is a density, which is correct
+    # for unequal bins and meaningless as a printed label.
+    ax.set_yticks([])
+    ax.spines[["left", "right", "top"]].set_visible(False)
+
+    below, above = wage_distribution_tail_notes(percentiles)
+    # Anchored to the axes in axes-fraction coords, below the x-label, so it
+    # can't land on top of it the way a figure-relative offset did.
+    ax.annotate(f"{below}  -  {above}", xy=(0, -0.32), xycoords="axes fraction",
+                 fontsize=8, color="#666666", annotation_clip=False,
+                 parse_math=False)
+    return _pdf_image_from_figure(fig, max_width=max_width)
+
+
+def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
+                                  scenario_label: str = None,
+                                  max_width: float = PDF_CONTENT_WIDTH) -> list:
+    """The wage-distribution chart plus its caption, for a report. Shared by
+    both generators for the same reason _pdf_breakeven_block is.
+
+    Returns [] whenever the on-screen render_wage_distribution would also show
+    nothing (Major mode, or an occupation with no published distribution), so
+    the report never gains or loses a section relative to the page the visitor
+    actually saw.
+
+    Recomputed here from MAJOR_DATA rather than carried in module_context:
+    that dict is spread straight into Supabase inserts and must stay
+    JSON-scalar-only, so a percentile dict has no business in it (see
+    CLAUDE.md).
+    """
+    context = get_wage_distribution_context(occupation_name)
+    if not context:
+        return []
+    chart = build_pdf_wage_distribution_chart(**context, max_width=max_width)
+    if chart is None:
+        return []
+
+    heading = "What this job actually pays"
+    if scenario_label:
+        heading = f"Scenario {scenario_label} -- {heading}"
+    return [
+        Spacer(1, 12),
+        Paragraph(heading, styles["section"]),
+        chart,
+        Paragraph(
+            "The median is a midpoint, not a promise -- half of this workforce earns less "
+            "than it. Each bar's area is its share of workers, so a wide flat bar and a "
+            "narrow tall one hold the same number of people. Source: BLS OEWS published "
+            "wage percentiles.",
+            styles["caption"]),
+    ]
+
+
 def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> Image:
     """PDF counterpart to build_balance_chart -- simplified redraw for
     print, not required to be pixel-identical to the on-screen interactive
@@ -3616,35 +4409,25 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     return _pdf_image_from_figure(fig)
 
 
-def build_pdf_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str,
-                             roi_window_years: int) -> Image:
-    """PDF counterpart to build_roi_bar_chart."""
+def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int) -> Image:
+    """PDF counterpart to build_net_position_chart. Takes the same prebuilt
+    frame, so the two can't disagree about the trajectory -- what is hand-kept
+    in sync is the styling and the zero line (see CLAUDE.md on the chart
+    twins)."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
-    groups = ["High School Graduate", major_name]
-    values = [hs_net_position, major_net_position]
-    ax.bar(groups, values, color=["#636EFA", "#EF553B"])
-    ax.set_title(f"{roi_window_years}-Year Net Position vs. High School Baseline")
-    ax.set_ylabel(f"{roi_window_years}-Year Net Position ($)")
+    for label, group in frame.groupby("Series", sort=False):
+        ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
+                linewidth=2, label=label)
+    ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
+    ax.set_title(f"Net Position by Year (through year {roi_window_years})", fontsize=11)
+    ax.set_xlabel("Years after graduation")
+    ax.set_ylabel("Net Position ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
-    ax.tick_params(axis="x", labelsize=9)
-    fig.autofmt_xdate(rotation=10, ha="center")
-    return _pdf_image_from_figure(fig)
-
-
-def build_pdf_scenario_comparison_roi_chart(hs_net_position: float,
-                                             net_a: float, label_a: str,
-                                             net_b: float, label_b: str,
-                                             roi_window_years: int) -> Image:
-    """PDF counterpart to build_scenario_comparison_roi_chart."""
-    fig, ax = plt.subplots(figsize=(6, 3.5))
-    groups = ["High School Graduate", label_a, label_b]
-    values = [hs_net_position, net_a, net_b]
-    ax.bar(groups, values, color=["#636EFA", "#EF553B", "#00CC96"])
-    ax.set_title(f"{roi_window_years}-Year Net Position: Scenario Comparison")
-    ax.set_ylabel(f"{roi_window_years}-Year Net Position ($)")
-    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
-    ax.tick_params(axis="x", labelsize=9)
-    fig.autofmt_xdate(rotation=10, ha="center")
+    ax.grid(True, alpha=0.3)
+    legend = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
+                       ncol=2, frameon=False, fontsize=8)
+    for text in legend.get_texts():
+        text.set_parse_math(False)
     return _pdf_image_from_figure(fig)
 
 
@@ -3788,7 +4571,7 @@ def _cc_info_for_pdf(cc_mode, cc_state_key, cost_per_year, oop, cc_years):
     """Small {mode,state_label,cost,oop,cc_years} bundle for the PDF profile's
     community-college disclosure rows (see _pdf_profile_rows). Returns None when
     no CC path is active, so the rows are simply omitted."""
-    if cc_mode not in ("fulltime", "parttime"):
+    if cc_mode not in CC_PATH_MODES:
         return None
     state_label = ("National average" if cc_state_key == "__national__"
                    else US_STATES.get(cc_state_key, "National average"))
@@ -3815,13 +4598,19 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     # Community-college path disclosure: without these rows the report shows a
     # single 4-year Cost of Attendance and a reduced loan with no explanation of
     # where the reduction came from. Only added when a CC path is active.
-    if cc_info and cc_info.get("mode") in ("fulltime", "parttime"):
-        _mode_label = ("Full-time, then transfer" if cc_info["mode"] == "fulltime"
-                       else "Part-time while working, then transfer")
+    if cc_info and cc_info.get("mode") in CC_PATH_MODES:
+        _mode_label = {
+            "fulltime": "Full-time, then transfer",
+            "associate": "Full-time, entire degree — no transfer",
+            "parttime": "Part-time while working, then transfer",
+        }[cc_info["mode"]]
         rows.append([f"Community College Path ({cc_info['cc_years']} yrs)", _mode_label])
         rows.append(["Community College",
                      f"{cc_info['state_label']} — {fmt_money(cc_info['cost'])}/yr, paid out of "
                      f"pocket ({fmt_money(cc_info['oop'])} total, no loan)"])
+    # The 4-year-school qualifier only makes sense when there IS a transfer --
+    # an associate-only path never reaches one, and its COA row describes the
+    # school that would have been used had the visitor not chosen this path.
     _coa_label = ("Cost of Attendance (per year, 4-year school)"
                   if cc_info and cc_info.get("mode") in ("fulltime", "parttime")
                   else "Cost of Attendance (per year)")
@@ -3843,6 +4632,7 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
 def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_name_a: str = None,
                           interest_rate_a: float = None, scenario_b: dict = None, major_name_b: str = None,
                           interest_rate_b: float = None, col_index: float = 100.0,
+                          hs_wage_index: float = 1.0,
                           key_suffix_a: str = "a", key_suffix_b: str = "b",
                           roi_window_years: int = ROI_WINDOW_YEARS) -> list:
     """Optional PDF section(s) for whichever advanced modules were active --
@@ -3925,10 +4715,10 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         if scenario_a is not None:
             elements += [
                 Spacer(1, 12),
-                build_pdf_scenario_comparison_roi_chart(
-                    scenario_a["roi_result"]["hs_net_position"],
-                    scenario_a["roi_result"]["major_net_position"], major_name_a,
-                    module_context["apprenticeship_net_position"], module_context["apprenticeship_label"],
+                build_pdf_net_position_chart(
+                    apprenticeship_net_position_frame(
+                        scenario_a, major_name_a, module_context["apprenticeship_label"],
+                        col_index, hs_wage_index, roi_window_years),
                     roi_window_years,
                 ),
             ]
@@ -4048,7 +4838,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["section"]),
         *loan_detail,
         Spacer(1, 6),
-        Paragraph(f"Total Loan Amount (all {UNDERGRAD_YEARS} years): {fmt_money(loan_amount)}", styles["body"]),
+        Paragraph(f"Total Loan Amount (all {program_years_for_major(major)} years): "
+                   f"{fmt_money(loan_amount)}", styles["body"]),
         *financing_line,
         Spacer(1, 6),
         _pdf_table(full_width=True, rows=[
@@ -4107,8 +4898,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             f"{city} -- that is what 'COL-Adjusted' means.",
             styles["caption"]),
         Spacer(1, 12),
-        build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
-                                 roi_window_years),
+        build_pdf_net_position_chart(
+            net_position_frame([(major, scenario)], col_index,
+                                get_metro_wage_index(city), roi_window_years),
+            roi_window_years),
     ]
 
     # Mirrors the on-screen break-even banner -- same breakeven_summary call,
@@ -4126,10 +4919,12 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
     )
     story += _pdf_breakeven_block(breakeven, styles)
+    story += _pdf_wage_distribution_block(major, styles)
 
     story += _pdf_module_sections(
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
-        col_index=col_index, key_suffix_a="single", roi_window_years=roi_window_years,
+        col_index=col_index, hs_wage_index=get_metro_wage_index(city),
+        key_suffix_a="single", roi_window_years=roi_window_years,
     )
     # Only cite the professional-school sources when this major actually uses
     # them -- listing AAMC on a Software Developer's report is noise.
@@ -4270,18 +5065,25 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
         ),
         Spacer(1, 12),
-        build_pdf_scenario_comparison_roi_chart(
-            scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
-            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
+        build_pdf_net_position_chart(
+            net_position_frame(
+                [(f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}", scenario_a),
+                 (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
+                col_index, get_metro_wage_index(city), roi_window_years),
             roi_window_years,
         ),
         *_pdf_resources_section(styles, [("Scenario A", school_name_a), ("Scenario B", school_name_b)]),
     ]
+    # One per scenario, labelled -- in Career mode A and B are different
+    # occupations with genuinely different spreads, which is the comparison
+    # this chart is most useful for.
+    story += _pdf_wage_distribution_block(major, styles, scenario_label="A")
+    story += _pdf_wage_distribution_block(major_b, styles, scenario_label="B")
     story += _pdf_module_sections(
         module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
         scenario_b=scenario_b, major_name_b=major_b, interest_rate_b=interest_rate_b,
-        col_index=col_index, roi_window_years=roi_window_years,
+        col_index=col_index, hs_wage_index=get_metro_wage_index(city),
+        roi_window_years=roi_window_years,
     )
     story += _pdf_sources_section(
         styles, roi_window_years,
@@ -4457,7 +5259,7 @@ scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 # below needs to know enable_prestige_mode before that point to decide
 # whether to show a school lookup or a college-tier picker -- so each
 # flag's current value is read from session_state here, before its widget
-# exists, exactly like Career Salary Data's radio further down. See the
+# exists, the same pattern the Career section's controls use. See the
 # Methodology footer for what each module models and, just as importantly,
 # what it deliberately does NOT claim.
 st.session_state.setdefault("enable_prestige_mode", False)
@@ -4468,6 +5270,41 @@ enable_ai_mode = st.session_state["enable_ai_mode"]
 enable_future_proofing = st.session_state["enable_future_proofing"]
 prestige_tier_a = None
 prestige_tier_b = None
+
+
+def resolve_program_years(selection_key: str, fallback: str) -> int:
+    """Enrollment length for whichever occupation this scenario currently has
+    selected, resolved from session_state before the Career section builds
+    MAJOR_DATA.
+
+    Financing renders above Career, so the cost model runs before MAJOR_DATA
+    exists -- the loan was therefore computed without knowing which occupation
+    it was paying for, which is exactly why an associate's-degree career was
+    charged four years of tuition. Reading the selection early is the same
+    before-the-widget pattern dataset_mode and city already use; the
+    typical_education lookup goes straight to the cached careers CSV rather
+    than to MAJOR_DATA, since that dict isn't built yet.
+
+    Always the national file: typical entry-level education is a property of
+    the occupation, not of where it's practised, so the state and metro
+    overlays carry wages only and have nothing to say about program length.
+
+    Major mode has no education field at all (a major isn't an occupation), and
+    an unrecognised or not-yet-chosen selection falls through to
+    UNDERGRAD_YEARS -- so anything this can't resolve keeps the old behaviour.
+    """
+    if st.session_state.get("dataset_mode_radio") != DATASET_MODE_CAREER:
+        return UNDERGRAD_YEARS
+    selection = st.session_state.get(selection_key) or fallback
+    careers = load_bls_careers(CAREERS_CSV_PATH_NATIONAL)
+    return program_years_for_education(careers.get(selection, {}).get("typical_education"))
+
+
+# Scenario B's own selection is made above its financing block, so it could read
+# it directly -- it goes through the same helper anyway so both scenarios can't
+# drift apart on how a program length is decided.
+program_years_a = resolve_program_years("major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER])
+program_years_b = resolve_program_years("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER])
 
 st.sidebar.subheader("💰 Financing")
 
@@ -4700,29 +5537,37 @@ else:
 _legacy_cc_a = get_shared_default("cc_a", "0") == "1"
 st.session_state.setdefault(
     "cc_mode_a", get_shared_default("cc_mode_a", "fulltime" if _legacy_cc_a else "none"))
+_cc_options_a, _cc_labels_a = cc_path_options(program_years_a)
+reconcile_cc_mode("cc_mode_a", _cc_options_a)
 cc_mode_a = st.sidebar.radio(
     "Community college path",
-    options=["none", "fulltime", "parttime"],
-    format_func=lambda c: {
-        "none": "None — start at the 4-year school",
-        "fulltime": "Full-time community college, then transfer (2+2)",
-        "parttime": "Part-time community college while working, then transfer",
-    }[c],
+    options=_cc_options_a,
+    format_func=lambda c: _cc_labels_a[c],
     key="cc_mode_a",
-    help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
-         "college, then transferring to the 4-year school above to finish the "
-         "SAME bachelor's -- earnings and the degree are unchanged, only the "
-         "cost of those years drops. Community college is assumed paid without "
-         "loans (Pell/work/out-of-pocket), so it adds nothing to your debt. "
-         "'Part-time while working' means you work full-time during the "
-         "community-college years (earning, not foregoing income) -- its "
-         "earnings advantage shows up when 'count foregone earnings' is on. "
-         "Put a different path in each scenario to compare them. See Methodology.",
+    help=(
+        f"This profession is entered with a {program_years_a}-year degree, which a "
+        "community college can award on its own -- so there's no transfer, and "
+        "choosing this models the WHOLE program at community-college prices. "
+        if program_years_a <= COMMUNITY_COLLEGE_YEARS else
+        f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
+        "college, then transferring to the 4-year school above to finish the "
+        "SAME bachelor's -- earnings and the degree are unchanged, only the "
+        "cost of those years drops. "
+    ) +
+    "Community college is assumed paid without loans "
+    "(Pell/work/out-of-pocket), so it adds nothing to your debt. "
+    "'Part-time while working' means you work full-time during the "
+    "community-college years (earning, not foregoing income) -- its "
+    "earnings advantage shows up when 'count foregone earnings' is on. "
+    "Put a different path in each scenario to compare them. See Methodology.",
 )
 cc_transfer_a = cc_mode_a != "none"
 is_parttime_a = cc_mode_a == "parttime"
-cc_years_a = COMMUNITY_COLLEGE_YEARS if cc_transfer_a else 0
-university_years_a = max(UNDERGRAD_YEARS - cc_years_a, 0)
+# Clamped to the program length: a 2-year program done at a community college
+# is entirely community college, not 2 years of CC plus a negative number of
+# university years.
+cc_years_a = min(COMMUNITY_COLLEGE_YEARS, program_years_a) if cc_transfer_a else 0
+university_years_a = max(program_years_a - cc_years_a, 0)
 if cc_transfer_a:
     # Default CC state: the selected 4-year school's state (you transfer within
     # a state), then the work city's state, then national. coa_match_a.get is a
@@ -4790,6 +5635,7 @@ effective_cc_coa_per_year_a = cc_coa_per_year_a * (1 + inflation_rate_a) ** year
 # CC out-of-pocket from it -- single source of truth, no drift.
 _schedule_a = compute_loan_schedule_by_year(
     effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+    years=program_years_a,
     cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False)
 computed_loan_amount_a = sum(r["loan_amount"] for r in _schedule_a)
 cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college")
@@ -4821,9 +5667,14 @@ else:
 if cc_transfer_a:
     _work_note_a = "working full-time, " if is_parttime_a else ""
     cc_note_a = (
-        f"{COMMUNITY_COLLEGE_YEARS} yrs community college ({_work_note_a}"
-        f"{fmt_money(effective_cc_coa_per_year_a)}/yr, no loan → {fmt_money(cc_oop_a)} out-of-pocket), "
-        f"then {university_years_a} yrs at the 4-year school ({fmt_money(effective_coa_per_year_a)}/yr, financed). "
+        f"{cc_years_a} yrs community college ({_work_note_a}"
+        f"{fmt_money(effective_cc_coa_per_year_a)}/yr, no loan → {fmt_money(cc_oop_a)} out-of-pocket)"
+        # No transfer clause when the program is short enough to finish at the
+        # community college -- a 2-year associate's has no 4-year school to
+        # transfer into, and university_years_a is 0.
+        + (f", then {university_years_a} yrs at the 4-year school "
+           f"({fmt_money(effective_coa_per_year_a)}/yr, financed). "
+           if university_years_a else " — the whole program. ")
     )
 else:
     cc_note_a = ""
@@ -4837,7 +5688,7 @@ st.sidebar.caption((
     f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
     f"{fmt_money(personal_contribution_per_year_a)} personal "
     f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
-    f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
+    f"→ over {program_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
 ).replace("$", r"\$"))
 # The loan field default follows the active loan source (set by the Loan estimate
 # toggle above): the college-reported median debt in Simplified, the cost-based
@@ -4937,43 +5788,28 @@ roi_horizon_years = st.sidebar.selectbox(
 
 st.sidebar.subheader("💼 Career")
 
-# Which BLS OEWS geographic release backs the career dropdown below --
-# National (every state combined into one nationwide figure per occupation)
-# or California (that state's own wages, which run higher for many careers,
-# e.g. tech and healthcare). Affects every curated-major lookup too, since
-# MAJOR_DATA is rebuilt from this choice on every rerun -- picking a source
-# here is a data-source preference for the whole session, not per-scenario.
-# The widget itself renders at the bottom of this section (after Career
-# Stage Snapshot) -- its value is read from session_state here, before that
-# widget exists, so Target Profession's options below can be built from the
-# right MAJOR_DATA even on the very first render.
+# The wage basis is no longer a sidebar control. It used to be "Career Salary
+# Data: National / California", chosen independently of the city -- which made
+# California + New York reachable, and the ~51 occupations New York suppresses
+# then showed California wages while the page called them national figures
+# (Craft Artists: $46,080 nationally, displayed as $100,540). A state is a fact
+# about the selected city, not a preference, so it's derived from it.
 #
-# Career mode only: Major mode's NY Fed data is national, since the NY Fed
-# publishes no state breakdown. The radio is disabled rather than hidden in
-# Major mode, so the sidebar doesn't reflow on every toggle.
-#
-# Defaults to National, for three reasons. It's a publicly shared tool, so
-# most visitors aren't Californian. It's the only geography Major mode can
-# offer, so a National default means the two modes are comparable out of the
-# box rather than differing by both dataset AND geography -- comparing them
-# at a California default mixes the two, which overstates the major-vs-career
-# gap by more than 2x. And the companion paper's simulation study is
-# national, so this keeps the app's default figures and the paper's figures
-# the same numbers.
-career_source_options = ["National", "California"]
-shared_career_source = get_shared_default("career_source", "National")
-st.session_state.setdefault(
-    "career_source_radio",
-    shared_career_source if shared_career_source in career_source_options else "National",
-)
-career_data_source = st.session_state["career_source_radio"]
-careers_csv_path = CAREERS_CSV_PATH_CA if career_data_source == "California" else CAREERS_CSV_PATH_NATIONAL
+# The national file stays the base that MAJOR_DATA is built from -- it defines
+# the dropdown's full 825-occupation list. build_major_data then overlays the
+# city's state and the city's metro on top, finest geography winning.
+careers_csv_path = CAREERS_CSV_PATH_NATIONAL
 
 # Which question the visitor is asking: "what if I study X?" (Major, NY Fed's
-# 73 majors) or "what if I become X?" (Career, BLS's 836 occupations). Read
-# from session_state before its own widget renders, same as the career source
-# above, so the Target Profession dropdown below can be built from the right
-# dataset on the very first pass.
+# 73 majors) or "what if I become X?" (Career, BLS's 836 occupations). Seeded
+# here and read once so MAJOR_DATA can be built below; the radio itself is the
+# first thing rendered in this section, just after that build (see there for
+# why it can't move any earlier).
+#
+# Note this is NOT the read-before-render pattern the career source above uses
+# -- resolve_program_years up in Financing does read this key that way, but
+# within this section the widget genuinely renders before every control that
+# depends on it.
 #
 # Defaults to Major because that's the choice a 17-year-old is actually
 # making -- they pick a major and a school, and the occupation is a
@@ -5013,10 +5849,40 @@ MAJOR_DATA = build_major_data(careers_csv_path, mode=dataset_mode, city=city)
 # Major mode is a single national dataset -- the NY Fed doesn't publish
 # per-state figures -- so fall back to Career mode's data if the majors CSV
 # is missing rather than rendering an empty dropdown.
+#
+# This write has to happen BEFORE the radio below is instantiated: Streamlit
+# raises if a widget's session_state key is assigned to after the widget
+# exists. It's the reason the radio renders here rather than immediately after
+# the subheader -- everything above it in this section is computation, not
+# output, so it still lands first on screen.
 if not MAJOR_DATA:
     MAJOR_DATA = build_major_data(careers_csv_path, mode=DATASET_MODE_CAREER, city=city)
     dataset_mode = DATASET_MODE_CAREER
     st.session_state["dataset_mode_radio"] = DATASET_MODE_CAREER
+
+# First control in the Career section: it decides what the dropdown below is
+# even a list of, so asking it first matches the order the visitor thinks in
+# ("what am I choosing?" then "which one?"). No index= -- session_state already
+# holds this widget's value from the setdefault above, and passing both would
+# trigger Streamlit's widget-default-conflict warning.
+dataset_mode = st.sidebar.radio(
+    "Choose by", dataset_mode_options, key="dataset_mode_radio",
+    help="Major: what people who studied that subject actually earn, "
+         "including those who ended up working outside it (NY Fed, 73 "
+         "majors). This is the choice you're actually making at 17. "
+         "Career: what people already doing a specific job earn (BLS, 836 "
+         "occupations) -- richer, but it assumes you get that job.",
+)
+if dataset_mode == DATASET_MODE_MAJOR:
+    st.sidebar.caption(
+        "Salaries reflect everyone who studied this — including the "
+        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
+    )
+else:
+    st.sidebar.caption(
+        "Salaries assume you land this job. Switch to **Major** to see what "
+        "everyone who studied a subject earns, not just those working in it."
+    )
 
 # Defaults below assume a popular, concrete profile (Software Developer in
 # San Francisco, in-state at UC Berkeley, 10 years in) instead of generic
@@ -5042,22 +5908,52 @@ default_major_index = major_options.index(shared_major) if shared_major in major
 # selectbox start empty would observe the same thing, at the cost of the
 # blank-page-until-you-pick friction this app exists to avoid. See
 # get_major_explicitly_selected (section 2b).
+# Keyed (and seeded by assignment rather than index=) so the Financing section
+# above can read the current selection before this widget renders -- see
+# resolve_program_years. Passing both key and index= is what triggers
+# Streamlit's widget-default-conflict warning, hence the assignment.
+#
+# Re-pinned on a MODE SWITCH, not merely when the stored name is absent from
+# the new list. A validity check alone isn't enough: a handful of names exist
+# in both datasets ("Computer Science" is an NY Fed major and also present in
+# the 836-entry career set), so switching Major -> Career would silently leave
+# the visitor on their Major-mode pick while the number behind that identical
+# label quietly became a different dataset's. Keying on the mode restores what
+# index= did before this widget was given a key -- land on the new mode's own
+# default.
+if (st.session_state.get("major_select_a") not in major_options
+        or st.session_state.get("major_select_a_mode") != dataset_mode):
+    st.session_state["major_select_a"] = major_options[default_major_index]
+st.session_state["major_select_a_mode"] = dataset_mode
 major = st.sidebar.selectbox(
-    SELECTION_LABEL[dataset_mode], major_options, index=default_major_index,
+    SELECTION_LABEL[dataset_mode], major_options, key="major_select_a",
     on_change=mark_major_explicitly_selected,
     help="Pick what you're evaluating -- this determines the salary numbers "
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
 )
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
-if typical_education_a in SUB_BACHELORS_EDUCATION_LEVELS:
+if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
     st.sidebar.caption((
         f"ℹ️ {major}'s typical entry-level education (BLS: "
         f"\"{typical_education_a}\") is below a bachelor's degree. This "
-        "app's Cost of Attendance/loan model below still assumes 4 years "
-        "of undergraduate cost -- see Alternative Pathway: Trade "
-        "Apprenticeship (if enabled) for a comparison using this "
-        "profession's real path instead."
+        f"app's Cost of Attendance/loan model below still assumes "
+        f"{UNDERGRAD_YEARS} years of undergraduate cost -- see Alternative "
+        "Pathway: Trade Apprenticeship (if enabled) for a comparison using "
+        "this profession's real path instead."
+    ).replace("$", r"\$"))
+elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
+    # Not a warning: the cost model matches the real program here, so this
+    # says what it's charging rather than apologising for what it isn't.
+    # Possessive phrasing, matching the sibling caption above: Career-mode
+    # names are plural BLS occupations ("Radiologic Technologists and
+    # Technicians"), so "{major} typically needs" disagrees in number.
+    st.sidebar.caption((
+        f"ℹ️ {major}'s typical entry-level education (BLS: "
+        f"\"{typical_education_a}\") is below a bachelor's degree, so costs "
+        f"below are modelled over {program_years_for_education(typical_education_a)} "
+        f"years rather than {UNDERGRAD_YEARS} -- and the community-college path "
+        "covers the whole program."
     ).replace("$", r"\$"))
 if enable_prestige_mode:
     # Apply the tier's salary premium (chosen above, in Financing) to
@@ -5099,41 +5995,20 @@ career_stage_label = st.sidebar.radio(
 )
 career_stage_key = CAREER_STAGE_OPTIONS[career_stage_label]
 
-# Rendered last in this section: its current value was already read from
-# session_state above (before Target Profession) so MAJOR_DATA could be
-# built in time. No index= here since session_state already holds this
-# widget's value (seeded via setdefault above) -- passing both would
-# trigger Streamlit's widget-policy warning.
-# Same read-before-render pattern as Career Salary Data below: the value was
-# taken from session_state up in Financing so the dropdown's options could be
-# built from the right dataset on the first pass.
-dataset_mode = st.sidebar.radio(
-    "Choose by", dataset_mode_options, key="dataset_mode_radio",
-    help="Major: what people who studied that subject actually earn, "
-         "including those who ended up working outside it (NY Fed, 73 "
-         "majors). This is the choice you're actually making at 17. "
-         "Career: what people already doing a specific job earn (BLS, 836 "
-         "occupations) -- richer, but it assumes you get that job.",
-)
-if dataset_mode == DATASET_MODE_MAJOR:
-    st.sidebar.caption(
-        "Salaries reflect everyone who studied this — including the "
-        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
-    )
-else:
-    st.sidebar.caption(
-        "Salaries assume you land this job. Switch to **Major** to see what "
-        "everyone who studied a subject earns, not just those working in it."
-    )
-
-career_data_source = st.sidebar.radio(
-    "Career Salary Data", career_source_options, key="career_source_radio",
-    disabled=(dataset_mode == DATASET_MODE_MAJOR),
-    help="National: nationwide BLS OEWS wage estimates (cleaned_careers.csv). "
-         "California: that state's own BLS OEWS wage estimates "
-         "(cleaned_careers_ca.csv), generated via `data_pipeline.py ... --state CA`. "
-         "Applies to Career mode only -- the NY Fed's per-major data is national.",
-)
+# Replaces the old National/California radio. It is NOT a widget any more --
+# the wage basis follows the selected city -- but the value is still computed,
+# for two reasons that both still hold:
+#
+#  1. It keys the break-even cache. find_breakeven_loan's work depends on the
+#     MAJOR_DATA global, which st.cache_data can't see; without an argument
+#     that moves when the wages move, the cache would serve a New York
+#     break-even to someone who just switched to Austin.
+#  2. It's logged to Supabase (career_data_source) and shown in the admin
+#     dashboard. The column is retained rather than dropped, with its meaning
+#     changed from a chosen source to the derived basis -- see migrations.sql,
+#     and treat rows either side of that change as different series.
+_career_state = CITY_DATA.get(city, {}).get("state_key")
+career_data_source = US_STATES.get(_career_state, "National") if _career_state else "National"
 
 # Rendered last in the sidebar: each flag's current value was already read
 # from session_state above (before Financing) so Financing could branch on
@@ -5283,8 +6158,17 @@ if compare_mode:
         default_major_b_index = major_options.index(shared_major_b) if shared_major_b in major_options else (
             major_options.index(_default_b) if _default_b in major_options else 0
         )
+        # Same mode-switch re-pin as Scenario A above, and for the same reason
+        # -- a name valid in both datasets would otherwise survive a switch and
+        # change meaning underneath the visitor. Also drops index=, which was
+        # being passed alongside key= and triggering Streamlit's
+        # widget-default-conflict warning.
+        if (st.session_state.get("major_b") not in major_options
+                or st.session_state.get("major_b_mode") != dataset_mode):
+            st.session_state["major_b"] = major_options[default_major_b_index]
+        st.session_state["major_b_mode"] = dataset_mode
         major_b = st.selectbox(
-            SELECTION_LABEL[dataset_mode], major_options, index=default_major_b_index, key="major_b",
+            SELECTION_LABEL[dataset_mode], major_options, key="major_b",
             help="Pick the career you're evaluating -- this determines the "
                  "salary numbers used everywhere else in the app. There are "
                  "hundreds of options, so instead of scrolling, click the "
@@ -5292,14 +6176,22 @@ if compare_mode:
                  "straight to it.",
         )
         typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
-        if typical_education_b in SUB_BACHELORS_EDUCATION_LEVELS:
+        if typical_education_b in MISMODELLED_EDUCATION_LEVELS:
             st.caption((
                 f"ℹ️ {major_b}'s typical entry-level education (BLS: "
                 f"\"{typical_education_b}\") is below a bachelor's degree. "
-                "This app's Cost of Attendance/loan model below still "
-                "assumes 4 years of undergraduate cost -- see Alternative "
-                "Pathway: Trade Apprenticeship (if enabled) for a "
+                f"This app's Cost of Attendance/loan model below still "
+                f"assumes {UNDERGRAD_YEARS} years of undergraduate cost -- see "
+                "Alternative Pathway: Trade Apprenticeship (if enabled) for a "
                 "comparison using this profession's real path instead."
+            ).replace("$", r"\$"))
+        elif typical_education_b in PROGRAM_YEARS_BY_EDUCATION:
+            st.caption((
+                f"ℹ️ {major_b}'s typical entry-level education (BLS: "
+                f"\"{typical_education_b}\") is below a bachelor's degree, so "
+                f"costs below are modelled over "
+                f"{program_years_for_education(typical_education_b)} years "
+                f"rather than {UNDERGRAD_YEARS}."
             ).replace("$", r"\$"))
 
         st.subheader("💰 Financing")
@@ -5432,26 +6324,31 @@ if compare_mode:
         _legacy_cc_b = get_shared_default("cc_b", "0") == "1"
         st.session_state.setdefault(
             "cc_mode_b", get_shared_default("cc_mode_b", "fulltime" if _legacy_cc_b else "none"))
+        _cc_options_b, _cc_labels_b = cc_path_options(program_years_b)
+        reconcile_cc_mode("cc_mode_b", _cc_options_b)
         cc_mode_b = st.radio(
             "Community college path",
-            options=["none", "fulltime", "parttime"],
-            format_func=lambda c: {
-                "none": "None — start at the 4-year school",
-                "fulltime": "Full-time community college, then transfer (2+2)",
-                "parttime": "Part-time community college while working, then transfer",
-            }[c],
+            options=_cc_options_b,
+            format_func=lambda c: _cc_labels_b[c],
             key="cc_mode_b",
-            help=f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
-                 "community college, then transferring to finish the SAME "
-                 "bachelor's. Community college is assumed paid without loans, "
-                 "so it adds nothing to the debt. 'Part-time while working' "
-                 "means you work full-time during the community-college years. "
-                 "See Methodology.",
+            help=(
+                f"This profession is entered with a {program_years_b}-year degree, "
+                "which a community college can award on its own -- no transfer, so "
+                "this models the WHOLE program at community-college prices. "
+                if program_years_b <= COMMUNITY_COLLEGE_YEARS else
+                f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
+                "community college, then transferring to finish the SAME "
+                "bachelor's. "
+            ) +
+            "Community college is assumed paid without loans, "
+            "so it adds nothing to the debt. 'Part-time while working' "
+            "means you work full-time during the community-college years. "
+            "See Methodology.",
         )
         cc_transfer_b = cc_mode_b != "none"
         is_parttime_b = cc_mode_b == "parttime"
-        cc_years_b = COMMUNITY_COLLEGE_YEARS if cc_transfer_b else 0
-        university_years_b = max(UNDERGRAD_YEARS - cc_years_b, 0)
+        cc_years_b = min(COMMUNITY_COLLEGE_YEARS, program_years_b) if cc_transfer_b else 0
+        university_years_b = max(program_years_b - cc_years_b, 0)
         if cc_transfer_b:
             _school_state_b = coa_match_b.get("STABBR") if coa_match_b is not None else None
             if _school_state_b not in US_STATES:
@@ -5500,6 +6397,7 @@ if compare_mode:
         effective_cc_coa_per_year_b = cc_coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
         _schedule_b = compute_loan_schedule_by_year(
             effective_coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b, inflation_rate_b,
+            years=program_years_b,
             cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b, finance_cc_years=False)
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
         cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
@@ -5520,9 +6418,11 @@ if compare_mode:
         if cc_transfer_b:
             _work_note_b = "working full-time, " if is_parttime_b else ""
             cc_note_b = (
-                f"{COMMUNITY_COLLEGE_YEARS} yrs community college ({_work_note_b}"
-                f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan → {fmt_money(cc_oop_b)} out-of-pocket), "
-                f"then {university_years_b} yrs at the 4-year school ({fmt_money(effective_coa_per_year_b)}/yr, financed). "
+                f"{cc_years_b} yrs community college ({_work_note_b}"
+                f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan → {fmt_money(cc_oop_b)} out-of-pocket)"
+                + (f", then {university_years_b} yrs at the 4-year school "
+                   f"({fmt_money(effective_coa_per_year_b)}/yr, financed). "
+                   if university_years_b else " — the whole program. ")
             )
         else:
             cc_note_b = ""
@@ -5536,7 +6436,7 @@ if compare_mode:
             f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
             f"{fmt_money(personal_contribution_per_year_b)} personal "
             f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
-            f"→ over {UNDERGRAD_YEARS} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
+            f"→ over {program_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
         ).replace("$", r"\$"))
         # Mirrors Scenario A: default to the college-reported median debt when
         # available, else the cost-based personal calc. See A's block for why
@@ -6144,6 +7044,13 @@ def render_cc_path_note(cc_mode: str) -> None:
             "community college, then transfer to finish the same degree — the "
             "community-college years are paid out of pocket, not financed."
         )
+    elif cc_mode == "associate":
+        st.caption(
+            "🏫 **Community-college path:** the entire degree at a community "
+            "college — no transfer, because this profession is entered with a "
+            "degree a community college awards on its own. Paid out of pocket, "
+            "not financed."
+        )
     elif cc_mode == "parttime":
         st.caption(
             f"🏫 **Community-college path:** {COMMUNITY_COLLEGE_YEARS} years at a "
@@ -6231,6 +7138,13 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             # Careers this major leads to -- compact, so each narrow compare
             # column shows its own. Same helper as the single-scenario view.
             render_major_careers(scenario["major"], compact=True)
+
+        # Career mode's wage distribution and its geography note. Both are
+        # per-occupation and therefore genuinely different between A and B, so
+        # each column draws its own -- unlike the underemployment text above,
+        # which is national in Career mode and rendered once below the columns.
+        render_wage_distribution(scenario["major"], compact=True)
+        render_wage_geography_note(scenario["major"])
 
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
@@ -6497,10 +7411,12 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
     )
     pos_cols[2].metric(f"{alt_label} — {roi_window_years}-Yr Net Position", fmt_money(alt_net_position))
     st.plotly_chart(
-        build_scenario_comparison_roi_chart(
-            scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], major_name_a,
-            alt_net_position, alt_label, roi_window_years,
+        build_net_position_chart(
+            apprenticeship_net_position_frame(
+                scenario_a, major_name_a, alt_label,
+                col_index, get_metro_wage_index(city), roi_window_years),
+            roi_window_years,
+            baseline_head_start_years=scenario_a.get("enrollment_years", 0),
         ),
         use_container_width=True, key="apprenticeship_roi_chart", config=PLOTLY_CHART_CONFIG,
     )
@@ -6601,11 +7517,14 @@ if compare_mode:
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
     st.plotly_chart(
-        build_scenario_comparison_roi_chart(
-            scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
-            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}",
+        build_net_position_chart(
+            net_position_frame(
+                [(f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}", scenario_a),
+                 (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
+                city_info["col_index"], get_metro_wage_index(city), roi_horizon_years),
             roi_horizon_years,
+            baseline_head_start_years=max(scenario_a["enrollment_years"],
+                                           scenario_b["enrollment_years"]),
         ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
@@ -6732,6 +7651,7 @@ else:
     # on-screen table below is what's shown conditionally.
     loan_schedule_a = compute_loan_schedule_by_year(
         effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+        years=program_years_a,
         cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
     )
     if loan_source_a == "college":
@@ -6758,7 +7678,7 @@ else:
              "Loan Amount This Year": fmt_money(row["loan_amount"])}
             for row in loan_schedule_a
         ]))
-    st.metric(f"Total Loan Amount (all {UNDERGRAD_YEARS} years)", fmt_money(loan_amount))
+    st.metric(f"Total Loan Amount (all {program_years_a} years)", fmt_money(loan_amount))
     # "Overridden" is measured against whichever default is active, so the note
     # only fires on a real manual change (not on the expected college-vs-personal
     # gap that exists by design).
@@ -6843,8 +7763,12 @@ else:
     )
 
     st.plotly_chart(
-        build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
-                             roi_horizon_years),
+        build_net_position_chart(
+            net_position_frame([(major, scenario)], city_info["col_index"],
+                                get_metro_wage_index(city), roi_horizon_years),
+            roi_horizon_years,
+            baseline_head_start_years=scenario["enrollment_years"],
+        ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
 
@@ -6893,23 +7817,15 @@ else:
     if dataset_mode == DATASET_MODE_MAJOR:
         render_major_careers(major)
 
-    # Which geography the salary above actually came from. BLS suppresses
-    # roughly a fifth of occupation-by-metro cells, so those fall back to a
-    # national wage -- and a national number standing in for a local one,
-    # unlabelled, is the same class of hidden assumption as the
-    # underemployment rate was.
-    if dataset_mode == DATASET_MODE_CAREER and city != "National Average":
-        if MAJOR_DATA.get(major, {}).get("wage_geography") == city:
-            st.caption(
-                f"💡 Salaries are **{city}**'s own BLS figures, not national ones — so this "
-                f"weighs {city}'s pay against {city}'s cost of living."
-            )
-        else:
-            st.caption(
-                f"⚠️ BLS doesn't publish a separate **{major}** wage for {city} (too few "
-                f"workers to report), so the salary above is the **national** figure adjusted "
-                f"for {city}'s cost of living. Treat it as an approximation."
-            )
+    # What this occupation's pay actually spreads across, rather than the one
+    # median the projection runs on. Career mode only (see
+    # get_wage_distribution_context); the same call sits in
+    # render_scenario_panel so Compare Mode shows it too.
+    render_wage_distribution(major)
+
+    # Which geography the salary above came from -- shared helper, called from
+    # render_scenario_panel too so Compare Mode shows it as well.
+    render_wage_geography_note(major)
 
     ai_context = {}
     if enable_ai_mode:
@@ -7131,11 +8047,26 @@ student might be evaluating. See Alternative Pathway: Trade Apprenticeship
 below, which uses that profession's own real BLS earnings instead of the
 generic national trade benchmark whenever this applies.
 
-The **"Career Salary Data" sidebar selector** lets you pick
-whether these extra careers use *National* average wages or
-*California*-specific wages, which can be noticeably higher for some jobs
-(tech and healthcare especially). This is real state-level government
-data, not just the national number scaled up.
+**Which geography a salary comes from.** You don't pick this — it follows the
+city you pick. For each occupation we take the finest geography BLS actually
+publishes: your **metro** if it reports that job, otherwise your **state**,
+otherwise the **national** figure. Every one of those is real government data
+for that place, not a national number scaled up, and the page says underneath
+the salary which of the three you're looking at.
+
+The fallbacks matter more than they sound. BLS won't publish a wage for a job
+in a metro where too few people do it, and that's roughly a fifth of
+occupations in a typical city — 227 of 836 in Austin, for instance. Those used
+to drop straight to a national average; now all but 41 of them land on Texas's
+own statewide figure first, which is much closer to the truth. Only when both
+the metro and the state suppress a job do you see a national number, and it's
+labelled as one.
+
+This replaced a "Career Salary Data: National / California" control that let
+you choose a wage basis independently of your city. That combination could
+disagree with itself — picking California while living in New York showed
+California wages for the jobs New York doesn't report, while the page called
+them national figures.
 
 **Majors that need school beyond a 4-year degree.** In real life,
 Athletic Training, Medicine, and Law don't pay a professional salary
@@ -7189,20 +8120,81 @@ occupation major group the major maps to (the SOC group described in the AI
 module note below) — a **representative sample of the field, not an
 exhaustive or guaranteed list**, since a major spreads across many jobs.
 Wages are the national BLS medians already used throughout this app, shown at
-the national level regardless of the California/National salary toggle so the
-"leads to" set stays stable. Occupations that a four-year degree doesn't
+the national level regardless of your selected city so the "leads to" set
+stays stable. Occupations that a four-year degree doesn't
 typically lead to (those BLS marks as needing less than a bachelor's) are
 filtered out. This is our own summary of public BLS data — it is not drawn
 from any subscription careers guide.
 
+**How long we assume you're enrolled.** Cost of Attendance is a per-year
+figure, so turning it into a total needs a program length. We use four years
+for a bachelor's — and **two years for an occupation BLS says is typically
+entered with an associate's degree**, because charging four years of tuition
+to reach a two-year credential roughly doubles the debt, and against a private
+four-year sticker price it overstates it by far more. That shorter length
+flows through everything: the loan total, the federal borrowing cap (which is
+set per year in school), the foregone-earnings option, and the break-even.
+Picking the community-college path on a two-year program covers the whole
+program rather than half of it.
+
+We don't guess at the other sub-bachelor's levels. "Postsecondary nondegree
+award" covers everything from a six-week certificate to an eighteen-month
+program, and "high school diploma" implies no college cost at all — which is a
+different model, not a shorter one. Those still get four years and say so on
+screen, and we suppress the break-even for them rather than print a number
+built on a length we don't believe.
+
+**Where the pay actually lands (Target Profession mode).** Under the salary
+figures we draw the spread of what people in that occupation really earn. BLS
+publishes five points for each one — the 10th, 25th, 50th, 75th and 90th
+percentile wage — and no individual worker records at all, so a true
+count-the-people histogram isn't something anyone can build from it, us
+included. What the percentiles *do* fix exactly is how many workers sit
+between any two of them: a quarter of the workforce earns between the 25th and
+the 50th, by definition. Each bar covers one of those ranges, and its height is
+that share divided by how many dollars wide the range is — so the **area** of a
+bar is the share of workers, and a wide flat bar holds just as many people as a
+narrow tall one. The bottom and top 10% have no published cutoff on the far
+side, so we state them in words instead of inventing a bar width for them.
+Percentiles follow the same city as the salary above when BLS publishes them
+for that metro. There's no equivalent for Intended Major mode: a major isn't
+an occupation, and the wage data behind it has no percentiles, so the chart
+simply doesn't appear there.
+
 **What if you skip college? The high school graduate baseline.** We
-compare every major against $49,192/year — real median pay for full-time
-workers 25 and older who only finished high school (based on $946/week in
-late 2024, annualized).
-[Source: BLS](https://www.bls.gov/opub/ted/2024/median-weekly-earnings-946-for-workers-with-high-school-diploma-1533-for-bachelors-degree.htm).
+compare every major against $51,688/year — real median pay for full-time
+workers 25 and older who only finished high school (based on $994/week in the
+second quarter of 2026, annualized).
+[Source: BLS Current Population Survey, series LEU0252917300](https://www.bls.gov/news.release/wkyeng.htm).
 We assume this grows a modest 2%/year (a stand-in for normal raises and
 cost-of-living bumps) since BLS doesn't publish a real year-by-year
 trajectory for this group the way it does for individual careers.
+
+**One thing to know about that baseline: it's an all-ages figure.** $51,688
+is the median across *every* high school graduate aged 25 and up — someone
+two years out of school and someone thirty years into a career, averaged
+together. Earnings typically peak in the late 40s and early 50s, so that
+blended median sits above what a young worker actually takes home. Meanwhile
+the person this app models is roughly 18 to 32 across the whole comparison
+window.""" + hs_young_wage_disclosure() + """
+
+That cuts both ways over ten years. Early on our baseline is too generous,
+which makes the degree look *worse* than it is. Later on it's too stingy: we
+grow it at a flat 2%/year, while real pay for workers in their twenties climbs
+substantially faster than that. The two errors run in opposite directions and
+partly cancel, and we don't claim to know what the net effect is.
+
+We still headline the published BLS number, because it's the one a reader can
+look up and check. BLS itself only breaks earnings out by education for ages
+25 and up, so there's no official under-25 figure for high school graduates;
+the one quoted above comes from the underlying Census survey records rather
+than a published table. What we won't do is manufacture a starting wage by running
+our own 2%/year assumption backwards — that 2% describes how wages drift over
+*calendar time*, not how one person's pay climbs with *age*, and the two
+aren't interchangeable. So read
+this comparison as "a degree versus a typical working adult without one,"
+rather than "versus your classmate who skipped college." It's the more
+demanding of the two tests.
 
 **How your loan payment is calculated.** *Standard 10-Year* just means a
 fixed payment every month for 10 years, using the standard math lenders
@@ -7215,6 +8207,20 @@ This is a simplified version of real federal IDR plans, not an exact
 copy of federal rules. For Medicine, Law, and Athletic Training, both
 options are calculated using your loan *plus* the extra training debt
 described above — not just the loan by itself.
+
+**Net Position by Year.** The chart under the headline figures plots each
+path's net position at the end of every year, not just at year 10. That's
+there because "who is ahead after ten years" and "when did they get ahead" are
+different questions, and the second one is usually the one being decided. A
+path that trains before it earns — medicine most of all — sits below zero for
+years and then climbs steeply; an endpoint alone reports that as a single
+verdict and hides the shape entirely. Every point is the same calculation as
+the headline number with the window shortened to that year, so the last point
+on the chart is exactly the figure above it, by construction rather than by
+coincidence. With *Count foregone earnings* on, the baseline starts several
+years ahead — the high school graduate was working while you were enrolled —
+and the chart says so above the plot, because that head start otherwise looks
+like the degree simply being behind.
 
 **How we calculate 10-Year ROI (return on investment).** We add up 10
 years of a major's earnings, subtract whatever loan payments you made
@@ -7347,8 +8353,8 @@ model those.
 Contribution, and Grants & Scholarships** (entered per year). Cost of
 Attendance grows a little each year (an estimated inflation rate) while
 Personal Contribution and Grants stay flat; each year's loan is whatever's
-left after subtracting them, never below $0, summed across the 4 years of an
-assumed bachelor's:
+left after subtracting them, never below $0, summed across the program's real
+length (4 years for a bachelor's, 2 for an associate's):
 `Loan (Year N) = max(Cost of Attendance × (1 + inflation rate)^(N-1) − Personal Contribution − Grants & Scholarships, 0)`.
 Detailed also shows the year-by-year breakdown. When a school has no reported
 debt (one that reports none, the College Tier estimator, or the live lookup
@@ -7417,6 +8423,15 @@ are two on modes:
   favorable path. Its earnings advantage only shows up when *Count foregone
   earnings during enrollment* is on (which puts every path on one age-18
   timeline); its lower debt shows up either way.
+
+When the profession you picked is entered with an **associate's degree**, there
+is nothing to transfer to — a community college awards that degree itself — so
+the selector offers **"the entire degree, no transfer"** in place of the 2+2
+option. Choosing it puts the whole program at community-college prices, which
+is what most people in these fields actually do, and typically brings the loan
+to **$0**. The comparison is still against the same high-school-graduate
+baseline, so this isn't a way to make a career look good by spending less: the
+earnings side is untouched.
 
 **Community college is assumed paid without loans.** In both modes the
 community-college years add **$0 to the loan** — most community-college
@@ -7609,10 +8624,12 @@ behaves exactly as described above when all five are left off.
   largest real cost of a bachelor's degree is usually not tuition — it's the
   roughly four years of wages given up while enrolled full-time, during which
   the debt-free high-school graduate is already working, earning raises, and
-  banking that income. Turning this option on adds those ~4 foregone years
-  (UNDERGRAD_YEARS) to the high-school baseline, so every path is compared on
-  one consistent timeline that starts at **age 18** rather than at
-  graduation. Concretely: the high-school graduate is credited with ~4 extra
+  banking that income. Turning this option on adds those foregone years to the
+  high-school baseline, so every path is compared on one consistent timeline
+  that starts at **age 18** rather than at graduation. The number of years is
+  the program's real length, not a flat four: an occupation BLS says is
+  entered with an associate's degree is charged two years of cost and two
+  years of foregone wages, because that is how long it takes. Concretely: the high-school graduate is credited with ~4 extra
   years of earnings at the front, the degree-seeker earns nothing during
   enrollment, and — when the Trade Apprenticeship module is also on — the
   apprentice, who *is* paid during those years, is credited with them too (a

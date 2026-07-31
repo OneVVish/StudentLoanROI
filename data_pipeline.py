@@ -52,10 +52,16 @@ Usage:
     python data_pipeline.py raw_bls_data.xlsx -o cleaned_careers.csv
     python data_pipeline.py state_M2025_dl.xlsx --state CA
     python data_pipeline.py state_M2025_dl.xlsx --state CA -o cleaned_careers_ca.csv
-    python data_pipeline.py MSA_M2024_dl.xlsx --metros -o data/metro_careers_clean.csv
+    python data_pipeline.py MSA_M2025_dl.xlsx --metros --national national_M2025_dl.xlsx
+
+Every geographic file must come from the same release year as the others --
+app.py shows metro and national wages side by side, so a metro file one
+release behind reads as a pay cut rather than as stale data. --metros
+enforces this where it can (see release_vintage).
 """
 
 import argparse
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -75,11 +81,17 @@ GROWTH_WINDOW_YEARS = 10
 
 # BLS's own national all-occupations median annual wage, the denominator of
 # the metro wage index (see build_metro_wage_index). Read straight off the
-# National release's o_group == "total" row -- "All Occupations", 154,187,380
-# workers, May 2024. Update it in the same pass as any release bump, and from
+# National release's o_group == "total" row -- "All Occupations", 155,495,730
+# workers, May 2025. Update it in the same pass as any release bump, and from
 # the SAME release as the metro file: mixing vintages here would tilt every
 # city's index by whatever wage growth happened in between.
-NATIONAL_ALL_OCCUPATIONS_MEDIAN = 49500
+#
+# Prefer `--metros --national national_M####_dl.xlsx`, which reads this figure
+# out of that file instead and refuses to run if the two releases disagree.
+# The constant is the fallback for when the National file isn't on hand, and
+# it is only correct while NATIONAL_MEDIAN_VINTAGE matches the metro release.
+NATIONAL_ALL_OCCUPATIONS_MEDIAN = 50980
+NATIONAL_MEDIAN_VINTAGE = "M2025"
 
 # The app's CITY_DATA keys mapped to their BLS OEWS metropolitan area
 # titles, for --metros. Hardcoded here rather than derived, because BLS's
@@ -121,6 +133,18 @@ METRO_AREA_BY_CITY = {
 DEFAULT_GROWTH_RATE = 0.03
 
 REQUIRED_COLUMNS = ["occ_code", "occ_title", "o_group", "a_median", "a_pct25"]
+
+# The rest of OEWS's published wage distribution, carried through so the app
+# can show what an occupation's pay actually spreads across rather than just a
+# starting/median pair. These are NOT in REQUIRED_COLUMNS: the model runs
+# entirely off a_pct25 and a_median, so a release missing them should still
+# produce a usable dataset -- the app treats absent percentiles as "no
+# distribution chart for this career" and carries on.
+#
+# OEWS publishes only these five points, never microdata, so a real frequency
+# histogram is not derivable from it; what IS derivable is the share of workers
+# between consecutive percentiles. See build_wage_distribution in app.py.
+DISTRIBUTION_COLUMNS = ["a_pct10", "a_pct75", "a_pct90"]
 
 # Candidate column names BLS has used to hold the state for each row in the
 # State release, checked in order -- whichever one is actually present in
@@ -176,6 +200,40 @@ def filter_to_state(df: pd.DataFrame, state_abbr: str) -> pd.DataFrame:
     return df[matches]
 
 
+def release_vintage(xlsx_path: str) -> str:
+    """The "M2025"-style release token out of a BLS filename
+    (national_M2025_dl.xlsx, MSA_M2024_dl.xlsx), or None if the file has been
+    renamed past recognition.
+
+    The filename is the only place the vintage lives -- OEWS's own columns
+    (AREA, OCC_CODE, A_MEDIAN, ...) carry no year field, so there is nothing
+    inside the workbook to check against. That makes a mismatch invisible at
+    read time and permanent once it's in a committed CSV, which is exactly
+    what happened here: the metro files were built from M2024 while
+    cleaned_careers.csv moved on to M2025, leaving 18% of New York
+    occupations reading *below* the national wage purely from a year of
+    wage growth."""
+    match = re.search(r"[_\b]M(\d{4})", Path(xlsx_path).stem, flags=re.IGNORECASE)
+    return f"M{match.group(1)}" if match else None
+
+
+def national_all_occupations_median(xlsx_path: str) -> float:
+    """The all-occupations median annual wage off a National release's
+    o_group == "total" row -- the metro wage index's denominator, taken from
+    a real file rather than the hardcoded constant."""
+    raw = load_bls_data(xlsx_path)
+    totals = raw[raw["o_group"].astype(str).str.strip().str.lower() == "total"]
+    if totals.empty:
+        raise ValueError(
+            f"'{xlsx_path}' has no o_group == 'total' row, so it can't supply the "
+            f"national all-occupations median. Pass the BLS *National* release."
+        )
+    median = clean_wage_column(totals["a_median"]).iloc[0]
+    if pd.isna(median):
+        raise ValueError(f"'{xlsx_path}' has no usable all-occupations median wage.")
+    return float(median)
+
+
 def load_bls_data(xlsx_path: str) -> pd.DataFrame:
     """Read the raw BLS OEWS national XLSX and normalize column names to
     lowercase -- BLS ships these as uppercase (OCC_CODE, A_MEDIAN, ...),
@@ -227,6 +285,15 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
     detailed["a_median"] = clean_wage_column(detailed["a_median"])
     detailed["a_pct25"] = clean_wage_column(detailed["a_pct25"])
 
+    # The rest of the distribution, where this release publishes it. Left as
+    # NaN when suppressed rather than back-filled the way a_pct25 is above:
+    # a_pct25 feeds the growth model and must have a number, but these are
+    # display-only, and inventing a percentile would draw a distribution that
+    # BLS never measured.
+    present_distribution = [c for c in DISTRIBUTION_COLUMNS if c in detailed.columns]
+    for column in present_distribution:
+        detailed[column] = clean_wage_column(detailed[column])
+
     # No usable median wage at all -- this occupation can't be modeled,
     # drop it (mirrors clean_college_scorecard.py dropping schools with no
     # usable COA figure).
@@ -248,7 +315,14 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
         (detailed["a_median"] / detailed["a_pct25"]) ** (1 / GROWTH_WINDOW_YEARS) - 1
     )
 
-    final_columns = ["occ_code", "occ_title", "o_group", "a_pct25", "a_median", "annual_growth_rate"]
+    # a_pct10 ... a_pct90 in ascending order, so the CSV reads as the
+    # distribution it is. Columns the release didn't publish are simply absent.
+    final_columns = (
+        ["occ_code", "occ_title", "o_group"]
+        + [c for c in ["a_pct10", "a_pct25", "a_median", "a_pct75", "a_pct90"]
+           if c == "a_pct25" or c == "a_median" or c in present_distribution]
+        + ["annual_growth_rate"]
+    )
     result = detailed[final_columns].reset_index(drop=True)
 
     if dropped_no_median and not quiet:
@@ -259,6 +333,52 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
             f"assigned the default {DEFAULT_GROWTH_RATE:.0%} annual growth rate instead."
         )
     return result
+
+
+def build_all_states_dataframe(xlsx_path: str) -> pd.DataFrame:
+    """Every state's own wages from the BLS OEWS *State* release, as ONE
+    long-format table with a `state` column -- the same shape --metros
+    produces, and for the same reasons.
+
+    Why every state rather than the single --state file this script already
+    made: the app layers national -> state -> metro, taking the finest
+    geography BLS actually publishes for each occupation. Metros publish a
+    median of 82% of occupations (72-92% by city), so roughly a fifth of every
+    city's careers fall through, and before this they fell all the way to a
+    national average. Now they land on the state, which is closer to right for
+    every one of them.
+
+    It also removes a control that shouldn't have existed. The app used to ask
+    the visitor to pick "National or California" as a Career Salary Data
+    source, independently of the city they'd already chosen -- so California +
+    New York was reachable, and the ~51 occupations New York suppresses showed
+    California wages while the page called them national figures. A state is
+    not a preference; it is a fact about the selected city.
+    """
+    raw = load_bls_data(xlsx_path)
+    column = find_state_column(raw)
+    values = raw[column].astype(str).str.strip()
+    looks_like_abbreviation = values.str.len().median() <= 3
+
+    frames = []
+    for abbreviation, full_name in STATE_ABBR_TO_NAME.items():
+        if looks_like_abbreviation:
+            matches = values.str.upper() == abbreviation
+        else:
+            matches = values.str.lower() == full_name.lower()
+        cleaned = _clean_detailed(raw[matches], quiet=True)
+        if cleaned.empty:
+            # Loud rather than silent -- a state that stops matching means the
+            # release renamed or restructured its state column, and every city
+            # in that state would quietly fall back to national wages.
+            raise ValueError(
+                f"No detailed rows matched {abbreviation} ({full_name}) in column "
+                f"'{column}'. The State release's layout may have changed."
+            )
+        cleaned.insert(0, "state", abbreviation)
+        frames.append(cleaned)
+
+    return pd.concat(frames, ignore_index=True)
 
 
 def build_metro_dataframe(xlsx_path: str) -> pd.DataFrame:
@@ -317,7 +437,7 @@ def build_metro_dataframe(xlsx_path: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def build_metro_wage_index(xlsx_path: str) -> pd.DataFrame:
+def build_metro_wage_index(xlsx_path: str, national_xlsx: str = None) -> pd.DataFrame:
     """Each app city's overall wage level relative to the nation, from BLS's
     own all-occupations median (the o_group == "total" row per area).
 
@@ -345,11 +465,40 @@ def build_metro_wage_index(xlsx_path: str) -> pd.DataFrame:
 
     The denominator is BLS's published national all-occupations median from
     the SAME release, so the index is internally consistent rather than
-    mixing vintages.
+    mixing vintages. Pass national_xlsx (the National release paired with this
+    metro file) to read it from that file and have the vintage checked;
+    without it the NATIONAL_ALL_OCCUPATIONS_MEDIAN constant is used, which is
+    only right while its vintage still matches.
     """
     raw = load_bls_data(xlsx_path)
     if "area_title" not in raw.columns:
         raise ValueError("No 'area_title' column -- this isn't the BLS Metropolitan release.")
+
+    metro_vintage = release_vintage(xlsx_path)
+    if national_xlsx:
+        national_vintage = release_vintage(national_xlsx)
+        if metro_vintage and national_vintage and metro_vintage != national_vintage:
+            raise ValueError(
+                f"Release mismatch: the metro file is {metro_vintage} but "
+                f"'{national_xlsx}' is {national_vintage}. The index would divide one "
+                f"year's metro wages by another's national wage, tilting every city by "
+                f"whatever wage growth happened in between. Download the matching pair "
+                f"from bls.gov/oes/tables.htm."
+            )
+        national_median = national_all_occupations_median(national_xlsx)
+    else:
+        national_median = NATIONAL_ALL_OCCUPATIONS_MEDIAN
+        if metro_vintage and metro_vintage != NATIONAL_MEDIAN_VINTAGE:
+            raise ValueError(
+                f"The metro file is {metro_vintage} but NATIONAL_ALL_OCCUPATIONS_MEDIAN is "
+                f"{NATIONAL_MEDIAN_VINTAGE}. Either pass --national {metro_vintage}'s National "
+                f"release, or update the constant and NATIONAL_MEDIAN_VINTAGE from its "
+                f"o_group == 'total' row."
+            )
+        print(
+            f"Note: no --national file given, so the index uses the hardcoded "
+            f"${NATIONAL_ALL_OCCUPATIONS_MEDIAN:,} ({NATIONAL_MEDIAN_VINTAGE}) denominator."
+        )
 
     totals = raw[raw["o_group"].astype(str).str.strip().str.lower() == "total"].copy()
     totals["a_median"] = clean_wage_column(totals["a_median"])
@@ -361,7 +510,7 @@ def build_metro_wage_index(xlsx_path: str) -> pd.DataFrame:
             raise ValueError(f"No all-occupations median for {city} ({area!r}).")
         median = float(match["a_median"].iloc[0])
         rows.append({"city": city, "all_occupations_median": median,
-                     "wage_index": median / NATIONAL_ALL_OCCUPATIONS_MEDIAN})
+                     "wage_index": median / national_median})
     return pd.DataFrame(rows).sort_values("wage_index", ascending=False).reset_index(drop=True)
 
 
@@ -389,14 +538,27 @@ if __name__ == "__main__":
                          help="Produce one long-format dataset covering every city in the app's "
                               "CITY_DATA, with a `city` column. Requires the BLS OEWS "
                               "*Metropolitan* release (oesm##ma.zip -> MSA_M####_dl.xlsx).")
+    parser.add_argument("--all-states", action="store_true", dest="all_states",
+                         help="Produce one long-format dataset covering EVERY state, with a "
+                              "`state` column. Requires the BLS OEWS *State* release -- the same "
+                              "file --state takes, read whole instead of filtered to one state.")
+    parser.add_argument("--national", default=None,
+                         help="With --metros: the National release from the SAME year, whose "
+                              "all-occupations median becomes the wage index's denominator. "
+                              "Recommended -- without it the hardcoded "
+                              "NATIONAL_ALL_OCCUPATIONS_MEDIAN is used instead.")
     parser.add_argument("-o", "--output", default=None,
                          help="Output CSV path (default: cleaned_careers.csv, or "
                               "cleaned_careers_<state>.csv when --state is given)")
     args = parser.parse_args()
-    if args.metros and args.state:
-        raise SystemExit("Error: --metros and --state are different releases; pass one or the other.")
+    _modes = [bool(args.metros), bool(args.state), bool(args.all_states)]
+    if sum(_modes) > 1:
+        raise SystemExit("Error: --metros, --state and --all-states are mutually exclusive; pass one.")
+    if args.national and not args.metros:
+        raise SystemExit("Error: --national only applies to --metros (it supplies the wage index's denominator).")
     output_path = args.output or (
         "data/metro_careers_clean.csv" if args.metros else
+        "data/state_careers_clean.csv" if args.all_states else
         f"cleaned_careers_{args.state.lower()}.csv" if args.state else "cleaned_careers.csv"
     )
 
@@ -404,7 +566,10 @@ if __name__ == "__main__":
         if args.metros:
             print(f"Extracting {len(METRO_AREA_BY_CITY)} metro areas:")
             clean_df = build_metro_dataframe(args.input_xlsx)
-            index_df = build_metro_wage_index(args.input_xlsx)
+            index_df = build_metro_wage_index(args.input_xlsx, national_xlsx=args.national)
+        elif args.all_states:
+            print(f"Extracting all {len(STATE_ABBR_TO_NAME)} states + DC:")
+            clean_df = build_all_states_dataframe(args.input_xlsx)
         else:
             clean_df = build_clean_dataframe(args.input_xlsx, state=args.state)
     except FileNotFoundError:
@@ -425,5 +590,14 @@ if __name__ == "__main__":
               f"(all-occupations wage level vs the national ${NATIONAL_ALL_OCCUPATIONS_MEDIAN:,} median):")
         print(index_df.head(4).to_string(index=False))
         print(index_df.tail(2).to_string(index=False))
+        vintage = release_vintage(args.input_xlsx) or "this"
+        print(f"\nRegenerate cleaned_careers.csv and cleaned_careers_ca.csv from {vintage}'s "
+              f"National/State releases too -- app.py compares them against these metro wages.")
+    elif args.all_states:
+        per_state = clean_df.groupby("state").size()
+        print(f"{clean_df.state.nunique()} states, "
+              f"{clean_df.occ_title.nunique()} distinct occupations, "
+              f"median {per_state.median():.0f} per state "
+              f"(min {per_state.min()} {per_state.idxmin()}, max {per_state.max()} {per_state.idxmax()}).")
     else:
         print_summary(clean_df)

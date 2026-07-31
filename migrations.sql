@@ -315,3 +315,27 @@ alter table scenario_events
   add column if not exists loan_mode text,
   add column if not exists cc_mode_a text,
   add column if not exists cc_mode_b text;
+
+-- ---------------------------------------------------------------------------
+-- 2026-07-30: career_data_source changes MEANING (no DDL required)
+--
+-- It used to record which wage file the visitor picked from the "Career Salary
+-- Data" sidebar radio: exactly 'National' or 'California'. That control is
+-- gone. The wage basis now follows the selected city automatically -- the app
+-- layers national -> state -> metro and takes the finest geography BLS
+-- publishes per occupation -- so this column records the DERIVED state name
+-- instead ('New York', 'Texas', ..., or 'National' when the city is
+-- "National Average").
+--
+-- No ALTER TABLE: the column is already text and is retained deliberately
+-- rather than dropped, so the pre-change rows stay readable. But it is a
+-- BREAK IN THE SERIES, not a widening of it:
+--   * Before this date the values are a user CHOICE, and 'California' was
+--     reachable alongside any city (that combination is the bug this removed).
+--   * After, the value is a FACT about the city and is fully determined by it.
+-- Do not pool the two periods in any analysis of geography or of the wage
+-- basis. Split on timestamp, or join to city and use that instead.
+--
+-- Rows written before 2026-07-30 also cannot distinguish "visitor deliberately
+-- chose California" from "visitor never touched the control and got the
+-- National default", since only the resulting value was stored.

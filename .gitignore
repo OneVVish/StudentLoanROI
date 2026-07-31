@@ -30,4 +30,7 @@ paper_*.md
 Most-Recent-Cohorts-Institution.csv
 national_M2025_dl.xlsx
 state_M2025_dl.xlsx
+MSA_M2025_dl.xlsx
 occupation.xlsx
+# CPS ASEC person file for build_hs_age_profile.py -- ~280MB unzipped
+pppub*.csv
