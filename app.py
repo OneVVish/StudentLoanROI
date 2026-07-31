@@ -2887,6 +2887,66 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     }
 
 
+def cumulative_loan_paid_by_year(repayment_result: dict, years: int) -> list:
+    """Loan dollars paid from month 1 through the end of each year 1..years.
+
+    The three repayment simulators emit different schedules -- IDR carries a
+    per-month `payment` column because its payment moves with income, while
+    Standard and RAP carry only the balance. So this reads the payment column
+    when it exists and reconstructs from the flat monthly payment when it
+    doesn't, rather than assuming one shape.
+
+    Naturally capped at payoff: every schedule stops at the month the balance
+    hits zero, so years past that repeat the final cumulative total instead of
+    charging payments that were never made.
+    """
+    schedule = repayment_result.get("schedule")
+    if schedule is None or schedule.empty:
+        return [0.0] * years
+    months = schedule["month"]
+    if "payment" in schedule.columns:
+        paid = schedule["payment"].cumsum()
+    else:
+        paid = months * repayment_result.get("monthly_payment", 0.0)
+
+    totals = []
+    for year in range(1, years + 1):
+        within = paid[months <= year * 12]
+        totals.append(float(within.iloc[-1]) if len(within) else 0.0)
+    return totals
+
+
+def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: float,
+                               years: int) -> list:
+    """Net position at the end of each year 1..years, for this scenario and for
+    the high-school baseline it's measured against: [{year, major, hs}].
+
+    Every point comes from calculate_roi with the window shortened to that
+    year, rather than from a second formula written for the chart. That is the
+    whole point -- a hand-rolled trajectory would be a third implementation of
+    the ROI model (after the on-screen and PDF paths) and would drift from the
+    headline figure it sits beside. Year `years` here is identical to the
+    metric above the chart by construction.
+
+    total_investment is passed as 0 because only the two net positions are
+    read; roi_pct comes back None and is discarded.
+    """
+    paid_by_year = cumulative_loan_paid_by_year(scenario["repayment_result"], years)
+    points = []
+    for year in range(1, years + 1):
+        result = calculate_roi(
+            scenario["major"], paid_by_year[year - 1], 0,
+            col_index=col_index, years=year, hs_wage_index=hs_wage_index,
+            personal_contribution=scenario["personal_contribution"],
+            enrollment_years=scenario["enrollment_years"],
+            working_years=scenario["working_years"],
+        )
+        points.append({"year": year,
+                       "major": result["major_net_position"],
+                       "hs": result["hs_net_position"]})
+    return points
+
+
 def get_apprenticeship_salary_for_year(year_index: int) -> float:
     """Two-phase illustrative wage curve for the Registered Apprenticeship
     benchmark -- ramps from the year-1 training wage to the completion
@@ -3574,21 +3634,112 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
     return fig
 
 
-def build_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str,
-                         roi_window_years: int):
-    y_label = f"{roi_window_years}-Year Net Position ($)"
-    comparison_df = pd.DataFrame({
-        "Group": ["High School Graduate", major_name],
-        y_label: [hs_net_position, major_net_position],
-    })
-    fig = px.bar(
-        comparison_df, x="Group", y=y_label, color="Group",
-        title=f"{roi_window_years}-Year Net Position vs. High School Baseline",
-        text_auto=".2s",
+def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
+                        roi_window_years: int) -> pd.DataFrame:
+    """Tidy {year, Series, Net Position} frame for the net-position chart, from
+    one or two (label, scenario) pairs.
+
+    The high-school baseline is emitted once when both scenarios produce the
+    same one, and twice -- labelled by scenario -- when they don't. They differ
+    only when the two paths have different enrollment lengths AND foregone
+    earnings is on, since the baseline is credited the years the graduate spends
+    enrolled. Rare, but drawing a single line then would quietly show one
+    scenario's baseline as if it were both.
+    """
+    series = {}
+    baselines = {}
+    for label, scenario in scenarios:
+        points = build_net_position_series(scenario, col_index, hs_wage_index, roi_window_years)
+        series[label] = [p["major"] for p in points]
+        baselines[label] = [p["hs"] for p in points]
+
+    labels = list(baselines)
+    if len(labels) > 1 and baselines[labels[0]] != baselines[labels[1]]:
+        for label in labels:
+            series[f"High School Graduate ({label} timeline)"] = baselines[label]
+    else:
+        series["High School Graduate"] = baselines[labels[0]]
+
+    rows = []
+    for label, values in series.items():
+        for year, value in enumerate(values, start=1):
+            rows.append({"year": year, "Series": label, "Net Position": value})
+    return pd.DataFrame(rows)
+
+
+def apprenticeship_net_position_frame(scenario: dict, major_label: str, alt_label: str,
+                                       col_index: float, hs_wage_index: float,
+                                       roi_window_years: int) -> pd.DataFrame:
+    """The same tidy frame for the Trade Apprenticeship module: the degree
+    path, the high-school baseline, and the apprentice.
+
+    The apprentice's own year-by-year figure comes from
+    calculate_apprenticeship_roi with the window shortened the same way, and is
+    handed that year's baseline rather than the 10-year one -- so all three
+    lines are measured at the same point in time, which is the only way the
+    crossings mean anything.
+    """
+    points = build_net_position_series(scenario, col_index, hs_wage_index, roi_window_years)
+    rows = []
+    for point in points:
+        rows.append({"year": point["year"], "Series": "High School Graduate",
+                     "Net Position": point["hs"]})
+        rows.append({"year": point["year"], "Series": major_label,
+                     "Net Position": point["major"]})
+        alt = calculate_apprenticeship_roi(
+            point["hs"], col_index=col_index, years=point["year"],
+            enrollment_years=scenario.get("enrollment_years", 0))
+        rows.append({"year": point["year"], "Series": alt_label,
+                     "Net Position": alt["apprentice_net_position"]})
+    return pd.DataFrame(rows)
+
+
+def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
+                              baseline_head_start_years: int = 0):
+    """Net position year by year, for every path on the page plus the
+    high-school baseline.
+
+    Replaces the endpoint bar chart. A bar pair could only say who was ahead at
+    year N; the shape says *when* that became true, which is the question a
+    student is actually asking. It also makes the training-debt majors legible:
+    Medicine spends years below zero and below the baseline before crossing,
+    and a single year-10 bar reports that crossing as though it were the whole
+    story.
+
+    Takes a prebuilt frame rather than scenarios so the scenario comparison and
+    the apprenticeship module render through one function instead of two that
+    can drift apart.
+    """
+    fig = px.line(
+        frame, x="year", y="Net Position", color="Series", markers=True,
+        title=f"Net Position by Year (through year {roi_window_years})",
+        # "after graduation" rather than "after starting": with foregone
+        # earnings counted, year 1 is the graduate's first working year while
+        # the baseline already carries the enrolled years' wages, so the two
+        # series do NOT begin level. Saying "starting" would misread that head
+        # start as the degree simply being behind.
+        labels={"year": "Years after graduation"},
     )
+    fig.update_traces(line=dict(width=3))
+    # Zero line: the training-debt paths sit below it for years, and "below
+    # zero" is a different statement from "below the baseline".
+    fig.add_hline(y=0, line=dict(color="#999999", width=1, dash="dot"))
     fig.update_layout(
-        yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center", title_font_size=14,
+        yaxis_tickprefix="$", title_font_size=14, hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5),
+        margin=dict(t=80 if baseline_head_start_years else 60, b=90),
     )
+    if baseline_head_start_years:
+        # Without this the baseline's opening lead reads as a modelling error
+        # rather than as the head start the foregone-earnings option exists to
+        # represent.
+        fig.add_annotation(
+            x=0, y=1.10, xref="paper", yref="paper", showarrow=False,
+            xanchor="left", font=dict(size=11, color="#666666"),
+            text=(f"Baseline starts {baseline_head_start_years} years ahead — the high school "
+                  f"graduate was working while you were enrolled."),
+        )
+    fig.update_xaxes(dtick=1 if roi_window_years <= 15 else 5)
     return fig
 
 
@@ -3621,28 +3772,6 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
         labels={"year": "Years", "balance": "Remaining Balance ($)"},
     )
     fig.update_layout(yaxis_tickprefix="$", hovermode="x unified", title_font_size=14)
-    return fig
-
-
-def build_scenario_comparison_roi_chart(hs_net_position: float,
-                                         net_a: float, label_a: str,
-                                         net_b: float, label_b: str,
-                                         roi_window_years: int):
-    """3-bar version of build_roi_bar_chart: HS-grad baseline plus both
-    scenarios, for comparing net financial position directly."""
-    y_label = f"{roi_window_years}-Year Net Position ($)"
-    comparison_df = pd.DataFrame({
-        "Group": ["High School Graduate", label_a, label_b],
-        y_label: [hs_net_position, net_a, net_b],
-    })
-    fig = px.bar(
-        comparison_df, x="Group", y=y_label, color="Group",
-        title=f"{roi_window_years}-Year Net Position: Scenario Comparison",
-        text_auto=".2s",
-    )
-    fig.update_layout(
-        yaxis_tickprefix="$", showlegend=False, title_x=0.5, title_xanchor="center", title_font_size=14,
-    )
     return fig
 
 
@@ -4280,35 +4409,25 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     return _pdf_image_from_figure(fig)
 
 
-def build_pdf_roi_bar_chart(hs_net_position: float, major_net_position: float, major_name: str,
-                             roi_window_years: int) -> Image:
-    """PDF counterpart to build_roi_bar_chart."""
+def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int) -> Image:
+    """PDF counterpart to build_net_position_chart. Takes the same prebuilt
+    frame, so the two can't disagree about the trajectory -- what is hand-kept
+    in sync is the styling and the zero line (see CLAUDE.md on the chart
+    twins)."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
-    groups = ["High School Graduate", major_name]
-    values = [hs_net_position, major_net_position]
-    ax.bar(groups, values, color=["#636EFA", "#EF553B"])
-    ax.set_title(f"{roi_window_years}-Year Net Position vs. High School Baseline")
-    ax.set_ylabel(f"{roi_window_years}-Year Net Position ($)")
+    for label, group in frame.groupby("Series", sort=False):
+        ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
+                linewidth=2, label=label)
+    ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
+    ax.set_title(f"Net Position by Year (through year {roi_window_years})", fontsize=11)
+    ax.set_xlabel("Years after graduation")
+    ax.set_ylabel("Net Position ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
-    ax.tick_params(axis="x", labelsize=9)
-    fig.autofmt_xdate(rotation=10, ha="center")
-    return _pdf_image_from_figure(fig)
-
-
-def build_pdf_scenario_comparison_roi_chart(hs_net_position: float,
-                                             net_a: float, label_a: str,
-                                             net_b: float, label_b: str,
-                                             roi_window_years: int) -> Image:
-    """PDF counterpart to build_scenario_comparison_roi_chart."""
-    fig, ax = plt.subplots(figsize=(6, 3.5))
-    groups = ["High School Graduate", label_a, label_b]
-    values = [hs_net_position, net_a, net_b]
-    ax.bar(groups, values, color=["#636EFA", "#EF553B", "#00CC96"])
-    ax.set_title(f"{roi_window_years}-Year Net Position: Scenario Comparison")
-    ax.set_ylabel(f"{roi_window_years}-Year Net Position ($)")
-    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
-    ax.tick_params(axis="x", labelsize=9)
-    fig.autofmt_xdate(rotation=10, ha="center")
+    ax.grid(True, alpha=0.3)
+    legend = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
+                       ncol=2, frameon=False, fontsize=8)
+    for text in legend.get_texts():
+        text.set_parse_math(False)
     return _pdf_image_from_figure(fig)
 
 
@@ -4513,6 +4632,7 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
 def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_name_a: str = None,
                           interest_rate_a: float = None, scenario_b: dict = None, major_name_b: str = None,
                           interest_rate_b: float = None, col_index: float = 100.0,
+                          hs_wage_index: float = 1.0,
                           key_suffix_a: str = "a", key_suffix_b: str = "b",
                           roi_window_years: int = ROI_WINDOW_YEARS) -> list:
     """Optional PDF section(s) for whichever advanced modules were active --
@@ -4595,10 +4715,10 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         if scenario_a is not None:
             elements += [
                 Spacer(1, 12),
-                build_pdf_scenario_comparison_roi_chart(
-                    scenario_a["roi_result"]["hs_net_position"],
-                    scenario_a["roi_result"]["major_net_position"], major_name_a,
-                    module_context["apprenticeship_net_position"], module_context["apprenticeship_label"],
+                build_pdf_net_position_chart(
+                    apprenticeship_net_position_frame(
+                        scenario_a, major_name_a, module_context["apprenticeship_label"],
+                        col_index, hs_wage_index, roi_window_years),
                     roi_window_years,
                 ),
             ]
@@ -4778,8 +4898,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
             f"{city} -- that is what 'COL-Adjusted' means.",
             styles["caption"]),
         Spacer(1, 12),
-        build_pdf_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
-                                 roi_window_years),
+        build_pdf_net_position_chart(
+            net_position_frame([(major, scenario)], col_index,
+                                get_metro_wage_index(city), roi_window_years),
+            roi_window_years),
     ]
 
     # Mirrors the on-screen break-even banner -- same breakeven_summary call,
@@ -4801,7 +4923,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
 
     story += _pdf_module_sections(
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
-        col_index=col_index, key_suffix_a="single", roi_window_years=roi_window_years,
+        col_index=col_index, hs_wage_index=get_metro_wage_index(city),
+        key_suffix_a="single", roi_window_years=roi_window_years,
     )
     # Only cite the professional-school sources when this major actually uses
     # them -- listing AAMC on a Software Developer's report is noise.
@@ -4942,10 +5065,11 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
         ),
         Spacer(1, 12),
-        build_pdf_scenario_comparison_roi_chart(
-            scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
-            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
+        build_pdf_net_position_chart(
+            net_position_frame(
+                [(f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}", scenario_a),
+                 (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
+                col_index, get_metro_wage_index(city), roi_window_years),
             roi_window_years,
         ),
         *_pdf_resources_section(styles, [("Scenario A", school_name_a), ("Scenario B", school_name_b)]),
@@ -4958,7 +5082,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     story += _pdf_module_sections(
         module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
         scenario_b=scenario_b, major_name_b=major_b, interest_rate_b=interest_rate_b,
-        col_index=col_index, roi_window_years=roi_window_years,
+        col_index=col_index, hs_wage_index=get_metro_wage_index(city),
+        roi_window_years=roi_window_years,
     )
     story += _pdf_sources_section(
         styles, roi_window_years,
@@ -7286,10 +7411,12 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
     )
     pos_cols[2].metric(f"{alt_label} — {roi_window_years}-Yr Net Position", fmt_money(alt_net_position))
     st.plotly_chart(
-        build_scenario_comparison_roi_chart(
-            scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], major_name_a,
-            alt_net_position, alt_label, roi_window_years,
+        build_net_position_chart(
+            apprenticeship_net_position_frame(
+                scenario_a, major_name_a, alt_label,
+                col_index, get_metro_wage_index(city), roi_window_years),
+            roi_window_years,
+            baseline_head_start_years=scenario_a.get("enrollment_years", 0),
         ),
         use_container_width=True, key="apprenticeship_roi_chart", config=PLOTLY_CHART_CONFIG,
     )
@@ -7390,11 +7517,14 @@ if compare_mode:
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
     st.plotly_chart(
-        build_scenario_comparison_roi_chart(
-            scenario_a["roi_result"]["hs_net_position"],
-            scenario_a["roi_result"]["major_net_position"], f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
-            scenario_b["roi_result"]["major_net_position"], f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}",
+        build_net_position_chart(
+            net_position_frame(
+                [(f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}", scenario_a),
+                 (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
+                city_info["col_index"], get_metro_wage_index(city), roi_horizon_years),
             roi_horizon_years,
+            baseline_head_start_years=max(scenario_a["enrollment_years"],
+                                           scenario_b["enrollment_years"]),
         ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
@@ -7633,8 +7763,12 @@ else:
     )
 
     st.plotly_chart(
-        build_roi_bar_chart(roi_result["hs_net_position"], roi_result["major_net_position"], major,
-                             roi_horizon_years),
+        build_net_position_chart(
+            net_position_frame([(major, scenario)], city_info["col_index"],
+                                get_metro_wage_index(city), roi_horizon_years),
+            roi_horizon_years,
+            baseline_head_start_years=scenario["enrollment_years"],
+        ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
 
@@ -8073,6 +8207,20 @@ This is a simplified version of real federal IDR plans, not an exact
 copy of federal rules. For Medicine, Law, and Athletic Training, both
 options are calculated using your loan *plus* the extra training debt
 described above — not just the loan by itself.
+
+**Net Position by Year.** The chart under the headline figures plots each
+path's net position at the end of every year, not just at year 10. That's
+there because "who is ahead after ten years" and "when did they get ahead" are
+different questions, and the second one is usually the one being decided. A
+path that trains before it earns — medicine most of all — sits below zero for
+years and then climbs steeply; an endpoint alone reports that as a single
+verdict and hides the shape entirely. Every point is the same calculation as
+the headline number with the window shortened to that year, so the last point
+on the chart is exactly the figure above it, by construction rather than by
+coincidence. With *Count foregone earnings* on, the baseline starts several
+years ahead — the high school graduate was working while you were enrolled —
+and the chart says so above the plot, because that head start otherwise looks
+like the degree simply being behind.
 
 **How we calculate 10-Year ROI (return on investment).** We add up 10
 years of a major's earnings, subtract whatever loan payments you made
