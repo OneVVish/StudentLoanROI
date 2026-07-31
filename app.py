@@ -3995,13 +3995,19 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     """
     fig = px.line(
         frame, x="year", y="Net Position", color="Series", markers=True,
-        title=f"Net Position by Year (through year {roi_window_years})",
+        # "Net position" is accounting vocabulary; the reader is 17. The
+        # quantity is cumulative earnings minus loan payments, so say that.
+        # The frame's COLUMN stays "Net Position" -- it is the key the PDF
+        # twin and net_position_frame both read -- and only the displayed
+        # name changes here.
+        title=f"Money earned so far, after loan payments (through year {roi_window_years})",
         # "after graduation" rather than "after starting": with foregone
         # earnings counted, year 1 is the graduate's first working year while
         # the baseline already carries the enrolled years' wages, so the two
         # series do NOT begin level. Saying "starting" would misread that head
         # start as the degree simply being behind.
-        labels={"year": "Years after graduation"},
+        labels={"year": "Years after graduation",
+                 "Net Position": "Earned so far, after loan payments ($)"},
     )
     fig.update_traces(line=dict(width=3))
     # Zero line: the training-debt paths sit below it for years, and "below
@@ -4054,7 +4060,17 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
         title="Loan Balance Over Time",
         labels={"year": "Years", "balance": "Remaining Balance ($)"},
     )
-    fig.update_layout(yaxis_tickprefix="$", hovermode="x unified", title_font_size=14)
+    fig.update_layout(
+        yaxis_tickprefix="$", hovermode="x unified", title_font_size=14,
+        # Legend below rather than at the right, matching the net-position
+        # chart. Occupation names run long ("News Analysts, Reporters, and
+        # Journalists"), and a right-hand legend takes its width out of the
+        # plot -- squeezing the curves this chart exists to show, and worst
+        # exactly when the two labels are longest.
+        legend=dict(orientation="h", yanchor="bottom", y=-0.35,
+                     xanchor="center", x=0.5, title_text=""),
+        margin=dict(t=60, b=90),
+    )
     return fig
 
 
@@ -4927,9 +4943,10 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int) -> 
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
                 linewidth=2, label=label)
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
-    ax.set_title(f"Net Position by Year (through year {roi_window_years})", fontsize=11)
+    ax.set_title(f"Money earned so far, after loan payments (through year {roi_window_years})",
+                  fontsize=11)
     ax.set_xlabel("Years after graduation")
-    ax.set_ylabel("Net Position ($)")
+    ax.set_ylabel("Earned so far, after loan payments ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
     ax.grid(True, alpha=0.3)
     legend = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
@@ -8946,8 +8963,9 @@ copy of federal rules. For Medicine, Law, and Athletic Training, both
 options are calculated using your loan *plus* the extra training debt
 described above — not just the loan by itself.
 
-**Net Position by Year.** The chart under the headline figures plots each
-path's net position at the end of every year, not just at year 10. That's
+**Money earned so far, after loan payments.** The chart under the headline
+figures plots each path's position at the end of every year, not just at
+year 10. That's
 there because "who is ahead after ten years" and "when did they get ahead" are
 different questions, and the second one is usually the one being decided. A
 path that trains before it earns — medicine most of all — sits below zero for
