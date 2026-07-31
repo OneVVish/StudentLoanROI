@@ -5793,18 +5793,45 @@ if cc_transfer_a:
     )
 else:
     cc_note_a = ""
-st.sidebar.caption((
-    f"{coa_projection_note}"
-    f"{cc_note_a}"
-    f"→ **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal "
-    f"(incl. {fmt_money(cc_oop_a)} community college)"
-    if cc_transfer_a else
-    f"{coa_projection_note}"
-    f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
-    f"{fmt_money(personal_contribution_per_year_a)} personal "
-    f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
-    f"→ over {program_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
-).replace("$", r"\$"))
+# Simplified takes the loan from the school's reported median debt, so this
+# cost-based build-up describes a calculation that isn't driving anything --
+# printing it invites the reader to reconcile it against the Total Loan Amount
+# just below, two numbers that were never meant to agree. Detailed still shows
+# it in full, because there it IS the loan.
+#
+# The community-college line survives either way: its out-of-pocket total is a
+# real cost that enters total_investment in both modes, so suppressing it would
+# hide money the visitor actually spends.
+if loan_source_a == "personal":
+    _loan_note_a = (
+        f"{coa_projection_note}"
+        f"{cc_note_a}"
+        f"→ **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal "
+        f"(incl. {fmt_money(cc_oop_a)} community college)"
+        if cc_transfer_a else
+        f"{coa_projection_note}"
+        f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
+        f"{fmt_money(personal_contribution_per_year_a)} personal "
+        f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
+        f"→ over {program_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
+    )
+elif cc_transfer_a:
+    # Deliberately NOT cc_note_a: that string ends "...then N yrs at the 4-year
+    # school ($X/yr, financed)", which is a Detailed-mode statement. In
+    # Simplified nothing is financed at the per-year COA -- the loan is the
+    # school's flat reported median debt -- so reusing it would describe a
+    # calculation that isn't running. Only the out-of-pocket half survives,
+    # because that IS still charged, via total_investment.
+    _loan_note_a = (
+        f"{cc_years_a} yrs community college ({_work_note_a}"
+        f"{fmt_money(effective_cc_coa_per_year_a)}/yr, no loan) → "
+        f"**{fmt_money(cc_oop_a)}** paid out of pocket, counted as your personal "
+        f"contribution on top of the loan below."
+    )
+else:
+    _loan_note_a = ""
+if _loan_note_a:
+    st.sidebar.caption(_loan_note_a.replace("$", r"\$"))
 # The loan field default follows the active loan source (set by the Loan estimate
 # toggle above): the college-reported median debt in Simplified, the cost-based
 # personal calculation in Detailed.
@@ -6562,18 +6589,32 @@ if compare_mode:
             )
         else:
             cc_note_b = ""
-        st.caption((
-            f"{coa_projection_note_b}"
-            f"{cc_note_b}"
-            f"→ **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal "
-            f"(incl. {fmt_money(cc_oop_b)} community college)"
-            if cc_transfer_b else
-            f"{coa_projection_note_b}"
-            f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
-            f"{fmt_money(personal_contribution_per_year_b)} personal "
-            f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
-            f"→ over {program_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
-        ).replace("$", r"\$"))
+        # Same rule as Scenario A -- see there for why.
+        if loan_source_b == "personal":
+            _loan_note_b = (
+                f"{coa_projection_note_b}"
+                f"{cc_note_b}"
+                f"→ **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal "
+                f"(incl. {fmt_money(cc_oop_b)} community college)"
+                if cc_transfer_b else
+                f"{coa_projection_note_b}"
+                f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
+                f"{fmt_money(personal_contribution_per_year_b)} personal "
+                f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
+                f"→ over {program_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
+            )
+        elif cc_transfer_b:
+            # See Scenario A for why this doesn't reuse cc_note_b.
+            _loan_note_b = (
+                f"{cc_years_b} yrs community college ({_work_note_b}"
+                f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan) → "
+                f"**{fmt_money(cc_oop_b)}** paid out of pocket, counted as your personal "
+                f"contribution on top of the loan below."
+            )
+        else:
+            _loan_note_b = ""
+        if _loan_note_b:
+            st.caption(_loan_note_b.replace("$", r"\$"))
         # Mirrors Scenario A: default to the college-reported median debt when
         # available, else the cost-based personal calc. See A's block for why
         # the seen-guard is keyed on the active default. loan_source_b was already
