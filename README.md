@@ -148,6 +148,8 @@ To run the app yourself, you need your own free Supabase project:
      future_forecasting_active boolean,
      future_plan_selected text,
      scenario_b_future_plan_selected text,
+     -- Retained but no longer written: the Trade Apprenticeship module was
+     -- removed. Kept so the rows already holding these values stay readable.
      apprenticeship_active boolean,
      apprenticeship_net_position numeric,
      apprenticeship_earnings_premium numeric,

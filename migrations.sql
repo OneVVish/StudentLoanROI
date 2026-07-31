@@ -375,3 +375,85 @@ alter table scenario_shares
 alter table scenario_events
   add column if not exists hs_baseline_age_aware boolean,
   add column if not exists count_foregone_earnings boolean;
+
+-- ---------------------------------------------------------------------------
+-- 2026-07-31: Trade Apprenticeship module REMOVED -- no DDL, informational
+--
+-- The module rested on two hardcoded national constants ($52,000 year-1
+-- training wage, $86,000 on completion), the second footnoted by
+-- apprenticeship.gov itself as Kansas Dept. of Commerce reporting rather than
+-- a national census, with an invented growth ramp between them and no
+-- per-trade, per-occupation or per-geography variation. It was removed rather
+-- than repaired.
+--
+-- These five columns are DELIBERATELY NOT DROPPED:
+--     apprenticeship_active, apprenticeship_net_position,
+--     apprenticeship_earnings_premium, apprenticeship_used_profession_data,
+--     apprenticeship_label
+-- They stop being written from this date and will be NULL on every later row.
+-- Dropping them would destroy the history they already hold. A NULL here after
+-- 2026-07-31 means "module no longer exists", not "visitor left it off" --
+-- those two are indistinguishable in the data, so do not read NULL as opt-out.
+
+-- ---------------------------------------------------------------------------
+-- 2026-07-31: program length now drives the loan -- RUN BEFORE DEPLOYING
+--
+-- scenario_a/b_loan_basis   -- how the loan figure was derived:
+--     'cost_based'      Detailed mode, built from Cost of Attendance
+--     'reported'        Simplified, school's median completer debt as-is
+--     'reported_scaled' Simplified, scaled down for a program shorter than
+--                       four years (only at bachelor's-predominant schools;
+--                       at a 2-year school the institution median already
+--                       describes 2-year completers and is left alone)
+--     'no_program'      BLS says the career needs no degree, so zero
+-- scenario_a/b_reported_debt   -- the raw College Scorecard figure before any
+--     scaling, so a scaled row stays auditable. NULL in Detailed.
+-- scenario_a/b_program_years   -- enrollment years charged (0, 2 or 4).
+--
+-- WHY THIS IS A SERIES BREAK. Until now every career was charged four years of
+-- cost and enrollment. From this date, 430 of 825 occupations (52% of the
+-- list) that BLS says need no degree are charged NONE, and associate's-degree
+-- careers in Simplified mode are charged a scaled figure. The same school and
+-- career can therefore produce a different loan_amount, earnings_premium and
+-- roi_pct than it did yesterday, for a reason that is not visible in those
+-- columns.
+--
+-- Rows before this date have NULL in all three and CANNOT be reclassified
+-- retroactively -- the app didn't record which basis produced them. Do not
+-- pool across this date without conditioning on scenario_a_loan_basis; treat
+-- NULL as 'cost_based or reported, unknown which'.
+--
+-- Run this BEFORE deploying. Until the columns exist PostgREST rejects the
+-- WHOLE ROW on the unknown column (PGRST204) and the event is lost entirely --
+-- it does not merely drop the new fields, and it fails silently.
+alter table survey_responses
+  add column if not exists scenario_a_loan_basis text,
+  add column if not exists scenario_a_reported_debt numeric,
+  add column if not exists scenario_a_program_years integer,
+  add column if not exists scenario_b_loan_basis text,
+  add column if not exists scenario_b_reported_debt numeric,
+  add column if not exists scenario_b_program_years integer;
+
+alter table pdf_downloads
+  add column if not exists scenario_a_loan_basis text,
+  add column if not exists scenario_a_reported_debt numeric,
+  add column if not exists scenario_a_program_years integer,
+  add column if not exists scenario_b_loan_basis text,
+  add column if not exists scenario_b_reported_debt numeric,
+  add column if not exists scenario_b_program_years integer;
+
+alter table scenario_shares
+  add column if not exists scenario_a_loan_basis text,
+  add column if not exists scenario_a_reported_debt numeric,
+  add column if not exists scenario_a_program_years integer,
+  add column if not exists scenario_b_loan_basis text,
+  add column if not exists scenario_b_reported_debt numeric,
+  add column if not exists scenario_b_program_years integer;
+
+alter table scenario_events
+  add column if not exists scenario_a_loan_basis text,
+  add column if not exists scenario_a_reported_debt numeric,
+  add column if not exists scenario_a_program_years integer,
+  add column if not exists scenario_b_loan_basis text,
+  add column if not exists scenario_b_reported_debt numeric,
+  add column if not exists scenario_b_program_years integer;

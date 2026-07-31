@@ -946,27 +946,6 @@ def render_wage_distribution(occupation_name: str, compact: bool = False) -> Non
     )
 
 
-# Registered Apprenticeship benchmark for the "Alternative Pathway" card.
-# Year-1 training wage ($52,000) and average starting salary upon
-# completion ($86,000) bookend a two-phase illustrative wage curve: pay
-# ramps from the training wage up to the completion salary via a constant
-# growth rate across the typical training period (BLS notes apprentices
-# "earn about half of what a fully qualified worker makes" early on,
-# ramping up as they progress), then grows at this app's existing
-# HS_GRAD_GROWTH_RATE after completion, since no BLS per-occupation
-# trajectory exists past that point. Completion salary is
-# apprenticeship.gov's own published "Did You Know?" statistic (footnoted
-# there as sourced from Kansas Dept. of Commerce CRIS reporting -- not a
-# national census figure, but DOL's own current national benchmark
-# reference). Typical program length (~4 years, range 1-6) and the
-# "apprentices are paid wages, not charged tuition" framing are both from
-# BLS Career Outlook, "Apprenticeships: Outlook and wages in selected
-# occupations" (2019).
-APPRENTICESHIP_YEAR1_SALARY = 52000
-APPRENTICESHIP_COMPLETION_SALARY = 86000
-APPRENTICESHIP_TYPICAL_DEBT = 0
-APPRENTICESHIP_TRAINING_YEARS = 4
-
 # BLS Employment Projections' 8-category "Typical Education Needed for
 # Entry" taxonomy (see add_education_field.py / bls.gov/oes/additional.htm)
 # -- these five are below a bachelor's degree. Target Profession keeps
@@ -1031,20 +1010,32 @@ ROI_HORIZON_OPTIONS = [10, 15, 20, 30]
 UNDERGRAD_YEARS = 4
 
 # Enrollment length by BLS typical-entry-education, for occupations whose real
-# program isn't four years. Only the levels with a defensible standard length
-# belong here: an associate's degree is two years essentially everywhere, so
-# charging four years of Cost of Attendance to reach one overstated the debt by
-# roughly double at a public school, and by ~23x for the common case of a
-# two-year program done at a community college against a private four-year COA.
+# program isn't four years. Only levels with a defensible standard length
+# belong here.
 #
-# The other sub-baccalaureate levels are deliberately absent. "Postsecondary
-# nondegree award" spans a six-week certificate and an eighteen-month program;
-# "High school diploma or equivalent" implies no college cost at all, which
-# isn't a shorter program but a different model entirely (zero cost makes ROI%
-# divide by zero). Those stay flagged as mismodelled rather than guessed at --
-# see MISMODELLED_EDUCATION_LEVELS.
+# An associate's degree is two years essentially everywhere, so charging four
+# years of Cost of Attendance to reach one overstated the debt by roughly
+# double at a public school, and by ~23x for the common case of a two-year
+# program done at a community college against a private four-year COA.
+#
+# Zero is a real length, not a missing one. BLS says 430 of the 825
+# occupations in this dataset are entered with a high school diploma or no
+# credential at all -- 52% of the list -- and the model charged every one of
+# them four years of tuition and four years of foregone wages for a degree the
+# job never asks for. Zero years means no loan, no enrollment gap, and a
+# timeline that starts at 18 for both sides of the comparison. The earnings
+# comparison itself still stands and stays interesting: Nuclear Power Reactor
+# Operators need only a diploma and still out-earn the baseline heavily. What
+# goes away is a cost that was never incurred.
+#
+# "Postsecondary nondegree award" and "Some college, no degree" stay out. The
+# first spans a six-week certificate and an eighteen-month program; the second
+# has no defined end at all. A guess there would be indistinguishable from data
+# -- see MISMODELLED_EDUCATION_LEVELS.
 PROGRAM_YEARS_BY_EDUCATION = {
     "Associate's degree": 2,
+    "High school diploma or equivalent": 0,
+    "No formal educational credential": 0,
 }
 
 # The sub-baccalaureate levels this app still models with the wrong program
@@ -2030,6 +2021,16 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         "scenario_a_school_name": school_name_a or None,
         "scenario_a_major": major,
         "scenario_a_loan_amount": loan_amount,
+        # How that loan figure was arrived at. Without this the number alone
+        # can't say whether it was reported as-is, scaled down for a shorter
+        # program, built from cost, or zeroed because the career needs no
+        # degree -- and from this deploy the same school+career can yield a
+        # different figure than it did before. reported_debt keeps the raw
+        # Scorecard value so a scaled row stays auditable; program_years lets
+        # rows be split by era. See migrations.sql.
+        "scenario_a_loan_basis": loan_basis_a,
+        "scenario_a_reported_debt": reported_debt_a,
+        "scenario_a_program_years": program_years_a,
         "scenario_a_interest_rate": interest_rate,
         "scenario_a_repayment_strategy": repayment_strategy,
         "scenario_a_starting_salary": starting_salary,
@@ -2058,6 +2059,9 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
             "scenario_b_school_name": school_name_b or None,
             "scenario_b_major": major_b,
             "scenario_b_loan_amount": loan_amount_b,
+            "scenario_b_loan_basis": loan_basis_b,
+            "scenario_b_reported_debt": reported_debt_b,
+            "scenario_b_program_years": program_years_b,
             "scenario_b_interest_rate": interest_rate_b,
             "scenario_b_repayment_strategy": repayment_strategy_b,
             "scenario_b_starting_salary": starting_salary_b,
@@ -2591,7 +2595,13 @@ def fetch_median_debt(school_name: str, api_key: str):
         return None
     params = {
         "school.name": school_name,
-        "fields": "school.name,latest.aid.median_debt.completers.overall",
+        # predominant degree gates the Simplified scaling: 1=certificate,
+        # 2=associate, 3=bachelor, 4=graduate. At a 2-year institution the
+        # institution-wide median ALREADY describes associate's completers, so
+        # scaling it would halve a figure that was right -- see
+        # simplified_debt_scale.
+        "fields": ("school.name,latest.aid.median_debt.completers.overall,"
+                    "school.degrees_awarded.predominant"),
         "api_key": api_key,
     }
     try:
@@ -2609,6 +2619,7 @@ def fetch_median_debt(school_name: str, api_key: str):
         return {
             "name": top.get("school.name"),
             "median_debt": top.get("latest.aid.median_debt.completers.overall"),
+            "predominant_degree": top.get("school.degrees_awarded.predominant"),
         }
     except (requests.exceptions.RequestException, ValueError, KeyError):
         return None
@@ -2688,6 +2699,20 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
     the ROI comparison looks, which the visitor now chooses. Only
     total_paid_in_roi_window depends on the latter.
     """
+    # Nothing borrowed, nothing to repay. Without this the loop below still
+    # runs one month and reports a 0.1-year payoff on a $0 loan -- previously a
+    # curiosity only reachable by typing 0, now the resting state for the 430
+    # occupations BLS says need no degree.
+    if principal <= 0:
+        return {
+            "monthly_payment": 0.0,
+            "total_interest": 0.0,
+            "payoff_years": 0.0,
+            "schedule": pd.DataFrame([{"month": 0, "year": 0.0, "balance": 0.0}]),
+            "total_paid_in_roi_window": 0.0,
+            "forgiven_amount": 0.0,
+        }
+
     monthly_rate = annual_rate_pct / 100 / 12
     n_months = term_years * 12
 
@@ -3053,56 +3078,6 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
     return points
 
 
-def get_apprenticeship_salary_for_year(year_index: int) -> float:
-    """Two-phase illustrative wage curve for the Registered Apprenticeship
-    benchmark -- ramps from the year-1 training wage to the completion
-    salary via a constant growth rate across the training period (BLS:
-    apprentices "earn about half of what a fully qualified worker makes"
-    early on, ramping up as they progress), then grows at
-    HS_GRAD_GROWTH_RATE after completion, since no BLS per-occupation
-    trajectory exists past that point. See APPRENTICESHIP_* constants for
-    sourcing."""
-    training_periods = APPRENTICESHIP_TRAINING_YEARS - 1
-    training_growth_rate = (
-        (APPRENTICESHIP_COMPLETION_SALARY / APPRENTICESHIP_YEAR1_SALARY) ** (1 / training_periods) - 1
-    )
-    if year_index < training_periods:
-        return APPRENTICESHIP_YEAR1_SALARY * (1 + training_growth_rate) ** year_index
-    return APPRENTICESHIP_COMPLETION_SALARY * (1 + HS_GRAD_GROWTH_RATE) ** (year_index - training_periods)
-
-
-def calculate_apprenticeship_roi(hs_net_position: float, col_index: float = 100.0,
-                                  years: int = ROI_WINDOW_YEARS,
-                                  enrollment_years: int = 0) -> dict:
-    """Illustrative Registered Apprenticeship benchmark, computed the same
-    way calculate_roi computes a major's ROI, but from the two-phase wage
-    curve above instead of a MAJOR_DATA lookup. hs_net_position is passed
-    in (not recomputed) so this always compares against the exact same
-    HS-grad baseline already shown elsewhere on the page.
-
-    enrollment_years mirrors calculate_roi's foregone-earnings option, but
-    with the opposite sign for the trade path: an apprentice is *earning*
-    (the ramping training wage) during the very years a degree-seeker is in
-    college, so those years are added to the apprentice's own earning window
-    rather than charged against it. When the option is on, the HS baseline
-    passed in is already extended by the same enrollment_years, so all three
-    paths -- degree, apprentice, HS grad -- are compared over one consistent
-    span that starts at age 18 instead of at college graduation. With it off
-    (0) the apprentice earns over `years`, the original behaviour."""
-    apprentice_cumulative_earnings = sum(
-        get_apprenticeship_salary_for_year(y) for y in range(years + enrollment_years)
-    )
-    apprentice_net_position_nominal = apprentice_cumulative_earnings - APPRENTICESHIP_TYPICAL_DEBT
-    apprentice_net_position = adjust_for_cost_of_living(apprentice_net_position_nominal, col_index)
-    earnings_premium = apprentice_net_position - hs_net_position
-    roi_pct = (earnings_premium / APPRENTICESHIP_TYPICAL_DEBT * 100) if APPRENTICESHIP_TYPICAL_DEBT > 0 else None
-    return {
-        "apprentice_net_position": apprentice_net_position,
-        "earnings_premium": earnings_premium,
-        "roi_pct": roi_pct,
-    }
-
-
 def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per_year: float,
                                    grants_per_year: float, inflation_rate: float,
                                    years: int = UNDERGRAD_YEARS,
@@ -3182,6 +3157,82 @@ def federal_direct_cap(schedule: list, dependency: str) -> float:
         if row.get("phase") == "university":
             total += limits[min(row["year"], 4)]
     return min(total, FEDERAL_DIRECT_AGGREGATE_CAP.get(dependency, FEDERAL_DIRECT_AGGREGATE_CAP["dependent"]))
+
+
+def simplified_debt_scale(program_years: int, predominant_degree=None,
+                           dependency: str = "dependent") -> float:
+    """How much of a school's institution-wide median completer debt a
+    `program_years`-year program should be charged. 1.0 = charge it in full.
+
+    Simplified mode takes the loan straight from College Scorecard's
+    `median_debt.completers.overall`. That figure has NO time dimension -- it
+    is cumulative federal debt at exit, for whatever program each completer
+    took -- so at a four-year institution it describes a four-year path, and
+    handing it unchanged to a two-year career overstates the debt by more than
+    double.
+
+    Two conditions must BOTH hold before scaling:
+
+      1. The program is shorter than UNDERGRAD_YEARS.
+      2. The school predominantly awards bachelor's degrees or higher
+         (predominant_degree >= 3). This one is easy to miss and matters more.
+         At a community college "institution-wide" already MEANS associate's
+         completers -- there is no four-year blend to correct -- so scaling
+         would halve a figure that was already right. Verified against live
+         Scorecard data: Santa Monica College reports $6,450 with predominant
+         2, Washtenaw $13,310 with predominant 1; both are already two-year
+         figures. And associate's career + community college is exactly the
+         pairing this app steers people toward, so the naive version would be
+         most wrong where the app is most confident.
+
+    The ratio is cumulative federal Direct limits, `program_years` against
+    four, computed by reusing federal_direct_cap so it inherits the aggregate
+    clamp and cannot drift from the Detailed-mode cap logic. Two years gives
+    0.444, three gives 0.722.
+
+    On why that and not a plain years/UNDERGRAD_YEARS: 0.444 is NOT more
+    accurate than 0.500. For a median borrower at a low-cost school it is cost
+    that binds, not the federal limit. Its only claim is that it is derived
+    from a published federal schedule rather than picked, and that it is
+    dependency-invariant -- dependent 12,000/27,000 and independent
+    20,000/45,000 are both 0.4444, so `dependency` cannot swing it for any
+    length this app can produce. That matters because in Simplified mode the
+    dependency radio isn't even rendered, so the value may be a default the
+    visitor never saw.
+    """
+    if program_years >= UNDERGRAD_YEARS or program_years <= 0:
+        return 1.0
+    try:
+        if int(predominant_degree) < 3:
+            return 1.0
+    except (TypeError, ValueError):
+        # Unknown predominant level: don't scale. A wrong scale-down is worse
+        # than a known-conservative overstatement, since the app's whole
+        # failure mode is understating what a degree costs.
+        return 1.0
+    span = lambda n: federal_direct_cap(
+        [{"year": i, "phase": "university"} for i in range(1, n + 1)], dependency)
+    full = span(UNDERGRAD_YEARS)
+    return span(program_years) / full if full else 1.0
+
+
+def loan_amount_label(loan_basis: str, program_years: int) -> str:
+    """Label for the Total Loan Amount figure, matching how it was derived.
+
+    The previous label was `f"Total Loan Amount (all {program_years} years)"`
+    unconditionally, which was wrong in two different ways at once. For a
+    Simplified figure it asserted a length the Scorecard number does not have
+    -- that median is cumulative debt at exit with no time dimension at all --
+    and once associate's degrees started resolving to 2 it printed "all 2
+    years" over an unscaled four-year institution-wide figure.
+    """
+    if loan_basis == "no_program":
+        return "Total Loan Amount (no degree required)"
+    if loan_basis == "reported_scaled":
+        return f"Estimated Loan Amount ({program_years}-year program)"
+    if loan_basis == "reported":
+        return "Total Loan Amount (school-reported)"
+    return f"Total Loan Amount (all {program_years} years)"
 
 
 def split_loan_financing(effective_principal: float, federal_cap: float,
@@ -3295,7 +3346,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         "personal_contribution": personal_contribution,
         "total_investment": total_investment,
         # Stamp the enrollment-cost assumptions onto the scenario so every
-        # re-derivation off this dict (break-even, apprenticeship, the PDF)
+        # re-derivation off this dict (break-even, the net-position chart,
+        # the PDF)
         # reuses the exact values it was computed under, rather than each call
         # site re-reading the toggle and risking a mismatch -- the same class
         # of bug the hs_wage_index threading fixed.
@@ -3428,8 +3480,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
 
     Returns None for `headline` when the break-even shouldn't be shown at
     all: "this degree stops paying off at $X" is malformed when the model
-    charged four financed years to reach a job that never asked for them. The
-    apprenticeship module makes that point properly instead.
+    charged four financed years to reach a job that never asked for them.
 
     That gate is MISMODELLED_EDUCATION_LEVELS, not every sub-baccalaureate
     level. An associate's degree now costs the two years it actually takes
@@ -3438,7 +3489,13 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     the ones with no defensible standard length -- those stay suppressed.
     """
     typical_education = MAJOR_DATA.get(major_name, {}).get("typical_education", "")
-    if typical_education in MISMODELLED_EDUCATION_LEVELS:
+    # Two different reasons to stay silent, both ending in the same place.
+    # MISMODELLED: we're charging a length we don't believe, so the number
+    # would be built on a wrong premise. Zero program years: there is no degree
+    # to weigh, so "this degree stops paying off at $X" has no referent at all
+    # -- a career you can enter with a diploma doesn't have a debt ceiling.
+    if (typical_education in MISMODELLED_EDUCATION_LEVELS
+            or program_years_for_education(typical_education) == 0):
         return {"headline": None, "detail": None, "status": "not_applicable"}
 
     result = find_breakeven_loan(major_name, interest_rate, repayment_strategy,
@@ -3784,33 +3841,6 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
     return pd.DataFrame(rows)
 
 
-def apprenticeship_net_position_frame(scenario: dict, major_label: str, alt_label: str,
-                                       col_index: float, hs_wage_index: float,
-                                       roi_window_years: int) -> pd.DataFrame:
-    """The same tidy frame for the Trade Apprenticeship module: the degree
-    path, the high-school baseline, and the apprentice.
-
-    The apprentice's own year-by-year figure comes from
-    calculate_apprenticeship_roi with the window shortened the same way, and is
-    handed that year's baseline rather than the 10-year one -- so all three
-    lines are measured at the same point in time, which is the only way the
-    crossings mean anything.
-    """
-    points = build_net_position_series(scenario, col_index, hs_wage_index, roi_window_years)
-    rows = []
-    for point in points:
-        rows.append({"year": point["year"], "Series": "High School Graduate",
-                     "Net Position": point["hs"]})
-        rows.append({"year": point["year"], "Series": major_label,
-                     "Net Position": point["major"]})
-        alt = calculate_apprenticeship_roi(
-            point["hs"], col_index=col_index, years=point["year"],
-            enrollment_years=scenario.get("enrollment_years", 0))
-        rows.append({"year": point["year"], "Series": alt_label,
-                     "Net Position": alt["apprentice_net_position"]})
-    return pd.DataFrame(rows)
-
-
 def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
                               baseline_head_start_years: int = 0):
     """Net position year by year, for every path on the page plus the
@@ -3823,9 +3853,9 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     and a single year-10 bar reports that crossing as though it were the whole
     story.
 
-    Takes a prebuilt frame rather than scenarios so the scenario comparison and
-    the apprenticeship module render through one function instead of two that
-    can drift apart.
+    Takes a prebuilt frame rather than scenarios so the single-scenario and
+    compare cases render through one function instead of two that can drift
+    apart.
     """
     fig = px.line(
         frame, x="year", y="Net Position", color="Series", markers=True,
@@ -4756,8 +4786,8 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
     guarded per-module (see build_module_context) so a PDF generated with
     every module off is unchanged from before these modules existed.
     scenario_a/b, major_name_a/b, interest_rate_a/b, col_index, and
-    key_suffix_a/b are only used to redraw the 2026-forecasting and
-    Trade-Apprenticeship modules' chart images (recomputed here, never
+    key_suffix_a/b are only used to redraw the 2026-forecasting module's
+    chart images (recomputed here, never
     stored in module_context -- that dict is also spread directly into
     Supabase inserts elsewhere, so it must stay JSON-serializable
     scalars only, never a DataFrame or chart object)."""
@@ -4821,26 +4851,6 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
                                                         rap_res["schedule"], "RAP"),
                     Spacer(1, 12),
                 ]
-    if module_context.get("apprenticeship_active"):
-        elements += [
-            PageBreak(),
-            Paragraph("Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)", styles["section"]),
-            _pdf_table([
-                [f"{roi_window_years}-Yr Net Position (COL-Adjusted)", "Earnings Premium vs. HS Grad"],
-                [fmt_money(module_context["apprenticeship_net_position"]),
-                 fmt_money(module_context["apprenticeship_earnings_premium"])],
-            ]),
-        ]
-        if scenario_a is not None:
-            elements += [
-                Spacer(1, 12),
-                build_pdf_net_position_chart(
-                    apprenticeship_net_position_frame(
-                        scenario_a, major_name_a, module_context["apprenticeship_label"],
-                        col_index, hs_wage_index, roi_window_years),
-                    roi_window_years,
-                ),
-            ]
     return elements
 
 
@@ -4895,6 +4905,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
                                 scenario, take_home, gross, disposable_nominal,
                                 disposable_col_adjusted, module_context: dict = None,
                                 start_year_a=None, monthly_payment=None, col_index: float = 100.0,
+                              loan_basis_a: str = "cost_based", reported_debt_a=None,
                                 roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None,
                                 loan_source_a: str = "personal",
                                 federal_cap_a: float = None, gap_rate_a: float = None,
@@ -4912,10 +4923,23 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
     # the college-reported default, that table would contradict the total, so a
     # one-line note replaces it (the Total Loan Amount line below still shows the
     # figure actually used).
-    if loan_source_a == "college":
+    if loan_basis_a == "no_program":
+        loan_detail = [Paragraph(
+            "BLS lists no degree requirement for this career, so no tuition is financed "
+            "and none is charged against it.", styles["body"])]
+    elif loan_basis_a == "reported_scaled":
+        loan_detail = [Paragraph(
+            f"Loan is an ESTIMATE. College Scorecard reports {fmt_money(reported_debt_a)} "
+            "for this school -- one institution-wide median across completers of every "
+            "credential length, with no per-credential breakdown -- scaled by the ratio of "
+            "cumulative federal Direct borrowing limits for this program's length. Not a "
+            "reported figure. Use Detailed mode in the app to model your own cost and aid.",
+            styles["body"])]
+    elif loan_source_a == "college":
         loan_detail = [Paragraph(
             "Loan is this school's median completer debt (College Scorecard) -- the median "
-            "amount graduates who borrowed leave with -- not a per-year cost buildup. Use "
+            "amount graduates who borrowed leave with, across every credential length -- "
+            "not a per-year cost buildup. Use "
             "Switch to Detailed mode in the app to model your own cost and aid instead.",
             styles["body"])]
     else:
@@ -4957,7 +4981,11 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         Paragraph(_strip_emoji(f"💳 Loan Information — {scenario['strategy_label']}"), styles["section"]),
         *loan_detail,
         Spacer(1, 6),
-        Paragraph(f"Total Loan Amount (all {program_years_for_major(major)} years): "
+        # Label comes from the basis the sidebar already resolved -- deliberately
+        # NOT recomputed here from program_years_for_major, which would be a
+        # second independent derivation and exactly the twin-drift CLAUDE.md
+        # warns about for the chart pairs.
+        Paragraph(f"{loan_amount_label(loan_basis_a, program_years_for_major(major))}: "
                    f"{fmt_money(loan_amount)}", styles["body"]),
         *financing_line,
         Spacer(1, 6),
@@ -5523,8 +5551,9 @@ else:
 # cached fetch_median_debt). None in Prestige Mode (no real school) or when the
 # school has no reported figure -- the loan then falls back to the cost-based
 # personal calculation below, exactly as the app worked before this default.
-median_debt_a = None if enable_prestige_mode else (
-    (fetch_median_debt(school_name_a, scorecard_api_key) or {}).get("median_debt"))
+_debt_lookup_a = {} if enable_prestige_mode else (fetch_median_debt(school_name_a, scorecard_api_key) or {})
+median_debt_a = _debt_lookup_a.get("median_debt")
+predominant_degree_a = _debt_lookup_a.get("predominant_degree")
 
 # ---- Loan estimate mode: Simplified vs Detailed ------------------------
 # One global toggle drives both scenarios. Simplified uses the school's
@@ -5659,30 +5688,38 @@ else:
 _legacy_cc_a = get_shared_default("cc_a", "0") == "1"
 st.session_state.setdefault(
     "cc_mode_a", get_shared_default("cc_mode_a", "fulltime" if _legacy_cc_a else "none"))
-_cc_options_a, _cc_labels_a = cc_path_options(program_years_a)
-reconcile_cc_mode("cc_mode_a", _cc_options_a)
-cc_mode_a = st.sidebar.radio(
-    "Community college path",
-    options=_cc_options_a,
-    format_func=lambda c: _cc_labels_a[c],
-    key="cc_mode_a",
-    help=(
-        f"This profession is entered with a {program_years_a}-year degree, which a "
-        "community college can award on its own -- so there's no transfer, and "
-        "choosing this models the WHOLE program at community-college prices. "
-        if program_years_a <= COMMUNITY_COLLEGE_YEARS else
-        f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
-        "college, then transferring to the 4-year school above to finish the "
-        "SAME bachelor's -- earnings and the degree are unchanged, only the "
-        "cost of those years drops. "
-    ) +
-    "Community college is assumed paid without loans "
-    "(Pell/work/out-of-pocket), so it adds nothing to your debt. "
-    "'Part-time while working' means you work full-time during the "
-    "community-college years (earning, not foregoing income) -- its "
-    "earnings advantage shows up when 'count foregone earnings' is on. "
-    "Put a different path in each scenario to compare them. See Methodology.",
-)
+# A career needing no degree has no program for a community college to deliver,
+# so the selector is hidden rather than shown with nonsense options
+# (cc_path_options(0) would offer "the entire 0-year degree"). Forced to "none"
+# so every downstream cc_* derivation stays defined and zero.
+if program_years_a == 0:
+    st.session_state["cc_mode_a"] = "none"
+    cc_mode_a = "none"
+else:
+    _cc_options_a, _cc_labels_a = cc_path_options(program_years_a)
+    reconcile_cc_mode("cc_mode_a", _cc_options_a)
+    cc_mode_a = st.sidebar.radio(
+        "Community college path",
+        options=_cc_options_a,
+        format_func=lambda c: _cc_labels_a[c],
+        key="cc_mode_a",
+        help=(
+            f"This profession is entered with a {program_years_a}-year degree, which a "
+            "community college can award on its own -- so there's no transfer, and "
+            "choosing this models the WHOLE program at community-college prices. "
+            if program_years_a <= COMMUNITY_COLLEGE_YEARS else
+            f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a community "
+            "college, then transferring to the 4-year school above to finish the "
+            "SAME bachelor's -- earnings and the degree are unchanged, only the "
+            "cost of those years drops. "
+        ) +
+        "Community college is assumed paid without loans "
+        "(Pell/work/out-of-pocket), so it adds nothing to your debt. "
+        "'Part-time while working' means you work full-time during the "
+        "community-college years (earning, not foregoing income) -- its "
+        "earnings advantage shows up when 'count foregone earnings' is on. "
+        "Put a different path in each scenario to compare them. See Methodology.",
+    )
 cc_transfer_a = cc_mode_a != "none"
 is_parttime_a = cc_mode_a == "parttime"
 # Clamped to the program length: a 2-year program done at a community college
@@ -5842,10 +5879,29 @@ if _loan_note_a:
 # The loan field default follows the active loan source (set by the Loan estimate
 # toggle above): the college-reported median debt in Simplified, the cost-based
 # personal calculation in Detailed.
-if loan_source_a == "college":
-    default_loan_a = int(median_debt_a)
+#
+# loan_basis_a records WHICH of those produced the number, because by the time
+# it reaches a caption, a PDF or a Supabase row the figure alone can't say
+# whether it was reported as-is, scaled, or built from cost. All three names are
+# assigned on every branch so nothing downstream can NameError -- this is a flat
+# script, and the PDF call site reads them unconditionally.
+reported_debt_a = int(median_debt_a) if median_debt_a is not None else None
+simplified_scale_a = 1.0
+if program_years_a == 0:
+    # No degree, so no college debt to carry -- the school's reported figure
+    # describes people who did attend, and none of it applies here. Detailed
+    # already lands on 0 through an empty schedule; this is the Simplified
+    # equivalent, made explicit rather than left to the median.
+    default_loan_a = 0
+    loan_basis_a = "no_program"
+elif loan_source_a == "college":
+    simplified_scale_a = simplified_debt_scale(
+        program_years_a, predominant_degree_a, loan_dependency)
+    default_loan_a = int(round(reported_debt_a * simplified_scale_a))
+    loan_basis_a = "reported_scaled" if simplified_scale_a < 1.0 else "reported"
 else:
     default_loan_a = int(computed_loan_amount_a)
+    loan_basis_a = "cost_based"
 # Re-seed the overridable field whenever the active default itself moves -- a
 # school change or a mode switch flips it; editing cost/aid moves the personal
 # figure only when Detailed is driving. A manual override survives reruns that
@@ -5864,7 +5920,21 @@ loan_amount = st.sidebar.number_input(
          "years). Override with any amount -- e.g. a real financial aid offer -- and "
          "that's used everywhere below.",
 )
-if loan_source_a == "college":
+if loan_basis_a == "no_program":
+    st.sidebar.caption(
+        "No loan: BLS says this job needs no degree, so there's no tuition to finance. "
+        "Type an amount above if you're borrowing for training anyway."
+    )
+elif loan_basis_a == "reported_scaled":
+    # Never attach "the median debt graduates leave with" to a scaled number --
+    # that sentence describes the raw figure, and the raw figure is shown.
+    st.sidebar.caption((
+        f"Estimated: College Scorecard reports {fmt_money(reported_debt_a)} for "
+        f"{school_name_a} — institution-wide, across completers of every credential "
+        f"length. Scaled to {fmt_money(default_loan_a)} for this {program_years_a}-year "
+        "program. An estimate, not a reported figure."
+    ).replace("$", r"\$"))
+elif loan_source_a == "college":
     st.sidebar.caption((
         f"Simplified: median debt for graduates of {school_name_a} who borrowed "
         f"({fmt_money(default_loan_a)}, College Scorecard). Switch to Detailed to "
@@ -6084,21 +6154,33 @@ major = st.sidebar.selectbox(
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
 if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
     st.sidebar.caption((
-        f"ℹ️ {major}'s typical entry-level education (BLS: "
+        f"ℹ️ The typical entry-level education for {major} (BLS: "
         f"\"{typical_education_a}\") is below a bachelor's degree. This "
         f"app's Cost of Attendance/loan model below still assumes "
-        f"{UNDERGRAD_YEARS} years of undergraduate cost -- see Alternative "
-        "Pathway: Trade Apprenticeship (if enabled) for a comparison using "
-        "this profession's real path instead."
+        f"{UNDERGRAD_YEARS} years of undergraduate cost, because BLS doesn't "
+        "publish a standard length for this level -- treat the debt figures as "
+        "an upper bound."
+    ).replace("$", r"\$"))
+elif program_years_a == 0:
+    # A different statement from the two above: not "we're charging the wrong
+    # length" and not "we're charging a shorter one", but "there is nothing to
+    # charge". Said plainly, because a $0 loan with no explanation reads as a
+    # bug rather than as the answer.
+    st.sidebar.caption((
+        f"ℹ️ BLS gives the typical entry-level education for {major} as "
+        f"\"{typical_education_a}\" -- no degree required. So there's no "
+        "tuition, no loan, and no years of foregone wages charged against it. "
+        "The salary comparison below still applies."
     ).replace("$", r"\$"))
 elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
     # Not a warning: the cost model matches the real program here, so this
     # says what it's charging rather than apologising for what it isn't.
-    # Possessive phrasing, matching the sibling caption above: Career-mode
-    # names are plural BLS occupations ("Radiologic Technologists and
-    # Technicians"), so "{major} typically needs" disagrees in number.
+    # Phrased around the name rather than with a possessive or a verb: Career-
+    # mode names are plural BLS occupations ("Air Traffic Controllers"), so
+    # "{major}'s" renders as "Controllers's" and "{major} typically needs"
+    # disagrees in number. "The ... for {major}" sidesteps both.
     st.sidebar.caption((
-        f"ℹ️ {major}'s typical entry-level education (BLS: "
+        f"ℹ️ The typical entry-level education for {major} (BLS: "
         f"\"{typical_education_a}\") is below a bachelor's degree, so costs "
         f"below are modelled over {program_years_for_education(typical_education_a)} "
         f"years rather than {UNDERGRAD_YEARS} -- and the community-college path "
@@ -6184,20 +6266,14 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "the Repayment Assistance Plan (RAP) and the Tiered Standard Plan, "
              "both effective July 1, 2026. See Methodology.",
     )
-    enable_apprenticeship = st.checkbox(
-        "Enable Trade Apprenticeship Comparison", key="enable_apprenticeship",
-        help="Show a real DOL/BLS-sourced benchmark comparing a registered "
-             "apprenticeship's 10-year financial position against your "
-             "chosen major and a high school graduate -- see Methodology.",
-    )
     enable_foregone_earnings = st.checkbox(
         "Count foregone earnings during enrollment", key="count_foregone_earnings",
         help=f"Charge the ~{UNDERGRAD_YEARS} years of wages a student gives up "
              "while enrolled full-time -- usually the single largest real cost "
              "of a degree, bigger than tuition -- against the degree. The "
-             "debt-free high school graduate (and, when shown, the trade "
-             "apprentice) is credited with those head-start years of income, "
-             "so every path is compared from age 18 rather than from "
+             "debt-free high school graduate is credited with those "
+             "head-start years of income, so every path is compared from age "
+             "18 rather than from "
              "graduation. This lowers each degree's earnings premium and "
              "break-even. Off by default. See Methodology.",
     )
@@ -6327,16 +6403,22 @@ if compare_mode:
         typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
         if typical_education_b in MISMODELLED_EDUCATION_LEVELS:
             st.caption((
-                f"ℹ️ {major_b}'s typical entry-level education (BLS: "
+                f"ℹ️ The typical entry-level education for {major_b} (BLS: "
                 f"\"{typical_education_b}\") is below a bachelor's degree. "
                 f"This app's Cost of Attendance/loan model below still "
-                f"assumes {UNDERGRAD_YEARS} years of undergraduate cost -- see "
-                "Alternative Pathway: Trade Apprenticeship (if enabled) for a "
-                "comparison using this profession's real path instead."
+                f"assumes {UNDERGRAD_YEARS} years of undergraduate cost, because "
+                "BLS doesn't publish a standard length for this level -- treat "
+                "the debt figures as an upper bound."
+            ).replace("$", r"\$"))
+        elif program_years_b == 0:
+            st.caption((
+                f"ℹ️ BLS gives the typical entry-level education for {major_b} as "
+                f"\"{typical_education_b}\" -- no degree required, so no tuition, "
+                "loan or foregone wages are charged against it."
             ).replace("$", r"\$"))
         elif typical_education_b in PROGRAM_YEARS_BY_EDUCATION:
             st.caption((
-                f"ℹ️ {major_b}'s typical entry-level education (BLS: "
+                f"ℹ️ The typical entry-level education for {major_b} (BLS: "
                 f"\"{typical_education_b}\") is below a bachelor's degree, so "
                 f"costs below are modelled over "
                 f"{program_years_for_education(typical_education_b)} years "
@@ -6412,8 +6494,9 @@ if compare_mode:
         # section, but resolves college-vs-personal against its OWN reported debt,
         # so B falls back to Detailed inputs when its school has no figure even
         # while A stays Simplified.
-        median_debt_b = None if enable_prestige_mode else (
-            (fetch_median_debt(school_name_b, scorecard_api_key) or {}).get("median_debt"))
+        _debt_lookup_b = {} if enable_prestige_mode else (fetch_median_debt(school_name_b, scorecard_api_key) or {})
+        median_debt_b = _debt_lookup_b.get("median_debt")
+        predominant_degree_b = _debt_lookup_b.get("predominant_degree")
         loan_source_b = "college" if (effective_loan_mode == "Simplified" and median_debt_b is not None) else "personal"
         _start_year_opts_b = list(range(now_local().year, now_local().year + 8))
         st.session_state.setdefault("start_year_b", get_shared_int("start_year_b", now_local().year))
@@ -6473,27 +6556,32 @@ if compare_mode:
         _legacy_cc_b = get_shared_default("cc_b", "0") == "1"
         st.session_state.setdefault(
             "cc_mode_b", get_shared_default("cc_mode_b", "fulltime" if _legacy_cc_b else "none"))
-        _cc_options_b, _cc_labels_b = cc_path_options(program_years_b)
-        reconcile_cc_mode("cc_mode_b", _cc_options_b)
-        cc_mode_b = st.radio(
-            "Community college path",
-            options=_cc_options_b,
-            format_func=lambda c: _cc_labels_b[c],
-            key="cc_mode_b",
-            help=(
-                f"This profession is entered with a {program_years_b}-year degree, "
-                "which a community college can award on its own -- no transfer, so "
-                "this models the WHOLE program at community-college prices. "
-                if program_years_b <= COMMUNITY_COLLEGE_YEARS else
-                f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
-                "community college, then transferring to finish the SAME "
-                "bachelor's. "
-            ) +
-            "Community college is assumed paid without loans, "
-            "so it adds nothing to the debt. 'Part-time while working' "
-            "means you work full-time during the community-college years. "
-            "See Methodology.",
-        )
+        # Hidden at zero program years -- see Scenario A for why.
+        if program_years_b == 0:
+            st.session_state["cc_mode_b"] = "none"
+            cc_mode_b = "none"
+        else:
+            _cc_options_b, _cc_labels_b = cc_path_options(program_years_b)
+            reconcile_cc_mode("cc_mode_b", _cc_options_b)
+            cc_mode_b = st.radio(
+                "Community college path",
+                options=_cc_options_b,
+                format_func=lambda c: _cc_labels_b[c],
+                key="cc_mode_b",
+                help=(
+                    f"This profession is entered with a {program_years_b}-year degree, "
+                    "which a community college can award on its own -- no transfer, so "
+                    "this models the WHOLE program at community-college prices. "
+                    if program_years_b <= COMMUNITY_COLLEGE_YEARS else
+                    f"Model the first {COMMUNITY_COLLEGE_YEARS} years at a "
+                    "community college, then transferring to finish the SAME "
+                    "bachelor's. "
+                ) +
+                "Community college is assumed paid without loans, "
+                "so it adds nothing to the debt. 'Part-time while working' "
+                "means you work full-time during the community-college years. "
+                "See Methodology.",
+            )
         cc_transfer_b = cc_mode_b != "none"
         is_parttime_b = cc_mode_b == "parttime"
         cc_years_b = min(COMMUNITY_COLLEGE_YEARS, program_years_b) if cc_transfer_b else 0
@@ -6606,10 +6694,21 @@ if compare_mode:
         # the seen-guard is keyed on the active default. loan_source_b was already
         # resolved above (from the global toggle + B's own reported debt); here we
         # just pick the matching default figure.
-        if loan_source_b == "college":
-            default_loan_b = int(median_debt_b)
+        # Mirrors Scenario A -- see there for why all three names are assigned
+        # on every branch.
+        reported_debt_b = int(median_debt_b) if median_debt_b is not None else None
+        simplified_scale_b = 1.0
+        if program_years_b == 0:
+            default_loan_b = 0
+            loan_basis_b = "no_program"
+        elif loan_source_b == "college":
+            simplified_scale_b = simplified_debt_scale(
+                program_years_b, predominant_degree_b, loan_dependency)
+            default_loan_b = int(round(reported_debt_b * simplified_scale_b))
+            loan_basis_b = "reported_scaled" if simplified_scale_b < 1.0 else "reported"
         else:
             default_loan_b = int(computed_loan_amount_b)
+            loan_basis_b = "cost_based"
         if st.session_state.get("default_loan_b_seen") != default_loan_b:
             st.session_state["default_loan_b_seen"] = default_loan_b
             st.session_state["loan_amount_b"] = default_loan_b
@@ -6623,7 +6722,19 @@ if compare_mode:
                  "and Grants, over 4 years). Override with any amount -- e.g. a real "
                  "financial aid offer -- used everywhere below.",
         )
-        if loan_source_b == "college":
+        if loan_basis_b == "no_program":
+            st.caption(
+                "No loan: BLS says this job needs no degree, so there's no tuition "
+                "to finance."
+            )
+        elif loan_basis_b == "reported_scaled":
+            st.caption((
+                f"Estimated: College Scorecard reports {fmt_money(reported_debt_b)} for "
+                f"{school_name_b} — institution-wide, across every credential length. "
+                f"Scaled to {fmt_money(default_loan_b)} for this {program_years_b}-year "
+                "program. An estimate, not a reported figure."
+            ).replace("$", r"\$"))
+        elif loan_source_b == "college":
             st.caption((
                 f"Simplified: median debt for graduates of {school_name_b} who borrowed "
                 f"({fmt_money(default_loan_b)}, College Scorecard). Switch to Detailed to "
@@ -7511,119 +7622,8 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
     return context
 
 
-def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index: float = 100.0,
-                                   roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
-    """Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark) --
-    independent module. When major_name_a itself typically requires less
-    than a bachelor's degree (per BLS's typical-entry-level-education data,
-    see SUB_BACHELORS_EDUCATION_LEVELS), shows that profession's own real
-    BLS earnings without this app's usual 4-year-loan assumption instead of
-    the generic national trade benchmark -- a more specific, more accurate
-    comparison for that exact path. See APPRENTICESHIP_* constants and
-    calculate_apprenticeship_roi for the generic benchmark's sourcing."""
-    st.subheader("🔨 Alternative Pathway: Trade Apprenticeship (Illustrative Benchmark)")
-    typical_education = MAJOR_DATA.get(major_name_a, {}).get("typical_education", "")
-    uses_own_profession_data = typical_education in SUB_BACHELORS_EDUCATION_LEVELS
-    # Read the foregone-earnings assumption off the scenario it's compared
-    # against, so the trade path and the degree share one age-18 timeline (see
-    # calculate_roi / calculate_apprenticeship_roi). 0 when the option is off.
-    # working_years deliberately does NOT propagate here: it's a major-side-only
-    # effect of the degree-seeker's part-time community college, and the
-    # apprentice path (and the shared hs_net_position, which is unchanged across
-    # CC modes) is independent of whether the degree was reached via CC.
-    enrollment_years = scenario_a.get("enrollment_years", 0)
-
-    if uses_own_profession_data:
-        st.caption(
-            f"{major_name_a}'s typical entry-level education (BLS: "
-            f"\"{typical_education}\") is below a bachelor's degree, so this "
-            "shows YOUR chosen profession's own real BLS earnings without "
-            "the 4-year loan this app otherwise assumes -- not the generic "
-            "national trade benchmark. See Methodology for citations."
-        )
-        quick_facts = st.columns(2)
-        quick_facts[0].metric("Starting Salary (BLS)", fmt_money(MAJOR_DATA[major_name_a]["starting_salary"]))
-        quick_facts[1].metric("Assumed Loan for This Path", fmt_money(0))
-        # A sub-bachelor's profession works immediately -- it forgoes no
-        # enrollment years -- so the option must not penalise it. Extending
-        # BOTH sides by enrollment_years (via a longer window, enrollment_years
-        # left at 0) keeps the age-18 timeline consistent with the degree while
-        # charging this path no foregone-earnings gap.
-        # This path works from 18 (it forgoes no enrollment years), so its
-        # timeline year 0 IS age 18 -- hence HS_GRAD_START_AGE directly rather
-        # than baseline_start_age_for's graduation offset. Whether the
-        # age-aware baseline is on is read off the scenario it's compared
-        # against, so the two sides can't end up on different baselines.
-        _age_aware = scenario_a.get("baseline_start_age") is not None
-        alt_result = calculate_roi(major_name_a, 0, 0, col_index=col_index,
-                                   years=roi_window_years + enrollment_years,
-                                   baseline_start_age=HS_GRAD_START_AGE if _age_aware else None)
-        alt_net_position = alt_result["major_net_position"]
-        alt_earnings_premium = alt_result["earnings_premium"]
-        alt_label = f"{major_name_a} (No 4-Yr Loan)"
-    else:
-        st.caption(
-            "A single national reference point from U.S. Dept. of Labor sources "
-            "-- not this app's per-major BLS pipeline -- for comparing college "
-            "against not going. Typical program length ranges 1-6 years "
-            "depending on the trade. See Methodology for exact citations and "
-            "caveats."
-        )
-        quick_facts = st.columns(4)
-        quick_facts[0].metric("Year 1 Training Wage", fmt_money(APPRENTICESHIP_YEAR1_SALARY))
-        quick_facts[1].metric("Starting Salary After Completion", fmt_money(APPRENTICESHIP_COMPLETION_SALARY))
-        quick_facts[2].metric("Typical Program Length", f"~{APPRENTICESHIP_TRAINING_YEARS} yrs")
-        quick_facts[3].metric("Typical Training Debt", fmt_money(APPRENTICESHIP_TYPICAL_DEBT))
-        apprenticeship_result = calculate_apprenticeship_roi(
-            scenario_a["roi_result"]["hs_net_position"], col_index=col_index,
-            years=roi_window_years, enrollment_years=enrollment_years,
-        )
-        alt_net_position = apprenticeship_result["apprentice_net_position"]
-        alt_earnings_premium = apprenticeship_result["earnings_premium"]
-        alt_label = "Trade Apprenticeship"
-
-    st.markdown(f"**{roi_window_years}-Year Financial Position: {alt_label} vs. Your Path**")
-    st.caption(
-        "Same High School Graduate baseline and cost-of-living adjustment "
-        "used everywhere else on this page." if uses_own_profession_data else
-        "Same High School Graduate baseline and cost-of-living adjustment "
-        "used everywhere else on this page -- apprenticeship earnings ramp "
-        "from the training wage to the completion salary above, then grow "
-        "at this app's existing high-school-grad wage-growth assumption "
-        "(no BLS per-occupation trajectory exists past completion)."
-    )
-    pos_cols = st.columns(3)
-    pos_cols[0].metric(
-        f"High School Grad — {roi_window_years}-Yr Net Position (No Loan)",
-        fmt_money(scenario_a["roi_result"]["hs_net_position"]),
-    )
-    pos_cols[1].metric(
-        f"{major_name_a} — {roi_window_years}-Yr Net Position", fmt_money(scenario_a["roi_result"]["major_net_position"]),
-    )
-    pos_cols[2].metric(f"{alt_label} — {roi_window_years}-Yr Net Position", fmt_money(alt_net_position))
-    st.plotly_chart(
-        build_net_position_chart(
-            apprenticeship_net_position_frame(
-                scenario_a, major_name_a, alt_label,
-                col_index, get_metro_wage_index(city), roi_window_years),
-            roi_window_years,
-            baseline_head_start_years=scenario_a.get("enrollment_years", 0),
-        ),
-        use_container_width=True, key="apprenticeship_roi_chart", config=PLOTLY_CHART_CONFIG,
-    )
-
-    return {
-        "apprenticeship_active": True,
-        "apprenticeship_net_position": alt_net_position,
-        "apprenticeship_earnings_premium": alt_earnings_premium,
-        "apprenticeship_used_profession_data": uses_own_profession_data,
-        "apprenticeship_label": alt_label,
-    }
-
-
 def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
-                          ai_context: dict = None, future_context: dict = None,
-                          apprenticeship_context: dict = None) -> dict:
+                          ai_context: dict = None, future_context: dict = None) -> dict:
     """Flat {column_name: value} dict of whichever optional advanced modules
     are active, in the same shape build_scenario_context already uses --
     merged into every save_survey_response/save_pdf_download/
@@ -7638,8 +7638,9 @@ def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
         context.update(ai_context)
     if future_context:
         context.update(future_context)
-    if apprenticeship_context:
-        context.update(apprenticeship_context)
+    # The Trade Apprenticeship module was removed (see migrations.sql). Its
+    # apprenticeship_* columns are retained in Supabase and simply stop being
+    # written -- dropping them would destroy the history they already hold.
     return context
 
 
@@ -7734,15 +7735,10 @@ if compare_mode:
                                                           hs_wage_index=get_metro_wage_index(city),
                                                           roi_window_years=roi_horizon_years)
 
-    apprenticeship_context = {}
-    if enable_apprenticeship:
-        apprenticeship_context = render_apprenticeship_section(
-            scenario_a, major, col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
-
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None,
         prestige_tier_b if enable_prestige_mode else None,
-        ai_context, future_context, apprenticeship_context,
+        ai_context, future_context,
     )
 
     # Runs on every rerun; maybe_log_scenario_event dedupes so only an actual
@@ -7850,14 +7846,35 @@ else:
         years=program_years_a,
         cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
     )
-    if loan_source_a == "college":
+    if loan_basis_a == "no_program":
+        st.caption(
+            "BLS lists no degree requirement for this career, so nothing is financed "
+            "and no tuition is charged against it. The earnings comparison below still "
+            "applies -- it's the cost side that goes to zero, not the pay."
+        )
+    elif loan_basis_a == "reported_scaled":
+        st.caption((
+            f"This uses **{fmt_money(default_loan_a)}** -- an **estimate**, not a reported "
+            f"figure. College Scorecard publishes {fmt_money(reported_debt_a)} for "
+            f"{school_name_a}, but that is one institution-wide median blending completers "
+            "of every credential length, with no per-year or per-credential breakdown. We "
+            f"scale it by the ratio of cumulative federal Direct borrowing limits, "
+            f"{program_years_a} years against {UNDERGRAD_YEARS} "
+            f"(**{simplified_scale_a * 100:.0f}%**), because the Scorecard figure counts "
+            "**federal loans only** and federal limits are what bound federal borrowing. "
+            "Direct PLUS and private borrowing aren't included either way, so a student "
+            "who needed those owes more. Switch to Detailed mode to model your own cost, "
+            "aid, and gap financing instead."
+        ).replace("$", r"\$"))
+    elif loan_source_a == "college":
         # The loan is the college-reported figure, not a per-year cost buildup, so
         # a year-by-year COA->loan table would contradict the total. Show the
         # reported number instead; the cost-based per-year breakdown appears only
         # when the personal calc is actually the loan in use.
         st.caption((
             f"This uses **{fmt_money(default_loan_a)}** -- the median debt graduates of "
-            f"{school_name_a} who borrowed leave with (College Scorecard). It counts "
+            f"{school_name_a} who borrowed leave with (College Scorecard), across "
+            "completers of every credential length. It counts "
             "**federal loans only** -- Direct PLUS and private borrowing aren't included, "
             "so a student who needed those owes more. Switch to Detailed mode in the "
             "sidebar to model your own cost, aid, and gap financing instead."
@@ -7874,7 +7891,7 @@ else:
              "Loan Amount This Year": fmt_money(row["loan_amount"])}
             for row in loan_schedule_a
         ]))
-    st.metric(f"Total Loan Amount (all {program_years_a} years)", fmt_money(loan_amount))
+    st.metric(loan_amount_label(loan_basis_a, program_years_a), fmt_money(loan_amount))
     # "Overridden" is measured against whichever default is active, so the note
     # only fires on a real manual change (not on the expected college-vs-personal
     # gap that exists by design).
@@ -8035,14 +8052,8 @@ else:
                                                           hs_wage_index=get_metro_wage_index(city),
                                                           roi_window_years=roi_horizon_years)
 
-    apprenticeship_context = {}
-    if enable_apprenticeship:
-        apprenticeship_context = render_apprenticeship_section(
-            scenario, major, col_index=city_info["col_index"], roi_window_years=roi_horizon_years)
-
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None, None, ai_context, future_context,
-        apprenticeship_context,
     )
 
     # See the Compare Mode branch above -- same dedupe-on-rerun logging, for
@@ -8062,6 +8073,7 @@ else:
         module_context=module_context, start_year_a=start_year_a, monthly_payment=monthly_payment,
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
         loan_source_a=loan_source_a,
+        loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
         federal_cap_a=federal_cap_a, gap_rate_a=gap_rate_a, include_fees=True,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     )
@@ -8244,9 +8256,9 @@ selecting a profession that typically requires less than a bachelor's
 degree shows a disclosure, since this app's Cost of Attendance/loan model
 otherwise assumes 4 years of undergraduate cost for every major. It's
 kept in the dropdown rather than removed -- it's still a real career a
-student might be evaluating. See Alternative Pathway: Trade Apprenticeship
-below, which uses that profession's own real BLS earnings instead of the
-generic national trade benchmark whenever this applies.
+student might be evaluating. Where BLS does publish a standard length, the
+model uses it: an associate's degree is charged two years, and a job needing no
+degree at all is charged none. See "How long we assume you're enrolled" below.
 
 **Which geography a salary comes from.** You don't pick this — it follows the
 city you pick. For each occupation we take the finest geography BLS actually
@@ -8338,12 +8350,43 @@ set per year in school), the foregone-earnings option, and the break-even.
 Picking the community-college path on a two-year program covers the whole
 program rather than half of it.
 
-We don't guess at the other sub-bachelor's levels. "Postsecondary nondegree
+**And zero years for a job that needs no degree.** BLS says 430 of the 825
+occupations here are entered with a high school diploma or no credential at all
+— 52% of the list — and until recently every one of them was charged four years
+of tuition and four years of given-up wages for a degree the job never asks
+for. They're now charged none: no loan, no enrollment gap, no break-even. What
+doesn't change is the pay comparison, and that's the point — a nuclear power
+reactor operator needs no degree and still earns far above the high-school
+median. The cost side goes to zero; the earnings side stands.
+
+We still don't guess at the remaining two levels. "Postsecondary nondegree
 award" covers everything from a six-week certificate to an eighteen-month
-program, and "high school diploma" implies no college cost at all — which is a
-different model, not a shorter one. Those still get four years and say so on
-screen, and we suppress the break-even for them rather than print a number
-built on a length we don't believe.
+program, and "some college, no degree" has no defined end at all. Those still
+get four years, say so on screen, and have their break-even suppressed rather
+than printing a number built on a length we don't believe.
+
+**One more place length matters: the Simplified loan.** In Simplified mode the
+loan is the school's median completer debt from College Scorecard. That is a
+single institution-wide number covering everyone who finished — two-year and
+four-year completers together — and it carries no per-year or per-credential
+breakdown at all. For a two-year career at a four-year school, handing it over
+unchanged charges roughly double. So we scale it by the ratio of cumulative
+federal Direct borrowing limits, two years against four (44%), on the grounds
+that the Scorecard figure counts federal loans only and federal limits are what
+bound federal borrowing. It's shown as an **estimate**, with the raw published
+figure beside it.
+
+We do not scale it at a community college. There, "institution-wide" already
+means two-year completers, so the reported number is already the right one and
+halving it would introduce the very error we're trying to remove. The test is
+the school's predominant credential, not the career's length.
+
+Why not just look up debt for two-year programs directly? Scorecard does
+publish it, per program of study — but only per individual CIP program, never
+rolled up to a school-level associate's figure, and it's suppressed wherever
+too few borrowers finished that exact program. At the community colleges where
+this matters most, that's often every program. An estimate we can explain beat
+a real number we mostly can't get.
 
 **Where the pay actually lands (Target Profession mode).** Under the salary
 figures we draw the spread of what people in that occupation really earn. BLS
@@ -8829,24 +8872,6 @@ behaves exactly as described above when all five are left off.
   2026/2028 effective dates. The cost-of-living comparison in this section
   reuses this app's own real per-city data (BEA Regional Price Parities, see
   above) — not a separate, flat percentage assumption.
-- **Alternative Pathway: Trade Apprenticeship.** A single national
-  reference point, not this app's per-major BLS pipeline. Year-1 training
-  wage ($52,000) and average starting salary upon completion ($86,000) are
-  apprenticeship.gov's own published statistics (the completion figure is
-  footnoted there as sourced from Kansas Dept. of Commerce CRIS reporting —
-  a single state's data, not a national census, though it's DOL's own
-  current national benchmark reference). Between those two points, pay is
-  modeled as ramping up at a constant rate across the typical training
-  period — real registered-apprenticeship pay schedules do step up as
-  apprentices progress, per BLS Career Outlook, ["Apprenticeships: Outlook
-  and wages in selected occupations"](https://www.bls.gov/careeroutlook/2019/article/apprenticeships-outlook-wages-update.htm)
-  (2019), which also documents typical program length (~4 years, range 1-6)
-  and that apprentices are paid wages during training rather than charged
-  tuition — hence $0 typical training debt. After completion, earnings grow
-  at this app's existing high-school-graduate wage-growth assumption (see
-  above), since no BLS per-occupation trajectory exists past that point.
-  **This is one illustrative national benchmark, not a personalized
-  estimate for any specific trade or apprenticeship program.**
 - **Count foregone earnings during enrollment.** By default this calculator
   starts its earnings clock at *graduation*: it compares a graduate's first
   N years of post-degree salary against a high-school graduate's same N
@@ -8861,10 +8886,8 @@ behaves exactly as described above when all five are left off.
   entered with an associate's degree is charged two years of cost and two
   years of foregone wages, because that is how long it takes. Concretely: the high-school graduate is credited with ~4 extra
   years of earnings at the front, the degree-seeker earns nothing during
-  enrollment, and — when the Trade Apprenticeship module is also on — the
-  apprentice, who *is* paid during those years, is credited with them too (a
-  job that doesn't need a 4-year degree is likewise never charged for time it
-  didn't spend in school). This lowers each degree's earnings premium and
+  enrollment, and a career that needs no degree is never charged for time it
+  didn't spend in school. This lowers each degree's earnings premium and
   break-even, often by a lot, and is the more complete way to compare. It
   only changes the *earnings* side of the comparison — the tuition and debt
   you put in stay the same — so the ROI% still reads as "how much you come out
