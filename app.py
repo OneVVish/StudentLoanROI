@@ -443,10 +443,8 @@ def hs_wage_for_timeline_year(year_index: int, hs_wage_index: float,
     return wage * hs_age_factor(baseline_start_age + year_index)
 
 
-def baseline_start_age_for(program_years: int, enrollment_years: int,
-                            age_aware: bool) -> int:
-    """The age the high-school baseline's timeline starts at, or None to keep
-    the flat all-ages baseline.
+def baseline_start_age_for(program_years: int, enrollment_years: int) -> int:
+    """The age the high-school baseline's timeline starts at.
 
     The offset is the subtle part, so it lives in one place. With foregone
     earnings counted the timeline starts the year the graduate would have
@@ -454,9 +452,14 @@ def baseline_start_age_for(program_years: int, enrollment_years: int,
     graduation, so year 0 is age 18 + however long the program ran -- the high
     school graduate is the same age as the graduate at that moment, just with
     more years of earnings behind them.
+
+    There is no longer an off switch: the app always compares against the age
+    curve, because a flat age-25+ median is simply the wrong figure for an
+    18-year-old and there is no reading of the data on which it is right.
+    calculate_roi still accepts baseline_start_age=None for the flat behaviour,
+    which is what analyze_model.py gets by not passing one -- that keeps the
+    paper able to reproduce the pre-curve model on demand.
     """
-    if not age_aware:
-        return None
     if enrollment_years:
         return HS_GRAD_START_AGE
     return HS_GRAD_START_AGE + program_years
@@ -2011,7 +2014,11 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # off; it stops being survivable the moment one defaults on, because
         # rows would then differ from earlier ones with nothing recording why.
         # Read both when aggregating -- see migrations.sql.
-        "hs_baseline_age_aware": bool(st.session_state.get("age_aware_hs_baseline", True)),
+        # Constant True since the switch was removed -- the app has no flat-
+        # baseline mode any more. Still written, because rows from before the
+        # age curve carry NULL/false and the column is what tells the two eras
+        # apart; dropping it would make them indistinguishable.
+        "hs_baseline_age_aware": True,
         "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", False)),
         "loan_mode": st.session_state.get("loan_mode", "Simplified"),  # Simplified / Detailed
         "cc_mode_a": cc_mode_a,                                         # none / fulltime / parttime
@@ -6194,27 +6201,6 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "graduation. This lowers each degree's earnings premium and "
              "break-even. Off by default. See Methodology.",
     )
-    # Defaults ON. It previously defaulted off on the argument that it moves
-    # results in this tool's own favour and so shouldn't be applied silently.
-    # That argument is about which way the error points, not about which figure
-    # is right: a flat age-25+ median is simply wrong for an 18-year-old, and
-    # defaulting to a number we can show is wrong in order to look conservative
-    # is its own kind of dishonesty. The switch stays so the published-figure
-    # comparison remains reachable, and the Methodology states plainly which
-    # way turning it off moves things.
-    st.session_state.setdefault("age_aware_hs_baseline", True)
-    enable_age_aware_baseline = st.checkbox(
-        "Age-aware high school baseline", key="age_aware_hs_baseline",
-        help="ON by default. BLS's high-school figure is a median for everyone "
-             "aged 25 and up -- a blend that runs well above what an actual "
-             "18-to-22-year-old earns, and the comparison here starts at 18. "
-             "So the baseline follows a real age-earnings curve from Census "
-             "microdata: about $32,000 at 18, reaching the all-ages figure "
-             "around 36. Turn it OFF to compare against the flat published "
-             "figure instead, which overstates a young worker's pay and so "
-             "makes every degree look WORSE than this model thinks it is. "
-             "See Methodology.",
-    )
 
 # The in-enrollment opportunity cost is now applied PER SCENARIO (its
 # enrollment_years_a/_b and working_years_a/_b are computed up in the Scenario
@@ -7665,7 +7651,7 @@ if compare_mode:
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
-                                           baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, enable_age_aware_baseline),
+                                           baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
                                            federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
@@ -7673,7 +7659,7 @@ if compare_mode:
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
-                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, enable_age_aware_baseline),
+                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
                                            federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
 
     col_a, col_b = st.columns(2)
@@ -7840,7 +7826,7 @@ else:
                                          hs_wage_index=get_metro_wage_index(city),
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
-                                         baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, enable_age_aware_baseline),
+                                         baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
                                          federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
@@ -8146,7 +8132,7 @@ if not st.session_state.survey_submitted:
                                                    hs_wage_index=get_metro_wage_index(city),
                                                    enrollment_years=enrollment_years_a,
                                                    working_years=working_years_a,
-                                                   baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, enable_age_aware_baseline),
+                                                   baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
                                                    federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
@@ -8161,7 +8147,7 @@ if not st.session_state.survey_submitted:
                                                        hs_wage_index=get_metro_wage_index(city),
                                                        enrollment_years=enrollment_years_b,
                                                        working_years=working_years_b,
-                                                       baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, enable_age_aware_baseline),
+                                                       baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
                                                        federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
@@ -8412,13 +8398,17 @@ Be clear about which way this cuts. It **raises every degree's earnings
 premium**, because the thing being compared against is no longer overstated in
 the years when a student is enrolled and earning nothing. It can move a major
 from "never worth it" to positive. That is the direction that flatters this
-tool's own conclusion, so it is worth saying plainly why it's the default
-anyway: a median for 25-to-65-year-olds is simply the wrong number for an
-18-year-old, and choosing a figure we can demonstrate is wrong, in order to
-look cautious, would be its own kind of dishonesty. The *Age-aware high school
-baseline* switch in Advanced Analysis Settings turns it off if you want the
-published-figure comparison — that setting makes every degree look worse than
-this model thinks it is, and it's recorded alongside your results either way.
+tool's own conclusion, so it is worth saying plainly why we do it anyway: a
+median for 25-to-65-year-olds is simply the wrong number to compare an
+18-year-old against, and choosing a figure we can demonstrate is wrong, in
+order to look cautious, would be its own kind of dishonesty.
+
+There is no setting for this. It briefly shipped as one, and that was the wrong
+shape for it — an option implies the two answers are both defensible, and here
+one of them isn't. If you want to see the comparison against the flat published
+figure, the numbers are all above: the baseline would be $51,688 in every year
+instead of climbing from about $32,000, which would make every degree on this
+page look worse than the model actually thinks it is.
 
 One knock-on: with the curve supplying the raises that come from getting older,
 the 2%/year growth stops meaning "raises and cost-of-living together" and means
