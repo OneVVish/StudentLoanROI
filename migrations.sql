@@ -339,3 +339,39 @@ alter table scenario_events
 -- Rows written before 2026-07-30 also cannot distinguish "visitor deliberately
 -- chose California" from "visitor never touched the control and got the
 -- National default", since only the resulting value was stored.
+
+-- ---------------------------------------------------------------------------
+-- 2026-07-31: log the two switches that change what an ROI figure MEANS
+--
+-- hs_baseline_age_aware  -- the high-school baseline follows a real
+--   age-earnings curve (true) or is BLS's flat age-25+ median (false).
+--   DEFAULTS TRUE from this deploy. Every row before it was computed on the
+--   flat baseline and carries NULL here; treat NULL as false.
+-- count_foregone_earnings -- whether wages given up while enrolled are charged
+--   against the degree. Defaults false, unchanged, but it was never logged
+--   either, so the same NULL-means-false rule applies.
+--
+-- Both were previously unlogged. That was survivable while both defaulted off
+-- -- almost every row was the default. It stops being survivable now that one
+-- defaults on, because rows would otherwise differ from earlier ones with
+-- nothing on the row saying why. Any comparison of earnings_premium or roi_pct
+-- across this date MUST condition on these columns.
+--
+-- Run this BEFORE deploying. Until it exists, PostgREST rejects the whole row
+-- on the unknown column (PGRST204) and the event is lost entirely -- it does
+-- not merely drop the new field.
+alter table survey_responses
+  add column if not exists hs_baseline_age_aware boolean,
+  add column if not exists count_foregone_earnings boolean;
+
+alter table pdf_downloads
+  add column if not exists hs_baseline_age_aware boolean,
+  add column if not exists count_foregone_earnings boolean;
+
+alter table scenario_shares
+  add column if not exists hs_baseline_age_aware boolean,
+  add column if not exists count_foregone_earnings boolean;
+
+alter table scenario_events
+  add column if not exists hs_baseline_age_aware boolean,
+  add column if not exists count_foregone_earnings boolean;

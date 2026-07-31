@@ -2005,7 +2005,14 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # not break usage down by any of them. career_data_source is only
         # meaningful in Career mode (the radio is disabled in Major mode);
         # read it together with dataset_mode when aggregating.
-        "career_data_source": career_data_source,                      # National / California
+        "career_data_source": career_data_source,                      # derived state name, or National
+        # The two switches that change what every ROI figure in this row MEANS.
+        # Neither was logged before, which was survivable while both defaulted
+        # off; it stops being survivable the moment one defaults on, because
+        # rows would then differ from earlier ones with nothing recording why.
+        # Read both when aggregating -- see migrations.sql.
+        "hs_baseline_age_aware": bool(st.session_state.get("age_aware_hs_baseline", True)),
+        "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", False)),
         "loan_mode": st.session_state.get("loan_mode", "Simplified"),  # Simplified / Detailed
         "cc_mode_a": cc_mode_a,                                         # none / fulltime / parttime
         # The horizon every roi_pct/earnings_premium below was computed over.
@@ -6160,18 +6167,26 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "graduation. This lowers each degree's earnings premium and "
              "break-even. Off by default. See Methodology.",
     )
+    # Defaults ON. It previously defaulted off on the argument that it moves
+    # results in this tool's own favour and so shouldn't be applied silently.
+    # That argument is about which way the error points, not about which figure
+    # is right: a flat age-25+ median is simply wrong for an 18-year-old, and
+    # defaulting to a number we can show is wrong in order to look conservative
+    # is its own kind of dishonesty. The switch stays so the published-figure
+    # comparison remains reachable, and the Methodology states plainly which
+    # way turning it off moves things.
+    st.session_state.setdefault("age_aware_hs_baseline", True)
     enable_age_aware_baseline = st.checkbox(
         "Age-aware high school baseline", key="age_aware_hs_baseline",
-        help="The high-school comparison figure is BLS's median for everyone "
+        help="ON by default. BLS's high-school figure is a median for everyone "
              "aged 25 and up -- a blend that runs well above what an actual "
-             "18-to-22-year-old earns. Turn this on to give the baseline a real "
-             "age-earnings curve from Census microdata instead of one flat "
-             "number, so it starts near what a young worker really makes and "
-             "climbs as they age. It RAISES every degree's earnings premium, "
-             "because the thing being compared against is no longer overstated "
-             "in the early years. Off by default, and shown as an option rather "
-             "than applied silently, precisely because it moves the answer in "
-             "this tool's own favour. See Methodology.",
+             "18-to-22-year-old earns, and the comparison here starts at 18. "
+             "So the baseline follows a real age-earnings curve from Census "
+             "microdata: about $32,000 at 18, reaching the all-ages figure "
+             "around 36. Turn it OFF to compare against the flat published "
+             "figure instead, which overstates a young worker's pay and so "
+             "makes every degree look WORSE than this model thinks it is. "
+             "See Methodology.",
     )
 
 # The in-enrollment opportunity cost is now applied PER SCENARIO (its
@@ -8320,10 +8335,12 @@ for that metro. There's no equivalent for Intended Major mode: a major isn't
 an occupation, and the wage data behind it has no percentiles, so the chart
 simply doesn't appear there.
 
-**What if you skip college? The high school graduate baseline.** We
-compare every major against $51,688/year — real median pay for full-time
-workers 25 and older who only finished high school (based on $994/week in the
-second quarter of 2026, annualized).
+**What if you skip college? The high school graduate baseline.** Every major
+is compared against what a high school graduate earns, anchored to $51,688/year
+— real median pay for full-time workers 25 and older who only finished high
+school (based on $994/week in the second quarter of 2026, annualized). That
+anchor sets the level; the next section explains why the figure actually used
+in each year varies with age rather than sitting flat.
 [Source: BLS Current Population Survey, series LEU0252917300](https://www.bls.gov/news.release/wkyeng.htm).
 We assume this grows a modest 2%/year (a stand-in for normal raises and
 cost-of-living bumps) since BLS doesn't publish a real year-by-year
@@ -8337,28 +8354,34 @@ blended median sits above what a young worker actually takes home. Meanwhile
 the person this app models is roughly 18 to 32 across the whole comparison
 window.""" + hs_young_wage_disclosure() + """
 
-That cuts both ways over ten years. Early on our baseline is too generous,
-which makes the degree look *worse* than it is. Later on it's too stingy: we
-grow it at a flat 2%/year, while real pay for workers in their twenties climbs
-substantially faster than that. The two errors run in opposite directions and
-partly cancel, and we don't claim to know what the net effect is.
+Using that flat figure anyway would cut both ways. Early on it is too
+generous, which makes the degree look *worse* than it is. Later on it is too
+stingy, since 2%/year is slower than real pay climbs in one's twenties. The two
+errors run in opposite directions and partly cancel — but "partly cancel" is
+not the same as "cancel", and neither error is one we have to accept.
 
-**Age-aware high school baseline (optional).** The *Age-aware high school
-baseline* switch in Advanced Analysis Settings replaces that single flat figure
-with a real age-earnings curve, built from the same Census records: each year
-of the comparison uses that age's own share of the all-ages median instead of
-the median itself. The published BLS figure still sets the level — only the
-*shape* comes from the microdata — so refreshing one doesn't invalidate the
-other.
+**So the baseline follows an age curve, and that is now the default.** Rather
+than one flat figure for every year, each year of the comparison uses that
+age's own share of the all-ages median, from the same Census records: about
+$32,000 at 18, $41,000 at 24, reaching the published all-ages figure around 36.
+The BLS number still sets the *level* — only the *shape* comes from the
+microdata — so refreshing one doesn't invalidate the other.
 
-Two things to be clear about. First, it **raises every degree's earnings
+Be clear about which way this cuts. It **raises every degree's earnings
 premium**, because the thing being compared against is no longer overstated in
-the early years, and it can move a major from "never worth it" to positive.
-That is the direction that flatters this tool's own conclusion, which is
-exactly why it's an explicit switch you turn on rather than something applied
-quietly to everybody. Second, with it on the 2%/year growth stops meaning
-"raises and cost-of-living together" and means calendar drift only — the raises
-that come from getting older now come from the curve instead.
+the years when a student is enrolled and earning nothing. It can move a major
+from "never worth it" to positive. That is the direction that flatters this
+tool's own conclusion, so it is worth saying plainly why it's the default
+anyway: a median for 25-to-65-year-olds is simply the wrong number for an
+18-year-old, and choosing a figure we can demonstrate is wrong, in order to
+look cautious, would be its own kind of dishonesty. The *Age-aware high school
+baseline* switch in Advanced Analysis Settings turns it off if you want the
+published-figure comparison — that setting makes every degree look worse than
+this model thinks it is, and it's recorded alongside your results either way.
+
+One knock-on: with the curve supplying the raises that come from getting older,
+the 2%/year growth stops meaning "raises and cost-of-living together" and means
+calendar drift only.
 
 We still headline the published BLS number, because it's the one a reader can
 look up and check. BLS itself only breaks earnings out by education for ages
