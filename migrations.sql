@@ -457,3 +457,38 @@ alter table scenario_events
   add column if not exists scenario_b_loan_basis text,
   add column if not exists scenario_b_reported_debt numeric,
   add column if not exists scenario_b_program_years integer;
+
+
+-- ---------------------------------------------------------------------------
+-- 2026-07-31 -- DATA QUALITY NOTE, no DDL.
+--
+-- Local browser verification on 2026-07-30 and 2026-07-31 was run WITHOUT the
+-- ?test=1 flag, against production Supabase (secrets.toml has no separate dev
+-- project). Those sessions wrote `pageview` rows to usage_logs and rows to
+-- scenario_events exactly as a real visit would.
+--
+-- Counted at the time of writing: 82 usage_logs rows and 76 scenario_events
+-- rows carry a timestamp >= 2026-07-30T00:00:00. An unknown but material
+-- share of those is self-testing. survey_responses, pdf_downloads and
+-- scenario_shares took ZERO new rows in that window -- the survey was never
+-- submitted, no PDF was downloaded and no share link was created during
+-- testing -- so the primary dependent measure and both high-intent
+-- behavioural proxies are UNAFFECTED.
+--
+-- Self-test rows cannot be separated from organic ones after the fact:
+-- traffic_source is NULL for an untagged real visit exactly as it is for an
+-- untagged local one. The 13 rows in that window carrying a src tag
+-- (LACC, ARC, 3Dcab, ys) are genuine recruitment traffic and are safe.
+--
+-- Guidance for anyone computing engagement/funnel figures:
+--   * Treat untagged usage_logs and scenario_events rows in
+--     [2026-07-30, 2026-07-31] as unusable. Do not try to filter by
+--     session_id -- local sessions look like any other.
+--   * Session COUNTS and pageview-derived funnel rates for those two days are
+--     inflated. Conversion rates with a survey/PDF/share numerator are still
+--     valid in the numerator but have an inflated denominator.
+--   * Nothing before 2026-07-30 is affected.
+--
+-- Prevention: CLAUDE.md now requires ?test=1 for every local run. Every
+-- writer already honours st.session_state.test_mode; the flag was simply not
+-- used.
