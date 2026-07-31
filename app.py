@@ -20,6 +20,7 @@ import contextlib
 import hashlib
 import html
 import io
+import math
 import re
 import uuid
 from datetime import datetime, timezone
@@ -929,7 +930,25 @@ def render_wage_geography_note(occupation_name: str) -> None:
         )
 
 
-def render_wage_distribution(occupation_name: str, compact: bool = False) -> None:
+# One string, used by the single-scenario view and by Compare Mode's
+# once-below-the-columns render, so the two can't drift into different
+# explanations of the same picture.
+#
+# Deliberately plain: the audience is a 17-year-old, and the previous wording
+# ("the area under each curve is the share of workers") was both harder to
+# read AND untrue of the curve now drawn -- the shape is stylised, with its
+# apex pinned to the median, so height carries no worker count. Nothing here
+# may imply it does.
+WAGE_DISTRIBUTION_CAPTION = (
+    "The median is the midpoint — half of these workers earn less, half earn "
+    "more. The curve shows the range around it: it runs from what the "
+    "lowest-paid 10% earn up to what the top 10% earn. "
+    "[BLS OEWS percentiles; see Methodology]"
+)
+
+
+def render_wage_distribution(occupation_name: str, compact: bool = False,
+                             caption: bool = True) -> None:
     """The wage-distribution histogram, rendered identically from both result
     branches.
 
@@ -964,14 +983,8 @@ def render_wage_distribution(occupation_name: str, compact: bool = False) -> Non
         figure.update_layout(title_text="", height=180 + 110 * rows_drawn,
                               margin=dict(t=40, b=110, l=120, r=60))
     st.plotly_chart(figure, use_container_width=True, config=PLOTLY_CHART_CONFIG)
-    st.caption(
-        "The median is a midpoint, not a promise — half of this workforce earns "
-        "less than it. The area under each curve is the share of workers, so a "
-        "wide flat stretch holds just as many people as a narrow tall one — where "
-        "the curve is highest is where pay actually clusters, which is often not "
-        "at the median. "
-        "[BLS OEWS percentiles; see Methodology]"
-    )
+    if caption:
+        st.caption(WAGE_DISTRIBUTION_CAPTION)
 
 
 # BLS Employment Projections' 8-category "Typical Education Needed for
@@ -4090,88 +4103,76 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
     return fig
 
 
+# Curve height at each published percentile. The apex is pinned to the median
+# and both ends close on the baseline, which is how O*NET draws its local-wage
+# chart and what this deliberately matches.
+#
+# This makes the curve a STYLISED SHAPE, not a density. An earlier version
+# plotted true density -- share divided by dollar width -- which peaked
+# wherever workers were packed tightest, usually BELOW the median because wage
+# bands widen as they rise. That was the more informative curve and it is not
+# what this is. Consequences to keep straight:
+#   * Height means nothing on its own. Only the marked percentiles carry
+#     numbers; the shape carries position and spread.
+#   * Nothing may claim the tall part is where pay clusters, or that area is
+#     the share of workers. Both were true of the density version and are
+#     false of this one. See the captions and the Methodology section.
+WAGE_CURVE_HEIGHTS = (0.0, 0.5, 1.0, 0.5, 0.0)
+WAGE_CURVE_PERCENTILES = ("p10", "p25", "p50", "p75", "p90")
+
+
 def wage_ridgeline_curve(percentiles: dict, points: int = 160) -> tuple:
-    """(xs, ys) tracing one occupation's pay distribution from the 10th to the
-    90th percentile as a smooth silhouette. ys are densities on the same
-    workers-per-dollar scale build_wage_distribution produces, so two curves
-    drawn against a shared maximum are directly comparable.
+    """(xs, ys) tracing one occupation's pay from the 10th to the 90th
+    percentile as a smooth hump peaking at the median, matching O*NET's
+    local-wage chart. ys run 0..1, so every row draws at the same height and
+    the comparison between rows is purely horizontal -- which is the point:
+    does this geography pay more, and over how wide a range.
 
     Shared by the Plotly and matplotlib versions so both draw the SAME
     geometry. Each smoothing its own curve is the chart-twin drift CLAUDE.md
     warns about, and here it would put visibly different shapes on screen and
     in the PDF from identical data.
 
-    The curve closes to the baseline at p10 and p90. That is a drawing
-    convention marking where published data ends, NOT a claim that nobody
-    earns beyond them -- 10% of workers sit past each end, which is why
-    wage_distribution_tail_notes states both in words beside every chart. The
-    same reasoning already keeps the tails out of the bar version: OEWS
-    publishes no bound on the far side, so any width drawn for them would be
-    invented.
+    Interpolation is a cosine smoothstep between adjacent percentiles rather
+    than a linear pass followed by a moving average. The smoothstep passes
+    exactly through every anchor, so the apex is exactly 1.0 at exactly the
+    median; an averaging filter would round that apex down and drift it off
+    the median, which is the one point this shape exists to mark. It also
+    cannot overshoot, so no curve dips below its baseline.
 
-    The peak lands wherever workers are densest, which is usually NOT the
-    median -- wage distributions are right-skewed, so the narrow low bins
-    often out-densify the wide high ones. O*NET's version of this chart always
-    peaks at the median, because its curve is a stylised fit rather than a
-    density; ours says something the median cannot, which is where in the
-    range people actually cluster. Radiologic Technologists nationally peak
-    near $63k against an $80k median; Registered Nurses peak above theirs.
+    The curve closes at p10 and p90 because that is where published data ends,
+    NOT because nobody earns beyond them -- 10% sit past each end, which
+    wage_distribution_tail_notes states in words beside every chart.
 
-    Pure Python on purpose. scipy would give a nicer monotone interpolant but
-    is NOT in requirements.txt, and this file only gets to use what production
+    Pure Python on purpose. scipy would offer a monotone interpolant but is
+    NOT in requirements.txt, and this file only gets to use what production
     installs.
     """
-    bins = build_wage_distribution(percentiles)
-    if not bins:
+    # build_wage_distribution is the shared validity gate: it rejects missing,
+    # NaN and non-monotonic percentile sets, which would otherwise draw a
+    # backwards or broken curve.
+    if not build_wage_distribution(percentiles):
         return [], []
 
-    low, high = bins[0]["low"], bins[-1]["high"]
-    # Anchor at each bin's midpoint, where that bin's density is most nearly
-    # its own rather than a blend with its neighbour's.
-    anchors = [(low, 0.0)]
-    anchors += [((b["low"] + b["high"]) / 2, b["density"]) for b in bins]
-    anchors.append((high, 0.0))
-
+    ax = [float(percentiles[k]) for k in WAGE_CURVE_PERCENTILES]
+    ay = list(WAGE_CURVE_HEIGHTS)
+    low, high = ax[0], ax[-1]
     step = (high - low) / (points - 1)
     xs = [low + step * i for i in range(points)]
-    ax = [a[0] for a in anchors]
-    ay = [a[1] for a in anchors]
 
-    raw = []
-    for x in xs:                                    # piecewise-linear resample
+    ys = []
+    for x in xs:
         if x <= ax[0]:
-            raw.append(ay[0]); continue
+            ys.append(ay[0]); continue
         if x >= ax[-1]:
-            raw.append(ay[-1]); continue
+            ys.append(ay[-1]); continue
         for i in range(len(ax) - 1):
             if ax[i] <= x <= ax[i + 1]:
                 span = ax[i + 1] - ax[i]
                 t = 0.0 if span == 0 else (x - ax[i]) / span
-                raw.append(ay[i] + t * (ay[i + 1] - ay[i]))
+                eased = 0.5 - 0.5 * math.cos(math.pi * t)
+                ys.append(ay[i] + eased * (ay[i + 1] - ay[i]))
                 break
-
-    # Moving average to round the corners the linear pass leaves at each
-    # anchor. Endpoints are pinned back to zero afterwards: the window pulls
-    # them up, which would reopen the silhouette at exactly the two points the
-    # tail notes are describing.
-    window = max(3, points // 14)
-    half = window // 2
-    ys = []
-    for i in range(points):
-        lo, hi = max(0, i - half), min(points, i + half + 1)
-        ys.append(sum(raw[lo:hi]) / (hi - lo))
-    ys[0] = ys[-1] = 0.0
-
-    # Smoothing and the pinned endpoints together shed roughly a tenth of the
-    # area, so rescale to put it back. Without this the curve is no longer
-    # area-truthful and the shared density scale two rows are compared on
-    # means slightly different things per row -- the smoothing loss depends on
-    # the shape being smoothed, so a wide flat distribution loses less than a
-    # narrow peaked one and would be drawn relatively too tall.
-    target = sum(share for _, _, share in WAGE_DISTRIBUTION_BINS)
-    area = sum((ys[i] + ys[i + 1]) / 2 * (xs[i + 1] - xs[i]) for i in range(points - 1))
-    if area > 0:
-        ys = [y * target / area for y in ys]
     return xs, ys
 
 
@@ -4216,23 +4217,21 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
     geography on a shared wage axis. Returns None when nothing can be built,
     so callers render nothing rather than an empty axis.
 
-    Replaces a single-series histogram. The bars were area-truthful and still
-    answered only "how spread out is this job's pay", when the question a
-    visitor is actually holding is "does it pay better HERE" -- the app
-    already picks a metro or state wage for them and says so in a caption, but
-    nothing showed what that choice was worth. Two curves on one axis show the
-    whole shift at once: how much higher, and whether the spread widens with
-    it.
+    Replaces a single-series histogram. The bars answered only "how spread out
+    is this job's pay", when the question a visitor is actually holding is
+    "does it pay better HERE" -- the app already picks a metro or state wage
+    for them and says so in a caption, but nothing showed what that choice was
+    worth. Two curves on one axis show the whole shift at once: how much
+    higher, and over how much wider a range.
 
-    Both rows share one density scale, so their heights mean the same thing. A
-    local distribution that is wider AND flatter than the national one is a
-    real finding about that metro, and normalising each row to its own peak
-    would erase exactly that.
+    Every row peaks at the same height by construction (see
+    WAGE_CURVE_HEIGHTS), so the comparison between rows is purely horizontal.
+    Height is not a quantity here and must not be read as one -- this shape is
+    stylised to match O*NET's, with its apex on the median.
 
-    The y-axis stays unlabelled and untick-ed. Height is a density (workers
-    per dollar), which is the right quantity over unequal bins and a
-    meaningless one to a 17-year-old; the marked percentiles carry the
-    numbers, and the shape carries the comparison.
+    The y-axis is unlabelled and untick-ed for that reason: there is nothing
+    to label. The marked percentiles carry every number; the shape carries
+    position and spread.
 
     modelled_start marks where the app's own starting-salary assumption sits.
     That's the honest bit: this app projects ten years from a single number,
@@ -4308,7 +4307,7 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
 
     if modelled_start:
         fig.add_vline(x=modelled_start, line=dict(color="#E45756", width=2, dash="dash"))
-        fig.add_annotation(x=modelled_start, y=(len(rows) - 1) * row_height + fill_scale, yref="y",
+        fig.add_annotation(x=modelled_start, y=(len(rows) - 1) * row_height + fill_scale + 0.13, yref="y",
                             showarrow=False, yanchor="bottom",
                             text=f"modelled start {fmt_money(modelled_start)}",
                             font=dict(size=11, color="#E45756"))
@@ -4330,7 +4329,7 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
         xaxis=dict(title="Annual wage", tickprefix="$", tickformat=",",
                     range=[_x_lo - _x_pad, _x_hi + _x_pad]),
         yaxis=dict(title=None, showticklabels=False, showgrid=False, zeroline=False,
-                    range=[-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34]),
+                    range=[-0.12, (len(rows) - 1) * row_height + fill_scale + 0.46]),
         height=200 + 130 * len(rows),
         # Left margin holds the row labels; bottom clears the x-title AND the
         # tail note under it, which is clipped out of the plot at the default.
@@ -4351,9 +4350,10 @@ def _rgba(hex_color: str, alpha: float) -> str:
 
 
 def _density_at(row: dict, x: float) -> float:
-    """The drawn curve's height at a wage, so a marker sits ON the silhouette
-    instead of at the density the bin table would give -- the curve is
-    smoothed, and a marker placed from unsmoothed data floats off it."""
+    """The drawn curve's height at a wage, so a marker sits ON the silhouette.
+    Named for the density curve this used to sample; the shape is now stylised
+    (WAGE_CURVE_HEIGHTS) and the returned number is a drawing coordinate with
+    no units, useful only for placing a marker or a median line."""
     xs, ys = row["xs"], row["ys"]
     if x <= xs[0] or x >= xs[-1]:
         return 0.0
@@ -4557,10 +4557,11 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
          "Starting salary uses the 25th-percentile wage; mid-career uses the median."],
         ["Wage distribution chart",
          "The same OEWS release, which publishes five wage percentiles (10th, 25th, 50th, 75th, "
-         "90th) per occupation and no individual records. The share of workers between any two "
-         "published percentiles is exact by definition; bar heights are those shares divided by "
-         "each range's width, so area is the share. The bottom and top 10% have no published "
-         "bound and are stated in words rather than drawn."],
+         "90th) per occupation and no individual records. The curve is drawn through those five "
+         "points, peaking at the median, in the style O*NET uses; its height is illustrative "
+         "rather than a count of workers. Where your city has its own published figures, the "
+         "national curve is drawn beneath it. The bottom and top 10% have no published bound and "
+         "are stated in words rather than drawn."],
         ["High school graduate baseline",
          "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
          "for full-time workers age 25+ with a high school diploma and no college ($994/week, "
@@ -4767,7 +4768,7 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
     if modelled_start:
         ax.axvline(modelled_start, color="#E45756", linewidth=1.6, linestyle="--")
         ax.annotate(f"modelled start {fmt_money(modelled_start)}",
-                     xy=(modelled_start, (len(rows) - 1) * row_height + fill_scale), ha="center",
+                     xy=(modelled_start, (len(rows) - 1) * row_height + fill_scale + 0.13), ha="center",
                      va="bottom", fontsize=7.5, color="#E45756", parse_math=False)
 
     where = rows[0]["label"]
@@ -4780,15 +4781,15 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
     # Cap the tick count: at print width the default locator packs in enough
     # "$110,000"-length labels to run them into each other.
     ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=5, prune="both"))
-    ax.set_ylim(-0.12, (len(rows) - 1) * row_height + fill_scale + 0.34)
+    ax.set_ylim(-0.12, (len(rows) - 1) * row_height + fill_scale + 0.46)
     # Same padding reasoning as the Plotly twin: the outer money labels sit
     # beyond their markers and would otherwise be trimmed at the axes edge.
     _x_lo = min(r["xs"][0] for r in rows)
     _x_hi = max(r["xs"][-1] for r in rows)
     _x_pad = (_x_hi - _x_lo) * 0.13
     ax.set_xlim(_x_lo - _x_pad, _x_hi + _x_pad)
-    # Same reasoning as the Plotly twin: height is a density, which is correct
-    # over unequal bins and meaningless as a printed label.
+    # Same reasoning as the Plotly twin: every row peaks at the same height by
+    # construction, so there is no quantity here worth printing.
     ax.set_yticks([])
     ax.spines[["left", "right", "top"]].set_visible(False)
 
@@ -4830,11 +4831,10 @@ def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
         Paragraph(heading, styles["section"]),
         chart,
         Paragraph(
-            "The median is a midpoint, not a promise -- half of this workforce earns less "
-            "than it. The area under each curve is the share of workers, so a wide flat "
-            "stretch holds just as many people as a narrow tall one; where the curve is "
-            "highest is where pay actually clusters, which is often not at the median. "
-            "Source: BLS OEWS published wage percentiles.",
+            "The median is the midpoint -- half of these workers earn less, half earn "
+            "more. The curve shows the range around it: it runs from what the "
+            "lowest-paid 10% earn up to what the top 10% earn. Source: BLS OEWS "
+            "published wage percentiles.",
             styles["caption"]),
     ]
 
@@ -7820,7 +7820,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # per-occupation and therefore genuinely different between A and B, so
         # each column draws its own -- unlike the underemployment text above,
         # which is national in Career mode and rendered once below the columns.
-        render_wage_distribution(scenario["major"], compact=True)
+        render_wage_distribution(scenario["major"], compact=True, caption=False)
         render_wage_geography_note(scenario["major"])
 
 
@@ -8087,6 +8087,13 @@ if compare_mode:
     # scenarios, so it renders once here rather than twice inside the panels.
     # Major mode's is per-major and lives in the panel instead.
     if dataset_mode == DATASET_MODE_CAREER:
+        # Same reasoning for the wage-distribution explanation: the CHARTS are
+        # per-occupation and genuinely differ between A and B, but the sentence
+        # explaining how to read one is identical, and printing it under both
+        # columns just doubled it.
+        if any(get_wage_distribution_context(s["major"])
+               for s in (scenario_a, scenario_b)):
+            st.caption(WAGE_DISTRIBUTION_CAPTION)
         st.info(underemployment_disclosure(None))
 
     # Take-home, per scenario. Compare Mode had none of this: the contrast arm
@@ -8791,14 +8798,15 @@ percentile wage — and no individual worker records at all, so a true
 count-the-people histogram isn't something anyone can build from it, us
 included. What the percentiles *do* fix exactly is how many workers sit
 between any two of them: a quarter of the workforce earns between the 25th and
-the 50th, by definition. The curve's height at any wage is that share divided by
-how many dollars wide the range is — so the **area** under it is the share of
-workers, and a wide flat stretch holds just as many people as a narrow tall one.
-The curve therefore peaks where workers are most tightly packed, which for most
-occupations is **below** the median, since pay ranges spread out as they rise.
-When your city has its own published figures, the national curve is drawn beneath
-it for comparison. The bottom and top 10% have no published cutoff on the far
-side, so we state them in words rather than inventing a width for them.
+the 50th, by definition. The curve is drawn through those five points and peaks
+at the median, matching the style O*NET uses for the same data. Read it for
+**position and spread** — where this job's pay sits, and how far it ranges — not
+as a count of people: its height is illustrative, and it is deliberately the
+same for every curve so that comparing two of them is a purely left-right
+comparison. When your city has its own published figures, the national curve is
+drawn beneath it, so you can see both how much higher local pay runs and how
+much wider it spreads. The bottom and top 10% have no published cutoff on the
+far side, so we state them in words rather than inventing a width for them.
 Percentiles follow the same city as the salary above when BLS publishes them
 for that metro. There's no equivalent for Intended Major mode: a major isn't
 an occupation, and the wage data behind it has no percentiles, so the chart
