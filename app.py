@@ -386,6 +386,82 @@ def load_hs_age_profile(csv_path: str) -> list:
     return df.sort_values("age_low").to_dict("records")
 
 
+def hs_age_factor(age: int) -> float:
+    """This age's wage as a multiple of the all-ages (25+) median, from the
+    CPS age profile. 1.0 when the profile is missing, which makes every caller
+    degrade to the flat baseline rather than to nonsense.
+
+    Clamped at both ends: an age below the youngest published band takes that
+    band's ratio, and an age above the oldest takes that one's. The profile
+    starts at 18 and ends at 64, so within this app's ~18-48 window only the
+    bottom clamp can fire, and only if a caller asks about someone younger than
+    a high school graduate can be.
+
+    Reads ratio_to_25plus rather than the profile's dollar medians, for the
+    same reason hs_young_wage_disclosure does: the ratio is a shape and
+    survives a vintage change, while the dollars are pinned to the microdata's
+    income year and would silently reintroduce the cross-vintage mixing this
+    codebase has been bitten by twice.
+    """
+    bands = load_hs_age_profile(HS_AGE_PROFILE_CSV_PATH)
+    if not bands:
+        return 1.0
+    for band in bands:
+        try:
+            if int(band["age_low"]) <= age <= int(band["age_high"]):
+                return float(band["ratio_to_25plus"])
+        except (KeyError, TypeError, ValueError):
+            return 1.0
+    try:
+        if age < int(bands[0]["age_low"]):
+            return float(bands[0]["ratio_to_25plus"])
+        return float(bands[-1]["ratio_to_25plus"])
+    except (KeyError, TypeError, ValueError):
+        return 1.0
+
+
+def hs_wage_for_timeline_year(year_index: int, hs_wage_index: float,
+                               baseline_start_age: int = None) -> float:
+    """The high-school baseline's wage in year `year_index` of the comparison
+    timeline.
+
+    baseline_start_age=None keeps the original flat behaviour: one all-ages
+    median grown at HS_GRAD_GROWTH_RATE. Passing an age turns on the age-aware
+    baseline, which additionally scales each year by that age's share of the
+    all-ages median.
+
+    The two rates are doing different jobs once this is on, which is the point.
+    HS_GRAD_GROWTH_RATE stops standing for "raises AND cost-of-living" and
+    becomes calendar drift only -- how the whole wage distribution moves over
+    time -- because the raises a person gets for getting older now come from
+    the profile instead. The arithmetic on the drift term is unchanged; what
+    changes is that a real age-earnings curve is layered on top of it.
+    """
+    wage = HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** year_index
+    if baseline_start_age is None:
+        return wage
+    return wage * hs_age_factor(baseline_start_age + year_index)
+
+
+def baseline_start_age_for(program_years: int, enrollment_years: int,
+                            age_aware: bool) -> int:
+    """The age the high-school baseline's timeline starts at, or None to keep
+    the flat all-ages baseline.
+
+    The offset is the subtle part, so it lives in one place. With foregone
+    earnings counted the timeline starts the year the graduate would have
+    started working, so year 0 is age 18. Without it the comparison starts at
+    graduation, so year 0 is age 18 + however long the program ran -- the high
+    school graduate is the same age as the graduate at that moment, just with
+    more years of earnings behind them.
+    """
+    if not age_aware:
+        return None
+    if enrollment_years:
+        return HS_GRAD_START_AGE
+    return HS_GRAD_START_AGE + program_years
+
+
 def hs_young_wage_disclosure() -> str:
     """One sentence sizing the gap between the all-ages baseline and what a
     young high school graduate actually earns. Empty string when the profile
@@ -622,6 +698,12 @@ HS_GRAD_GROWTH_RATE = 0.02
 # instead of a hardcoded one that goes stale the moment either the baseline or
 # the microdata is refreshed.
 HS_AGE_PROFILE_CSV_PATH = "data/hs_age_profile.csv"
+
+# The age a high school graduate starts working, and therefore the age the
+# baseline's timeline begins at when foregone earnings are counted. 18 rather
+# than 17 or 19 because that's when the app's own "one consistent timeline
+# starting at age 18" framing begins (see the foregone-earnings option).
+HS_GRAD_START_AGE = 18
 
 # Underemployment: the share of college graduates working in jobs that don't
 # require a degree at all. From the Federal Reserve Bank of New York's "The
@@ -2772,7 +2854,8 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    hs_wage_index: float = 1.0,
                    personal_contribution: float = 0.0,
                    enrollment_years: int = 0,
-                   working_years: int = 0) -> dict:
+                   working_years: int = 0,
+                   baseline_start_age: int = None) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window, minus any personal_contribution) compared against a
@@ -2849,8 +2932,11 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # earnings option is on), so those head-start wages count against the
     # degree. Growth compounds from year 0, so the enrollment years correctly
     # sit at the *front* of the HS grad's raise trajectory.
+    #
+    # baseline_start_age (None = off) makes each of those years use that age's
+    # own wage rather than one all-ages median -- see hs_wage_for_timeline_year.
     hs_cumulative_earnings = sum(
-        HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** y
+        hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age)
         for y in range(years + enrollment_years)
     )
     # Part-time-while-working community-college years: the major side earns a
@@ -2858,8 +2944,13 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # growing from year 0 -- identical terms to the HS baseline's first
     # working_years, so they cancel in the premium). 0 unless the part-time CC
     # path is on AND the foregone-earnings option is on.
+    # Age-aware on the same terms as the baseline above, and that is load-
+    # bearing rather than tidiness: these are the same person at the same ages,
+    # and the comment above only holds -- they cancel in the premium -- if both
+    # sides are computed identically. Scaling one and not the other would
+    # invent an earnings premium out of the part-time community-college path.
     major_working_earnings = sum(
-        HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** y
+        hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age)
         for y in range(working_years)
     )
 
@@ -2940,6 +3031,7 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
             personal_contribution=scenario["personal_contribution"],
             enrollment_years=scenario["enrollment_years"],
             working_years=scenario["working_years"],
+            baseline_start_age=scenario.get("baseline_start_age"),
         )
         points.append({"year": year,
                        "major": result["major_net_position"],
@@ -3122,6 +3214,7 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               hs_wage_index: float = 1.0,
                               enrollment_years: int = 0,
                               working_years: int = 0,
+                              baseline_start_age: int = None,
                               federal_cap: float = None, gap_rate: float = None,
                               include_fees: bool = False) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
@@ -3177,6 +3270,7 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
                                 total_investment, col_index=col_index, years=roi_window_years,
                                 hs_wage_index=hs_wage_index,
+                                baseline_start_age=baseline_start_age,
                                 personal_contribution=personal_contribution,
                                 enrollment_years=enrollment_years,
                                 working_years=working_years)
@@ -3193,6 +3287,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # of bug the hs_wage_index threading fixed.
         "enrollment_years": enrollment_years,
         "working_years": working_years,
+        # None when the age-aware baseline is off. Stamped for the same reason
+        # the two above are: every re-derivation off this dict (the break-even,
+        # the net-position chart, the PDF) must reuse the value the scenario
+        # was actually computed under.
+        "baseline_start_age": baseline_start_age,
         "repayment_result": repayment_result,
         "roi_result": roi_result,
         # None unless the cap-and-gap split was applied (Detailed mode); the
@@ -3218,6 +3317,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          personal_contribution: float = 0.0,
                          enrollment_years: int = 0,
                          working_years: int = 0,
+                         baseline_start_age: int = None,
                          federal_cap: float = None, gap_rate: float = None,
                          include_fees: bool = False) -> dict:
     """The undergraduate loan at which `major_name` stops beating a debt-free
@@ -3278,6 +3378,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             hs_wage_index=hs_wage_index,
             enrollment_years=enrollment_years,
             working_years=working_years,
+            baseline_start_age=baseline_start_age,
             federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
         )["roi_result"]["earnings_premium"]
 
@@ -3304,6 +3405,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        personal_contribution: float = 0.0,
                        enrollment_years: int = 0,
                        working_years: int = 0,
+                       baseline_start_age: int = None,
                        federal_cap: float = None, gap_rate: float = None,
                        include_fees: bool = False) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
@@ -3332,6 +3434,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   personal_contribution=personal_contribution,
                                   enrollment_years=enrollment_years,
                                   working_years=working_years,
+                                  baseline_start_age=baseline_start_age,
                                   federal_cap=federal_cap, gap_rate=gap_rate,
                                   include_fees=include_fees)
     years = roi_window_years
@@ -4916,6 +5019,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, career_st
         personal_contribution=scenario["personal_contribution"],
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
+        baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
     )
     story += _pdf_breakeven_block(breakeven, styles)
@@ -5033,6 +5137,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               personal_contribution=scenario_a["personal_contribution"],
                               enrollment_years=scenario_a["enrollment_years"],
                               working_years=scenario_a["working_years"],
+                              baseline_start_age=scenario_a["baseline_start_age"],
                               federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees),
             styles, scenario_label="Scenario A"),
         PageBreak(),
@@ -5055,6 +5160,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               personal_contribution=scenario_b["personal_contribution"],
                               enrollment_years=scenario_b["enrollment_years"],
                               working_years=scenario_b["working_years"],
+                              baseline_start_age=scenario_b["baseline_start_age"],
                               federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=include_fees),
             styles, scenario_label="Scenario B"),
         PageBreak(),
@@ -6051,6 +6157,19 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "so every path is compared from age 18 rather than from "
              "graduation. This lowers each degree's earnings premium and "
              "break-even. Off by default. See Methodology.",
+    )
+    enable_age_aware_baseline = st.checkbox(
+        "Age-aware high school baseline", key="age_aware_hs_baseline",
+        help="The high-school comparison figure is BLS's median for everyone "
+             "aged 25 and up -- a blend that runs well above what an actual "
+             "18-to-22-year-old earns. Turn this on to give the baseline a real "
+             "age-earnings curve from Census microdata instead of one flat "
+             "number, so it starts near what a young worker really makes and "
+             "climbs as they age. It RAISES every degree's earnings premium, "
+             "because the thing being compared against is no longer overstated "
+             "in the early years. Off by default, and shown as an option rather "
+             "than applied silently, precisely because it moves the answer in "
+             "this tool's own favour. See Methodology.",
     )
 
 # The in-enrollment opportunity cost is now applied PER SCENARIO (its
@@ -7121,6 +7240,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             hs_wage_index=hs_wage_index,
             personal_contribution=scenario["personal_contribution"],
             enrollment_years=scenario["enrollment_years"],
+            baseline_start_age=scenario["baseline_start_age"],
             federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
         )
         if breakeven["headline"]:
@@ -7213,9 +7333,23 @@ def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: f
     else:
         result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents,
                                         roi_window_years=roi_window_years)
+    # enrollment_years/working_years/baseline_start_age come off the scenario
+    # rather than defaulting: baseline_start_age's age offset is derived from
+    # enrollment_years (see baseline_start_age_for), so passing one without the
+    # other would place the baseline at the wrong age entirely. Before this
+    # they all defaulted, which quietly compared these plans' premiums against
+    # a no-head-start baseline while the rest of the page used one with it.
+    #
+    # hs_wage_index is still NOT passed here -- this module's premium remains
+    # on a national baseline while the main page's is city-scaled. That is a
+    # separate pre-existing gap, left alone deliberately rather than folded
+    # into a change about age.
     roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
                                      scenario["total_investment"], col_index=col_index,
-                                     years=roi_window_years)
+                                     years=roi_window_years,
+                                     enrollment_years=scenario["enrollment_years"],
+                                     working_years=scenario["working_years"],
+                                     baseline_start_age=scenario["baseline_start_age"])
     return result, roi_result_2026
 
 
@@ -7365,8 +7499,15 @@ def render_apprenticeship_section(scenario_a: dict, major_name_a: str, col_index
         # BOTH sides by enrollment_years (via a longer window, enrollment_years
         # left at 0) keeps the age-18 timeline consistent with the degree while
         # charging this path no foregone-earnings gap.
+        # This path works from 18 (it forgoes no enrollment years), so its
+        # timeline year 0 IS age 18 -- hence HS_GRAD_START_AGE directly rather
+        # than baseline_start_age_for's graduation offset. Whether the
+        # age-aware baseline is on is read off the scenario it's compared
+        # against, so the two sides can't end up on different baselines.
+        _age_aware = scenario_a.get("baseline_start_age") is not None
         alt_result = calculate_roi(major_name_a, 0, 0, col_index=col_index,
-                                   years=roi_window_years + enrollment_years)
+                                   years=roi_window_years + enrollment_years,
+                                   baseline_start_age=HS_GRAD_START_AGE if _age_aware else None)
         alt_net_position = alt_result["major_net_position"]
         alt_earnings_premium = alt_result["earnings_premium"]
         alt_label = f"{major_name_a} (No 4-Yr Loan)"
@@ -7460,6 +7601,7 @@ if compare_mode:
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
+                                           baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, enable_age_aware_baseline),
                                            federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
@@ -7467,6 +7609,7 @@ if compare_mode:
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
+                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, enable_age_aware_baseline),
                                            federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
 
     col_a, col_b = st.columns(2)
@@ -7631,6 +7774,7 @@ else:
                                          hs_wage_index=get_metro_wage_index(city),
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
+                                         baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, enable_age_aware_baseline),
                                          federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
@@ -7786,6 +7930,7 @@ else:
         personal_contribution=personal_contribution,
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
+        baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
     )
     if breakeven["headline"]:
@@ -7933,6 +8078,7 @@ if not st.session_state.survey_submitted:
                                                    hs_wage_index=get_metro_wage_index(city),
                                                    enrollment_years=enrollment_years_a,
                                                    working_years=working_years_a,
+                                                   baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, enable_age_aware_baseline),
                                                    federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
@@ -7947,6 +8093,7 @@ if not st.session_state.survey_submitted:
                                                        hs_wage_index=get_metro_wage_index(city),
                                                        enrollment_years=enrollment_years_b,
                                                        working_years=working_years_b,
+                                                       baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, enable_age_aware_baseline),
                                                        federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
@@ -8183,6 +8330,23 @@ which makes the degree look *worse* than it is. Later on it's too stingy: we
 grow it at a flat 2%/year, while real pay for workers in their twenties climbs
 substantially faster than that. The two errors run in opposite directions and
 partly cancel, and we don't claim to know what the net effect is.
+
+**Age-aware high school baseline (optional).** The *Age-aware high school
+baseline* switch in Advanced Analysis Settings replaces that single flat figure
+with a real age-earnings curve, built from the same Census records: each year
+of the comparison uses that age's own share of the all-ages median instead of
+the median itself. The published BLS figure still sets the level — only the
+*shape* comes from the microdata — so refreshing one doesn't invalidate the
+other.
+
+Two things to be clear about. First, it **raises every degree's earnings
+premium**, because the thing being compared against is no longer overstated in
+the early years, and it can move a major from "never worth it" to positive.
+That is the direction that flatters this tool's own conclusion, which is
+exactly why it's an explicit switch you turn on rather than something applied
+quietly to everybody. Second, with it on the 2%/year growth stops meaning
+"raises and cost-of-living together" and means calendar drift only — the raises
+that come from getting older now come from the curve instead.
 
 We still headline the published BLS number, because it's the one a reader can
 look up and check. BLS itself only breaks earnings out by education for ages
