@@ -2527,27 +2527,38 @@ def get_traffic_source() -> str:
     return st.session_state["traffic_source"]
 
 
-def mark_first_interaction(field: str):
-    """Log the FIRST control a visitor actually touches, once per session.
+def mark_interaction(field: str):
+    """Log each control a visitor touches, ONCE PER FIELD per session.
 
     ~92% of sessions are pageview-only -- they never move a control -- so the
-    interesting question is not how many people engage but what the engaged
-    minority reach for first. Nothing in the data answered that: scenario_events
-    records where a session LANDED, never which field moved it there.
+    question worth answering is what the engaged minority actually do, and
+    nothing in the data answered it: scenario_events records where a session
+    LANDED, never which fields moved it there, and it only fires on a
+    major/school change, so city and financing edits wrote nothing at all.
 
-    Relies on the same property mark_major_explicitly_selected documents:
-    Streamlit fires on_change only on a real interaction, never on the initial
-    render and never on reruns other widgets trigger. So this fires at most
-    once, on the first genuine touch, and the guard keeps it there.
+    Per FIELD, not per session. The earlier version logged only the very first
+    touch, which made one click and twenty indistinguishable. Per-field keeps
+    that first touch derivable -- it is the earliest interaction: row in the
+    session -- while also showing breadth.
 
-    Deliberately only the FIRST. Logging every interaction would put a network
-    insert inside a slider drag -- the same reason maybe_log_scenario_event
-    keys on a signature rather than firing per rerun.
+    Per field is also what keeps a slider safe: dragging "Total Loan Amount"
+    fires on_change repeatedly, but the guard is keyed on the field, so it
+    produces exactly one row no matter how far it is dragged. That was the
+    original reason for only-first, and it is preserved without the cost.
+
+    Relies on the property mark_major_explicitly_selected documents: Streamlit
+    fires on_change only on a real interaction, never on the initial render and
+    never on reruns other widgets trigger. So an untouched control never
+    appears, and "absent" means "not touched" rather than "not instrumented".
+
+    Bounded by construction: at most one row per control, realistically 3-8 for
+    an engaged session.
     """
-    if st.session_state.get("_first_interaction_logged"):
+    seen = st.session_state.setdefault("_interactions_logged", set())
+    if field in seen:
         return
-    st.session_state["_first_interaction_logged"] = True
-    log_usage_event(f"first_interaction:{field}")
+    seen.add(field)
+    log_usage_event(f"interaction:{field}")
 
 
 def mark_major_explicitly_selected():
@@ -3099,9 +3110,17 @@ def maybe_log_scenario_event(context: dict) -> bool:
     """
     if st.session_state.get("test_mode"):
         return False  # ?test=1 developer session -- don't log interactions
+    # city joins the signature because it changes EVERY outcome number in the
+    # row -- the cost-of-living index and the metro wage basis both -- so a
+    # session moving San Francisco -> National Average produced an entirely
+    # different set of figures and recorded none of it. It is safe to include
+    # for the reason the financing fields are not: it is a discrete selectbox,
+    # so it cannot fire per-tick the way a slider drag would. That distinction,
+    # not "how important is the field", is what governs what belongs here.
     signature = (
         context.get("scenario_a_major"), context.get("scenario_a_school_name"),
         context.get("scenario_b_major"), context.get("scenario_b_school_name"),
+        context.get("city"),
     )
     if st.session_state.get("last_scenario_signature") == signature:
         return False
@@ -6666,8 +6685,22 @@ if "test_mode" not in st.session_state:
 
 # an expander see "pageview_logged" already set and skip logging again.
 if "pageview_logged" not in st.session_state:
-    log_usage_event("pageview")
+    # Flag BEFORE the write, not after. log_usage_event performs a network
+    # insert, and the timezone round-trip clicks its hidden button mid-run --
+    # Streamlit then interrupts the script before the flag is set, and the
+    # rerun re-enters this guard and logs a second pageview. Real browsers run
+    # that JS and doubled; the automated loads that never execute it did not,
+    # so the inflation landed specifically on tagged recruitment traffic, which
+    # is the traffic a campaign gets judged on.
+    #
+    # Setting the flag first means an interrupted write loses ONE pageview
+    # rather than duplicating it. That is the right way to be wrong here: an
+    # undercount by a row is recoverable arithmetic, a double-count silently
+    # doubles a headline number. presurvey_shown_logged has always done it in
+    # this order, which is why it never doubled -- the contrast is what
+    # identified the bug.
     st.session_state.pageview_logged = True
+    log_usage_event("pageview")
 
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
@@ -6812,7 +6845,7 @@ if enable_prestige_mode:
         prestige_tier_options.index(shared_tier_a) if shared_tier_a in prestige_tier_options else 0
     )
     prestige_tier_a = st.sidebar.selectbox(
-        "College Tier Selection", prestige_tier_options, index=default_tier_a_index, key="prestige_tier_a",
+        "College Tier Selection", prestige_tier_options, index=default_tier_a_index, key="prestige_tier_a", on_change=lambda: mark_interaction("prestige_tier_a"),
         help="A modeled college-tier cost + salary-premium estimate, in "
              "place of entering a specific school -- see Methodology for "
              "how the salary premium is sourced and why it's kept "
@@ -6842,7 +6875,7 @@ else:
     school_search_a = st.sidebar.text_input(
         "Target Undergraduate School", placeholder="e.g. University of Michigan",
         key="school_search_a",
-        on_change=lambda: (mark_first_interaction("school_a"),
+        on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         help="Type a school name to auto-fill Cost of Attendance below from "
              "real government data, if we have it on file. If your school "
@@ -6858,7 +6891,7 @@ else:
             f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
             matching_schools_a, key="school_pick_a",
             format_func=lambda u: school_option_label(u, load_coa_dataset()),
-            on_change=lambda: (mark_first_interaction("school_a"),
+            on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         )
     school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
@@ -6871,7 +6904,7 @@ else:
     st.session_state.setdefault("in_state_a", get_shared_default("in_state", "1") == "1")
     in_state_a = st.sidebar.checkbox(
         "In-State Student?", key="in_state_a",
-        on_change=lambda: (mark_first_interaction("school_a"),
+        on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         help="Check this if you'd pay in-state tuition at the school above. "
              "Changes the auto-filled Cost of Attendance and how fast tuition "
@@ -6940,7 +6973,7 @@ if simplified_available:
             "Simplified": "Simplified — use the school's reported debt",
             "Detailed": "Detailed — estimate from my cost & aid",
         }[m],
-        key="loan_mode",
+        key="loan_mode", on_change=lambda: mark_interaction("loan_mode"),
         help="Simplified uses the median debt graduates who borrowed leave this "
              "school with (College Scorecard) -- no cost or aid inputs needed. "
              "Detailed builds the loan from Cost of Attendance minus your Personal "
@@ -6976,7 +7009,7 @@ if effective_loan_mode == "Detailed":
         options=["dependent", "independent"],
         format_func=lambda d: {"dependent": "Dependent (parents' info on FAFSA)",
                                 "independent": "Independent"}[d],
-        key="loan_dependency",
+        key="loan_dependency", on_change=lambda: mark_interaction("loan_dependency"),
         help="Sets your federal Direct loan limit -- about $27,000 total over four "
              "years if dependent, $45,000 if independent. Need above that limit is "
              "modeled as higher-rate gap financing (Direct PLUS or private loans).",
@@ -7011,7 +7044,7 @@ if loan_source_a == "personal":
     if not enable_prestige_mode:
         coa_per_year_a = st.sidebar.number_input(
             "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
-            key="coa_per_year_a",
+            key="coa_per_year_a", on_change=lambda: mark_interaction("coa_per_year_a"),
             help="The full sticker price for your first year (Year 1) at this "
                  "school -- tuition, fees, room & board, books, everything -- "
                  "before subtracting scholarships or what you pay yourself. "
@@ -7020,7 +7053,7 @@ if loan_source_a == "personal":
         )
     start_year_a = st.sidebar.selectbox(
         "Year Starting Undergraduate School", _start_year_opts_a,
-        key="start_year_a",
+        key="start_year_a", on_change=lambda: mark_interaction("start_year_a"),
         help="If you won't start college right away, Cost of Attendance "
              "gets projected forward to this year using the estimated COA "
              "inflation rate, before growing further across all 4 years "
@@ -7028,7 +7061,7 @@ if loan_source_a == "personal":
     )
     personal_contribution_per_year_a = st.sidebar.number_input(
         "Personal Contribution (per year, $)", min_value=0, max_value=100000, step=500,
-        key="personal_contribution_per_year_a",
+        key="personal_contribution_per_year_a", on_change=lambda: mark_interaction("personal_contribution_per_year_a"),
         help="Also called the Student Aid Index (SAI) -- the amount your family "
              "is expected to contribute. Savings or family money toward this "
              "year's cost that you did NOT borrow. Subtracted (with Grants) from "
@@ -7037,7 +7070,7 @@ if loan_source_a == "personal":
     )
     grants_per_year_a = st.sidebar.number_input(
         "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, step=500,
-        key="grants_per_year_a",
+        key="grants_per_year_a", on_change=lambda: mark_interaction("grants_per_year_a"),
         help="Grant or scholarship aid that reduces what you need to borrow. "
              "This amount does not need to be repaid back to the grantor.",
     )
@@ -7067,7 +7100,7 @@ else:
         "Community college path",
         options=_cc_options_a,
         format_func=lambda c: _cc_labels_a[c],
-        key="cc_mode_a",
+        key="cc_mode_a", on_change=lambda: mark_interaction("cc_mode_a"),
         help=(
             f"This profession is entered with a {program_years_a}-year degree, which a "
             "community college can award on its own -- so there's no transfer, and "
@@ -7112,7 +7145,7 @@ if cc_transfer_a:
         "Community College State",
         ["__national__"] + sorted(US_STATES, key=lambda k: US_STATES[k]),
         format_func=lambda k: "National average" if k == "__national__" else US_STATES[k],
-        key="cc_state_a",
+        key="cc_state_a", on_change=lambda: mark_interaction("cc_state_a"),
         help="Community-college tuition varies widely by state. Defaults to "
              "your school's state (then your work city's), and sets the cost "
              "below. Source: NCES via the Education Data Initiative (2025).",
@@ -7129,7 +7162,7 @@ if cc_transfer_a:
         st.session_state["cc_coa_per_year_a"] = int(_state_cost_a)
     cc_coa_per_year_a = st.sidebar.number_input(
         "Community College Cost (per year, $)", min_value=0, max_value=100000, step=250,
-        key="cc_coa_per_year_a",
+        key="cc_coa_per_year_a", on_change=lambda: mark_interaction("cc_coa_per_year_a"),
         help="Average annual in-district tuition & fees for the selected "
              "state's community colleges (NCES). Edit to your local college. "
              "Paid out of pocket -- it is NOT added to the loan, but it does "
@@ -7278,7 +7311,7 @@ if st.session_state.get("default_loan_a_seen") != default_loan_a:
 st.session_state.setdefault("loan_amount_a", default_loan_a)
 loan_amount = st.sidebar.number_input(
     "Total Loan Amount ($)", min_value=0, max_value=1000000, step=500,
-    key="loan_amount_a",
+    key="loan_amount_a", on_change=lambda: mark_interaction("loan_amount_a"),
     help="In Simplified mode this is the median debt graduates who borrowed leave "
          "this school with (College Scorecard); in Detailed mode it's the cost-based "
          "total (Cost of Attendance minus Personal Contribution and Grants, over 4 "
@@ -7308,6 +7341,9 @@ elif loan_source_a == "college":
 interest_rate = st.sidebar.number_input(
     "Federal Direct rate (%)", min_value=0.0, max_value=20.0,
     value=get_shared_float("rate", DEFAULT_FEDERAL_RATE), step=0.1,
+    # No key on this widget, so it is named explicitly here rather than being
+    # picked up with the keyed ones. on_change does not require a key.
+    on_change=lambda: mark_interaction("interest_rate_a"),
     help="Rate on federal Direct (Subsidized/Unsubsidized) loans -- the first "
          "~$27k over four years (dependent). 6.5% is a placeholder for the recent "
          "undergraduate Direct rate; it resets every July 1. In Simplified mode "
@@ -7318,7 +7354,7 @@ interest_rate = st.sidebar.number_input(
 if loan_source_a == "personal":
     gap_rate_a = st.sidebar.number_input(
         "Gap financing rate (%)", min_value=0.0, max_value=25.0,
-        step=0.1, key="gap_rate_a",
+        step=0.1, key="gap_rate_a", on_change=lambda: mark_interaction("gap_rate_a"),
         help="Rate on borrowing above the federal Direct cap -- Direct PLUS "
              "(~9% + 4.2% fee) or private/alternative loans. Applied to the "
              "'gap' tranche; the app blends it with the federal rate above.",
@@ -7333,6 +7369,7 @@ default_repayment_strategy_index = (
 )
 repayment_strategy = st.sidebar.selectbox(
     "Repayment Strategy", repayment_strategy_options, index=default_repayment_strategy_index,
+    on_change=lambda: mark_interaction("repayment_strategy_a"),
     help="Standard 10-Year: a fixed payment every month for 10 years. "
          "Income-Driven Repayment (IDR): your payment is based on your "
          "income instead, and whatever's left is forgiven after 20 years.",
@@ -7362,7 +7399,7 @@ st.session_state.setdefault(
 )
 roi_horizon_years = st.sidebar.selectbox(
     "ROI Horizon", ROI_HORIZON_OPTIONS, key="roi_horizon_select",
-    on_change=lambda: (mark_first_interaction("roi_horizon"), log_horizon_change()),
+    on_change=lambda: (mark_interaction("roi_horizon"), log_horizon_change()),
     format_func=lambda y: f"{y} years",
     help="How far into the future every comparison on this page looks. "
          "Careers that train before they earn (medicine, law) look worst at "
@@ -7475,7 +7512,7 @@ if not MAJOR_DATA:
 # holds this widget's value from the setdefault above, and passing both would
 # trigger Streamlit's widget-default-conflict warning.
 dataset_mode = st.sidebar.radio(
-    "Choose by", dataset_mode_options, key="dataset_mode_radio",
+    "Choose by", dataset_mode_options, key="dataset_mode_radio", on_change=lambda: mark_interaction("dataset_mode_radio"),
     help="Major: what people who studied that subject actually earn, "
          "including those who ended up working outside it (NY Fed, 73 "
          "majors). This is the choice you're actually making at 17. "
@@ -7536,7 +7573,7 @@ if (st.session_state.get("major_select_a") not in major_options
 st.session_state["major_select_a_mode"] = dataset_mode
 major = st.sidebar.selectbox(
     SELECTION_LABEL[dataset_mode], major_options, key="major_select_a",
-    on_change=lambda: (mark_first_interaction("major"), mark_major_explicitly_selected()),
+    on_change=lambda: (mark_interaction("major"), mark_major_explicitly_selected()),
     help="Pick what you're evaluating -- this determines the salary numbers "
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
@@ -7587,7 +7624,7 @@ if enable_prestige_mode:
 # setdefault up in the Career section, where MAJOR_DATA needed it) and passing
 # both would trigger Streamlit's widget-default-conflict warning.
 city = st.sidebar.selectbox(
-    "City / Metro Area", city_options, key="city_select",
+    "City / Metro Area", city_options, key="city_select", on_change=lambda: mark_interaction("city_select"),
     help="Where you plan to live and work after graduating. In Career mode "
          "this sets BOTH the wages (your metro's own BLS figures) and the "
          "cost-of-living adjustment -- so a higher-paying, pricier city can "
@@ -7644,26 +7681,26 @@ career_data_source = US_STATES.get(_career_state, "National") if _career_state e
 # above) -- passing both would trigger Streamlit's widget-policy warning.
 with st.sidebar.expander("🧪 Advanced Analysis Settings"):
     enable_prestige_mode = st.checkbox(
-        "Enable College Prestige & Cost Estimator", key="enable_prestige_mode",
+        "Enable College Prestige & Cost Estimator", key="enable_prestige_mode", on_change=lambda: mark_interaction("enable_prestige_mode"),
         help="Replace the manual school/Cost of Attendance fields above with "
              "a college-tier picker that also applies a modeled (not "
              "guaranteed) salary premium by tier -- see Methodology for "
              "sourcing and caveats.",
     )
     enable_ai_mode = st.checkbox(
-        "Enable AI Employability Risk Analysis", key="enable_ai_mode",
+        "Enable AI Employability Risk Analysis", key="enable_ai_mode", on_change=lambda: mark_interaction("enable_ai_mode"),
         help="Show a modeled AI task-exposure estimate for your chosen "
              "major's occupation group, based on published research -- see "
              "Methodology.",
     )
     enable_future_proofing = st.checkbox(
-        "Enable 2026 Federal Repayment Plans (RAP & Tiered)", key="enable_future_proofing",
+        "Enable 2026 Federal Repayment Plans (RAP & Tiered)", key="enable_future_proofing", on_change=lambda: mark_interaction("enable_future_proofing"),
         help="Compare the two real 2026 federal repayment plans side by side -- "
              "the Repayment Assistance Plan (RAP) and the Tiered Standard Plan, "
              "both effective July 1, 2026. See Methodology.",
     )
     enable_foregone_earnings = st.checkbox(
-        "Count foregone earnings during enrollment", key="count_foregone_earnings",
+        "Count foregone earnings during enrollment", key="count_foregone_earnings", on_change=lambda: mark_interaction("count_foregone_earnings"),
         help=f"Charge the ~{UNDERGRAD_YEARS} years of wages a student gives up "
              "while enrolled full-time -- usually the single largest real cost "
              "of a degree, bigger than tuition -- against the degree. The "
@@ -7767,7 +7804,7 @@ else:
 st.session_state.setdefault("compare_mode", _default_compare)
 compare_mode = st.sidebar.checkbox(
     "🔀 Compare Two Scenarios", key="compare_mode",
-    on_change=lambda: (mark_first_interaction("compare_toggle"), log_compare_toggle()),
+    on_change=lambda: (mark_interaction("compare_toggle"), log_compare_toggle()),
     help="Turn this on to compare two different majors, schools, or loan "
          "setups side by side instead of looking at just one.",
 )
@@ -7789,7 +7826,7 @@ if compare_mode:
             st.session_state["major_b"] = major_options[default_major_b_index]
         st.session_state["major_b_mode"] = dataset_mode
         major_b = st.selectbox(
-            SELECTION_LABEL[dataset_mode], major_options, key="major_b",
+            SELECTION_LABEL[dataset_mode], major_options, key="major_b", on_change=lambda: mark_interaction("major_b"),
             help="Pick the career you're evaluating -- this determines the "
                  "salary numbers used everywhere else in the app. There are "
                  "hundreds of options, so instead of scrolling, click the "
@@ -7828,7 +7865,7 @@ if compare_mode:
                 prestige_tier_options.index(shared_tier_b) if shared_tier_b in prestige_tier_options else 0
             )
             prestige_tier_b = st.selectbox(
-                "College Tier Selection", prestige_tier_options, index=default_tier_b_index, key="prestige_tier_b",
+                "College Tier Selection", prestige_tier_options, index=default_tier_b_index, key="prestige_tier_b", on_change=lambda: mark_interaction("prestige_tier_b"),
                 help="A modeled college-tier cost + salary-premium estimate, "
                      "in place of entering a specific school -- see "
                      "Methodology for how the salary premium is sourced and "
@@ -7845,7 +7882,7 @@ if compare_mode:
             school_search_b = st.text_input(
                 "Target Undergraduate School", placeholder="e.g. Ohio State University",
                 value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
-                on_change=lambda: (mark_first_interaction("school_b"),
+                on_change=lambda: (mark_interaction("school_b"),
                                     _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 help="Type a school name to auto-fill Cost of Attendance below "
                      "from real government data, if we have it on file. If "
@@ -7858,7 +7895,7 @@ if compare_mode:
                     f"Multiple schools matched \"{school_search_b}\" -- pick yours:",
                     matching_schools_b, key="school_pick_b",
                     format_func=lambda u: school_option_label(u, load_coa_dataset()),
-                    on_change=lambda: (mark_first_interaction("school_b"),
+                    on_change=lambda: (mark_interaction("school_b"),
                                     _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 )
             school_name_b = _resolve_school_name("school_search_b", "school_pick_b")
@@ -7866,7 +7903,7 @@ if compare_mode:
 
             in_state_b = st.checkbox(
                 "In-State Student?", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
-                on_change=lambda: (mark_first_interaction("school_b"),
+                on_change=lambda: (mark_interaction("school_b"),
                                     _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 help="Check this if you'd pay in-state tuition at the school "
                      "above. Changes the auto-filled Cost of Attendance and how "
@@ -7918,7 +7955,7 @@ if compare_mode:
             if not enable_prestige_mode:
                 coa_per_year_b = st.number_input(
                     "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
-                    key="coa_per_year_b",
+                    key="coa_per_year_b", on_change=lambda: mark_interaction("coa_per_year_b"),
                     help="The full sticker price for your first year (Year 1) at "
                          "this school -- tuition, fees, room & board, books, "
                          "everything -- before subtracting scholarships or what "
@@ -7928,7 +7965,7 @@ if compare_mode:
                 )
             start_year_b = st.selectbox(
                 "Year Starting Undergraduate School", _start_year_opts_b,
-                key="start_year_b",
+                key="start_year_b", on_change=lambda: mark_interaction("start_year_b"),
                 help="If you won't start college right away, Cost of Attendance "
                      "gets projected forward to this year using the estimated COA "
                      "inflation rate, before growing further across all 4 years "
@@ -7936,7 +7973,7 @@ if compare_mode:
             )
             personal_contribution_per_year_b = st.number_input(
                 "Personal Contribution (per year, $)", min_value=0, max_value=100000, step=500,
-                key="personal_contribution_per_year_b",
+                key="personal_contribution_per_year_b", on_change=lambda: mark_interaction("personal_contribution_per_year_b"),
                 help="Also called the Student Aid Index (SAI) -- the amount your "
                      "family is expected to contribute. Savings or family money "
                      "toward this year's cost that wasn't borrowed. Subtracted "
@@ -7944,7 +7981,7 @@ if compare_mode:
             )
             grants_per_year_b = st.number_input(
                 "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, step=500,
-                key="grants_per_year_b",
+                key="grants_per_year_b", on_change=lambda: mark_interaction("grants_per_year_b"),
                 help="Grant or scholarship aid that reduces what you need to "
                      "borrow. This amount does not need to be repaid back to "
                      "the grantor.",
@@ -7969,7 +8006,7 @@ if compare_mode:
                 "Community college path",
                 options=_cc_options_b,
                 format_func=lambda c: _cc_labels_b[c],
-                key="cc_mode_b",
+                key="cc_mode_b", on_change=lambda: mark_interaction("cc_mode_b"),
                 help=(
                     f"This profession is entered with a {program_years_b}-year degree, "
                     "which a community college can award on its own -- no transfer, so "
@@ -8004,7 +8041,7 @@ if compare_mode:
                 "Community College State",
                 ["__national__"] + sorted(US_STATES, key=lambda k: US_STATES[k]),
                 format_func=lambda k: "National average" if k == "__national__" else US_STATES[k],
-                key="cc_state_b",
+                key="cc_state_b", on_change=lambda: mark_interaction("cc_state_b"),
                 help="Community-college tuition varies widely by state. Defaults "
                      "to your school's state (then work city's) and sets the "
                      "cost below. Source: NCES via Education Data Initiative.",
@@ -8018,7 +8055,7 @@ if compare_mode:
                 st.session_state["cc_coa_per_year_b"] = int(_state_cost_b)
             cc_coa_per_year_b = st.number_input(
                 "Community College Cost (per year, $)", min_value=0, max_value=100000, step=250,
-                key="cc_coa_per_year_b",
+                key="cc_coa_per_year_b", on_change=lambda: mark_interaction("cc_coa_per_year_b"),
                 help="Average annual in-district tuition & fees for the selected "
                      "state's community colleges (NCES). Paid out of pocket -- "
                      "not added to the loan, but counts as a real cost in the ROI.",
@@ -8117,7 +8154,7 @@ if compare_mode:
         st.session_state.setdefault("loan_amount_b", default_loan_b)
         loan_amount_b = st.number_input(
             "Total Loan Amount ($)", min_value=0, max_value=1000000, step=500,
-            key="loan_amount_b",
+            key="loan_amount_b", on_change=lambda: mark_interaction("loan_amount_b"),
             help="In Simplified mode this is the median debt graduates who borrowed "
                  "leave this school with (College Scorecard); in Detailed mode it's "
                  "the cost-based total (Cost of Attendance minus Personal Contribution "
@@ -8147,7 +8184,7 @@ if compare_mode:
         interest_rate_b = st.number_input(
             "Federal Direct rate (%)", min_value=0.0, max_value=20.0,
             value=get_shared_float("rate_b", DEFAULT_FEDERAL_RATE), step=0.1,
-            key="interest_rate_b",
+            key="interest_rate_b", on_change=lambda: mark_interaction("interest_rate_b"),
             help="Rate on federal Direct loans (the first ~$27k over four years, "
                  "dependent). 6.5% is a placeholder for the recent undergraduate "
                  "Direct rate; it resets every July 1.",
@@ -8155,7 +8192,7 @@ if compare_mode:
         if loan_source_b == "personal":
             gap_rate_b = st.number_input(
                 "Gap financing rate (%)", min_value=0.0, max_value=25.0,
-                step=0.1, key="gap_rate_b",
+                step=0.1, key="gap_rate_b", on_change=lambda: mark_interaction("gap_rate_b"),
                 help="Rate on borrowing above the federal Direct cap -- Direct "
                      "PLUS or private/alternative loans. Blended with the federal "
                      "rate above.",
@@ -8169,7 +8206,7 @@ if compare_mode:
         )
         repayment_strategy_b = st.selectbox(
             "Repayment Strategy", repayment_strategy_options, index=default_repayment_strategy_b_index,
-            key="repayment_strategy_b",
+            key="repayment_strategy_b", on_change=lambda: mark_interaction("repayment_strategy_b"),
             help="Standard 10-Year: a fixed payment every month for 10 "
                  "years. Income-Driven Repayment (IDR): your payment is "
                  "based on your income instead, and whatever's left is "
