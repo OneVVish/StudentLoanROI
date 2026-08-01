@@ -4709,7 +4709,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        working_years: int = 0,
                        baseline_start_age: int = None,
                        federal_cap: float = None, gap_rate: float = None,
-                       include_fees: bool = False) -> dict:
+                       include_fees: bool = False,
+                       baseline_salary_now: float = None,
+                       baseline_salary_in_10y: float = None) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
     borrowing, shared by the on-screen section and its PDF counterpart so
     the two can't drift.
@@ -4743,7 +4745,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   working_years=working_years,
                                   baseline_start_age=baseline_start_age,
                                   federal_cap=federal_cap, gap_rate=gap_rate,
-                                  include_fees=include_fees)
+                                  include_fees=include_fees,
+                                  baseline_salary_now=baseline_salary_now,
+                                  baseline_salary_in_10y=baseline_salary_in_10y)
     years = roi_window_years
     # Career-mode names are plural BLS occupations ("Software Developers")
     # while Major-mode names are singular ("Computer Science"), so any verb
@@ -6566,7 +6570,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
-    )
+            **breakeven_kwargs())
     story += _pdf_breakeven_block(breakeven, styles)
     story += _pdf_wage_distribution_block(major, styles)
 
@@ -6683,7 +6687,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_a["enrollment_years"],
                               working_years=scenario_a["working_years"],
                               baseline_start_age=scenario_a["baseline_start_age"],
-                              federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees),
+                              federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
+            **breakeven_kwargs()),
             styles, scenario_label="Scenario A"),
         PageBreak(),
         Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
@@ -6706,7 +6711,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_b["enrollment_years"],
                               working_years=scenario_b["working_years"],
                               baseline_start_age=scenario_b["baseline_start_age"],
-                              federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=include_fees),
+                              federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=include_fees,
+            **breakeven_kwargs()),
             styles, scenario_label="Scenario B"),
         PageBreak(),
         Paragraph(_strip_emoji("📊 Side-by-Side Charts"), styles["section"]),
@@ -7632,6 +7638,32 @@ careers_csv_path = CAREERS_CSV_PATH_NATIONAL
 # making -- they pick a major and a school, and the occupation is a
 # consequence they're guessing at. Career mode is the richer dataset and
 # stays one click away for anyone who does have a specific job in mind.
+# Who is going to school. The app has always modelled exactly one person -- an
+# 18-year-old starting a first degree, measured against a debt-free high school
+# graduate -- and that is now the minority case: 24.6M federal borrowers are 35+
+# against 20.2M under 35, and over-50s owe more on average than under-35s. For
+# someone going back at 49 the high-school-graduate counterfactual is
+# meaningless; her alternative was her existing job at her existing salary.
+#
+# Read from session_state before the widget renders, the same pattern
+# dataset_mode uses, because the Financing block above needs it.
+STUDENT_MODE_FIRST = "Straight from high school"
+STUDENT_MODE_RETURNING = "Going back to school"
+STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
+st.session_state.setdefault("student_mode_radio", STUDENT_MODE_FIRST)
+student_mode = st.session_state["student_mode_radio"]
+is_returning = student_mode == STUDENT_MODE_RETURNING
+st.session_state.setdefault("current_age", 30)
+# Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
+# 4,950% ROI on the default San Francisco scenario, because $50k is below what
+# a high school graduate earns there -- so the app invented a spectacular
+# return for someone who had entered nothing. An unanswered question must look
+# unanswered.
+st.session_state.setdefault("current_salary", 0)
+st.session_state.setdefault("salary_no_degree_10y", 0)
+st.session_state.setdefault("existing_debt", 0)
+st.session_state.setdefault("existing_debt_rate", DEFAULT_FEDERAL_RATE)
+
 dataset_mode_options = [DATASET_MODE_MAJOR, DATASET_MODE_CAREER]
 shared_dataset_mode = get_shared_default("mode", DATASET_MODE_MAJOR)
 st.session_state.setdefault(
@@ -7639,6 +7671,49 @@ st.session_state.setdefault(
     shared_dataset_mode if shared_dataset_mode in dataset_mode_options else DATASET_MODE_MAJOR,
 )
 dataset_mode = st.session_state["dataset_mode_radio"]
+
+# One place the baseline arguments are assembled, spread into every
+# compute_scenario_results / find_breakeven_loan call. Threading them by hand
+# through five call sites is exactly how hs_wage_index went missing from
+# compute_future_plan_result and put a 76% overstatement on screen -- a dict
+# spread cannot be half-applied.
+def returning_kwargs() -> dict:
+    """Baseline + existing-debt arguments, or empty in first-time mode."""
+    if not is_returning:
+        return {}
+    # Existing debt applies as soon as it is entered; the BASELINE only swaps
+    # once she has said what she earns. Swapping to a zero baseline would
+    # compare the degree against earning nothing and report a spectacular
+    # return -- the app would be answering a question she has not been asked yet.
+    kwargs = {
+        "existing_debt": float(st.session_state.get("existing_debt", 0) or 0),
+        "existing_debt_rate": float(st.session_state.get("existing_debt_rate")
+                                     if st.session_state.get("existing_debt", 0) else 0) or None,
+    }
+    if returning_baseline_ready():
+        kwargs["baseline_salary_now"] = float(st.session_state["current_salary"])
+        kwargs["baseline_salary_in_10y"] = float(st.session_state["salary_no_degree_10y"])
+    return kwargs
+
+
+def returning_baseline_ready() -> bool:
+    """Both salary answers present. Until then the comparison stays on the
+    high-school-graduate baseline and the page says so, rather than silently
+    measuring a degree against zero."""
+    return bool(st.session_state.get("current_salary", 0)
+                and st.session_state.get("salary_no_degree_10y", 0))
+
+
+def breakeven_kwargs() -> dict:
+    """The baseline half only -- find_breakeven_loan solves for NEW borrowing,
+    so an existing balance has no place in it."""
+    if not is_returning or not returning_baseline_ready():
+        return {}
+    return {
+        "baseline_salary_now": float(st.session_state["current_salary"]),
+        "baseline_salary_in_10y": float(st.session_state["salary_no_degree_10y"]),
+    }
+
 
 # City drives the wage dataset now, not just the cost-of-living index, so it
 # must be resolved before MAJOR_DATA is built. Its widget renders further
@@ -7707,6 +7782,65 @@ if not MAJOR_DATA:
 # ("what am I choosing?" then "which one?"). No index= -- session_state already
 # holds this widget's value from the setdefault above, and passing both would
 # trigger Streamlit's widget-default-conflict warning.
+# Rendered before "Choose by" because it changes what the whole section means:
+# in returning mode the comparison is against the visitor's own salary, not a
+# high school graduate's.
+st.sidebar.radio(
+    "Who is going to school?", STUDENT_MODE_OPTIONS, key="student_mode_radio",
+    on_change=lambda: mark_interaction("student_mode_radio"),
+    help="Straight from high school compares against a debt-free high school "
+          "graduate. Going back to school compares against your own current "
+          "pay -- which is the honest question if you already have a job.",
+)
+
+if is_returning:
+    # Everything here is something the visitor knows about themselves. The app
+    # asks rather than infers, because the alternative is guessing at a career
+    # history it has no data for.
+    st.sidebar.number_input(
+        "Your age now", min_value=18, max_value=80, step=1, key="current_age",
+        on_change=lambda: mark_interaction("current_age"),
+        help="Used to say when you'd finish repaying -- 'repaid at 63' rather "
+              "than 'payoff 14 years'.",
+    )
+    st.sidebar.number_input(
+        "Your salary now ($/yr)", min_value=0, max_value=1_000_000, step=1_000,
+        key="current_salary", on_change=lambda: mark_interaction("current_salary"),
+        help="What you earn today. This replaces the high-school-graduate "
+              "figure as the thing the degree is measured against.",
+    )
+    st.sidebar.number_input(
+        "Your salary in 10 years WITHOUT the degree ($/yr)",
+        min_value=0, max_value=1_000_000, step=1_000,
+        key="salary_no_degree_10y",
+        on_change=lambda: mark_interaction("salary_no_degree_10y"),
+        help="Staying put isn't standing still. Leaving this at your current "
+              "salary assumes no raises ever, which flatters the degree.",
+    )
+    st.sidebar.number_input(
+        "Existing student debt ($)", min_value=0, max_value=1_000_000, step=1_000,
+        key="existing_debt",
+        on_change=lambda: mark_interaction("existing_debt"),
+        help="Any student loan you already owe. It is added to your monthly "
+              "payment and payoff date, but NOT charged against this degree -- "
+              "you'd be paying it either way.",
+    )
+    if st.session_state.get("existing_debt", 0):
+        st.sidebar.number_input(
+            "Rate on that existing debt (%)", min_value=0.0, max_value=20.0,
+            step=0.1, key="existing_debt_rate",
+            on_change=lambda: mark_interaction("existing_debt_rate"),
+        )
+    # Says which comparison is actually running. Without this the visitor sees
+    # returning-student inputs on screen and assumes the figures already use
+    # them, when a blank salary leaves the old baseline in force.
+    if not returning_baseline_ready():
+        st.sidebar.warning(
+            "Enter both salaries above to compare against **your own pay**. "
+            "Until then the figures still compare against a debt-free high "
+            "school graduate, which understates what this degree has to beat."
+        )
+
 dataset_mode = st.sidebar.radio(
     "Choose by", dataset_mode_options, key="dataset_mode_radio", on_change=lambda: mark_interaction("dataset_mode_radio"),
     help="Major: what people who studied that subject actually earn, "
@@ -9464,7 +9598,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             enrollment_years=scenario["enrollment_years"],
             baseline_start_age=scenario["baseline_start_age"],
             federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
-        )
+            **breakeven_kwargs())
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
             st.markdown(breakeven["headline"].replace("$", r"\$"))
@@ -9721,7 +9855,8 @@ if compare_mode:
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                           federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
+                                           federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                           **returning_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
@@ -9729,7 +9864,8 @@ if compare_mode:
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                           federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
+                                           federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
+                                           **returning_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
     # national curve -- the one series genuinely common to A and B -- sits at
@@ -9907,7 +10043,8 @@ else:
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
+                                         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                           **returning_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -10079,7 +10216,7 @@ else:
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
-    )
+            **breakeven_kwargs())
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
         # here, so the verdict leads instead of trailing the ROI chart. The
@@ -10366,7 +10503,8 @@ Questions about the research? Contact **veervish11@gmail.com**.
                                                    enrollment_years=enrollment_years_a,
                                                    working_years=working_years_a,
                                                    baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                                   federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
+                                                   federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                           **returning_kwargs())
             # major_b/loan_amount_b/etc. only exist as script variables when
             # compare_mode is on (they're assigned inside that sidebar
             # expander) -- referencing them outside an "if compare_mode:"
@@ -10381,7 +10519,8 @@ Questions about the research? Contact **veervish11@gmail.com**.
                                                        enrollment_years=enrollment_years_b,
                                                        working_years=working_years_b,
                                                        baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                                       federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
+                                                       federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
+                                           **returning_kwargs())
                 compare_mode_kwargs = dict(
                     compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                     interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
