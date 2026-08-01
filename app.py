@@ -9145,7 +9145,15 @@ render_get_accurate_inputs(
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------
 
-if not st.session_state.survey_submitted:
+# Hidden outright for a student who told the pre block they are under
+# RESEARCH_MIN_AGE. Gating only the pre questions would have left the larger
+# instrument -- the one carrying the free-text box -- fully open to exactly
+# the visitors the floor exists to exclude.
+#
+# A visitor who never answered the role question still sees the survey; an
+# unanswered role is not a claim to be a minor. That path is caught inside the
+# form instead, where selecting Student requires the same attestation.
+if not st.session_state.survey_submitted and research_participation_allowed():
     st.subheader("📋 Help Us Measure Impact")
     # Consent, shown BEFORE the form rather than inside it. Inside an st.form
     # nothing renders until the form is constructed and nothing submits until
@@ -9206,10 +9214,18 @@ Questions about the research? Contact **veervish11@gmail.com**.
         if _pre_role:
             st.caption(f"Answering as: **{_pre_role}** (from the questions at the top)")
             respondent_role = _pre_role
+            # Already attested at the top, or this block would not render.
+            form_age_ok = True
         else:
             respondent_role = st.selectbox(
                 "I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
                 placeholder="Select one")
+            # Shown unconditionally rather than only for Students: inside an
+            # st.form nothing reruns until submit, so the checkbox cannot
+            # appear in response to the role choice the way it does at the top
+            # of the page. Asking everyone is the cost of that constraint --
+            # it is only ENFORCED for the roles that need it, below.
+            form_age_ok = st.checkbox(f"I am {RESEARCH_MIN_AGE} or older")
         hs_graduation_year = st.selectbox(
             "Expected High School Graduation Year", ["2027", "2028", "2029", "2030"],
         )
@@ -9219,6 +9235,20 @@ Questions about the research? Contact **veervish11@gmail.com**.
         )
         feedback_text = st.text_area("How did this data influence your thinking? (optional)")
         submitted = st.form_submit_button("Submit Feedback")
+
+        # Enforced at submit because a form cannot react before it. Checked
+        # BEFORE compute_scenario_results and before any write: an ineligible
+        # submission must not be assembled and then discarded, since the
+        # discarding is the only thing standing between it and Supabase.
+        if submitted and respondent_role in ROLES_REQUIRING_AGE_ATTESTATION \
+                and not form_age_ok:
+            st.warning(
+                f"This survey is for people {RESEARCH_MIN_AGE} and over, so this "
+                "response wasn't recorded. Everything else on the page is "
+                "unaffected — the calculator is yours to use."
+            )
+            log_usage_event("survey_blocked_minor")
+            submitted = False
 
         if submitted:
             # Recomputed fresh (cheap, pure functions, no API calls) rather
@@ -9270,7 +9300,12 @@ Questions about the research? Contact **veervish11@gmail.com**.
                 st.rerun()
             else:
                 st.error("Something went wrong saving your response -- please try again.")
-else:
+elif st.session_state.survey_submitted:
+    # Only for someone who actually submitted. This was a bare `else`, which
+    # after the eligibility condition was added to the `if` above began
+    # thanking under-18 visitors for a response that was never collected --
+    # a false statement, and on precisely the surface where the app is making
+    # claims about what it does with data.
     st.success("Thank you! Your feedback has been recorded anonymously.")
 
 st.divider()
