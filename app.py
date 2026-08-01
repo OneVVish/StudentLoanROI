@@ -1528,25 +1528,28 @@ ROLES_WITHOUT_BORROWING = {"Counselor"}
 # is a public information tool and nothing about using it is research -- but
 # the survey instruments are not offered to a student below this age.
 #
-# READ THIS BEFORE RELYING ON IT: 17 does NOT make the minor-research
-# requirements go away. The age of majority is 18 in nearly every state (19 in
-# Alabama and Nebraska), and 45 CFR 46.402(a) defines "children" by the age of
-# consent in the jurisdiction where the research is conducted -- which, for a
-# tool reachable from anywhere, is not a single jurisdiction. A 17-year-old is
-# a child under the Common Rule, so surveying them still requires IRB review
-# plus parental permission and child assent, and is NOT exempt under the
-# survey-procedures category (45 CFR 46.104(d)(2) reaches children only for
-# educational tests and non-participant observation of public behaviour).
+# 18 is the load-bearing number, not a rounded-up 17. At 18 a respondent is an
+# adult in every state but Alabama and Nebraska (19) and consents for
+# themselves, which takes the study out of Subpart D entirely: no parental
+# permission, no child assent, and the anonymous-survey exemption at
+# 45 CFR 46.104(d)(2) becomes available -- it is unavailable for children,
+# reaching them only for educational tests and non-participant observation.
+# At 17 none of that is true; a 17-year-old is a child under 45 CFR 46.402(a),
+# and every one of those requirements still applies. The floor is the
+# difference between a study that needs parental permission and one that does
+# not.
 #
-# What this floor actually buys: it excludes younger minors, and it makes the
-# eligible population close to the high-school seniors the tool is built for.
-# What it does not buy: any reduction in the approval a study of minors needs.
-# Setting it to 18 would remove that requirement outright; 17 does not.
+# The cost is real and belongs in the paper rather than a footnote: the
+# intended population is high-school seniors, most of whom are 16-17. A
+# visitor graduating in 2028-2030 is 14-16 today and cannot participate at
+# all. Any claim about "high school students" must be read as "students
+# already 18" -- an older, smaller, and differently-situated group than the
+# one the tool was built for.
 #
 # Only asked of Students. Parent/Counselor/Teacher are adult roles by
 # construction -- asking them to attest reads as an accusation and collects
 # nothing.
-RESEARCH_MIN_AGE = 17
+RESEARCH_MIN_AGE = 18
 ROLES_REQUIRING_AGE_ATTESTATION = {"Student"}
 
 # Lower-case codes for the log line, so a reworded option label cannot
@@ -2321,9 +2324,7 @@ def research_participation_allowed() -> bool:
     """Whether this visitor may be offered a research instrument.
 
     False only for a self-identified student who has not attested to meeting
-    RESEARCH_MIN_AGE. Note that meeting it does not make them an adult -- at
-    17 they are still a child under 45 CFR 46.402(a), and the study still
-    needs the approvals that implies. Everyone else -- including a visitor who never
+    RESEARCH_MIN_AGE. Everyone else -- including a visitor who never
     answered the role question at all -- is allowed, because an unanswered
     role is not a claim to be a minor and refusing on that basis would
     suppress most of the sample for no gain.
