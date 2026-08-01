@@ -642,3 +642,37 @@ delete from survey_responses
    and timestamp < '2026-07-15';
 
 -- After both statements: select count(*) from survey_responses;  -- expect 0
+
+-- ============================================================================
+-- 2026-08-01  ?research=1 gate REMOVED -- collection is open
+-- ============================================================================
+-- No schema change. Recorded here because this is the line every later
+-- analysis has to condition on, and nothing in the data marks it.
+--
+-- The pre/post instrument was held behind ?research=1 from 2026-07-31 until
+-- 2026-08-01 because the human-subjects determination had not been obtained.
+-- It now has been, and the gate is gone: the pre-question and the exit survey
+-- render for every visitor.
+--
+--   >>> FILL IN: determination reference (protocol number, or the exemption
+--   >>> category relied on, and the date and issuing body). It is deliberately
+--   >>> not invented here. Copy the same reference into the paper's 5.1b.
+--
+-- What this means for the data:
+--
+--   * survey_responses is EMPTY as of this date -- the 5 pre-approval rows
+--     were deleted above. Every row from here on is post-determination, so
+--     there is no "collected before approval" subset to exclude. That is the
+--     whole point of having deleted them rather than kept them.
+--   * usage_logs, scenario_events, pdf_downloads and scenario_shares were
+--     never gated and span both eras. They are behavioural, not instrument
+--     data, and were unaffected by the gate.
+--   * Response volume before and after 2026-08-01 is not comparable: the
+--     denominator changed from "visitors given a research link" to "all
+--     visitors". Any rate computed across this date is meaningless.
+--
+-- Two protections remain and were never part of this gate. Do not remove them
+-- on the strength of a determination that covers something else:
+--   * research_participation_allowed() withholds the instrument from a
+--     self-identified student who has not attested to RESEARCH_MIN_AGE.
+--   * The consent notice renders above the form, before anything is answered.
