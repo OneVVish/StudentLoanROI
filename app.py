@@ -1446,6 +1446,96 @@ CAREER_STAGE_OPTIONS = {
     "Mid-Career (Year 10)": 9,
 }
 
+# ---- Pre/post impact measurement -------------------------------------------
+# The exit survey asks whether the tool changed the visitor's view -- one
+# retrospective self-report, asked after everything, requiring them to
+# introspect on a change they may never have noticed. There has never been
+# anything to difference it against: no question is asked anywhere before the
+# numbers appear.
+#
+# These two get asked TWICE -- once above the results and once inside the exit
+# survey -- so the paper can report a measured shift rather than a remembered
+# one. Both are ordered categories, so a pair yields a signed step difference.
+#
+# Bands rather than a free-numeric borrowing field on purpose: a text box
+# placed after the app has just displayed a loan figure measures how well the
+# visitor read that figure, not what they intend to borrow.
+#
+# WILLINGNESS, not expectation, for the same reason and more sharply. The
+# sidebar shows a loan amount at page load, so "how much do you expect to
+# borrow?" asked afterwards is partly a reading test of a number already on
+# screen. The MOST you would be willing to take on is a threshold the app
+# never states anywhere, so the post answer has to be generated rather than
+# recalled -- which is the whole point of asking twice.
+#
+# "Not sure" / "Haven't decided" are real answers and are scored as their own
+# category, never as a midpoint. Someone moving from "Haven't decided" to a
+# band is the clearest evidence the tool did something, and averaging it into
+# a number would erase exactly that.
+#
+# Stored as CODES, not these display labels. analyze_survey.py's
+# PERCEPTION_ORDER is a hand-copy of app.py's radio list, so rewording one
+# side silently reindexes the cross-tab to NaN -- survivable for a category
+# count, not for an ORDINAL item whose analysis subtracts two values, where a
+# broken map yields a wrong number instead of an obvious blank.
+PRESURVEY_SCHOOLS_OPTIONS = {
+    "0": "s0", "1": "s1", "2": "s2", "3": "s3", "4": "s4",
+    "5 or more": "s5plus", "Not sure": "unsure",
+}
+PRESURVEY_BORROWING_OPTIONS = {
+    "Nothing — I don't want to borrow": "n0",
+    "Up to $10,000": "b1",
+    "$10,000-$30,000": "b2",
+    "$30,000-$60,000": "b3",
+    "$60,000-$100,000": "b4",
+    "More than $100,000": "b5",
+    "Haven't decided": "undecided",
+}
+
+# Asked before the numbers and again after. The post wording deliberately does
+# NOT ask "did this change your mind?" -- that invites the respondent to report
+# the change they think is expected of them. Asking for a current state and
+# differencing it ourselves keeps the inference on our side of the instrument.
+PRESURVEY_SCHOOLS_QUESTION = "How many colleges are you seriously considering right now?"
+PRESURVEY_BORROWING_QUESTION = (
+    "What's the most total student debt you'd be willing to take on for this path?")
+POSTSURVEY_SCHOOLS_QUESTION = "How many colleges are you seriously considering now?"
+POSTSURVEY_BORROWING_QUESTION = (
+    "Now, what's the most total student debt you'd be willing to take on for this path?")
+
+# Asked FIRST, in the pre block, because it decides what else to ask. The
+# option set gains "Counselor": the outreach this app is built around goes to
+# high-school and community-college counsellors, and until now they had to
+# file themselves under Teacher or Other.
+PRESURVEY_ROLE_OPTIONS = ["Student", "Parent", "Counselor", "Teacher", "Other"]
+
+# Roles for whom "the most debt you'd be willing to take on" is not a question
+# about themselves. A counsellor answering it is either guessing on a
+# student's behalf or answering about their own long-past finances -- either
+# way it is not the quantity the paired test differences, and averaging it in
+# would add noise to the one measure the design exists to produce.
+#
+# They still get the schools question: a counsellor advising students plausibly
+# does hold a consideration set, and widening it is exactly what the tool is
+# for.
+#
+# Teacher is arguably in the same position and is deliberately NOT listed --
+# flagged for a decision rather than assumed, since a teacher could as easily
+# be a parent of a college-bound child answering for themselves.
+ROLES_WITHOUT_BORROWING = {"Counselor"}
+
+# Lower-case codes for the log line, so a reworded option label cannot
+# silently change what a stored value means.
+_ROLE_CODES = {role: role.lower() for role in PRESURVEY_ROLE_OPTIONS}
+
+# Bumped whenever an option set or question wording changes. Without it,
+# "declined the pre" (version set, answers NULL) and "predates the pre"
+# (version NULL) are the same NULL, and the denominator of the pre-response
+# rate is silently wrong. Same reasoning as hs_baseline_age_aware: keep
+# writing a near-constant column because it is the only thing telling two
+# eras apart.
+PRESURVEY_INSTRUMENT_VERSION = "v1"
+
 # ---- Budget-first school search (fields of study) ---------------------------
 # The 38 two-digit CIP families the College Scorecard reports program flags
 # for, as carried in data/college_coa_clean.csv's programs_* columns (see
@@ -2141,6 +2231,144 @@ def log_compare_toggle():
     """
     state = "on" if st.session_state.get("compare_mode") else "off"
     log_usage_event(f"compare_toggled:{state}:arm={get_experiment_arm()}")
+
+
+def escape_money_markdown(label: str) -> str:
+    """Escape dollar signs so Streamlit renders them as text, not LaTeX.
+
+    A label like "$10,000-$25,000" carries a MATCHED PAIR of "$", which
+    Streamlit's markdown treats as a maths delimiter -- the band renders
+    italicised, without its dollar signs, as though it were an equation. Single
+    "$" elsewhere in the app is unaffected because it is unpaired, which is why
+    this has not bitten before.
+
+    Used via format_func so the stored and logged value stays clean: the
+    backslashes are a display concern and must not reach Supabase.
+    """
+    return label.replace("$", r"\$")
+
+
+def presurvey_code(options: dict, label: str) -> str:
+    """The stable code for a display label, or "skip" when unanswered.
+
+    Everything stored or logged goes through here. The display strings are
+    free to be reworded -- for clarity, or because a band changes -- without
+    silently reindexing an ordinal analysis that subtracts two values."""
+    return options.get(label, "skip") if label else "skip"
+
+
+def log_presurvey(answered: bool) -> None:
+    """Record the pre-question outcome to usage_logs.
+
+    usage_logs takes any new action string with no migration -- the same reason
+    log_horizon_change writes here rather than adding a column. That matters
+    more than usual for this one: writing the pre-answer ONLY into the survey
+    row would make it invisible for every visitor who answers it and then
+    leaves without submitting the exit survey, which is most of them. The
+    drop-off between the two is itself a finding about engagement, and it can
+    only be measured if the pre exists independently.
+
+    Answers are also held in session_state and copied onto the survey row when
+    one is submitted, so a completed pair lives on a single row for analysis.
+    """
+    if not answered:
+        log_usage_event("presurvey_skipped")
+        return
+    role = st.session_state.get("presurvey_role") or "unset"
+    schools = presurvey_code(PRESURVEY_SCHOOLS_OPTIONS,
+                             st.session_state.get("presurvey_schools"))
+    # "n_a" rather than "skip": for a counsellor the question was never put,
+    # which is a different fact from a visitor who was asked and declined.
+    borrowing = ("n_a" if role in ROLES_WITHOUT_BORROWING
+                 else presurvey_code(PRESURVEY_BORROWING_OPTIONS,
+                                      st.session_state.get("presurvey_borrowing")))
+    # seq > 1 means the visitor had already switched major or school before
+    # answering, so their "pre" is really post-interaction. One token, and it
+    # is the only way to tell those rows apart later.
+    seq = st.session_state.get("scenario_event_seq", 0)
+    log_usage_event(
+        f"presurvey_answered:role={presurvey_code(_ROLE_CODES, role)}"
+        f":considering={schools}:borrow={borrowing}"
+        f":seq={seq}:arm={get_experiment_arm()}:v={PRESURVEY_INSTRUMENT_VERSION}")
+
+
+def render_presurvey() -> None:
+    """The two before-you-look questions, above the results.
+
+    Deliberately NOT a gate. This app's premise is that real numbers are on
+    screen before you touch anything, so a prompt that withholds them to
+    collect data would trade the thing the tool is for against the thing the
+    paper wants. It renders, it can be skipped in one click, and the results
+    below render either way.
+
+    Rendered at module level, outside both section 5c branches -- the same
+    reason the exit survey is safe. get_experiment_arm() assigns ~half of
+    visitors to Compare Mode, so anything rendered inside one branch and not
+    the other becomes a difference between the arms that H2 does not claim.
+
+    Skipped and unanswered are tracked separately. A missing answer must mean
+    "we don't know", never "they had nothing to say" -- the same distinction
+    major_explicitly_selected exists to preserve for the major.
+    """
+    # No test_mode gate here on purpose: log_usage_event already returns early
+    # on it, so a ?test=1 session sees the real prompt and writes nothing --
+    # matching save_survey_response, which returns True without inserting so
+    # the thank-you UX still appears. Suppressing the render instead would make
+    # the one feature that must be verified in a browser unverifiable there.
+    if st.session_state.get("presurvey_answered") or st.session_state.get("presurvey_skipped"):
+        return
+
+    # One row per session, not per rerun -- this function runs on every pass.
+    if not st.session_state.get("presurvey_shown_logged"):
+        st.session_state["presurvey_shown_logged"] = True
+        log_usage_event("presurvey_shown")
+
+    with st.expander("📝 Two quick questions before you look (optional)", expanded=True):
+        st.caption(
+            "Answering these before you explore lets us measure whether tools like "
+            "this actually change anything — we ask the same two at the end. Skip "
+            "if you'd rather just get to the numbers."
+        )
+        # index=None so "unanswered" is a real state. A radio defaulting to its
+        # first option would record "0 colleges" for anyone who ignored it,
+        # which is the same answer-vs-absence failure the exit survey's
+        # role/graduation-year dropdowns still have.
+        # Role first: it decides whether the borrowing question is asked at
+        # all. Plain radios rather than a form precisely so this reacts --
+        # inside st.form nothing reruns until submit, and the borrowing
+        # question could not appear or disappear in response.
+        st.radio("I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
+                  horizontal=True, key="presurvey_role")
+        st.radio(PRESURVEY_SCHOOLS_QUESTION, list(PRESURVEY_SCHOOLS_OPTIONS),
+                  index=None, horizontal=True, key="presurvey_schools")
+
+        role = st.session_state.get("presurvey_role")
+        borrowing_applies = role not in ROLES_WITHOUT_BORROWING
+        if borrowing_applies:
+            st.radio(PRESURVEY_BORROWING_QUESTION, list(PRESURVEY_BORROWING_OPTIONS),
+                      index=None, key="presurvey_borrowing",
+                      format_func=escape_money_markdown)
+        elif st.session_state.get("presurvey_borrowing"):
+            # Cleared rather than left dangling: a visitor who answered the
+            # borrowing question and THEN picked Counselor would otherwise
+            # have a stale answer silently ride along to Supabase.
+            st.session_state["presurvey_borrowing"] = None
+
+        save_col, skip_col = st.columns([1, 3])
+        answered_required = (
+            bool(role)
+            and bool(st.session_state.get("presurvey_schools"))
+            and (not borrowing_applies or bool(st.session_state.get("presurvey_borrowing")))
+        )
+        if save_col.button("Save answers", disabled=not answered_required,
+                            use_container_width=True):
+            st.session_state["presurvey_answered"] = True
+            log_presurvey(answered=True)
+            st.rerun()
+        if skip_col.button("Skip"):
+            st.session_state["presurvey_skipped"] = True
+            log_presurvey(answered=False)
+            st.rerun()
 
 
 def get_traffic_source() -> str:
@@ -5964,6 +6192,14 @@ if "pageview_logged" not in st.session_state:
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
 
+# Pre-question state. answered and skipped are tracked separately on purpose:
+# both hide the prompt, but only one of them means the visitor had something
+# to say. Neither is seeded onto the radios themselves -- those stay at
+# index=None so "unanswered" survives as a distinct third state.
+for _presurvey_flag in ("presurvey_answered", "presurvey_skipped", "presurvey_shown_logged"):
+    if _presurvey_flag not in st.session_state:
+        st.session_state[_presurvey_flag] = False
+
 # Admin Analytics View starts hidden -- Ctrl+Shift+A reveals the checkbox
 # that controls it (see the hidden trigger button + injected JS near the
 # bottom of the sidebar), or visiting the app with ?admin=1 in the URL,
@@ -7448,6 +7684,11 @@ st.info(
     "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
     "anything. Everything below updates instantly as you change it, no button to click."
 )
+
+# The before-you-look questions. Above the results because that is the only
+# place a "before" measurement can be taken, and skippable because the results
+# are the point -- see render_presurvey.
+render_presurvey()
 
 # Collapsed on purpose. This app's whole premise is that real numbers are on
 # screen before you touch anything -- there is deliberately no "calculate"
