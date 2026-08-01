@@ -612,6 +612,33 @@ alter table survey_responses
 
 delete from survey_responses where traffic_source = 'schema_probe';
 
--- Expected: DELETE 5, leaving the 5 genuine responses from 2026-07-12..14.
--- Those five predate any IRB determination and are the pre-approval rows noted
--- below; they are a separate decision and are deliberately NOT deleted here.
+-- ============================================================================
+-- 2026-08-01  Delete the 5 pre-approval survey responses
+-- ============================================================================
+-- These are genuine visitor responses, collected 2026-07-12..14, BEFORE any
+-- IRB determination existed. They are human-subjects data gathered without the
+-- approval that should have preceded it, so they are being removed rather than
+-- retained-and-excluded. Retaining them for analysis while acknowledging they
+-- were improperly collected is the thing the deletion is meant to avoid.
+--
+-- IRREVERSIBLE, and there is no backup. These 5 rows are the ENTIRE survey
+-- dataset -- after this the table is empty and every survey figure the paper
+-- might have cited is gone. That is the intended outcome, not a side effect.
+--
+-- The one substantive finding in them does not require keeping them: a
+-- self-identified student wrote "I am not really sure what any of this means."
+-- That is a usability signal about the app's readability for its actual target
+-- reader, and it survives as a note here without retaining the row.
+--
+-- Predicate rather than a bare `delete from survey_responses` so that a
+-- response arriving between now and when this is run is not silently caught up
+-- in it. Check the count first:
+--
+--   select count(*) from survey_responses
+--    where traffic_source is null and timestamp < '2026-07-15';   -- expect 5
+
+delete from survey_responses
+ where traffic_source is null
+   and timestamp < '2026-07-15';
+
+-- After both statements: select count(*) from survey_responses;  -- expect 0
