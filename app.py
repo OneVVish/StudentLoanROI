@@ -2403,8 +2403,6 @@ def render_presurvey() -> None:
     # matching save_survey_response, which returns True without inserting so
     # the thank-you UX still appears. Suppressing the render instead would make
     # the one feature that must be verified in a browser unverifiable there.
-    if not st.session_state.get("research_mode"):
-        return
     if st.session_state.get("presurvey_answered") or st.session_state.get("presurvey_skipped"):
         return
 
@@ -2500,7 +2498,7 @@ def get_traffic_source() -> str:
     NULL in the database rather than a fabricated "direct".
 
     LATCHED into session_state on first read, not re-read from the URL each
-    time, for the same reason test_mode and research_mode are: "Share Scenario"
+    time, for the same reason test_mode is: "Share Scenario"
     calls st.query_params.from_dict, which REPLACES the whole query string. A
     live read meant every row written after a share lost its attribution --
     silently, and looking exactly like organic traffic, which is the one thing
@@ -2903,9 +2901,10 @@ def session_query_params() -> dict:
       arrived from a forwarded link did not come from that counsellor's class,
       and recording that they did is fabricated attribution, worse than the
       NULL it replaces.
-    - **admin / research.** Both fail safe when dropped: the dashboard stays
-      hidden and the survey instrument stays off. Neither should ride along to
-      a stranger, and research= in particular gates an ethics hold.
+    - **admin.** Fails safe when dropped -- the dashboard stays hidden -- and
+      should not ride along to a stranger. (research= was here too until the
+      human-subjects determination came through on 2026-08-01 and that gate was
+      removed; the parameter no longer does anything.)
     """
     return {"test": "1"} if st.session_state.get("test_mode") else {}
 
@@ -6553,26 +6552,19 @@ components.html(
 if "test_mode" not in st.session_state:
     st.session_state.test_mode = get_shared_default("test", "0") == "1"
 
-# The pre/post research instrument renders only for ?research=1. Everyone else
-# sees the calculator exactly as it was, and no pre/post answer is collected
-# from them.
+# The pre/post research instrument renders for everyone. It was held behind a
+# ?research=1 gate from 2026-07-31 to 2026-08-01 because the human-subjects
+# determination had not been obtained; that determination now exists (recorded
+# in migrations.sql and the paper's section 5.1b), so the gate is gone.
 #
-# This is an ethics gate, not a feature flag. The instrument is human-subjects
-# research and the required IRB determination has not been obtained -- see the
-# paper's section 5.1b. Deploying it open would begin collecting from the
-# public before that exists, which is the same defect as the handful of
-# pre-approval responses already in the table, at a larger scale and this time
-# knowingly.
-#
-# Sticky in session_state for the same reason test_mode is: "Share Scenario"
-# calls st.query_params.from_dict, which REPLACES the whole query string, so a
-# flag re-read from the URL on every call would silently switch itself off
-# mid-session.
-#
-# Remove this gate when an approval exists -- not before, and not by anyone
-# who has not checked that it does.
-if "research_mode" not in st.session_state:
-    st.session_state.research_mode = get_shared_default("research", "0") == "1"
+# Two protections that were NEVER the IRB gate remain, and removing them is a
+# separate and much worse decision:
+#   - research_participation_allowed() still withholds the instrument from a
+#     self-identified student who has not attested to RESEARCH_MIN_AGE.
+#   - The consent notice still renders above the form, before anything is
+#     answered.
+# The calculator itself has never been gated on either, and must not be: using
+# a public information tool is not participating in research.
 
 # an expander see "pageview_logged" already set and skip logging again.
 if "pageview_logged" not in st.session_state:
@@ -9732,8 +9724,7 @@ render_get_accurate_inputs(
 # A visitor who never answered the role question still sees the survey; an
 # unanswered role is not a claim to be a minor. That path is caught inside the
 # form instead, where selecting Student requires the same attestation.
-if st.session_state.get("research_mode") and not st.session_state.survey_submitted \
-        and research_participation_allowed():
+if not st.session_state.survey_submitted and research_participation_allowed():
     st.subheader("📋 Help Us Measure Impact")
     # Consent, shown BEFORE the form rather than inside it. Inside an st.form
     # nothing renders until the form is constructed and nothing submits until
