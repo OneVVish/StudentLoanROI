@@ -4452,7 +4452,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               baseline_start_age: int = None,
                               federal_cap: float = None, gap_rate: float = None,
                               include_fees: bool = False,
-                              baseline_curve=None,
+                              baseline_salary_now: float = None,
+                              baseline_salary_in_10y: float = None,
                               existing_debt: float = 0.0,
                               existing_debt_rate: float = None) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
@@ -4511,6 +4512,16 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     # it is and tell someone not to go back to school because of a loan they
     # already have -- an answer given for a reason that has nothing to do with
     # the decision in front of them.
+    # Built here from SCALARS rather than accepting a callable, because
+    # find_breakeven_loan is @st.cache_data and calls this function: a lambda is
+    # not hashable, so a callable crossing that boundary would either raise or
+    # be keyed by object identity, which caches the wrong answer. Two floats key
+    # the cache correctly and cannot go stale when the visitor edits either.
+    baseline_curve = (
+        returning_student_curve(baseline_salary_now, baseline_salary_in_10y)
+        if baseline_salary_now is not None and baseline_salary_in_10y is not None
+        else None)
+
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
                                 total_investment, col_index=col_index, years=roi_window_years,
                                 hs_wage_index=hs_wage_index,
@@ -4602,7 +4613,9 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          working_years: int = 0,
                          baseline_start_age: int = None,
                          federal_cap: float = None, gap_rate: float = None,
-                         include_fees: bool = False) -> dict:
+                         include_fees: bool = False,
+                         baseline_salary_now: float = None,
+                         baseline_salary_in_10y: float = None) -> dict:
     """The undergraduate loan at which `major_name` stops beating a debt-free
     high school graduate — i.e. where earnings_premium crosses zero.
 
@@ -4663,6 +4676,12 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             working_years=working_years,
             baseline_start_age=baseline_start_age,
             federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
+            # The same baseline the ROI used. Without this the break-even would
+            # be solved against the high-school-graduate curve while the premium
+            # beside it used the visitor's own salary -- two numbers on one
+            # screen quietly answering different questions.
+            baseline_salary_now=baseline_salary_now,
+            baseline_salary_in_10y=baseline_salary_in_10y,
         )["roi_result"]["earnings_premium"]
 
     if premium_at(0.0) <= 0:
