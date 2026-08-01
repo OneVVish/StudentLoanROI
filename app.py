@@ -2772,10 +2772,20 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         "scenario_a_in_state": in_state_a,
         # national / state / metro -- which geography published the wage. The
         # app already tells the visitor via render_wage_geography_note, so
-        # before this the visitor knew something the dataset did not. .get()
-        # because NY Fed major entries carry no OEWS geography at all; None
-        # there means "not applicable", not "national".
-        "wage_geography_level": MAJOR_DATA.get(major, {}).get("wage_geography_level"),
+        # before this the visitor knew something the dataset did not.
+        #
+        # Resolved to a literal "national" rather than left as the absent key
+        # it actually is. build_major_data stamps the level only when a state
+        # or metro overlay REPLACES the national spine, so an un-overlaid
+        # occupation carries no key -- in San Francisco that is 39 of 836. A
+        # raw .get() would write None for those, which is the same value Major
+        # mode writes for a completely different reason (NY Fed entries have no
+        # OEWS geography at all), and the two are not the same fact. Making the
+        # Career case explicit means NULL has exactly one meaning per mode:
+        # "not applicable", never "national".
+        "wage_geography_level": (
+            (MAJOR_DATA.get(major, {}).get("wage_geography_level") or "national")
+            if dataset_mode == DATASET_MODE_CAREER else None),
         # The two switches that change what every ROI figure in this row MEANS.
         # Neither was logged before, which was survivable while both defaulted
         # off; it stops being survivable the moment one defaults on, because
