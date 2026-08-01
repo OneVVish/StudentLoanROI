@@ -2337,6 +2337,48 @@ def research_participation_allowed() -> bool:
     return bool(st.session_state.get("presurvey_age_ok"))
 
 
+def build_instrument_context(post_schools: str, post_borrowing: str,
+                              respondent_role: str) -> dict:
+    """The seven paired-measurement columns for one survey row.
+
+    Pre values come from session_state, where the pre block left them; post
+    values are passed in from the form. Both sides go through presurvey_code,
+    so a reworded option label cannot change what a stored value means -- the
+    analysis subtracts these, and a broken label map would yield a wrong
+    number rather than an obvious blank.
+
+    Three states are kept distinct and must stay that way downstream:
+      answered    -> a code
+      skip        -> asked, declined
+      n_a         -> never asked (the role does not take the question)
+    and separately, all-NULL pre columns with instrument_version set means the
+    pre block was never shown at all.
+    """
+    pre_answered = bool(st.session_state.get("presurvey_answered"))
+    borrowing_applies = respondent_role not in ROLES_WITHOUT_BORROWING
+    return {
+        "pre_schools_considered": presurvey_code(
+            PRESURVEY_SCHOOLS_OPTIONS, st.session_state.get("presurvey_schools")
+        ) if pre_answered else None,
+        "pre_borrow_willingness": (
+            (presurvey_code(PRESURVEY_BORROWING_OPTIONS,
+                            st.session_state.get("presurvey_borrowing"))
+             if borrowing_applies else "n_a") if pre_answered else None),
+        "post_schools_considered": presurvey_code(
+            PRESURVEY_SCHOOLS_OPTIONS, post_schools),
+        "post_borrow_willingness": (
+            presurvey_code(PRESURVEY_BORROWING_OPTIONS, post_borrowing)
+            if borrowing_applies else "n_a"),
+        "pre_skipped": bool(st.session_state.get("presurvey_skipped")),
+        # Only meaningful for the roles asked to attest. True for everyone
+        # else would imply we checked, which we did not.
+        "age_attested": (bool(st.session_state.get("presurvey_age_ok"))
+                          if respondent_role in ROLES_REQUIRING_AGE_ATTESTATION
+                          else None),
+        "instrument_version": PRESURVEY_INSTRUMENT_VERSION,
+    }
+
+
 def render_presurvey() -> None:
     """The two before-you-look questions, above the results.
 
@@ -2515,7 +2557,8 @@ def log_usage_event(action: str):
 
 
 def save_survey_response(respondent_role: str, hs_graduation_year: str,
-                          perception_change: str, feedback_text: str, context: dict) -> bool:
+                          perception_change: str, feedback_text: str, context: dict,
+                          instrument: dict = None) -> bool:
     """Insert one anonymous survey submission into the survey_responses
     table. `context` is a flat {column_name: value} dict carrying every
     simulation-context field: school name, Scenario A's inputs/outputs, and
@@ -2548,6 +2591,12 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             "hs_graduation_year": hs_graduation_year,
             "perception_change": perception_change,
             "feedback_text": feedback_text,
+            # The paired pre/post measurement. Survey-only, so it is a named
+            # argument like the four above rather than a member of context --
+            # context is spread into four tables, and these columns exist on
+            # one. Placed before **context so a context key added later cannot
+            # silently overwrite a measurement.
+            **(instrument or {}),
             **context,
         }
         execute_query(
@@ -9296,16 +9345,11 @@ Questions about the research? Contact **veervish11@gmail.com**.
             if respondent_role in ROLES_WITHOUT_BORROWING:
                 post_borrowing = None
 
-            # Coded here, once, so every downstream consumer sees the same
-            # vocabulary as the pre answers. "n_a" is not "skip": never asked
-            # and asked-then-declined are different facts.
-            postsurvey_codes = {
-                "post_schools_considered": presurvey_code(
-                    PRESURVEY_SCHOOLS_OPTIONS, post_schools),
-                "post_expected_borrowing": (
-                    "n_a" if respondent_role in ROLES_WITHOUT_BORROWING
-                    else presurvey_code(PRESURVEY_BORROWING_OPTIONS, post_borrowing)),
-            }
+            # Coded once, so every consumer sees the same vocabulary as the
+            # pre answers. "n_a" is not "skip": never asked and
+            # asked-then-declined are different facts.
+            postsurvey_codes = build_instrument_context(
+                post_schools, post_borrowing, respondent_role)
 
             # Recomputed fresh (cheap, pure functions, no API calls) rather
             # than reused from st.session_state, so the survey reflects
@@ -9360,11 +9404,13 @@ Questions about the research? Contact **veervish11@gmail.com**.
             log_usage_event(
                 "postsurvey_answered"
                 f":considering={postsurvey_codes['post_schools_considered']}"
-                f":borrow={postsurvey_codes['post_expected_borrowing']}"
+                f":borrow={postsurvey_codes['post_borrow_willingness']}"
                 f":pre={'1' if st.session_state.get('presurvey_answered') else '0'}"
                 f":v={PRESURVEY_INSTRUMENT_VERSION}")
 
-            saved = save_survey_response(respondent_role, hs_graduation_year, perception_change, feedback_text, context)
+            saved = save_survey_response(respondent_role, hs_graduation_year,
+                                          perception_change, feedback_text, context,
+                                          instrument=postsurvey_codes)
             if saved:
                 st.session_state.survey_submitted = True
                 st.rerun()
