@@ -86,8 +86,20 @@ def fetch_table(client, table_name: str) -> pd.DataFrame:
     this falls back to using all rows unchanged. false / NULL / missing all
     count as real data -- only an explicit true is treated as a test row.
     """
-    response = client.table(table_name).select("*").execute()
-    df = pd.DataFrame(response.data)
+    # Paginated: PostgREST caps a plain select at 1,000 rows and reports it
+    # only in a Content-Range header the client discards. usage_logs passed
+    # that ceiling at 1,040 rows, so an unpaginated read silently dropped the
+    # 40 NEWEST -- which for a research script means every analysis quietly
+    # stops at whatever day the table crossed 1,000, with no error and no gap
+    # in the output to notice.
+    rows, start, page = [], 0, 1000
+    while start < 200_000:
+        batch = client.table(table_name).select("*").range(start, start + page - 1).execute().data or []
+        rows.extend(batch)
+        if len(batch) < page:
+            break
+        start += page
+    df = pd.DataFrame(rows)
     if "is_test" in df.columns:
         is_test = df["is_test"].fillna(False).astype(bool)
         dropped = int(is_test.sum())
