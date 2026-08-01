@@ -3197,13 +3197,41 @@ def now_local() -> datetime:
     return datetime.now(tz)
 
 
+SUPABASE_PAGE_SIZE = 1000        # PostgREST's default max-rows ceiling
+
+
 def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
-    """Read all rows from a Supabase table, tolerating any connection/query
-    failure (e.g. secrets not configured yet) by returning an empty frame."""
+    """Read ALL rows from a Supabase table, tolerating any connection/query
+    failure (e.g. secrets not configured yet) by returning an empty frame.
+
+    Paginated because PostgREST caps a plain select at 1,000 rows and says so
+    only in a Content-Range header the client discards. Before this, the admin
+    dashboard silently saw the first 1,000 rows of each table and nothing else
+    -- and the rows it dropped were the NEWEST, so a growing table presents as
+    "recent traffic stopped" rather than as truncation. usage_logs crossed the
+    ceiling at 1,040 rows, which is how it surfaced: a ?src= tag applied that
+    afternoon was absent from the by-source table while being plainly present
+    in the database.
+
+    Reads until a short page comes back. The hard stop is a runaway guard, not
+    an expected limit; if a table ever legitimately exceeds it, this needs a
+    date filter rather than a bigger number, because loading it all into a
+    Streamlit rerun stops being sensible well before that point.
+    """
     try:
         conn = get_supabase_connection()
-        result = execute_query(conn.table(table_name).select("*"), ttl=0)
-        return pd.DataFrame(result.data) if result.data else pd.DataFrame(columns=columns)
+        rows, start = [], 0
+        while start < 200_000:
+            result = execute_query(
+                conn.table(table_name).select("*")
+                    .range(start, start + SUPABASE_PAGE_SIZE - 1),
+                ttl=0)
+            batch = result.data or []
+            rows.extend(batch)
+            if len(batch) < SUPABASE_PAGE_SIZE:
+                break
+            start += SUPABASE_PAGE_SIZE
+        return pd.DataFrame(rows) if rows else pd.DataFrame(columns=columns)
     except Exception:
         return pd.DataFrame(columns=columns)
 
