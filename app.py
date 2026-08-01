@@ -4780,14 +4780,14 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         # The frame's COLUMN stays "Net Position" -- it is the key the PDF
         # twin and net_position_frame both read -- and only the displayed
         # name changes here.
-        title=f"Total pay before tax, minus loan payments (through year {roi_window_years})",
+        title="Cumulative Gross Pay minus loan payments (Tax not considered)",
         # "after graduation" rather than "after starting": with foregone
         # earnings counted, year 1 is the graduate's first working year while
         # the baseline already carries the enrolled years' wages, so the two
         # series do NOT begin level. Saying "starting" would misread that head
         # start as the degree simply being behind.
         labels={"year": "Years after graduation",
-                 "Net Position": "Pay before tax, minus loan payments ($)"},
+                 "Net Position": "Cumulative gross pay minus loan payments ($)"},
     )
     fig.update_traces(line=dict(width=3))
     # Zero line: the training-debt paths sit below it for years, and "below
@@ -5734,10 +5734,10 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int) -> 
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
                 linewidth=2, label=label)
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
-    ax.set_title(f"Total pay before tax, minus loan payments (through year {roi_window_years})",
+    ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
                   fontsize=11)
     ax.set_xlabel("Years after graduation")
-    ax.set_ylabel("Pay before tax, minus loan payments ($)")
+    ax.set_ylabel("Cumulative gross pay minus loan payments ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
     legend = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
@@ -10206,7 +10206,7 @@ copy of federal rules. For Medicine, Law, and Athletic Training, both
 options are calculated using your loan *plus* the extra training debt
 described above — not just the loan by itself.
 
-**Total pay before tax, minus loan payments.** These figures are **before
+**Cumulative Gross Pay minus loan payments.** These figures are **before
 tax**. The ROI model sums each year's gross salary and subtracts the loan
 payments made in that window — it never applies income tax, because tax
 depends on where you live and filing status, and applying it to one side of
