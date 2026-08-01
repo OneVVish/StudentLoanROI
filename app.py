@@ -1524,6 +1524,31 @@ PRESURVEY_ROLE_OPTIONS = ["Student", "Parent", "Counselor", "Teacher", "Other"]
 # be a parent of a college-bound child answering for themselves.
 ROLES_WITHOUT_BORROWING = {"Counselor"}
 
+# Floor on research participation. The CALCULATOR stays open to everyone -- it
+# is a public information tool and nothing about using it is research -- but
+# the survey instruments are not offered to a student below this age.
+#
+# READ THIS BEFORE RELYING ON IT: 17 does NOT make the minor-research
+# requirements go away. The age of majority is 18 in nearly every state (19 in
+# Alabama and Nebraska), and 45 CFR 46.402(a) defines "children" by the age of
+# consent in the jurisdiction where the research is conducted -- which, for a
+# tool reachable from anywhere, is not a single jurisdiction. A 17-year-old is
+# a child under the Common Rule, so surveying them still requires IRB review
+# plus parental permission and child assent, and is NOT exempt under the
+# survey-procedures category (45 CFR 46.104(d)(2) reaches children only for
+# educational tests and non-participant observation of public behaviour).
+#
+# What this floor actually buys: it excludes younger minors, and it makes the
+# eligible population close to the high-school seniors the tool is built for.
+# What it does not buy: any reduction in the approval a study of minors needs.
+# Setting it to 18 would remove that requirement outright; 17 does not.
+#
+# Only asked of Students. Parent/Counselor/Teacher are adult roles by
+# construction -- asking them to attest reads as an accusation and collects
+# nothing.
+RESEARCH_MIN_AGE = 17
+ROLES_REQUIRING_AGE_ATTESTATION = {"Student"}
+
 # Lower-case codes for the log line, so a reworded option label cannot
 # silently change what a stored value means.
 _ROLE_CODES = {role: role.lower() for role in PRESURVEY_ROLE_OPTIONS}
@@ -2292,6 +2317,25 @@ def log_presurvey(answered: bool) -> None:
         f":seq={seq}:arm={get_experiment_arm()}:v={PRESURVEY_INSTRUMENT_VERSION}")
 
 
+def research_participation_allowed() -> bool:
+    """Whether this visitor may be offered a research instrument.
+
+    False only for a self-identified student who has not attested to meeting
+    RESEARCH_MIN_AGE. Note that meeting it does not make them an adult -- at
+    17 they are still a child under 45 CFR 46.402(a), and the study still
+    needs the approvals that implies. Everyone else -- including a visitor who never
+    answered the role question at all -- is allowed, because an unanswered
+    role is not a claim to be a minor and refusing on that basis would
+    suppress most of the sample for no gain.
+
+    The CALCULATOR is never gated on this. It is a public information tool;
+    using it is not participating in research, and withholding it from a
+    16-year-old would defeat the point of having built it."""
+    if st.session_state.get("presurvey_role") not in ROLES_REQUIRING_AGE_ATTESTATION:
+        return True
+    return bool(st.session_state.get("presurvey_age_ok"))
+
+
 def render_presurvey() -> None:
     """The two before-you-look questions, above the results.
 
@@ -2339,10 +2383,30 @@ def render_presurvey() -> None:
         # question could not appear or disappear in response.
         st.radio("I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
                   horizontal=True, key="presurvey_role")
+
+        role = st.session_state.get("presurvey_role")
+
+        # Age gate, students only. Rendered before the rest so an ineligible
+        # visitor is never asked a research question at all -- collecting the
+        # answers and discarding them afterwards would still be collecting
+        # them.
+        if role in ROLES_REQUIRING_AGE_ATTESTATION:
+            st.checkbox(f"I am {RESEARCH_MIN_AGE} or older", key="presurvey_age_ok")
+            if not st.session_state.get("presurvey_age_ok"):
+                st.info(
+                    f"These questions are for people {RESEARCH_MIN_AGE} and over. "
+                    "**Everything else on this page works exactly the same** — "
+                    "scroll on down, the calculator is yours to use."
+                )
+                if st.button("Got it"):
+                    st.session_state["presurvey_skipped"] = True
+                    log_usage_event("presurvey_ineligible_minor")
+                    st.rerun()
+                return
+
         st.radio(PRESURVEY_SCHOOLS_QUESTION, list(PRESURVEY_SCHOOLS_OPTIONS),
                   index=None, horizontal=True, key="presurvey_schools")
 
-        role = st.session_state.get("presurvey_role")
         borrowing_applies = role not in ROLES_WITHOUT_BORROWING
         if borrowing_applies:
             st.radio(PRESURVEY_BORROWING_QUESTION, list(PRESURVEY_BORROWING_OPTIONS),
