@@ -2413,7 +2413,7 @@ def render_presurvey() -> None:
         st.session_state["presurvey_shown_logged"] = True
         log_usage_event("presurvey_shown")
 
-    with st.expander("📝 Two quick questions before you look (optional)", expanded=True):
+    with st.expander("📝 Two quick questions before you start (optional)", expanded=True):
         st.caption(
             "Answering these before you explore lets us measure whether tools like "
             "this actually change anything — we ask the same two at the end. Skip "
