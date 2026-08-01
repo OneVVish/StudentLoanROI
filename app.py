@@ -4017,6 +4017,38 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
 # ---- 2f. 10-Year ROI ------------------------------------------------------
 
+def returning_student_curve(current_salary: float, salary_in_10_years: float,
+                            hs_wage_index: float = 1.0):
+    """The baseline for someone already working: what they'd earn WITHOUT the
+    degree, year by year.
+
+    Replaces the debt-free-high-school-graduate curve, which is meaningless for
+    a 49-year-old going back for a master's -- her alternative was her existing
+    job at her existing salary, not being a teenager. The article this was built
+    for makes the point directly: 24.6M federal borrowers are 35+ against 20.2M
+    under 35, and policy (and this app) assumed the 20-something.
+
+    Two anchors, because staying put is not standing still: today's salary and
+    what they expect in ten years without the degree. Linear between them, then
+    the same annual growth beyond -- deliberately NOT compounding from year 0,
+    which would let a small entered growth rate balloon over a 30-year horizon
+    and quietly make the degree look bad.
+
+    NOT scaled by hs_wage_index. That index moves a NATIONAL median to a city;
+    a salary the visitor typed is already their real, local pay, and scaling it
+    would inflate a figure that needs no adjusting -- the same
+    double-counting the metro-wage comment in calculate_roi warns about,
+    arriving from the other direction. The argument is accepted and ignored so
+    callers can pass it uniformly.
+    """
+    annual_step = (salary_in_10_years - current_salary) / 10.0
+
+    def wage(year_index: int) -> float:
+        return max(current_salary + annual_step * year_index, 0.0)
+
+    return wage
+
+
 def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    total_investment: float, col_index: float = 100.0,
                    years: int = ROI_WINDOW_YEARS,
@@ -4024,7 +4056,8 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    personal_contribution: float = 0.0,
                    enrollment_years: int = 0,
                    working_years: int = 0,
-                   baseline_start_age: int = None) -> dict:
+                   baseline_start_age: int = None,
+                   baseline_curve=None) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window, minus any personal_contribution) compared against a
@@ -4104,9 +4137,17 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     #
     # baseline_start_age (None = off) makes each of those years use that age's
     # own wage rather than one all-ages median -- see hs_wage_for_timeline_year.
+    # ONE callable, used for both sums below. The two used to repeat the same
+    # hs_wage_for_timeline_year call, and CLAUDE.md warns that they only cancel
+    # in the premium if computed identically -- so a returning-student baseline
+    # that replaced one and not the other would invent an earnings premium out
+    # of nothing, silently. Binding it once makes that mistake unavailable
+    # rather than merely documented.
+    baseline_wage = baseline_curve or (
+        lambda y: hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age))
+
     hs_cumulative_earnings = sum(
-        hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age)
-        for y in range(years + enrollment_years)
+        baseline_wage(y) for y in range(years + enrollment_years)
     )
     # Part-time-while-working community-college years: the major side earns a
     # HS-equivalent wage for the first `working_years` of the timeline (front,
@@ -4119,8 +4160,7 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # sides are computed identically. Scaling one and not the other would
     # invent an earnings premium out of the part-time community-college path.
     major_working_earnings = sum(
-        hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age)
-        for y in range(working_years)
+        baseline_wage(y) for y in range(working_years)
     )
 
     major_net_position_nominal = (
