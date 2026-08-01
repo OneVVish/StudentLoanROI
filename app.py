@@ -3067,13 +3067,26 @@ def load_coa_dataset() -> pd.DataFrame:
 
 
 def search_schools_by_budget(cip_family: str, credential: str,
-                              max_coa_per_year: float, in_state: bool,
+                              max_coa_per_year: float, home_state: str = None,
                               states: tuple = None, control_types: tuple = None,
                               limit: int = 50) -> pd.DataFrame:
     """Schools that teach `cip_family` at `credential` for at most
     `max_coa_per_year`, cheapest first. The inverse of the app's normal
     question: not "what does the school I named cost" but "what could I attend
     for this, in this field".
+
+    Prices each row against `home_state` INDIVIDUALLY -- in-state where the
+    school sits in that state, out-of-state everywhere else. This cannot be one
+    flag for the whole search the way it can for a single named school: a
+    result set routinely spans nine or more states and the visitor is resident
+    in exactly one of them. Pricing them all in-state understates 28% of the
+    dataset (every public school; median $7,080/yr, ~$28k over four years) and
+    lets a school clear a budget it does not actually fit.
+
+    `home_state=None` means the visitor did not say, and everything is priced
+    out-of-state. That is the conservative direction on purpose: it can only
+    overstate cost, and an overstated cost drops a school the visitor could
+    afford, where an understated one recommends a school they cannot.
 
     Sorted by COST and nothing else, deliberately. Every salary figure in this
     app comes from the occupation or major dataset -- no school attribute
@@ -3097,16 +3110,31 @@ def search_schools_by_budget(cip_family: str, credential: str,
 
     suffix, nominal_years = CREDENTIAL_LEVELS[credential]
     program_column = f"programs_{suffix}"
-    cost_column = "in_state_coa" if in_state else "out_of_state_coa"
-    if program_column not in coa_df.columns or cost_column not in coa_df.columns:
+    if (program_column not in coa_df.columns
+            or "in_state_coa" not in coa_df.columns
+            or "out_of_state_coa" not in coa_df.columns):
         return pd.DataFrame()
+
+    coa_df = coa_df.copy()
+    # The rate that applies to THIS visitor at THIS school. Resolved before the
+    # budget filter, so affordability and the sort both run on the price the
+    # visitor would actually be charged rather than on the cheaper of the two.
+    at_home = (coa_df["STABBR"] == home_state) if home_state else False
+    coa_df["is_home_state"] = at_home
+    coa_df["coa_per_year"] = coa_df["out_of_state_coa"].where(
+        ~coa_df["is_home_state"], coa_df["in_state_coa"])
+    # Both figures are populated for all 5,035 rows today; this keeps a
+    # half-reported row costed rather than silently dropped by the notna filter
+    # if a future Scorecard release stops publishing one of them.
+    coa_df["coa_per_year"] = coa_df["coa_per_year"].fillna(coa_df["in_state_coa"])
 
     # Anchored on the pipe delimiters. Codes are fixed 2-digit today, which
     # makes a plain substring match equivalent (verified across the dataset) --
     # this keeps that true rather than relying on it.
     teaches = coa_df[program_column].fillna("").str.contains(
         rf"(?:^|\|){re.escape(str(cip_family))}(?:\||$)", regex=True)
-    affordable = coa_df[cost_column].notna() & (coa_df[cost_column] <= max_coa_per_year)
+    affordable = (coa_df["coa_per_year"].notna()
+                  & (coa_df["coa_per_year"] <= max_coa_per_year))
     open_now = coa_df["CURROPER"].fillna(1) != 0
 
     matches = coa_df[teaches & affordable & open_now]
@@ -3115,9 +3143,8 @@ def search_schools_by_budget(cip_family: str, credential: str,
     if control_types:
         matches = matches[matches["control_type"].isin(control_types)]
 
-    matches = matches.sort_values(cost_column).head(limit).copy()
-    matches["coa_per_year"] = matches[cost_column]
-    matches["total_program_cost"] = matches[cost_column] * nominal_years
+    matches = matches.sort_values("coa_per_year").head(limit).copy()
+    matches["total_program_cost"] = matches["coa_per_year"] * nominal_years
     return matches.reset_index(drop=True)
 
 
@@ -3367,15 +3394,18 @@ def _apply_pending_school() -> None:
     pending = st.session_state.pop("_pending_school", None)
     if not pending:
         return
-    name, unitid = pending
+    name, unitid, is_home_state = pending
     st.session_state["school_search_a"] = name
     st.session_state.pop("school_pick_a", None)
     if unitid is not None:
         # Seed the picker so an ambiguous name lands on the institution that
         # was actually clicked, not on whichever sorts first.
         st.session_state["school_pick_a"] = int(unitid)
-    suggested = get_suggested_coa_per_year(
-        name, st.session_state.get("in_state_a", False), unitid=unitid)
+    # Adopt the residency the search result was priced at, so the sidebar
+    # agrees with the row that was clicked. Legal here only because the
+    # in_state_a widget is created further down the sidebar than this call.
+    st.session_state["in_state_a"] = is_home_state
+    suggested = get_suggested_coa_per_year(name, is_home_state, unitid=unitid)
     if suggested is not None:
         st.session_state["coa_per_year_a"] = int(suggested)
 
@@ -6652,8 +6682,13 @@ else:
     school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
     school_unitid_a = _resolve_school_unitid("school_search_a", "school_pick_a")
 
+    # setdefault rather than value=, because _apply_pending_school writes this
+    # key when a search result is applied. A widget carrying both a default and
+    # a Session State write is the conflict Streamlit warns about on every such
+    # apply -- same conversion school_search_a needed for the same reason.
+    st.session_state.setdefault("in_state_a", get_shared_default("in_state", "1") == "1")
     in_state_a = st.sidebar.checkbox(
-        "In-State Student?", value=get_shared_default("in_state", "1") == "1", key="in_state_a",
+        "In-State Student?", key="in_state_a",
         on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
         help="Check this if you'd pay in-state tuition at the school above. "
              "Changes the auto-filled Cost of Attendance and how fast tuition "
@@ -8227,6 +8262,31 @@ if admin_enabled:
 # per-year Cost of Attendance field (in-state or out-of-state, per the
 # In-State Student? checkbox) -- see _autofill_coa in section 2c.
 
+def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
+    """Best available guess at where the visitor lives, for pricing search
+    results. Returns None when nothing supports a guess -- which prices
+    everything out-of-state, the safe direction.
+
+    Two sources, strongest first:
+
+    1. **In-state at the school they named.** That is not a guess at all but a
+       direct statement about residency: you cannot be an in-state student
+       somewhere you do not reside. Only usable when in_state_a is actually
+       True -- an out-of-state student's school says nothing about home.
+    2. **The selected metro's state.** Weaker, since the metro is where they
+       want to WORK, and it is itself seeded from the school. Used only as a
+       fallback.
+    """
+    if st.session_state.get("in_state_a"):
+        row = find_school_coa(
+            st.session_state.get("school_search_a", ""), coa_df,
+            unitid=st.session_state.get("school_pick_a"))
+        if row is not None and pd.notna(row.get("STABBR")):
+            return str(row["STABBR"])
+    metro_state = CITY_DATA.get(city_name, {}).get("state_key")
+    return metro_state if metro_state in US_STATES else None
+
+
 def render_school_search() -> None:
     """Budget-first school search: what could I attend, for this field, at this price?
 
@@ -8287,23 +8347,44 @@ def render_school_search() -> None:
             value=int(st.session_state.get("coa_per_year_a", 25_000)), step=1_000,
             format="$%d", key="search_budget",
         )
-        states = st.multiselect(
-            "Limit to states (optional)",
-            sorted({s for s in coa_df["STABBR"].dropna().unique()}),
-            key="search_states",
+        all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
+        home_col, states_col = st.columns([2, 3])
+
+        # Asked once, here, rather than inherited from the sidebar's in-state
+        # checkbox: that checkbox is one fact about the visitor and the ONE
+        # school they named, and these results span many states. See
+        # search_schools_by_budget for what pricing them all alike costs.
+        st.session_state.setdefault(
+            "search_home_state", suggested_home_state(coa_df, city))
+        home_col.selectbox(
+            "Where do you live?", all_states, key="search_home_state",
+            index=None if st.session_state.get("search_home_state") is None else None,
+            placeholder="Pick your state",
+            help="Public schools charge residents far less. Without this, every "
+                  "school is priced at its higher out-of-state rate.",
         )
+        states = states_col.multiselect(
+            "Limit to states (optional)", all_states, key="search_states")
 
         family = st.session_state.get("search_cip_family")
         if not family:
             st.info("Pick a field of study to search.")
             return
 
+        home_state = st.session_state.get("search_home_state")
+        if not home_state:
+            st.caption(
+                "⚠️ Every school below is priced at its **out-of-state** rate, "
+                "because you haven't said where you live. Public schools in your "
+                "own state will be cheaper than shown — often by several thousand "
+                "a year."
+            )
+
         results = search_schools_by_budget(
             family, st.session_state.get("search_credential", "Bachelor's degree"),
-            budget, st.session_state.get("in_state_a", True),
-            states=tuple(states) or None, limit=25)
+            budget, home_state, states=tuple(states) or None, limit=25)
 
-        _log_school_search(family, budget, states, len(results))
+        _log_school_search(family, budget, states, len(results), home_state)
 
         if results.empty:
             # A real answer, not an error state. "Your budget admits nothing in
@@ -8325,10 +8406,20 @@ def render_school_search() -> None:
             "cheaper once grants are applied, so treat this as a starting list and "
             "check each one's net price calculator below."
         )
+        # Shown per row because it varies per row -- the visitor is resident in
+        # one of these states and a visitor state elsewhere. Naming the rate is
+        # what makes the price checkable against the school's own published
+        # figures, which are always listed as two numbers.
+        rate_label = results.apply(
+            lambda row: "in-state"
+            if row["is_home_state"] else
+            ("out-of-state" if row["out_of_state_coa"] != row["in_state_coa"]
+             else "same either way"), axis=1)
         table = pd.DataFrame({
             "School": results["INSTNM"],
             "Where": results["CITY"].fillna("") + ", " + results["STABBR"].fillna(""),
             "Type": results["control_type"],
+            "Rate": rate_label,
             "Per year": results["coa_per_year"].map(fmt_money),
             "Whole program": results["total_program_cost"].map(fmt_money),
             "Admits": results["ADM_RATE"].map(
@@ -8336,9 +8427,13 @@ def render_school_search() -> None:
         })
         st.dataframe(table, use_container_width=True, hide_index=True)
         st.caption(
-            "**Admits** is the share of applicants accepted. Blank means the school "
-            "reports none — usually because it admits nearly everyone. It is shown "
-            "for context and is never what the list is sorted by."
+            "**Rate** is which price you'd be charged"
+            + (f", based on living in {home_state}. " if home_state else ". ")
+            + "*Same either way* means the school charges one price regardless — "
+            "true of most private schools. **Admits** is the share of applicants "
+            "accepted; blank means the school reports none, usually because it "
+            "admits nearly everyone. It is shown for context and is never what "
+            "the list is sorted by."
         )
 
         # One selectbox and one button, not a button per row: 25 widgets would
@@ -8352,16 +8447,23 @@ def render_school_search() -> None:
         )
         if st.button("Use this school", type="primary"):
             picked = results.loc[choice]
+            # Carries the residency the row was PRICED at. Without it the
+            # sidebar would autofill from its own in-state checkbox and could
+            # show a different number than the row the visitor just clicked --
+            # the in-state price of a school they'd attend out-of-state.
             st.session_state["_pending_school"] = (
                 picked["INSTNM"],
-                int(picked["UNITID"]) if pd.notna(picked.get("UNITID")) else None)
+                int(picked["UNITID"]) if pd.notna(picked.get("UNITID")) else None,
+                bool(picked["is_home_state"]))
             log_usage_event(
                 f"school_search_apply:unitid={picked.get('UNITID')}"
-                f":coa={int(picked['coa_per_year'])}")
+                f":coa={int(picked['coa_per_year'])}"
+                f":in_state={int(bool(picked['is_home_state']))}")
             st.rerun()
 
 
-def _log_school_search(family: str, budget: int, states: list, hit_count: int) -> None:
+def _log_school_search(family: str, budget: int, states: list, hit_count: int,
+                        home_state: str = None) -> None:
     """Record a search, once per distinct query rather than once per rerun.
 
     This runs on every pass of the script, so without the dedupe a slider drag
@@ -8370,12 +8472,16 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int) -
     the direct evidence that a visitor's budget admits nothing in their field,
     which is the finding this feature exists to produce.
     """
-    signature = (family, budget, tuple(states), hit_count)
+    # home_state is part of the signature because it changes the PRICES, and
+    # therefore which schools clear the budget -- two searches identical but
+    # for residency are different searches with different answers.
+    signature = (family, budget, tuple(states), hit_count, home_state)
     if st.session_state.get("_last_school_search") == signature:
         return
     st.session_state["_last_school_search"] = signature
     log_usage_event(
         f"school_search_run:cip={family}:budget={budget}"
+        f":home={home_state or 'unset'}"
         f":states={'+'.join(states) if states else 'any'}:n={hit_count}")
 
 
