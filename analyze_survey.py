@@ -688,6 +688,56 @@ def analyze_school_search(usage_df: pd.DataFrame):
           "  screen, which is the only thing it can observe.")
 
 
+def analyze_interactions(usage_df: pd.DataFrame):
+    """Which sidebar controls sessions actually touch, and how many.
+
+    Reads the interaction: actions, one per field per session. Answers two
+    things nothing else does: WHICH control the engaged minority reach for
+    first (the earliest row in a session), and HOW BROADLY they explore (the
+    count of distinct fields).
+
+    Sessions that touch nothing produce no rows at all, which is most of them
+    -- so the denominator here is pageviews, not interaction rows, and the
+    zero-interaction share is the headline rather than a rounding note.
+    """
+    print_section(
+        "SIDEBAR INTERACTIONS",
+        "What the engaged minority actually touch",
+    )
+    if usage_df.empty or "action" not in usage_df.columns:
+        print("  (no usage_logs yet)")
+        return
+    acts = usage_df[usage_df["action"].astype(str).str.startswith("interaction:")]
+    sessions = set(usage_df.loc[usage_df["action"] == "pageview", "session_id"].dropna())
+    if acts.empty:
+        print(f"  0 of {len(sessions)} sessions touched any control")
+        print("  (or these rows predate the interaction: events)")
+        return
+
+    acts = acts.assign(field=acts["action"].astype(str).str.split(":", n=1).str[1])
+    touched = acts["session_id"].nunique()
+    print(f"  sessions with a pageview      : {len(sessions)}")
+    print(f"  sessions that touched anything: {touched}"
+          + (f"  ({touched / len(sessions):.0%})" if sessions else ""))
+
+    per = acts.groupby("session_id")["field"].nunique()
+    if len(per):
+        print(f"  distinct controls per engaged session: median {per.median():.0f}, max {per.max()}")
+
+    print("\n  most-touched controls:")
+    for field, n in acts["field"].value_counts().head(12).items():
+        print(f"    {field:34} {n}")
+
+    # The earliest interaction row in each session is that session's first
+    # touch -- no separate event needed, which is why per-field replaced
+    # first-only.
+    if "timestamp" in acts.columns:
+        first = (acts.sort_values("timestamp").groupby("session_id")["field"].first())
+        print("\n  FIRST control touched (what draws people in):")
+        for field, n in first.value_counts().head(8).items():
+            print(f"    {field:34} {n}")
+
+
 def main():
     client = load_supabase_client()
     survey_df = fetch_table(client, "survey_responses")
@@ -706,6 +756,7 @@ def main():
         analyze_engagement(events)
         analyze_switch_rate(scenario_events_df)
         analyze_school_search(usage_df)
+        analyze_interactions(usage_df)
         # Still worth running: the pre block writes to usage_logs whether or
         # not anyone reaches the survey, so the funnel exists before the first
         # response does -- and an empty survey with a healthy pre-answer rate
@@ -787,6 +838,7 @@ def main():
     analyze_engagement(events)
     analyze_switch_rate(scenario_events_df)
     analyze_school_search(usage_df)
+    analyze_interactions(usage_df)
     analyze_paired_shift(survey_df, usage_df)
     analyze_instrument_agreement(survey_df)
 
