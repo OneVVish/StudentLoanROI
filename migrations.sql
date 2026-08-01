@@ -492,3 +492,107 @@ alter table scenario_events
 -- Prevention: CLAUDE.md now requires ?test=1 for every local run. Every
 -- writer already honours st.session_state.test_mode; the flag was simply not
 -- used.
+
+
+-- ---------------------------------------------------------------------------
+-- 2026-07-31: within-session pre/post instrument.
+--
+-- The app's only outcome measure was perception_change: one retrospective
+-- self-report, four options, no neutral category, collected from the
+-- self-selected minority who scroll ~1,000 lines to the bottom. It asks a
+-- respondent to introspect on a change they may never have noticed, and there
+-- was nothing to difference it against -- no question was asked anywhere
+-- before the numbers appeared. These columns hold a measurement taken BEFORE
+-- the results are read, and the same one taken after.
+--
+-- SEVEN COLUMNS, ONE TABLE. This is deliberate and is the opposite of the
+-- four-table discipline elsewhere in this file. Those blocks add fields that
+-- enter build_scenario_context, which is spread into four different inserts.
+-- These are survey-only fields, passed as named parameters to
+-- save_survey_response exactly like perception_change and respondent_role.
+-- pdf_downloads, scenario_shares and scenario_events get NOTHING. Putting
+-- them in the context dict instead would require the four-table migration and
+-- walk straight into the PGRST204 whole-row-rejection failure this file
+-- exists to prevent.
+--
+-- Values are stable CODES, not display prose. PERCEPTION_ORDER in
+-- analyze_survey.py is a hand-copy of app.py's radio labels: reword one side
+-- and the cross-tab silently reindexes to NaN. Survivable for a category
+-- count; not for an ORDINAL item whose analysis SUBTRACTS two values, where a
+-- broken map yields a wrong number instead of an obvious blank.
+--
+--   pre_schools_considered   s0 | s1 | s2 | s3 | s4 | s5plus | unsure | skip
+--   post_schools_considered  Same codes. Outcome = idx(post) - idx(pre).
+--                            "unsure" is a RESPONSE, not a missing value, and
+--                            must be tabulated then excluded BY NAME -- never
+--                            by dropna(), and never averaged into a midpoint.
+--
+--   pre_borrow_willingness   n0 | b1 | b2 | b3 | b4 | b5 | undecided
+--   post_borrow_willingness  | n_a | skip
+--                            WILLINGNESS ("the most you would take on"), not
+--                            expectation. The sidebar displays a loan figure
+--                            at page load, so an "expectation" asked after
+--                            exposure is partly a reading test of a number
+--                            already on screen; a willingness threshold
+--                            appears nowhere in the app and has to be
+--                            generated. The column name says so on purpose.
+--                            n_a = the question was never put (Counselor),
+--                            which is NOT the same fact as skip = asked and
+--                            declined. Do not collapse them.
+--
+--   pre_skipped              true when the visitor dismissed the pre block.
+--                            Distinct from the pre columns being NULL, which
+--                            means it was never shown at all.
+--
+--   age_attested             true when a Student confirmed 18+. Research
+--                            participation is limited to adults; this is the
+--                            eligibility record for that, on the row.
+--
+--   instrument_version       'v1'. Without it, "declined the pre" (version
+--                            set, pre columns NULL) and "predates the pre"
+--                            (version NULL) are the SAME NULL, and the
+--                            denominator of the pre-response rate is silently
+--                            wrong. Same reasoning as hs_baseline_age_aware
+--                            above: keep writing a near-constant column
+--                            because it is the only thing telling two eras
+--                            apart. Bump it whenever an option set or a
+--                            question's wording changes.
+--
+-- Run this BEFORE deploying the code that writes these fields. Until the
+-- columns exist PostgREST rejects the WHOLE ROW on the unknown column
+-- (PGRST204) and the survey response is lost entirely -- it does not merely
+-- drop the new field.
+alter table survey_responses
+  add column if not exists pre_schools_considered  text,
+  add column if not exists pre_borrow_willingness  text,
+  add column if not exists post_schools_considered text,
+  add column if not exists post_borrow_willingness text,
+  add column if not exists pre_skipped             boolean,
+  add column if not exists age_attested            boolean,
+  add column if not exists instrument_version      text;
+
+
+-- NOTE, no DDL: the pre AND post answers also ride usage_logs.action and need
+-- no columns of their own -- same treatment as horizon_changed: above.
+--     presurvey_shown
+--     presurvey_answered:role=student:considering=s3:borrow=b3:seq=1:arm=single:v=v1
+--     presurvey_skipped
+--     presurvey_ineligible_minor
+--     postsurvey_answered:considering=s2:borrow=b2:pre=1:v=v1
+--     survey_blocked_minor
+-- Query with `where action like 'presurvey_%' or action like 'postsurvey_%'`.
+--
+-- Why both there and here, which looks like duplication and is not: the
+-- survey-row copy makes a pair atomic (a pre can never be mispaired with
+-- another session's post, and it survives a swallowed usage_logs exception --
+-- every writer in app.py catches and returns silently). The usage_logs copy
+-- is the ONLY record of a session that answered the pre and never reached the
+-- survey, which is most of them and the entire basis for measuring drop-off.
+--
+-- KNOWN LIMITATION, not fixable without breaking a privacy commitment: a
+-- refresh resets survey_submitted, so one person can submit more than once as
+-- apparently distinct respondents, and the second visit's "pre" is collected
+-- post-exposure. Closing it needs a durable identifier, which the app
+-- deliberately does not store (get_session_id: a per-visit uuid4, no cookie,
+-- no fingerprint). Report the session-to-response ratio so the inflation is
+-- visible rather than silent.

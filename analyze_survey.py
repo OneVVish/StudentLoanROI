@@ -19,8 +19,21 @@ supabase-py client -- no Streamlit runtime needed.
 Optional: `pip install matplotlib` to also save a couple of bar charts
 under analysis_output/. Everything else (the printed cross-tabs) works
 with just pandas + supabase-py, which the app already depends on.
+
+The paired pre/post analysis follows the same rule. Its inferential test is
+an EXACT SIGN TEST written in pure Python (math.comb), so it always runs --
+scipy is not in requirements.txt, and adding it would put a dependency in the
+deploy for a script the app never imports. Where scipy happens to be
+installed, a Wilcoxon signed-rank is printed alongside as a supplement.
+
+The sign test is not a compromise here. These are 6-7 category ordinal bands,
+so the rank magnitudes Wilcoxon relies on are not really measured -- the
+distance from "$10-30k" to "$30-60k" is not a known quantity. Counting the
+direction of movement is the claim the data actually supports.
 """
 
+import math
+import re
 import sys
 import tomllib
 from collections import Counter
@@ -138,6 +151,218 @@ ENGAGEMENT_CAVEAT = (
     "  Apprenticeship adoption among those rows reads as zero regardless of\n"
     "  what actually happened. Rows with a session_id are unaffected."
 )
+
+
+# ---- Paired pre/post instrument --------------------------------------------
+# Codes mirror app.py's PRESURVEY_* option maps. They are duplicated here
+# rather than imported because this script deliberately does not import app.py
+# (that would execute the whole Streamlit page). Keep them in step: the app
+# writes these strings, and a code missing from a map below silently drops
+# that respondent out of the paired analysis rather than erroring.
+SCHOOLS_INDEX = {"s0": 0, "s1": 1, "s2": 2, "s3": 3, "s4": 4, "s5plus": 5}
+BORROW_INDEX = {"n0": 0, "b1": 1, "b2": 2, "b3": 3, "b4": 4, "b5": 5}
+
+# Responses that are NOT missing data and must never be dropna()'d away. Each
+# is a finding in its own right -- "haven't decided" before seeing any numbers
+# is the paper's information-asymmetry thesis in one click -- so they are
+# counted, reported, and only then excluded from the arithmetic BY NAME.
+NON_NUMERIC_RESPONSES = {"unsure", "undecided", "skip", "n_a"}
+
+
+def exact_sign_test(negative: int, positive: int) -> float:
+    """Two-sided exact sign test p-value for a paired shift.
+
+    Ties are discarded, which is the test's definition, not an oversight: a
+    respondent who did not move contributes no evidence about direction.
+
+    Pure Python so this always runs. scipy is not in requirements.txt, and the
+    deployed app must not gain a dependency for a script it never imports.
+    """
+    n = negative + positive
+    if n == 0:
+        return float("nan")
+    k = min(negative, positive)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / (2 ** n)
+    return min(1.0, 2 * tail)
+
+
+def parse_presurvey_events(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per session that saw the pre block, from usage_logs.action.
+
+    This table is the ONLY record of a session that answered the pre and never
+    reached the survey -- which is most of them, and the entire basis for
+    measuring drop-off. The survey row carries its own copy for sessions that
+    did finish; that copy is what makes a pair atomic.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    actions = usage_df[usage_df["action"].astype(str).str.startswith(
+        ("presurvey_", "postsurvey_", "survey_blocked_"))]
+    if actions.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for record in actions.itertuples():
+        action = str(record.action)
+        name = action.split(":", 1)[0]
+        fields = dict(part.split("=", 1) for part in action.split(":")[1:] if "=" in part)
+        rows.append({"session_id": getattr(record, "session_id", None),
+                     "event": name, **fields})
+    return pd.DataFrame(rows)
+
+
+def build_paired_frame(survey_df: pd.DataFrame) -> pd.DataFrame:
+    """Survey rows with the paired shift computed, and every row labelled.
+
+    `pair_status` is the point of this function. Partial pairs are reported,
+    never silently dropped: a respondent who skipped the pre is a different
+    fact from one who predates the instrument, and both are different from one
+    who answered and moved zero bands.
+    """
+    df = survey_df.copy()
+    for column in ("pre_schools_considered", "pre_borrow_willingness",
+                    "post_schools_considered", "post_borrow_willingness",
+                    "pre_skipped", "instrument_version"):
+        if column not in df.columns:
+            df[column] = None
+
+    def status(row):
+        if pd.isna(row["instrument_version"]):
+            return "pre_instrument_era"      # collected before the pre existed
+        if row.get("pre_skipped") is True:
+            return "declined_pre"
+        if pd.isna(row["pre_schools_considered"]):
+            return "pre_not_shown"
+        return "paired"
+
+    df["pair_status"] = df.apply(status, axis=1)
+
+    def shift(row, pre_col, post_col, index_map):
+        pre, post = row[pre_col], row[post_col]
+        if pre in NON_NUMERIC_RESPONSES or post in NON_NUMERIC_RESPONSES:
+            return None
+        if pre in index_map and post in index_map:
+            return index_map[post] - index_map[pre]
+        return None
+
+    df["schools_shift"] = df.apply(
+        shift, axis=1, args=("pre_schools_considered", "post_schools_considered", SCHOOLS_INDEX))
+    df["borrow_shift"] = df.apply(
+        shift, axis=1, args=("pre_borrow_willingness", "post_borrow_willingness", BORROW_INDEX))
+    return df
+
+
+def _report_shift(df: pd.DataFrame, column: str, label: str, index_map: dict,
+                   pre_col: str, post_col: str):
+    """Direction counts, exact sign test, and the full transition matrix."""
+    values = df[column].dropna()
+    if values.empty:
+        print(f"\n  {label}: no complete pairs yet.")
+        return
+    down = int((values < 0).sum())
+    same = int((values == 0).sum())
+    up = int((values > 0).sum())
+    p = exact_sign_test(down, up)
+    print(f"\n  {label}  (n = {len(values)} complete pairs)")
+    print(f"    moved down {down} | unchanged {same} | moved up {up}")
+    print(f"    median shift {values.median():+.1f} bands | exact sign test p = {p:.4f}")
+    try:                                   # supplement only where available
+        from scipy.stats import wilcoxon
+        if down + up:
+            print(f"    Wilcoxon signed-rank p = {wilcoxon(values).pvalue:.4f}")
+    except Exception:
+        pass
+
+    # The marginals are where floor and ceiling effects show; a mean alone
+    # hides that everyone at the top band could only move one way.
+    order = list(index_map) + sorted(NON_NUMERIC_RESPONSES)
+    matrix = pd.crosstab(df[pre_col], df[post_col]).reindex(
+        index=order, columns=order).dropna(how="all").dropna(axis=1, how="all")
+    if not matrix.empty:
+        print("\n    pre (rows) -> post (columns):")
+        print(matrix.fillna(0).astype(int).to_string().replace("\n", "\n      "))
+
+
+def analyze_paired_shift(survey_df: pd.DataFrame, usage_df: pd.DataFrame):
+    """The measured change the retrospective item could only ask about."""
+    print_section(
+        "PAIRED PRE/POST SHIFT",
+        "Same two questions before the numbers and after -- differenced, not recalled.",
+    )
+    if survey_df.empty:
+        print("  (no survey responses yet)")
+        return
+
+    df = build_paired_frame(survey_df)
+    print("  Response composition (every row accounted for):")
+    for status, count in df["pair_status"].value_counts().items():
+        print(f"    {status:20s} {count}")
+
+    paired = df[df["pair_status"] == "paired"]
+    _report_shift(paired, "schools_shift", "Colleges being considered", SCHOOLS_INDEX,
+                   "pre_schools_considered", "post_schools_considered")
+    _report_shift(paired, "borrow_shift", "Willingness to borrow", BORROW_INDEX,
+                   "pre_borrow_willingness", "post_borrow_willingness")
+
+    # Non-numeric answers reported rather than quietly excluded.
+    for column, label in (("pre_borrow_willingness", "pre"), ("post_borrow_willingness", "post")):
+        counts = df[df[column].isin(NON_NUMERIC_RESPONSES)][column].value_counts()
+        if not counts.empty:
+            print(f"\n  Non-numeric {label} borrowing answers (excluded from the shift, "
+                  f"counted here):")
+            for value, count in counts.items():
+                print(f"    {value:12s} {count}")
+
+    _report_presurvey_funnel(usage_df)
+
+
+def _report_presurvey_funnel(usage_df: pd.DataFrame):
+    """Who saw the pre block, who answered, and who fell out before the survey."""
+    events = parse_presurvey_events(usage_df)
+    if events.empty:
+        print("\n  (no pre-block events in usage_logs yet)")
+        return
+    counts = events["event"].value_counts()
+    print("\n  Pre-block funnel:")
+    for event in ("presurvey_shown", "presurvey_answered", "presurvey_skipped",
+                   "presurvey_ineligible_minor", "postsurvey_answered",
+                   "survey_blocked_minor"):
+        print(f"    {event:28s} {int(counts.get(event, 0))}")
+    shown = int(counts.get("presurvey_shown", 0))
+    answered = int(counts.get("presurvey_answered", 0))
+    if shown:
+        print(f"    -> answered {answered / shown:.0%} of those shown")
+    if answered:
+        reached = int(counts.get("postsurvey_answered", 0))
+        print(f"    -> of those, {reached / answered:.0%} went on to submit the survey")
+        print("       (the gap is the drop-off the pre exists to make measurable)")
+
+
+def analyze_instrument_agreement(survey_df: pd.DataFrame):
+    """Does the retrospective self-report agree with the measured shift?
+
+    If respondents who say "no impact" moved a band -- or those who say
+    "significantly" did not -- that is a finding about the instrument the
+    paper's headline currently rests on, and it is only visible with both
+    measures present.
+    """
+    print_section(
+        "SELF-REPORT vs MEASURED SHIFT",
+        "Validation of perception_change against what the paired answers actually did.",
+    )
+    df = build_paired_frame(survey_df)
+    paired = df[(df["pair_status"] == "paired") & df["borrow_shift"].notna()]
+    if paired.empty:
+        print("  (needs complete pairs -- none yet)")
+        return
+    paired = paired.copy()
+    paired["moved"] = paired["borrow_shift"].apply(
+        lambda v: "moved down" if v < 0 else ("moved up" if v > 0 else "no change"))
+    table = pd.crosstab(paired["perception_change"], paired["moved"])
+    print(table.to_string())
+    print("\n  Read the off-diagonal: 'Yes - significantly' with no change, or")
+    print("  'No - no impact' with a band move, are both disagreements between")
+    print("  what respondents say happened and what they did.")
 
 
 def print_section(title: str, subtitle: str = ""):
@@ -369,6 +594,11 @@ def main():
         print("No survey responses yet -- skipping the perception-change analysis.")
         analyze_engagement(events)
         analyze_switch_rate(scenario_events_df)
+        # Still worth running: the pre block writes to usage_logs whether or
+        # not anyone reaches the survey, so the funnel exists before the first
+        # response does -- and an empty survey with a healthy pre-answer rate
+        # is itself the finding.
+        _report_presurvey_funnel(usage_df)
         return
 
     df = survey_df.copy()
@@ -444,6 +674,8 @@ def main():
 
     analyze_engagement(events)
     analyze_switch_rate(scenario_events_df)
+    analyze_paired_shift(survey_df, usage_df)
+    analyze_instrument_agreement(survey_df)
 
     try:
         import matplotlib

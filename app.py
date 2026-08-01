@@ -22,6 +22,7 @@ import html
 import io
 import math
 import re
+import sys
 import uuid
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
@@ -1446,6 +1447,244 @@ CAREER_STAGE_OPTIONS = {
     "Mid-Career (Year 10)": 9,
 }
 
+# ---- Pre/post impact measurement -------------------------------------------
+# The exit survey asks whether the tool changed the visitor's view -- one
+# retrospective self-report, asked after everything, requiring them to
+# introspect on a change they may never have noticed. There has never been
+# anything to difference it against: no question is asked anywhere before the
+# numbers appear.
+#
+# These two get asked TWICE -- once above the results and once inside the exit
+# survey -- so the paper can report a measured shift rather than a remembered
+# one. Both are ordered categories, so a pair yields a signed step difference.
+#
+# Bands rather than a free-numeric borrowing field on purpose: a text box
+# placed after the app has just displayed a loan figure measures how well the
+# visitor read that figure, not what they intend to borrow.
+#
+# WILLINGNESS, not expectation, for the same reason and more sharply. The
+# sidebar shows a loan amount at page load, so "how much do you expect to
+# borrow?" asked afterwards is partly a reading test of a number already on
+# screen. The MOST you would be willing to take on is a threshold the app
+# never states anywhere, so the post answer has to be generated rather than
+# recalled -- which is the whole point of asking twice.
+#
+# "Not sure" / "Haven't decided" are real answers and are scored as their own
+# category, never as a midpoint. Someone moving from "Haven't decided" to a
+# band is the clearest evidence the tool did something, and averaging it into
+# a number would erase exactly that.
+#
+# Stored as CODES, not these display labels. analyze_survey.py's
+# PERCEPTION_ORDER is a hand-copy of app.py's radio list, so rewording one
+# side silently reindexes the cross-tab to NaN -- survivable for a category
+# count, not for an ORDINAL item whose analysis subtracts two values, where a
+# broken map yields a wrong number instead of an obvious blank.
+PRESURVEY_SCHOOLS_OPTIONS = {
+    "0": "s0", "1": "s1", "2": "s2", "3": "s3", "4": "s4",
+    "5 or more": "s5plus", "Not sure": "unsure",
+}
+PRESURVEY_BORROWING_OPTIONS = {
+    "Nothing — I don't want to borrow": "n0",
+    "Up to $10,000": "b1",
+    "$10,000-$30,000": "b2",
+    "$30,000-$60,000": "b3",
+    "$60,000-$100,000": "b4",
+    "More than $100,000": "b5",
+    "Haven't decided": "undecided",
+}
+
+# Asked before the numbers and again after. The post wording deliberately does
+# NOT ask "did this change your mind?" -- that invites the respondent to report
+# the change they think is expected of them. Asking for a current state and
+# differencing it ourselves keeps the inference on our side of the instrument.
+PRESURVEY_SCHOOLS_QUESTION = "How many colleges are you seriously considering right now?"
+PRESURVEY_BORROWING_QUESTION = (
+    "What's the most total student debt you'd be willing to take on for this path?")
+POSTSURVEY_SCHOOLS_QUESTION = "How many colleges are you seriously considering now?"
+POSTSURVEY_BORROWING_QUESTION = (
+    "Now, what's the most total student debt you'd be willing to take on for this path?")
+
+# Asked FIRST, in the pre block, because it decides what else to ask. The
+# option set gains "Counselor": the outreach this app is built around goes to
+# high-school and community-college counsellors, and until now they had to
+# file themselves under Teacher or Other.
+PRESURVEY_ROLE_OPTIONS = ["Student", "Parent", "Counselor", "Teacher", "Other"]
+
+# Roles for whom "the most debt you'd be willing to take on" is not a question
+# about themselves. A counsellor answering it is either guessing on a
+# student's behalf or answering about their own long-past finances -- either
+# way it is not the quantity the paired test differences, and averaging it in
+# would add noise to the one measure the design exists to produce.
+#
+# They still get the schools question: a counsellor advising students plausibly
+# does hold a consideration set, and widening it is exactly what the tool is
+# for.
+#
+# Teacher is arguably in the same position and is deliberately NOT listed --
+# flagged for a decision rather than assumed, since a teacher could as easily
+# be a parent of a college-bound child answering for themselves.
+ROLES_WITHOUT_BORROWING = {"Counselor"}
+
+# Floor on research participation. The CALCULATOR stays open to everyone -- it
+# is a public information tool and nothing about using it is research -- but
+# the survey instruments are not offered to a student below this age.
+#
+# 18 is the load-bearing number, not a rounded-up 17. At 18 a respondent is an
+# adult in every state but Alabama and Nebraska (19) and consents for
+# themselves, which takes the study out of Subpart D entirely: no parental
+# permission, no child assent, and the anonymous-survey exemption at
+# 45 CFR 46.104(d)(2) becomes available -- it is unavailable for children,
+# reaching them only for educational tests and non-participant observation.
+# At 17 none of that is true; a 17-year-old is a child under 45 CFR 46.402(a),
+# and every one of those requirements still applies. The floor is the
+# difference between a study that needs parental permission and one that does
+# not.
+#
+# The cost is real and belongs in the paper rather than a footnote: the
+# intended population is high-school seniors, most of whom are 16-17. A
+# visitor graduating in 2028-2030 is 14-16 today and cannot participate at
+# all. Any claim about "high school students" must be read as "students
+# already 18" -- an older, smaller, and differently-situated group than the
+# one the tool was built for.
+#
+# Only asked of Students. Parent/Counselor/Teacher are adult roles by
+# construction -- asking them to attest reads as an accusation and collects
+# nothing.
+RESEARCH_MIN_AGE = 18
+ROLES_REQUIRING_AGE_ATTESTATION = {"Student"}
+
+# Lower-case codes for the log line, so a reworded option label cannot
+# silently change what a stored value means.
+_ROLE_CODES = {role: role.lower() for role in PRESURVEY_ROLE_OPTIONS}
+
+# Bumped whenever an option set or question wording changes. Without it,
+# "declined the pre" (version set, answers NULL) and "predates the pre"
+# (version NULL) are the same NULL, and the denominator of the pre-response
+# rate is silently wrong. Same reasoning as hs_baseline_age_aware: keep
+# writing a near-constant column because it is the only thing telling two
+# eras apart.
+PRESURVEY_INSTRUMENT_VERSION = "v1"
+
+# ---- Budget-first school search (fields of study) ---------------------------
+# The 38 two-digit CIP families the College Scorecard reports program flags
+# for, as carried in data/college_coa_clean.csv's programs_* columns (see
+# clean_college_scorecard.py). Titles are shortened from NCES's official CIP
+# series titles for a sidebar-width control.
+#
+# Two digits is the ONLY granularity available for a whole-dataset filter.
+# Finer 4-digit programs exist in the Scorecard API but only per school, one
+# request each, so they cannot filter 5,035 rows -- the same constraint that
+# keeps per-school earnings out of the filter.
+#
+# The consequence is real and is handled by LABELLING, not by pretending
+# otherwise: six NY Fed majors (Accounting, Business Analytics, Business
+# Management, Finance, General Business, Marketing) all live in family 52 and
+# therefore return the same schools, and family 51 spans nursing through
+# massage therapy. The UI names the FAMILY rather than the major, so an
+# identical result set for Finance and Marketing reads as what it is -- one
+# field of study -- instead of looking broken.
+CIP_FAMILY_TITLES = {
+    "01": "Agriculture & Related Sciences",
+    "03": "Natural Resources & Conservation",
+    "04": "Architecture",
+    "05": "Area, Ethnic & Gender Studies",
+    "09": "Communication & Journalism",
+    "10": "Communications Technologies",
+    "11": "Computer & Information Sciences",
+    "12": "Personal & Culinary Services",
+    "13": "Education",
+    "14": "Engineering",
+    "15": "Engineering Technologies",
+    "16": "Foreign Languages & Literatures",
+    "19": "Family & Consumer Sciences",
+    "22": "Legal Professions & Studies",
+    "23": "English Language & Literature",
+    "24": "Liberal Arts & General Studies",
+    "25": "Library Science",
+    "26": "Biological & Biomedical Sciences",
+    "27": "Mathematics & Statistics",
+    "29": "Military Technologies",
+    "30": "Multi/Interdisciplinary Studies",
+    "31": "Parks, Recreation & Fitness",
+    "38": "Philosophy & Religious Studies",
+    "39": "Theology & Religious Vocations",
+    "40": "Physical Sciences",
+    "41": "Science Technologies",
+    "42": "Psychology",
+    "43": "Homeland Security, Law Enforcement & Firefighting",
+    "44": "Public Administration & Social Service",
+    "45": "Social Sciences",
+    "46": "Construction Trades",
+    "47": "Mechanic & Repair Technologies",
+    "48": "Precision Production",
+    "49": "Transportation & Materials Moving",
+    "50": "Visual & Performing Arts",
+    "51": "Health Professions",
+    "52": "Business, Management & Marketing",
+    "54": "History",
+}
+
+# UI label -> (programs_* column suffix, nominal years). The years are the
+# length of THAT credential, used to turn a per-year cost into a program
+# total. They are deliberately NOT program_years_for_major: a bachelor's
+# result list is four years regardless of which occupation the visitor has
+# selected in the sidebar.
+CREDENTIAL_LEVELS = {
+    "Bachelor's degree": ("bachl", 4),
+    "Associate's degree": ("assoc", 2),
+    "Certificate (2-4 years)": ("cert4", 2),
+    "Certificate (1-2 years)": ("cert2", 1),
+    "Certificate (under 1 year)": ("cert1", 1),
+}
+
+# NY Fed major -> CIP family, for prefilling the search when the visitor is in
+# Major mode. A major and a CIP family are both fields of STUDY, so this is a
+# direct correspondence rather than a crosswalk.
+#
+# None where no single family is defensible. That follows SINGLE_METRO_BY_STATE,
+# which refuses to guess between Los Angeles and San Francisco for a California
+# school: a wrong prefill here is worse than no prefill, because the visitor
+# would have to notice it was wrong before they could correct it.
+#
+# There is deliberately NO equivalent for Career mode's 836 occupations.
+# Occupation -> field of study is the SOC-CIP crosswalk whose own documentation
+# calls it conceptual rather than empirical, and which this codebase already
+# declined to rely on for underemployment.
+MAJOR_TO_CIP_FAMILY = {
+    "Accounting": "52", "Advertising and Public Relations": "09",
+    "Aerospace Engineering": "14", "Agriculture": "01",
+    "Animal and Plant Sciences": "01", "Anthropology": "45",
+    "Architecture": "04", "Art History": "50", "Biochemistry": "26",
+    "Biology": "26", "Business Analytics": "52", "Business Management": "52",
+    "Chemical Engineering": "14", "Chemistry": "40", "Civil Engineering": "14",
+    "Commercial Art & Graphic Design": "50", "Communications": "09",
+    "Computer Engineering": "14", "Computer Science": "11",
+    "Construction Services": "46", "Criminal Justice": "43",
+    "Early Childhood Education": "13", "Earth Sciences": "40",
+    "Economics": "45", "Electrical Engineering": "14",
+    "Elementary Education": "13", "Engineering Technologies": "15",
+    "English Language": "23", "Environmental Studies": "03",
+    "Ethnic Studies": "05", "Family and Consumer Sciences": "19",
+    "Finance": "52", "Fine Arts": "50", "Foreign Language": "16",
+    "General Business": "52", "General Education": "13",
+    "General Engineering": "14", "General Social Sciences": "45",
+    "Geography": "45", "Health Services": "51", "History": "54",
+    "Industrial Engineering": "14", "Information Systems & Management": "11",
+    "Interdisciplinary Studies": "30", "International Affairs": "45",
+    "Journalism": "09", "Leisure and Hospitality": "31", "Liberal Arts": "24",
+    "Marketing": "52", "Mass Media": "09", "Mathematics": "27",
+    "Mechanical Engineering": "14", "Medical Technicians": "51",
+    "Miscellaneous Biological Science": "26", "Miscellaneous Education": "13",
+    "Miscellaneous Engineering": "14", "Miscellaneous Physical Sciences": "40",
+    "Miscellaneous Technologies": None,   # spans 10/15/41/47/48 -- no one family
+    "Nursing": "51", "Nutrition Sciences": "51", "Performing Arts": "50",
+    "Pharmacy": "51", "Philosophy": "38", "Physics": "40",
+    "Political Science": "45", "Psychology": "42",
+    "Public Policy and Law": "44", "Secondary Education": "13",
+    "Social Services": "44", "Sociology": "45", "Special Education": "13",
+    "Theology and Religion": "39", "Treatment Therapy": "51",
+}
+
 # ---- College Prestige & Cost Estimator (optional "Advanced Analysis" mode) --
 # Cost per tier is a straightforward sticker-price bucketing. The salary
 # multiplier is the part that needs care: real research on a "prestige
@@ -2023,6 +2262,225 @@ def log_compare_toggle():
     log_usage_event(f"compare_toggled:{state}:arm={get_experiment_arm()}")
 
 
+def escape_money_markdown(label: str) -> str:
+    """Escape dollar signs so Streamlit renders them as text, not LaTeX.
+
+    A label like "$10,000-$25,000" carries a MATCHED PAIR of "$", which
+    Streamlit's markdown treats as a maths delimiter -- the band renders
+    italicised, without its dollar signs, as though it were an equation. Single
+    "$" elsewhere in the app is unaffected because it is unpaired, which is why
+    this has not bitten before.
+
+    Used via format_func so the stored and logged value stays clean: the
+    backslashes are a display concern and must not reach Supabase.
+    """
+    return label.replace("$", r"\$")
+
+
+def presurvey_code(options: dict, label: str) -> str:
+    """The stable code for a display label, or "skip" when unanswered.
+
+    Everything stored or logged goes through here. The display strings are
+    free to be reworded -- for clarity, or because a band changes -- without
+    silently reindexing an ordinal analysis that subtracts two values."""
+    return options.get(label, "skip") if label else "skip"
+
+
+def log_presurvey(answered: bool) -> None:
+    """Record the pre-question outcome to usage_logs.
+
+    usage_logs takes any new action string with no migration -- the same reason
+    log_horizon_change writes here rather than adding a column. That matters
+    more than usual for this one: writing the pre-answer ONLY into the survey
+    row would make it invisible for every visitor who answers it and then
+    leaves without submitting the exit survey, which is most of them. The
+    drop-off between the two is itself a finding about engagement, and it can
+    only be measured if the pre exists independently.
+
+    Answers are also held in session_state and copied onto the survey row when
+    one is submitted, so a completed pair lives on a single row for analysis.
+    """
+    if not answered:
+        log_usage_event("presurvey_skipped")
+        return
+    role = st.session_state.get("presurvey_role") or "unset"
+    schools = presurvey_code(PRESURVEY_SCHOOLS_OPTIONS,
+                             st.session_state.get("presurvey_schools"))
+    # "n_a" rather than "skip": for a counsellor the question was never put,
+    # which is a different fact from a visitor who was asked and declined.
+    borrowing = ("n_a" if role in ROLES_WITHOUT_BORROWING
+                 else presurvey_code(PRESURVEY_BORROWING_OPTIONS,
+                                      st.session_state.get("presurvey_borrowing")))
+    # seq > 1 means the visitor had already switched major or school before
+    # answering, so their "pre" is really post-interaction. One token, and it
+    # is the only way to tell those rows apart later.
+    seq = st.session_state.get("scenario_event_seq", 0)
+    log_usage_event(
+        f"presurvey_answered:role={presurvey_code(_ROLE_CODES, role)}"
+        f":considering={schools}:borrow={borrowing}"
+        f":seq={seq}:arm={get_experiment_arm()}:v={PRESURVEY_INSTRUMENT_VERSION}")
+
+
+def research_participation_allowed() -> bool:
+    """Whether this visitor may be offered a research instrument.
+
+    False only for a self-identified student who has not attested to meeting
+    RESEARCH_MIN_AGE. Everyone else -- including a visitor who never
+    answered the role question at all -- is allowed, because an unanswered
+    role is not a claim to be a minor and refusing on that basis would
+    suppress most of the sample for no gain.
+
+    The CALCULATOR is never gated on this. It is a public information tool;
+    using it is not participating in research, and withholding it from a
+    16-year-old would defeat the point of having built it."""
+    if st.session_state.get("presurvey_role") not in ROLES_REQUIRING_AGE_ATTESTATION:
+        return True
+    return bool(st.session_state.get("presurvey_age_ok"))
+
+
+def build_instrument_context(post_schools: str, post_borrowing: str,
+                              respondent_role: str) -> dict:
+    """The seven paired-measurement columns for one survey row.
+
+    Pre values come from session_state, where the pre block left them; post
+    values are passed in from the form. Both sides go through presurvey_code,
+    so a reworded option label cannot change what a stored value means -- the
+    analysis subtracts these, and a broken label map would yield a wrong
+    number rather than an obvious blank.
+
+    Three states are kept distinct and must stay that way downstream:
+      answered    -> a code
+      skip        -> asked, declined
+      n_a         -> never asked (the role does not take the question)
+    and separately, all-NULL pre columns with instrument_version set means the
+    pre block was never shown at all.
+    """
+    pre_answered = bool(st.session_state.get("presurvey_answered"))
+    borrowing_applies = respondent_role not in ROLES_WITHOUT_BORROWING
+    return {
+        "pre_schools_considered": presurvey_code(
+            PRESURVEY_SCHOOLS_OPTIONS, st.session_state.get("presurvey_schools")
+        ) if pre_answered else None,
+        "pre_borrow_willingness": (
+            (presurvey_code(PRESURVEY_BORROWING_OPTIONS,
+                            st.session_state.get("presurvey_borrowing"))
+             if borrowing_applies else "n_a") if pre_answered else None),
+        "post_schools_considered": presurvey_code(
+            PRESURVEY_SCHOOLS_OPTIONS, post_schools),
+        "post_borrow_willingness": (
+            presurvey_code(PRESURVEY_BORROWING_OPTIONS, post_borrowing)
+            if borrowing_applies else "n_a"),
+        "pre_skipped": bool(st.session_state.get("presurvey_skipped")),
+        # Only meaningful for the roles asked to attest. True for everyone
+        # else would imply we checked, which we did not.
+        "age_attested": (bool(st.session_state.get("presurvey_age_ok"))
+                          if respondent_role in ROLES_REQUIRING_AGE_ATTESTATION
+                          else None),
+        "instrument_version": PRESURVEY_INSTRUMENT_VERSION,
+    }
+
+
+def render_presurvey() -> None:
+    """The two before-you-look questions, above the results.
+
+    Deliberately NOT a gate. This app's premise is that real numbers are on
+    screen before you touch anything, so a prompt that withholds them to
+    collect data would trade the thing the tool is for against the thing the
+    paper wants. It renders, it can be skipped in one click, and the results
+    below render either way.
+
+    Rendered at module level, outside both section 5c branches -- the same
+    reason the exit survey is safe. get_experiment_arm() assigns ~half of
+    visitors to Compare Mode, so anything rendered inside one branch and not
+    the other becomes a difference between the arms that H2 does not claim.
+
+    Skipped and unanswered are tracked separately. A missing answer must mean
+    "we don't know", never "they had nothing to say" -- the same distinction
+    major_explicitly_selected exists to preserve for the major.
+    """
+    # No test_mode gate here on purpose: log_usage_event already returns early
+    # on it, so a ?test=1 session sees the real prompt and writes nothing --
+    # matching save_survey_response, which returns True without inserting so
+    # the thank-you UX still appears. Suppressing the render instead would make
+    # the one feature that must be verified in a browser unverifiable there.
+    if not st.session_state.get("research_mode"):
+        return
+    if st.session_state.get("presurvey_answered") or st.session_state.get("presurvey_skipped"):
+        return
+
+    # One row per session, not per rerun -- this function runs on every pass.
+    if not st.session_state.get("presurvey_shown_logged"):
+        st.session_state["presurvey_shown_logged"] = True
+        log_usage_event("presurvey_shown")
+
+    with st.expander("📝 Two quick questions before you look (optional)", expanded=True):
+        st.caption(
+            "Answering these before you explore lets us measure whether tools like "
+            "this actually change anything — we ask the same two at the end. Skip "
+            "if you'd rather just get to the numbers."
+        )
+        # index=None so "unanswered" is a real state. A radio defaulting to its
+        # first option would record "0 colleges" for anyone who ignored it,
+        # which is the same answer-vs-absence failure the exit survey's
+        # role/graduation-year dropdowns still have.
+        # Role first: it decides whether the borrowing question is asked at
+        # all. Plain radios rather than a form precisely so this reacts --
+        # inside st.form nothing reruns until submit, and the borrowing
+        # question could not appear or disappear in response.
+        st.radio("I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
+                  horizontal=True, key="presurvey_role")
+
+        role = st.session_state.get("presurvey_role")
+
+        # Age gate, students only. Rendered before the rest so an ineligible
+        # visitor is never asked a research question at all -- collecting the
+        # answers and discarding them afterwards would still be collecting
+        # them.
+        if role in ROLES_REQUIRING_AGE_ATTESTATION:
+            st.checkbox(f"I am {RESEARCH_MIN_AGE} or older", key="presurvey_age_ok")
+            if not st.session_state.get("presurvey_age_ok"):
+                st.info(
+                    f"These questions are for people {RESEARCH_MIN_AGE} and over. "
+                    "**Everything else on this page works exactly the same** — "
+                    "scroll on down, the calculator is yours to use."
+                )
+                if st.button("Got it"):
+                    st.session_state["presurvey_skipped"] = True
+                    log_usage_event("presurvey_ineligible_minor")
+                    st.rerun()
+                return
+
+        st.radio(PRESURVEY_SCHOOLS_QUESTION, list(PRESURVEY_SCHOOLS_OPTIONS),
+                  index=None, horizontal=True, key="presurvey_schools")
+
+        borrowing_applies = role not in ROLES_WITHOUT_BORROWING
+        if borrowing_applies:
+            st.radio(PRESURVEY_BORROWING_QUESTION, list(PRESURVEY_BORROWING_OPTIONS),
+                      index=None, key="presurvey_borrowing",
+                      format_func=escape_money_markdown)
+        elif st.session_state.get("presurvey_borrowing"):
+            # Cleared rather than left dangling: a visitor who answered the
+            # borrowing question and THEN picked Counselor would otherwise
+            # have a stale answer silently ride along to Supabase.
+            st.session_state["presurvey_borrowing"] = None
+
+        save_col, skip_col = st.columns([1, 3])
+        answered_required = (
+            bool(role)
+            and bool(st.session_state.get("presurvey_schools"))
+            and (not borrowing_applies or bool(st.session_state.get("presurvey_borrowing")))
+        )
+        if save_col.button("Save answers", disabled=not answered_required,
+                            use_container_width=True):
+            st.session_state["presurvey_answered"] = True
+            log_presurvey(answered=True)
+            st.rerun()
+        if skip_col.button("Skip"):
+            st.session_state["presurvey_skipped"] = True
+            log_presurvey(answered=False)
+            st.rerun()
+
+
 def get_traffic_source() -> str:
     """Where this visit came from, read from a ?src= tag on the URL and
     stamped on every row -- e.g. studentloanroi.streamlit.app/?src=jefferson_econ.
@@ -2078,6 +2536,23 @@ def get_major_explicitly_selected() -> bool:
     return bool(st.session_state.get("major_explicitly_selected", False))
 
 
+def report_write_failure(what: str, error: Exception) -> None:
+    """Print why a Supabase write failed, without changing what the visitor sees.
+
+    Every writer in this file catches broadly and returns False, so a page load
+    keeps working when the database is unreachable -- that part is deliberate.
+    What it also did was discard the reason, which makes the two failures that
+    matter indistinguishable from each other and from a healthy no-op: a
+    missing column (PGRST204, the whole row rejected) looks exactly like a
+    network timeout, which looks exactly like nobody having used the feature.
+
+    Goes to the server console, which is the Streamlit Cloud log -- never to
+    the page. A visitor should not be shown a PostgREST error, and the app's
+    own error text stays as it is.
+    """
+    print(f"[supabase] {what} failed: {type(error).__name__}: {error}", file=sys.stderr)
+
+
 def log_usage_event(action: str):
     """Insert a single usage event into the usage_logs table. Tolerates any
     connection/query failure (matching every other save_*/log_* helper in
@@ -2102,7 +2577,8 @@ def log_usage_event(action: str):
 
 
 def save_survey_response(respondent_role: str, hs_graduation_year: str,
-                          perception_change: str, feedback_text: str, context: dict) -> bool:
+                          perception_change: str, feedback_text: str, context: dict,
+                          instrument: dict = None) -> bool:
     """Insert one anonymous survey submission into the survey_responses
     table. `context` is a flat {column_name: value} dict carrying every
     simulation-context field: school name, Scenario A's inputs/outputs, and
@@ -2135,6 +2611,12 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             "hs_graduation_year": hs_graduation_year,
             "perception_change": perception_change,
             "feedback_text": feedback_text,
+            # The paired pre/post measurement. Survey-only, so it is a named
+            # argument like the four above rather than a member of context --
+            # context is spread into four tables, and these columns exist on
+            # one. Placed before **context so a context key added later cannot
+            # silently overwrite a measurement.
+            **(instrument or {}),
             **context,
         }
         execute_query(
@@ -2142,7 +2624,8 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("survey_responses insert", error)
         return False
 
 
@@ -2573,8 +3056,69 @@ def load_coa_dataset() -> pd.DataFrame:
     try:
         return pd.read_csv(COA_DATASET_PATH)
     except (FileNotFoundError, pd.errors.EmptyDataError):
-        return pd.DataFrame(
-            columns=["INSTNM", "control_type", "in_state_coa", "out_of_state_coa", "NPCURL"])
+        # Must name every column any caller reads, not just the COA ones. An
+        # empty frame missing STABBR made metro_for_school raise rather than
+        # degrade, and the same would now apply to the search's programs_*
+        # and CURROPER columns.
+        return pd.DataFrame(columns=[
+            "INSTNM", "STABBR", "control_type", "in_state_coa", "out_of_state_coa",
+            "NPCURL", "UNITID", "CITY", "CURROPER", "DISTANCEONLY", "ADM_RATE",
+        ] + [f"programs_{suffix}" for suffix, _ in CREDENTIAL_LEVELS.values()])
+
+
+def search_schools_by_budget(cip_family: str, credential: str,
+                              max_coa_per_year: float, in_state: bool,
+                              states: tuple = None, control_types: tuple = None,
+                              limit: int = 50) -> pd.DataFrame:
+    """Schools that teach `cip_family` at `credential` for at most
+    `max_coa_per_year`, cheapest first. The inverse of the app's normal
+    question: not "what does the school I named cost" but "what could I attend
+    for this, in this field".
+
+    Sorted by COST and nothing else, deliberately. Every salary figure in this
+    app comes from the occupation or major dataset -- no school attribute
+    touches the earnings side -- so a "best value" or ROI ordering here would
+    be the cost ordering wearing an outcome's name. For the same reason the ROI
+    model is NOT run per row: 181 model runs per search would be slow AND
+    misleading.
+
+    Excludes schools flagged as no longer operating. Surfacing a closed
+    institution as somewhere a 17-year-old could enrol is this feature's worst
+    failure mode, and it is not something the visitor could be expected to
+    check.
+
+    Returns an empty frame when nothing matches, which is a real and useful
+    answer -- "your budget admits nothing in this field" is the finding, not an
+    error -- so callers must render that case rather than hiding it.
+    """
+    coa_df = load_coa_dataset()
+    if coa_df.empty or not cip_family or credential not in CREDENTIAL_LEVELS:
+        return pd.DataFrame()
+
+    suffix, nominal_years = CREDENTIAL_LEVELS[credential]
+    program_column = f"programs_{suffix}"
+    cost_column = "in_state_coa" if in_state else "out_of_state_coa"
+    if program_column not in coa_df.columns or cost_column not in coa_df.columns:
+        return pd.DataFrame()
+
+    # Anchored on the pipe delimiters. Codes are fixed 2-digit today, which
+    # makes a plain substring match equivalent (verified across the dataset) --
+    # this keeps that true rather than relying on it.
+    teaches = coa_df[program_column].fillna("").str.contains(
+        rf"(?:^|\|){re.escape(str(cip_family))}(?:\||$)", regex=True)
+    affordable = coa_df[cost_column].notna() & (coa_df[cost_column] <= max_coa_per_year)
+    open_now = coa_df["CURROPER"].fillna(1) != 0
+
+    matches = coa_df[teaches & affordable & open_now]
+    if states:
+        matches = matches[matches["STABBR"].isin(states)]
+    if control_types:
+        matches = matches[matches["control_type"].isin(control_types)]
+
+    matches = matches.sort_values(cost_column).head(limit).copy()
+    matches["coa_per_year"] = matches[cost_column]
+    matches["total_program_cost"] = matches[cost_column] * nominal_years
+    return matches.reset_index(drop=True)
 
 
 def find_school_coa(school_name: str, coa_df: pd.DataFrame):
@@ -5775,6 +6319,27 @@ components.html(
 if "test_mode" not in st.session_state:
     st.session_state.test_mode = get_shared_default("test", "0") == "1"
 
+# The pre/post research instrument renders only for ?research=1. Everyone else
+# sees the calculator exactly as it was, and no pre/post answer is collected
+# from them.
+#
+# This is an ethics gate, not a feature flag. The instrument is human-subjects
+# research and the required IRB determination has not been obtained -- see the
+# paper's section 5.1b. Deploying it open would begin collecting from the
+# public before that exists, which is the same defect as the handful of
+# pre-approval responses already in the table, at a larger scale and this time
+# knowingly.
+#
+# Sticky in session_state for the same reason test_mode is: "Share Scenario"
+# calls st.query_params.from_dict, which REPLACES the whole query string, so a
+# flag re-read from the URL on every call would silently switch itself off
+# mid-session.
+#
+# Remove this gate when an approval exists -- not before, and not by anyone
+# who has not checked that it does.
+if "research_mode" not in st.session_state:
+    st.session_state.research_mode = get_shared_default("research", "0") == "1"
+
 # an expander see "pageview_logged" already set and skip logging again.
 if "pageview_logged" not in st.session_state:
     log_usage_event("pageview")
@@ -5782,6 +6347,14 @@ if "pageview_logged" not in st.session_state:
 
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
+
+# Pre-question state. answered and skipped are tracked separately on purpose:
+# both hide the prompt, but only one of them means the visitor had something
+# to say. Neither is seeded onto the radios themselves -- those stay at
+# index=None so "unanswered" survives as a distinct third state.
+for _presurvey_flag in ("presurvey_answered", "presurvey_skipped", "presurvey_shown_logged"):
+    if _presurvey_flag not in st.session_state:
+        st.session_state[_presurvey_flag] = False
 
 # Admin Analytics View starts hidden -- Ctrl+Shift+A reveals the checkbox
 # that controls it (see the hidden trigger button + injected JS near the
@@ -7268,6 +7841,11 @@ st.info(
     "anything. Everything below updates instantly as you change it, no button to click."
 )
 
+# The before-you-look questions. Above the results because that is the only
+# place a "before" measurement can be taken, and skippable because the results
+# are the point -- see render_presurvey.
+render_presurvey()
+
 # Collapsed on purpose. This app's whole premise is that real numbers are on
 # screen before you touch anything -- there is deliberately no "calculate"
 # button -- so a guide that interrupts that is worse than no guide. Costs
@@ -8658,13 +9236,127 @@ render_get_accurate_inputs(
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------
 
-if not st.session_state.survey_submitted:
-    with st.form("survey_form", clear_on_submit=True):
-        st.subheader("📋 Help Us Measure Impact")
-        respondent_role = st.selectbox("I am a...", ["Parent", "Student", "Teacher", "Other"])
-        hs_graduation_year = st.selectbox(
-            "Expected High School Graduation Year", ["2027", "2028", "2029", "2030"],
+# Hidden outright for a student who told the pre block they are under
+# RESEARCH_MIN_AGE. Gating only the pre questions would have left the larger
+# instrument -- the one carrying the free-text box -- fully open to exactly
+# the visitors the floor exists to exclude.
+#
+# A visitor who never answered the role question still sees the survey; an
+# unanswered role is not a claim to be a minor. That path is caught inside the
+# form instead, where selecting Student requires the same attestation.
+if st.session_state.get("research_mode") and not st.session_state.survey_submitted \
+        and research_participation_allowed():
+    st.subheader("📋 Help Us Measure Impact")
+    # Consent, shown BEFORE the form rather than inside it. Inside an st.form
+    # nothing renders until the form is constructed and nothing submits until
+    # the button, so a notice in there is read at the same moment it is agreed
+    # to -- which is not consent, it is a receipt.
+    #
+    # Deliberately short and in the app's own register. The elements 45 CFR
+    # 46.116 requires for minimal-risk research are all here -- that it is
+    # research, its purpose, what is asked, voluntariness, risks, benefits,
+    # what is recorded, a contact, and an affirmative act -- but a wall of
+    # legalese aimed at an 18-year-old is consent in form only.
+    #
+    # ACCURACY NOTE, do not "simplify" this away: the text says the SURVEY
+    # saves nothing until submitted, which is true, and separately admits that
+    # page views and scenario changes are recorded as you go, which is also
+    # true (log_usage_event and maybe_log_scenario_event both fire before any
+    # consent is given). An earlier draft said "nothing is saved until you
+    # press Save" full stop, which would have been a false statement about the
+    # page as a whole.
+    with st.expander("Before you answer — what this is and what's recorded", expanded=False):
+        st.markdown(
+            f"""
+These questions are part of a **research project** on whether tools like this change
+how people think about college debt. Taking part is **voluntary** and takes about a
+minute. The calculator works exactly the same whether you answer or not.
+
+**What's recorded if you submit:** your answers, plus the scenario on screen at that
+moment — school, major, loan amount, and the resulting figures. Separately, and as you
+go, the app records that a page was opened and which majors and schools were tried.
+
+**What's never recorded:** your name, email, IP address, or any account — there isn't
+one. Each visit gets a random ID that is discarded when you close the tab, so two
+visits cannot be linked to each other or to you.
+
+**Risks and benefits:** no known risks beyond using any web page, and no direct benefit
+to you. Results may be published in aggregate; nothing identifying anyone will appear.
+
+**You can stop at any time** by not submitting, or by closing the tab. The survey itself
+saves nothing until you press Submit.
+
+Questions about the research? Contact **veervish11@gmail.com**.
+
+*By submitting, you agree to take part. You must be {RESEARCH_MIN_AGE} or over.*
+"""
         )
+    with st.form("survey_form", clear_on_submit=True):
+        # Asked here only if the pre block did not already get it. Asking the
+        # same person their role twice in one session is not just redundant --
+        # the two answers can disagree, and nothing in the schema says which
+        # one the scenario columns were recorded under.
+        #
+        # index=None so an ignored dropdown stays distinguishable from an
+        # answer. The old version defaulted to "Parent", which meant a row
+        # could not tell a parent from someone who never touched the control
+        # -- the answer-vs-absence failure major_explicitly_selected exists to
+        # prevent for the major, and it silently inflated one category.
+        _pre_role = st.session_state.get("presurvey_role")
+        if _pre_role:
+            st.caption(f"Answering as: **{_pre_role}** (from the questions at the top)")
+            respondent_role = _pre_role
+            # Already attested at the top, or this block would not render.
+            form_age_ok = True
+        else:
+            respondent_role = st.selectbox(
+                "I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
+                placeholder="Select one")
+            # Shown unconditionally rather than only for Students: inside an
+            # st.form nothing reruns until submit, so the checkbox cannot
+            # appear in response to the role choice the way it does at the top
+            # of the page. Asking everyone is the cost of that constraint --
+            # it is only ENFORCED for the roles that need it, below.
+            form_age_ok = st.checkbox(f"I am {RESEARCH_MIN_AGE} or older")
+        # index=None for the same answer-vs-absence reason as the role above.
+        # "Already graduated" is new and is not padding: the 18+ floor means a
+        # participating student has often finished high school already, and
+        # without it they must either pick a false year or leave the default.
+        hs_graduation_year = st.selectbox(
+            "Expected High School Graduation Year",
+            ["Already graduated", "2026", "2027", "2028", "2029", "2030", "Not applicable"],
+            index=None, placeholder="Select one",
+        )
+
+        # ---- The post half of the paired measurement -------------------------
+        # Above perception_change deliberately. That item asks whether the tool
+        # CHANGED anything, which is the most leading question on the page; a
+        # respondent who answers it first has been told what the researcher is
+        # looking for, and the paired items are the better measures. Let the
+        # legacy item absorb the priming rather than spread it.
+        #
+        # Wording is present-tense state ("...now"), never "did this change
+        # your mind?". We difference the two answers ourselves; asking the
+        # respondent to report the change invites them to supply one.
+        st.markdown("---")
+        post_schools = st.radio(POSTSURVEY_SCHOOLS_QUESTION,
+                                 list(PRESURVEY_SCHOOLS_OPTIONS),
+                                 index=None, horizontal=True)
+
+        # A counsellor is not answering about their own borrowing, so the
+        # question is not put to them -- matching the pre block. Only
+        # suppressible when the role is already known: inside a form nothing
+        # reruns, so if the role is being chosen right here the question has to
+        # render, and an answer from a counsellor is dropped at submit instead.
+        _post_borrowing_applies = _pre_role not in ROLES_WITHOUT_BORROWING
+        if _post_borrowing_applies:
+            post_borrowing = st.radio(POSTSURVEY_BORROWING_QUESTION,
+                                       list(PRESURVEY_BORROWING_OPTIONS),
+                                       index=None, format_func=escape_money_markdown)
+        else:
+            post_borrowing = None
+        st.markdown("---")
+
         perception_change = st.radio(
             "Did this tool change how you view your target major or university choice?",
             ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
@@ -8672,7 +9364,36 @@ if not st.session_state.survey_submitted:
         feedback_text = st.text_area("How did this data influence your thinking? (optional)")
         submitted = st.form_submit_button("Submit Feedback")
 
+        # Enforced at submit because a form cannot react before it. Checked
+        # BEFORE compute_scenario_results and before any write: an ineligible
+        # submission must not be assembled and then discarded, since the
+        # discarding is the only thing standing between it and Supabase.
+        if submitted and respondent_role in ROLES_REQUIRING_AGE_ATTESTATION \
+                and not form_age_ok:
+            st.warning(
+                f"This survey is for people {RESEARCH_MIN_AGE} and over, so this "
+                "response wasn't recorded. Everything else on the page is "
+                "unaffected — the calculator is yours to use."
+            )
+            log_usage_event("survey_blocked_minor")
+            submitted = False
+
         if submitted:
+            # Dropped rather than stored when the role turns out not to take
+            # the question. Only reachable when the role was chosen inside the
+            # form, where the widget could not be hidden reactively -- storing
+            # it anyway would put a counsellor's borrowing answer in the same
+            # column as a student's, which is the noise the exclusion exists
+            # to prevent.
+            if respondent_role in ROLES_WITHOUT_BORROWING:
+                post_borrowing = None
+
+            # Coded once, so every consumer sees the same vocabulary as the
+            # pre answers. "n_a" is not "skip": never asked and
+            # asked-then-declined are different facts.
+            postsurvey_codes = build_instrument_context(
+                post_schools, post_borrowing, respondent_role)
+
             # Recomputed fresh (cheap, pure functions, no API calls) rather
             # than reused from st.session_state, so the survey reflects
             # exact click-time state.
@@ -8716,13 +9437,34 @@ if not st.session_state.survey_submitted:
                 **module_context,
             }
 
-            saved = save_survey_response(respondent_role, hs_graduation_year, perception_change, feedback_text, context)
+            # Logged to usage_logs as well as (eventually) the survey row.
+            # Same reasoning as the pre answers: this channel needs no
+            # migration, so the paired measurement starts producing data
+            # immediately, and a survey insert that fails silently -- every
+            # writer here catches and returns False -- does not take the
+            # answers with it. The survey-row copy arrives with the migration
+            # and is what makes the pair atomic on one row.
+            log_usage_event(
+                "postsurvey_answered"
+                f":considering={postsurvey_codes['post_schools_considered']}"
+                f":borrow={postsurvey_codes['post_borrow_willingness']}"
+                f":pre={'1' if st.session_state.get('presurvey_answered') else '0'}"
+                f":v={PRESURVEY_INSTRUMENT_VERSION}")
+
+            saved = save_survey_response(respondent_role, hs_graduation_year,
+                                          perception_change, feedback_text, context,
+                                          instrument=postsurvey_codes)
             if saved:
                 st.session_state.survey_submitted = True
                 st.rerun()
             else:
                 st.error("Something went wrong saving your response -- please try again.")
-else:
+elif st.session_state.survey_submitted:
+    # Only for someone who actually submitted. This was a bare `else`, which
+    # after the eligibility condition was added to the `if` above began
+    # thanking under-18 visitors for a response that was never collected --
+    # a false statement, and on precisely the surface where the app is making
+    # claims about what it does with data.
     st.success("Thank you! Your feedback has been recorded anonymously.")
 
 st.divider()
@@ -9337,9 +10079,22 @@ estimate based on general inflation trends — this one is a judgment call,
 not a number we found in a report. If we don't even know what type of
 school it is, we default to the public-school rate.
 
+**The two questions at the top of the page.** If you answer them, we save
+your answers straight away — before you submit anything else — because the
+whole point is to record what you thought *before* you saw the numbers. If
+you skip them, we record that you skipped, which is a different fact from
+never having been asked. Either way the calculator behaves identically; the
+questions are optional and they never gate a single figure on this page.
+
+Those questions are research, so they're for people 18 and over. If you tell
+us you're a student under 18, we don't ask them and we don't show the survey
+at the bottom either. Everything else still works.
+
 **What we save when you submit the survey.** Each anonymous response
-saves who's answering (Parent/Student/Teacher/Other) and an expected high
-school graduation year (2027-2030), plus your exact inputs and results at
+saves who's answering (Student/Parent/Counselor/Teacher/Other), an expected
+high school graduation year, the two questions from the top asked a second
+time — so a change can be measured rather than remembered — plus your exact
+inputs and results at
 that moment: school, major, loan amount, personal contribution, interest
 rate, repayment strategy, your
 major's starting salary, and something called `dti_ratio` — short for
@@ -9353,6 +10108,14 @@ between the two scenarios' ROI%. None of this is tied to your name or
 any personal identifying information — it's used to help a companion
 research paper understand how tools like this one affect students'
 thinking about college and careers.
+
+**What gets recorded even if you never answer anything.** Opening the page
+records that a page was opened, and changing your major or school records the
+new selection. That happens as you browse, not when you submit — so it is
+recorded whether or not you touch either set of questions. It carries no name,
+no email, no IP address and no account. Each visit gets a random ID that is
+thrown away when you close the tab, so two visits can't be linked to each
+other or to you.
 
 **Advanced Analysis Settings (optional, off by default).** Five extra
 modules live in a sidebar expander. Each one is opt-in, and the calculator
