@@ -2411,7 +2411,15 @@ def render_presurvey() -> None:
         st.session_state["presurvey_shown_logged"] = True
         log_usage_event("presurvey_shown")
 
-    with st.expander("📝 Two quick questions before you start (optional)", expanded=True):
+    # A bordered container, not an expander. An expander offers a collapse
+    # control, and a collapsed prompt is one the visitor never returns to --
+    # it reads as chrome to dismiss rather than as part of the page. This is
+    # deliberately the ONLY change to how hard the prompt is to ignore: it is
+    # not a gate, and must not become one. The consent text promises "the
+    # calculator works exactly the same whether you answer or not", and Skip
+    # stays a single click for exactly that reason.
+    with st.container(border=True):
+        st.markdown("#### 📝 Two quick questions before you start (optional)")
         st.caption(
             "Answering these before you explore lets us measure whether tools like "
             "this actually change anything — we ask the same two at the end. Skip "
@@ -2468,8 +2476,10 @@ def render_presurvey() -> None:
             and bool(st.session_state.get("presurvey_schools"))
             and (not borrowing_applies or bool(st.session_state.get("presurvey_borrowing")))
         )
+        # Primary on Save, default on Skip. Both stay one click -- the weighting
+        # says which is more useful to the research, not which is permitted.
         if save_col.button("Save answers", disabled=not answered_required,
-                            use_container_width=True):
+                            type="primary", use_container_width=True):
             st.session_state["presurvey_answered"] = True
             log_presurvey(answered=True)
             st.rerun()
@@ -2515,6 +2525,29 @@ def get_traffic_source() -> str:
         # and must latch the same tag the later writers see.
         st.session_state["traffic_source"] = get_shared_default("src", None)
     return st.session_state["traffic_source"]
+
+
+def mark_first_interaction(field: str):
+    """Log the FIRST control a visitor actually touches, once per session.
+
+    ~92% of sessions are pageview-only -- they never move a control -- so the
+    interesting question is not how many people engage but what the engaged
+    minority reach for first. Nothing in the data answered that: scenario_events
+    records where a session LANDED, never which field moved it there.
+
+    Relies on the same property mark_major_explicitly_selected documents:
+    Streamlit fires on_change only on a real interaction, never on the initial
+    render and never on reruns other widgets trigger. So this fires at most
+    once, on the first genuine touch, and the guard keeps it there.
+
+    Deliberately only the FIRST. Logging every interaction would put a network
+    insert inside a slider drag -- the same reason maybe_log_scenario_event
+    keys on a signature rather than firing per rerun.
+    """
+    if st.session_state.get("_first_interaction_logged"):
+        return
+    st.session_state["_first_interaction_logged"] = True
+    log_usage_event(f"first_interaction:{field}")
 
 
 def mark_major_explicitly_selected():
@@ -2727,6 +2760,22 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # meaningful in Career mode (the radio is disabled in Major mode);
         # read it together with dataset_mode when aggregating.
         "career_data_source": career_data_source,                      # derived state name, or National
+        # Where the numbers came from. Without these three, the outcome
+        # columns in this row cannot be read: every earnings_premium and
+        # roi_pct is cost-of-living adjusted to `city` and metro-scaled to that
+        # city's wages, so a $292,603 premium in San Francisco and a $292,603
+        # premium at National Average are different claims and nothing else
+        # here distinguishes them. Module globals, same as dataset_mode.
+        "city": city,
+        # Which Cost of Attendance fed the loan. $34,200/year apart at Berkeley
+        # alone, so scenario_a_loan_amount is ambiguous without it.
+        "scenario_a_in_state": in_state_a,
+        # national / state / metro -- which geography published the wage. The
+        # app already tells the visitor via render_wage_geography_note, so
+        # before this the visitor knew something the dataset did not. .get()
+        # because NY Fed major entries carry no OEWS geography at all; None
+        # there means "not applicable", not "national".
+        "wage_geography_level": MAJOR_DATA.get(major, {}).get("wage_geography_level"),
         # The two switches that change what every ROI figure in this row MEANS.
         # Neither was logged before, which was survivable while both defaulted
         # off; it stops being survivable the moment one defaults on, because
@@ -2783,6 +2832,10 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
             # cc_mode_b is a module global only in the compare branch (assigned
             # in section 5c), so it is referenced only here, inside compare_mode.
             "cc_mode_b": cc_mode_b,   # none / fulltime / parttime
+            # Inside compare_mode for the same reason cc_mode_b is: in_state_b
+            # is assigned in the compare branch of the sidebar, so referencing
+            # it unconditionally would raise NameError with compare off.
+            "scenario_b_in_state": in_state_b,
             "scenario_b_school_name": school_name_b or None,
             "scenario_b_major": major_b,
             "scenario_b_loan_amount": loan_amount_b,
@@ -6744,7 +6797,8 @@ else:
     school_search_a = st.sidebar.text_input(
         "Target Undergraduate School", placeholder="e.g. University of Michigan",
         key="school_search_a",
-        on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+        on_change=lambda: (mark_first_interaction("school_a"),
+                            _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         help="Type a school name to auto-fill Cost of Attendance below from "
              "real government data, if we have it on file. If your school "
              "isn't found, just enter Cost of Attendance yourself.",
@@ -6759,7 +6813,8 @@ else:
             f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
             matching_schools_a, key="school_pick_a",
             format_func=lambda u: school_option_label(u, load_coa_dataset()),
-            on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+            on_change=lambda: (mark_first_interaction("school_a"),
+                            _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         )
     school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
     school_unitid_a = _resolve_school_unitid("school_search_a", "school_pick_a")
@@ -6771,7 +6826,8 @@ else:
     st.session_state.setdefault("in_state_a", get_shared_default("in_state", "1") == "1")
     in_state_a = st.sidebar.checkbox(
         "In-State Student?", key="in_state_a",
-        on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
+        on_change=lambda: (mark_first_interaction("school_a"),
+                            _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         help="Check this if you'd pay in-state tuition at the school above. "
              "Changes the auto-filled Cost of Attendance and how fast tuition "
              "is estimated to grow each year.",
@@ -7261,7 +7317,7 @@ st.session_state.setdefault(
 )
 roi_horizon_years = st.sidebar.selectbox(
     "ROI Horizon", ROI_HORIZON_OPTIONS, key="roi_horizon_select",
-    on_change=log_horizon_change,
+    on_change=lambda: (mark_first_interaction("roi_horizon"), log_horizon_change()),
     format_func=lambda y: f"{y} years",
     help="How far into the future every comparison on this page looks. "
          "Careers that train before they earn (medicine, law) look worst at "
@@ -7435,7 +7491,7 @@ if (st.session_state.get("major_select_a") not in major_options
 st.session_state["major_select_a_mode"] = dataset_mode
 major = st.sidebar.selectbox(
     SELECTION_LABEL[dataset_mode], major_options, key="major_select_a",
-    on_change=mark_major_explicitly_selected,
+    on_change=lambda: (mark_first_interaction("major"), mark_major_explicitly_selected()),
     help="Pick what you're evaluating -- this determines the salary numbers "
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
@@ -7666,7 +7722,8 @@ else:
 # warning once session_state holds the key.
 st.session_state.setdefault("compare_mode", _default_compare)
 compare_mode = st.sidebar.checkbox(
-    "🔀 Compare Two Scenarios", key="compare_mode", on_change=log_compare_toggle,
+    "🔀 Compare Two Scenarios", key="compare_mode",
+    on_change=lambda: (mark_first_interaction("compare_toggle"), log_compare_toggle()),
     help="Turn this on to compare two different majors, schools, or loan "
          "setups side by side instead of looking at just one.",
 )
@@ -7744,7 +7801,8 @@ if compare_mode:
             school_search_b = st.text_input(
                 "Target Undergraduate School", placeholder="e.g. Ohio State University",
                 value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
-                on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+                on_change=lambda: (mark_first_interaction("school_b"),
+                                    _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 help="Type a school name to auto-fill Cost of Attendance below "
                      "from real government data, if we have it on file. If "
                      "your school isn't found, just enter Cost of Attendance "
@@ -7756,14 +7814,16 @@ if compare_mode:
                     f"Multiple schools matched \"{school_search_b}\" -- pick yours:",
                     matching_schools_b, key="school_pick_b",
                     format_func=lambda u: school_option_label(u, load_coa_dataset()),
-                    on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+                    on_change=lambda: (mark_first_interaction("school_b"),
+                                    _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 )
             school_name_b = _resolve_school_name("school_search_b", "school_pick_b")
             school_unitid_b = _resolve_school_unitid("school_search_b", "school_pick_b")
 
             in_state_b = st.checkbox(
                 "In-State Student?", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
-                on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
+                on_change=lambda: (mark_first_interaction("school_b"),
+                                    _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 help="Check this if you'd pay in-state tuition at the school "
                      "above. Changes the auto-filled Cost of Attendance and how "
                      "fast tuition is estimated to grow each year.",
@@ -8084,15 +8144,22 @@ st.caption(
 )
 if st.session_state.get("test_mode"):
     st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
-st.info(
-    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
-    "anything. Everything below updates instantly as you change it, no button to click."
-)
 
 # The before-you-look questions. Above the results because that is the only
 # place a "before" measurement can be taken, and skippable because the results
 # are the point -- see render_presurvey.
+#
+# Above the "update your profile" banner too: that banner is an instruction
+# about the sidebar, and a visitor who reads it acts on it and never comes back
+# up. Putting the one-time question first costs the banner nothing -- it is
+# still the next thing on screen -- and is the whole of what "more prominent"
+# means here. It is NOT a gate; everything below renders regardless.
 render_presurvey()
+
+st.info(
+    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
+    "anything. Everything below updates instantly as you change it, no button to click."
+)
 
 # Collapsed on purpose. This app's whole premise is that real numbers are on
 # screen before you touch anything -- there is deliberately no "calculate"
@@ -8462,11 +8529,16 @@ def render_school_search() -> None:
                 "a year."
             )
 
+        # Read once into a local: the search and the log must agree on which
+        # credential was asked for, and reading session_state twice invites
+        # them to disagree.
+        credential = st.session_state.get("search_credential", "Bachelor's degree")
         results = search_schools_by_budget(
-            family, st.session_state.get("search_credential", "Bachelor's degree"),
-            budget, home_state, states=tuple(states) or None, limit=25)
+            family, credential, budget, home_state,
+            states=tuple(states) or None, limit=25)
 
-        _log_school_search(family, budget, states, len(results), home_state)
+        _log_school_search(family, budget, states, len(results), home_state,
+                            level=CREDENTIAL_LEVELS.get(credential, (None,))[0])
 
         if results.empty:
             # A real answer, not an error state. "Your budget admits nothing in
@@ -8537,15 +8609,26 @@ def render_school_search() -> None:
                 picked["INSTNM"],
                 int(picked["UNITID"]) if pd.notna(picked.get("UNITID")) else None,
                 bool(picked["is_home_state"]))
+            # delta_coa is this feature's effect size in one number: what the
+            # visitor was already modelling, minus what they just switched to.
+            # Negative means the search moved them cheaper, which is the entire
+            # claim the inverse search exists to support. Recorded here rather
+            # than derived later because the PREVIOUS value is gone the moment
+            # _apply_pending_school overwrites it on the next rerun.
+            prev_coa = st.session_state.get("coa_per_year_a")
+            delta_coa = (int(picked["coa_per_year"]) - int(prev_coa)
+                          if prev_coa is not None else None)
             log_usage_event(
                 f"school_search_apply:unitid={picked.get('UNITID')}"
                 f":coa={int(picked['coa_per_year'])}"
+                f":prev_coa={int(prev_coa) if prev_coa is not None else 'unset'}"
+                f":delta_coa={delta_coa if delta_coa is not None else 'unset'}"
                 f":in_state={int(bool(picked['is_home_state']))}")
             st.rerun()
 
 
 def _log_school_search(family: str, budget: int, states: list, hit_count: int,
-                        home_state: str = None) -> None:
+                        home_state: str = None, level: str = None) -> None:
     """Record a search, once per distinct query rather than once per rerun.
 
     This runs on every pass of the script, so without the dedupe a slider drag
@@ -8557,12 +8640,17 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
     # home_state is part of the signature because it changes the PRICES, and
     # therefore which schools clear the budget -- two searches identical but
     # for residency are different searches with different answers.
-    signature = (family, budget, tuple(states), hit_count, home_state)
+    signature = (family, budget, tuple(states), hit_count, home_state, level)
     if st.session_state.get("_last_school_search") == signature:
         return
     st.session_state["_last_school_search"] = signature
+    # level matters more than it looks: an associate's search and a bachelor's
+    # search over the same field return different institutions entirely, and
+    # which one a visitor ran is the whole distinction for the community-college
+    # audience. Abbreviated to the CREDENTIAL_LEVELS suffix so the action string
+    # stays short.
     log_usage_event(
-        f"school_search_run:cip={family}:budget={budget}"
+        f"school_search_run:cip={family}:level={level or 'unset'}:budget={budget}"
         f":home={home_state or 'unset'}"
         f":states={'+'.join(states) if states else 'any'}:n={hit_count}")
 
