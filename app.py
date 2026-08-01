@@ -6560,16 +6560,19 @@ st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page
 # one extra rerun and never loops. The very first "pageview" log below still
 # can't benefit -- there's no timezone to read until this round-trip
 # completes -- so it's the one timestamp that may land in UTC regardless.
-# Uses window.top, not window.parent -- Streamlit Community Cloud nests this
-# component inside an additional wrapping iframe, so window.parent only
-# reaches that intermediate frame (with its own internal /~/+/ URL) instead
-# of the real page. That's exactly why this always fell back to UTC on the
-# deployed app regardless of the visitor's actual timezone: the "tz" query
-# param below was being written to the wrapper iframe's own address, never
-# to the page's real URL that get_shared_default() actually reads. window.top
-# always reaches the real outermost browsing context no matter how many
-# iframe layers exist in between (confirmed via a live browser test against
-# the deployed app).
+# Targets the frame the Streamlit APP runs in -- NOT window.top. That
+# distinction was got backwards once already, and the note it replaced claimed
+# the opposite: on Community Cloud the app is itself wrapped, so the layers are
+# component < app frame (/~/+/) < wrapper page (/), and window.top is the
+# WRAPPER. Streamlit reads its query params from the app frame, so writing tz
+# to the wrapper put it somewhere Python never looks -- which is precisely why
+# every production timestamp and every PDF footer read UTC regardless of the
+# visitor's clock. Measured on the deployed app: the wrapper's URL carried tz
+# and the app frame's did not, across 12/12 production rows stamped +00:00.
+#
+# window.top IS right for the admin panel's keydown listener further down --
+# keystrokes land on the outermost page. The rule is not "always top", it is
+# "top for browser events, the app frame for anything Streamlit itself reads".
 with st.container(key="tz_trigger_wrap"):
     st.button("Set Timezone", key="tz_trigger")
 st.markdown(
@@ -6580,22 +6583,42 @@ components.html(
     """
     <script>
     (function() {
-        function findTzButton() {
-            const doc = window.top.document;
-            const buttons = doc.querySelectorAll("button");
-            for (const b of buttons) {
-                if (b.textContent.trim() === "Set Timezone") return b;
+        // Find the frame the STREAMLIT APP is running in, by looking for the
+        // hidden button that only exists in its DOM. Neither window.top nor a
+        // fixed window.parent is right on its own: locally there is one iframe
+        // layer (component inside the app page) so they coincide, but on
+        // Community Cloud the app itself is wrapped, giving
+        //   component  <  app frame (/~/+/)  <  wrapper page (/)
+        // window.top is then the WRAPPER -- which is not where Streamlit reads
+        // its query params from, and not where its buttons live. Writing tz
+        // there is why every production timestamp and every PDF footer came
+        // out UTC no matter what the visitor's clock said. Climbing until the
+        // button is found works at any nesting depth and needs no assumption
+        // about how many layers the host adds.
+        function findAppFrame() {
+            let w = window;
+            for (let i = 0; i < 6; i++) {
+                try {
+                    for (const b of w.document.querySelectorAll("button")) {
+                        if (b.textContent.trim() === "Set Timezone") return w;
+                    }
+                } catch (e) { /* cross-origin frame -- keep climbing */ }
+                if (w === w.parent) break;
+                w = w.parent;
             }
             return null;
         }
+        const appWin = findAppFrame();
+        if (!appWin) return;      // button not rendered yet; a later rerun retries
         const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        const params = new URLSearchParams(window.top.location.search);
+        const params = new URLSearchParams(appWin.location.search);
         if (params.get("tz") !== detected) {
             params.set("tz", detected);
-            const newUrl = window.top.location.pathname + "?" + params.toString();
-            window.top.history.replaceState(null, "", newUrl);
-            const btn = findTzButton();
-            if (btn) btn.click();
+            appWin.history.replaceState(
+                null, "", appWin.location.pathname + "?" + params.toString());
+            for (const b of appWin.document.querySelectorAll("button")) {
+                if (b.textContent.trim() === "Set Timezone") { b.click(); break; }
+            }
         }
     })();
     </script>
