@@ -2403,6 +2403,8 @@ def render_presurvey() -> None:
     # matching save_survey_response, which returns True without inserting so
     # the thank-you UX still appears. Suppressing the render instead would make
     # the one feature that must be verified in a browser unverifiable there.
+    if not st.session_state.get("research_mode"):
+        return
     if st.session_state.get("presurvey_answered") or st.session_state.get("presurvey_skipped"):
         return
 
@@ -6317,6 +6319,27 @@ components.html(
 if "test_mode" not in st.session_state:
     st.session_state.test_mode = get_shared_default("test", "0") == "1"
 
+# The pre/post research instrument renders only for ?research=1. Everyone else
+# sees the calculator exactly as it was, and no pre/post answer is collected
+# from them.
+#
+# This is an ethics gate, not a feature flag. The instrument is human-subjects
+# research and the required IRB determination has not been obtained -- see the
+# paper's section 5.1b. Deploying it open would begin collecting from the
+# public before that exists, which is the same defect as the handful of
+# pre-approval responses already in the table, at a larger scale and this time
+# knowingly.
+#
+# Sticky in session_state for the same reason test_mode is: "Share Scenario"
+# calls st.query_params.from_dict, which REPLACES the whole query string, so a
+# flag re-read from the URL on every call would silently switch itself off
+# mid-session.
+#
+# Remove this gate when an approval exists -- not before, and not by anyone
+# who has not checked that it does.
+if "research_mode" not in st.session_state:
+    st.session_state.research_mode = get_shared_default("research", "0") == "1"
+
 # an expander see "pageview_logged" already set and skip logging again.
 if "pageview_logged" not in st.session_state:
     log_usage_event("pageview")
@@ -9221,7 +9244,8 @@ render_get_accurate_inputs(
 # A visitor who never answered the role question still sees the survey; an
 # unanswered role is not a claim to be a minor. That path is caught inside the
 # form instead, where selecting Student requires the same attestation.
-if not st.session_state.survey_submitted and research_participation_allowed():
+if st.session_state.get("research_mode") and not st.session_state.survey_submitted \
+        and research_participation_allowed():
     st.subheader("📋 Help Us Measure Impact")
     # Consent, shown BEFORE the form rather than inside it. Inside an st.form
     # nothing renders until the form is constructed and nothing submits until
