@@ -1446,6 +1446,126 @@ CAREER_STAGE_OPTIONS = {
     "Mid-Career (Year 10)": 9,
 }
 
+# ---- Budget-first school search (fields of study) ---------------------------
+# The 38 two-digit CIP families the College Scorecard reports program flags
+# for, as carried in data/college_coa_clean.csv's programs_* columns (see
+# clean_college_scorecard.py). Titles are shortened from NCES's official CIP
+# series titles for a sidebar-width control.
+#
+# Two digits is the ONLY granularity available for a whole-dataset filter.
+# Finer 4-digit programs exist in the Scorecard API but only per school, one
+# request each, so they cannot filter 5,035 rows -- the same constraint that
+# keeps per-school earnings out of the filter.
+#
+# The consequence is real and is handled by LABELLING, not by pretending
+# otherwise: six NY Fed majors (Accounting, Business Analytics, Business
+# Management, Finance, General Business, Marketing) all live in family 52 and
+# therefore return the same schools, and family 51 spans nursing through
+# massage therapy. The UI names the FAMILY rather than the major, so an
+# identical result set for Finance and Marketing reads as what it is -- one
+# field of study -- instead of looking broken.
+CIP_FAMILY_TITLES = {
+    "01": "Agriculture & Related Sciences",
+    "03": "Natural Resources & Conservation",
+    "04": "Architecture",
+    "05": "Area, Ethnic & Gender Studies",
+    "09": "Communication & Journalism",
+    "10": "Communications Technologies",
+    "11": "Computer & Information Sciences",
+    "12": "Personal & Culinary Services",
+    "13": "Education",
+    "14": "Engineering",
+    "15": "Engineering Technologies",
+    "16": "Foreign Languages & Literatures",
+    "19": "Family & Consumer Sciences",
+    "22": "Legal Professions & Studies",
+    "23": "English Language & Literature",
+    "24": "Liberal Arts & General Studies",
+    "25": "Library Science",
+    "26": "Biological & Biomedical Sciences",
+    "27": "Mathematics & Statistics",
+    "29": "Military Technologies",
+    "30": "Multi/Interdisciplinary Studies",
+    "31": "Parks, Recreation & Fitness",
+    "38": "Philosophy & Religious Studies",
+    "39": "Theology & Religious Vocations",
+    "40": "Physical Sciences",
+    "41": "Science Technologies",
+    "42": "Psychology",
+    "43": "Homeland Security, Law Enforcement & Firefighting",
+    "44": "Public Administration & Social Service",
+    "45": "Social Sciences",
+    "46": "Construction Trades",
+    "47": "Mechanic & Repair Technologies",
+    "48": "Precision Production",
+    "49": "Transportation & Materials Moving",
+    "50": "Visual & Performing Arts",
+    "51": "Health Professions",
+    "52": "Business, Management & Marketing",
+    "54": "History",
+}
+
+# UI label -> (programs_* column suffix, nominal years). The years are the
+# length of THAT credential, used to turn a per-year cost into a program
+# total. They are deliberately NOT program_years_for_major: a bachelor's
+# result list is four years regardless of which occupation the visitor has
+# selected in the sidebar.
+CREDENTIAL_LEVELS = {
+    "Bachelor's degree": ("bachl", 4),
+    "Associate's degree": ("assoc", 2),
+    "Certificate (2-4 years)": ("cert4", 2),
+    "Certificate (1-2 years)": ("cert2", 1),
+    "Certificate (under 1 year)": ("cert1", 1),
+}
+
+# NY Fed major -> CIP family, for prefilling the search when the visitor is in
+# Major mode. A major and a CIP family are both fields of STUDY, so this is a
+# direct correspondence rather than a crosswalk.
+#
+# None where no single family is defensible. That follows SINGLE_METRO_BY_STATE,
+# which refuses to guess between Los Angeles and San Francisco for a California
+# school: a wrong prefill here is worse than no prefill, because the visitor
+# would have to notice it was wrong before they could correct it.
+#
+# There is deliberately NO equivalent for Career mode's 836 occupations.
+# Occupation -> field of study is the SOC-CIP crosswalk whose own documentation
+# calls it conceptual rather than empirical, and which this codebase already
+# declined to rely on for underemployment.
+MAJOR_TO_CIP_FAMILY = {
+    "Accounting": "52", "Advertising and Public Relations": "09",
+    "Aerospace Engineering": "14", "Agriculture": "01",
+    "Animal and Plant Sciences": "01", "Anthropology": "45",
+    "Architecture": "04", "Art History": "50", "Biochemistry": "26",
+    "Biology": "26", "Business Analytics": "52", "Business Management": "52",
+    "Chemical Engineering": "14", "Chemistry": "40", "Civil Engineering": "14",
+    "Commercial Art & Graphic Design": "50", "Communications": "09",
+    "Computer Engineering": "14", "Computer Science": "11",
+    "Construction Services": "46", "Criminal Justice": "43",
+    "Early Childhood Education": "13", "Earth Sciences": "40",
+    "Economics": "45", "Electrical Engineering": "14",
+    "Elementary Education": "13", "Engineering Technologies": "15",
+    "English Language": "23", "Environmental Studies": "03",
+    "Ethnic Studies": "05", "Family and Consumer Sciences": "19",
+    "Finance": "52", "Fine Arts": "50", "Foreign Language": "16",
+    "General Business": "52", "General Education": "13",
+    "General Engineering": "14", "General Social Sciences": "45",
+    "Geography": "45", "Health Services": "51", "History": "54",
+    "Industrial Engineering": "14", "Information Systems & Management": "11",
+    "Interdisciplinary Studies": "30", "International Affairs": "45",
+    "Journalism": "09", "Leisure and Hospitality": "31", "Liberal Arts": "24",
+    "Marketing": "52", "Mass Media": "09", "Mathematics": "27",
+    "Mechanical Engineering": "14", "Medical Technicians": "51",
+    "Miscellaneous Biological Science": "26", "Miscellaneous Education": "13",
+    "Miscellaneous Engineering": "14", "Miscellaneous Physical Sciences": "40",
+    "Miscellaneous Technologies": None,   # spans 10/15/41/47/48 -- no one family
+    "Nursing": "51", "Nutrition Sciences": "51", "Performing Arts": "50",
+    "Pharmacy": "51", "Philosophy": "38", "Physics": "40",
+    "Political Science": "45", "Psychology": "42",
+    "Public Policy and Law": "44", "Secondary Education": "13",
+    "Social Services": "44", "Sociology": "45", "Special Education": "13",
+    "Theology and Religion": "39", "Treatment Therapy": "51",
+}
+
 # ---- College Prestige & Cost Estimator (optional "Advanced Analysis" mode) --
 # Cost per tier is a straightforward sticker-price bucketing. The salary
 # multiplier is the part that needs care: real research on a "prestige
@@ -2573,8 +2693,69 @@ def load_coa_dataset() -> pd.DataFrame:
     try:
         return pd.read_csv(COA_DATASET_PATH)
     except (FileNotFoundError, pd.errors.EmptyDataError):
-        return pd.DataFrame(
-            columns=["INSTNM", "control_type", "in_state_coa", "out_of_state_coa", "NPCURL"])
+        # Must name every column any caller reads, not just the COA ones. An
+        # empty frame missing STABBR made metro_for_school raise rather than
+        # degrade, and the same would now apply to the search's programs_*
+        # and CURROPER columns.
+        return pd.DataFrame(columns=[
+            "INSTNM", "STABBR", "control_type", "in_state_coa", "out_of_state_coa",
+            "NPCURL", "UNITID", "CITY", "CURROPER", "DISTANCEONLY", "ADM_RATE",
+        ] + [f"programs_{suffix}" for suffix, _ in CREDENTIAL_LEVELS.values()])
+
+
+def search_schools_by_budget(cip_family: str, credential: str,
+                              max_coa_per_year: float, in_state: bool,
+                              states: tuple = None, control_types: tuple = None,
+                              limit: int = 50) -> pd.DataFrame:
+    """Schools that teach `cip_family` at `credential` for at most
+    `max_coa_per_year`, cheapest first. The inverse of the app's normal
+    question: not "what does the school I named cost" but "what could I attend
+    for this, in this field".
+
+    Sorted by COST and nothing else, deliberately. Every salary figure in this
+    app comes from the occupation or major dataset -- no school attribute
+    touches the earnings side -- so a "best value" or ROI ordering here would
+    be the cost ordering wearing an outcome's name. For the same reason the ROI
+    model is NOT run per row: 181 model runs per search would be slow AND
+    misleading.
+
+    Excludes schools flagged as no longer operating. Surfacing a closed
+    institution as somewhere a 17-year-old could enrol is this feature's worst
+    failure mode, and it is not something the visitor could be expected to
+    check.
+
+    Returns an empty frame when nothing matches, which is a real and useful
+    answer -- "your budget admits nothing in this field" is the finding, not an
+    error -- so callers must render that case rather than hiding it.
+    """
+    coa_df = load_coa_dataset()
+    if coa_df.empty or not cip_family or credential not in CREDENTIAL_LEVELS:
+        return pd.DataFrame()
+
+    suffix, nominal_years = CREDENTIAL_LEVELS[credential]
+    program_column = f"programs_{suffix}"
+    cost_column = "in_state_coa" if in_state else "out_of_state_coa"
+    if program_column not in coa_df.columns or cost_column not in coa_df.columns:
+        return pd.DataFrame()
+
+    # Anchored on the pipe delimiters. Codes are fixed 2-digit today, which
+    # makes a plain substring match equivalent (verified across the dataset) --
+    # this keeps that true rather than relying on it.
+    teaches = coa_df[program_column].fillna("").str.contains(
+        rf"(?:^|\|){re.escape(str(cip_family))}(?:\||$)", regex=True)
+    affordable = coa_df[cost_column].notna() & (coa_df[cost_column] <= max_coa_per_year)
+    open_now = coa_df["CURROPER"].fillna(1) != 0
+
+    matches = coa_df[teaches & affordable & open_now]
+    if states:
+        matches = matches[matches["STABBR"].isin(states)]
+    if control_types:
+        matches = matches[matches["control_type"].isin(control_types)]
+
+    matches = matches.sort_values(cost_column).head(limit).copy()
+    matches["coa_per_year"] = matches[cost_column]
+    matches["total_program_cost"] = matches[cost_column] * nominal_years
+    return matches.reset_index(drop=True)
 
 
 def find_school_coa(school_name: str, coa_df: pd.DataFrame):
