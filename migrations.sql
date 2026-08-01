@@ -676,3 +676,62 @@ delete from survey_responses
 --   * research_participation_allowed() withholds the instrument from a
 --     self-identified student who has not attested to RESEARCH_MIN_AGE.
 --   * The consent notice renders above the form, before anything is answered.
+
+-- ============================================================================
+-- 2026-08-01  Interpretability columns -- RUN THIS BEFORE DEPLOYING THE CODE
+-- ============================================================================
+-- scenario_events already carries 68 columns, but none of them says WHERE the
+-- numbers came from. Every earnings_premium and roi_pct is cost-of-living
+-- adjusted to a city and metro-scaled to that city's wages, so a logged
+-- $292,603 premium is indistinguishable from a national-average one. The loan
+-- figure has the same defect: in-state vs out-of-state Cost of Attendance
+-- differs by $34,200/year at Berkeley alone, and which one produced
+-- scenario_a_loan_amount is not recorded.
+--
+-- Four columns, four tables. Run all four blocks BEFORE the code that writes
+-- them: PostgREST rejects the WHOLE ROW on an unknown column (PGRST204), so a
+-- forgotten table silently drops every event from sessions that reach it.
+
+alter table survey_responses
+  add column if not exists city text,
+  add column if not exists scenario_a_in_state boolean,
+  add column if not exists scenario_b_in_state boolean,
+  add column if not exists wage_geography_level text;
+
+alter table pdf_downloads
+  add column if not exists city text,
+  add column if not exists scenario_a_in_state boolean,
+  add column if not exists scenario_b_in_state boolean,
+  add column if not exists wage_geography_level text;
+
+alter table scenario_shares
+  add column if not exists city text,
+  add column if not exists scenario_a_in_state boolean,
+  add column if not exists scenario_b_in_state boolean,
+  add column if not exists wage_geography_level text;
+
+alter table scenario_events
+  add column if not exists city text,
+  add column if not exists scenario_a_in_state boolean,
+  add column if not exists scenario_b_in_state boolean,
+  add column if not exists wage_geography_level text;
+
+-- Reading these later:
+--
+--   * Rows written before this date have all four NULL. NULL means NOT
+--     RECORDED -- never "national", never "in-state". Any analysis that treats
+--     a NULL wage_geography_level as a national wage is inventing a value; the
+--     national/state/metro fallback has been live since well before this
+--     column existed, so those rows genuinely could be any of the three.
+--   * wage_geography_level is Scenario A's. In Compare Mode both scenarios
+--     share one city, so they share the level unless the two occupations
+--     differ in which geographies publish them -- which they can. Treat it as
+--     Scenario A's basis, not the row's.
+--
+-- NOT added, deliberately: scenario_a/b_breakeven_debt. It is computed inside
+-- the single-scenario branch only, after that branch's writer; adding it would
+-- produce a column whose missingness correlates PERFECTLY with experiment_arm,
+-- which is a worse defect than not having it. It is also redundant --
+-- break-even is a deterministic function of major, rate, strategy, horizon and
+-- wage index, all of which this row already carries, so it can be recomputed
+-- offline exactly as analyze_model.py already does.

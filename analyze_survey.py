@@ -577,6 +577,117 @@ def analyze_switch_rate(events_df: pd.DataFrame):
           "  sessions_seen; a 0% on n=1 is not a result.")
 
 
+def parse_school_search_events(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per school-search action, from usage_logs.action.
+
+    Same shape as parse_presurvey_events: the action string is a colon-joined
+    name plus key=value pairs, and everything after the name is a field.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    actions = usage_df[usage_df["action"].astype(str).str.startswith("school_search_")]
+    if actions.empty:
+        return pd.DataFrame()
+    rows = []
+    for record in actions.itertuples():
+        action = str(record.action)
+        name = action.split(":", 1)[0]
+        fields = dict(part.split("=", 1) for part in action.split(":")[1:] if "=" in part)
+        rows.append({"session_id": getattr(record, "session_id", None),
+                      "timestamp": getattr(record, "timestamp", None),
+                      "event": name, **fields})
+    return pd.DataFrame(rows)
+
+
+def analyze_school_search(usage_df: pd.DataFrame):
+    """Does the budget-first search actually move anyone to a cheaper school?
+
+    This is the inverse-search feature's whole claim, and it needs no column
+    the app doesn't already write: school_search_apply carries the school the
+    visitor switched TO, the one they were already modelling, and the
+    difference. A negative delta is the feature working.
+
+    Reported as a funnel, because the interesting failures are at the joins:
+    a search that returns nothing is a real answer ("your budget admits nothing
+    in this field") and is logged deliberately, so a high zero-result rate is a
+    finding about budgets, not a bug. A search that returns results and is
+    never applied is the other failure -- the list was not persuasive.
+
+    Deliberately NOT joined to scenario_events here. The apply already records
+    the before and after COA at click time, which is stronger than inferring
+    the switch from the next scenario row: _apply_pending_school overwrites the
+    previous value on the very next rerun, so a join could only ever see the
+    after.
+    """
+    print_section(
+        "BUDGET-FIRST SCHOOL SEARCH",
+        "Did surfacing cheaper schools change which one gets modelled?",
+    )
+    events = parse_school_search_events(usage_df)
+    if events.empty:
+        print("  (no school-search events yet -- this needs post-deploy traffic)")
+        return
+
+    runs = events[events["event"] == "school_search_run"]
+    applies = events[events["event"] == "school_search_apply"]
+    searchers = set(runs["session_id"].dropna())
+    appliers = set(applies["session_id"].dropna())
+    # Numerator is sessions in BOTH sets, not every applier. An apply whose run
+    # row is missing (a dropped insert) would otherwise push the rate above
+    # 100%, which reads as a broken report rather than as the missing row it is.
+    converted = searchers & appliers
+
+    print(f"  sessions that ran a search : {len(searchers)}")
+    print(f"  sessions that applied one  : {len(converted)}"
+          + (f"  ({len(converted) / len(searchers):.0%} of searchers)"
+             if searchers else ""))
+    if appliers - searchers:
+        print(f"  ({len(appliers - searchers)} apply(s) with no run row -- "
+              f"the run insert did not land; excluded from the rate)")
+
+    if "n" in runs.columns:
+        counts = pd.to_numeric(runs["n"], errors="coerce")
+        zero = int((counts == 0).sum())
+        print(f"  searches returning nothing : {zero} of {len(runs)}"
+              f"  ({zero / len(runs):.0%})" if len(runs) else "")
+
+    if "level" in runs.columns:
+        by_level = runs["level"].value_counts()
+        print("\n  searches by credential level:")
+        for level, n in by_level.items():
+            print(f"    {level:>10}  {n}")
+        if "unset" in by_level.index:
+            print("    ('unset' predates the level= field -- not a bachelor's)")
+
+    if applies.empty:
+        print("\n  No applies yet, so no effect size. A search that returns\n"
+              "  results and is never applied means the list did not persuade;\n"
+              "  that is a finding, not missing data.")
+        return
+
+    # Column-presence check, not applies.get(): every apply logged before
+    # 2026-08-01 predates delta_coa, so the key is absent rather than null and
+    # .get returns None -- which pd.to_numeric turns into a scalar NaN with no
+    # .dropna(). This is the normal state of the historical rows, not an edge
+    # case, so it has to degrade to a message rather than raise.
+    if "delta_coa" not in applies.columns:
+        print("\n  (all applies predate the delta_coa field -- no effect size available)")
+        return
+    deltas = pd.to_numeric(applies["delta_coa"], errors="coerce").dropna()
+    if deltas.empty:
+        print("\n  (no apply carries a usable delta_coa -- no effect size available)")
+        return
+    cheaper = int((deltas < 0).sum())
+    print(f"\n  applies with a cost delta  : {len(deltas)}")
+    print(f"    moved CHEAPER            : {cheaper}  ({cheaper / len(deltas):.0%})")
+    print(f"    median change            : ${deltas.median():,.0f}/year")
+    if cheaper:
+        print(f"    median saving when cheaper: ${-deltas[deltas < 0].median():,.0f}/year")
+    print("\n  Per-year sticker price, before aid, and a switch in the sidebar is\n"
+          "  not a switch in enrolment. This measures what the tool changed on\n"
+          "  screen, which is the only thing it can observe.")
+
+
 def main():
     client = load_supabase_client()
     survey_df = fetch_table(client, "survey_responses")
@@ -594,6 +705,7 @@ def main():
         print("No survey responses yet -- skipping the perception-change analysis.")
         analyze_engagement(events)
         analyze_switch_rate(scenario_events_df)
+        analyze_school_search(usage_df)
         # Still worth running: the pre block writes to usage_logs whether or
         # not anyone reaches the survey, so the funnel exists before the first
         # response does -- and an empty survey with a healthy pre-answer rate
@@ -674,6 +786,7 @@ def main():
 
     analyze_engagement(events)
     analyze_switch_rate(scenario_events_df)
+    analyze_school_search(usage_df)
     analyze_paired_shift(survey_df, usage_df)
     analyze_instrument_agreement(survey_df)
 
