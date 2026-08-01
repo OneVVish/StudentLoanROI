@@ -9226,9 +9226,45 @@ Questions about the research? Contact **veervish11@gmail.com**.
             # of the page. Asking everyone is the cost of that constraint --
             # it is only ENFORCED for the roles that need it, below.
             form_age_ok = st.checkbox(f"I am {RESEARCH_MIN_AGE} or older")
+        # index=None for the same answer-vs-absence reason as the role above.
+        # "Already graduated" is new and is not padding: the 18+ floor means a
+        # participating student has often finished high school already, and
+        # without it they must either pick a false year or leave the default.
         hs_graduation_year = st.selectbox(
-            "Expected High School Graduation Year", ["2027", "2028", "2029", "2030"],
+            "Expected High School Graduation Year",
+            ["Already graduated", "2026", "2027", "2028", "2029", "2030", "Not applicable"],
+            index=None, placeholder="Select one",
         )
+
+        # ---- The post half of the paired measurement -------------------------
+        # Above perception_change deliberately. That item asks whether the tool
+        # CHANGED anything, which is the most leading question on the page; a
+        # respondent who answers it first has been told what the researcher is
+        # looking for, and the paired items are the better measures. Let the
+        # legacy item absorb the priming rather than spread it.
+        #
+        # Wording is present-tense state ("...now"), never "did this change
+        # your mind?". We difference the two answers ourselves; asking the
+        # respondent to report the change invites them to supply one.
+        st.markdown("---")
+        post_schools = st.radio(POSTSURVEY_SCHOOLS_QUESTION,
+                                 list(PRESURVEY_SCHOOLS_OPTIONS),
+                                 index=None, horizontal=True)
+
+        # A counsellor is not answering about their own borrowing, so the
+        # question is not put to them -- matching the pre block. Only
+        # suppressible when the role is already known: inside a form nothing
+        # reruns, so if the role is being chosen right here the question has to
+        # render, and an answer from a counsellor is dropped at submit instead.
+        _post_borrowing_applies = _pre_role not in ROLES_WITHOUT_BORROWING
+        if _post_borrowing_applies:
+            post_borrowing = st.radio(POSTSURVEY_BORROWING_QUESTION,
+                                       list(PRESURVEY_BORROWING_OPTIONS),
+                                       index=None, format_func=escape_money_markdown)
+        else:
+            post_borrowing = None
+        st.markdown("---")
+
         perception_change = st.radio(
             "Did this tool change how you view your target major or university choice?",
             ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
@@ -9251,6 +9287,26 @@ Questions about the research? Contact **veervish11@gmail.com**.
             submitted = False
 
         if submitted:
+            # Dropped rather than stored when the role turns out not to take
+            # the question. Only reachable when the role was chosen inside the
+            # form, where the widget could not be hidden reactively -- storing
+            # it anyway would put a counsellor's borrowing answer in the same
+            # column as a student's, which is the noise the exclusion exists
+            # to prevent.
+            if respondent_role in ROLES_WITHOUT_BORROWING:
+                post_borrowing = None
+
+            # Coded here, once, so every downstream consumer sees the same
+            # vocabulary as the pre answers. "n_a" is not "skip": never asked
+            # and asked-then-declined are different facts.
+            postsurvey_codes = {
+                "post_schools_considered": presurvey_code(
+                    PRESURVEY_SCHOOLS_OPTIONS, post_schools),
+                "post_expected_borrowing": (
+                    "n_a" if respondent_role in ROLES_WITHOUT_BORROWING
+                    else presurvey_code(PRESURVEY_BORROWING_OPTIONS, post_borrowing)),
+            }
+
             # Recomputed fresh (cheap, pure functions, no API calls) rather
             # than reused from st.session_state, so the survey reflects
             # exact click-time state.
@@ -9293,6 +9349,20 @@ Questions about the research? Contact **veervish11@gmail.com**.
                 ),
                 **module_context,
             }
+
+            # Logged to usage_logs as well as (eventually) the survey row.
+            # Same reasoning as the pre answers: this channel needs no
+            # migration, so the paired measurement starts producing data
+            # immediately, and a survey insert that fails silently -- every
+            # writer here catches and returns False -- does not take the
+            # answers with it. The survey-row copy arrives with the migration
+            # and is what makes the pair atomic on one row.
+            log_usage_event(
+                "postsurvey_answered"
+                f":considering={postsurvey_codes['post_schools_considered']}"
+                f":borrow={postsurvey_codes['post_expected_borrowing']}"
+                f":pre={'1' if st.session_state.get('presurvey_answered') else '0'}"
+                f":v={PRESURVEY_INSTRUMENT_VERSION}")
 
             saved = save_survey_response(respondent_role, hs_graduation_year, perception_change, feedback_text, context)
             if saved:
