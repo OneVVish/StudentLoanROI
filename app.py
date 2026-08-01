@@ -2498,8 +2498,25 @@ def get_traffic_source() -> str:
 
     Returns None when absent, which is the normal case for organic traffic --
     NULL in the database rather than a fabricated "direct".
+
+    LATCHED into session_state on first read, not re-read from the URL each
+    time, for the same reason test_mode and research_mode are: "Share Scenario"
+    calls st.query_params.from_dict, which REPLACES the whole query string. A
+    live read meant every row written after a share lost its attribution --
+    silently, and looking exactly like organic traffic, which is the one thing
+    this field exists to distinguish. The share is also a high-intent action,
+    so the rows most worth attributing were the ones losing it.
+
+    Latching means the tag describes the visit as it ARRIVED, which is what a
+    recruitment channel is. Editing ?src= mid-session without a reload no
+    longer changes it -- correct: one visit came from one place.
     """
-    return get_shared_default("src", None)
+    if "traffic_source" not in st.session_state:
+        # Seeded here rather than only in section 3 so the value cannot depend
+        # on which caller runs first -- log_usage_event("pageview") fires early
+        # and must latch the same tag the later writers see.
+        st.session_state["traffic_source"] = get_shared_default("src", None)
+    return st.session_state["traffic_source"]
 
 
 def mark_major_explicitly_selected():
@@ -2818,6 +2835,32 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
             "cc_coa_b": str(cc_coa_per_year_b),
         })
     return params
+
+
+def session_query_params() -> dict:
+    """Params describing the SESSION rather than the scenario, merged back in
+    when "Share Scenario" replaces the whole query string.
+
+    Only flags that fail DANGEROUSLY when lost belong here, which today is
+    test alone. Losing it does not merely turn a feature off: the next reload
+    of that URL is a live session writing to the production Supabase, and the
+    rows it writes are indistinguishable from real visitors' -- the exact
+    contamination already on record in migrations.sql. Carrying it makes the
+    button safe to press while testing.
+
+    Deliberately NOT carried:
+
+    - **src.** It is now latched in session_state, so the sharer keeps their
+      own attribution without the URL. Putting it in the shared link would
+      stamp the RECIPIENT with the sharer's recruitment channel -- someone who
+      arrived from a forwarded link did not come from that counsellor's class,
+      and recording that they did is fabricated attribution, worse than the
+      NULL it replaces.
+    - **admin / research.** Both fail safe when dropped: the dashboard stays
+      hidden and the survey instrument stays off. Neither should ride along to
+      a stranger, and research= in particular gates an ethics hold.
+    """
+    return {"test": "1"} if st.session_state.get("test_mode") else {}
 
 
 # The Clipboard API (navigator.clipboard.writeText) silently fails inside
@@ -9310,7 +9353,7 @@ if compare_mode:
             ), **module_context}),
         )
         if compare_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_compare"):
-            st.query_params.from_dict(build_share_params(
+            st.query_params.from_dict({**session_query_params(), **build_share_params(
                 career_data_source, major, city, school_name_a, in_state_a,
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                 interest_rate, repayment_strategy, True, major_b=major_b, school_name_b=school_name_b,
@@ -9322,7 +9365,7 @@ if compare_mode:
                 roi_horizon_years=roi_horizon_years,
                 cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
                 cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
-            ))
+            )})
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
@@ -9605,13 +9648,13 @@ else:
             ), **module_context}),
         )
         if single_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_single"):
-            st.query_params.from_dict(build_share_params(
+            st.query_params.from_dict({**session_query_params(), **build_share_params(
                 career_data_source, major, city, school_name_a, in_state_a,
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
                 interest_rate, repayment_strategy, False, start_year_a=start_year_a,
                 roi_horizon_years=roi_horizon_years,
                 cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
-            ))
+            )})
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario,
