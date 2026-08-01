@@ -8380,11 +8380,37 @@ if admin_enabled:
     # "what visitors configured" breakdown below.
     final_df = _admin_final_per_session(events_df)
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total App Interactions", len(usage_df))
-    col2.metric("Total Survey Responses", len(survey_df))
-    col3.metric("Total PDF Downloads", len(pdf_downloads_df))
-    col4.metric("Total Scenario Shares", len(scenario_shares_df))
+    # Pageviews and "everything logged" are separate numbers and were being
+    # conflated: the old single "Total App Interactions" was len(usage_df),
+    # i.e. every row of every kind -- pageviews, presurvey_shown, searches and
+    # the interaction: events -- which now reads as if it meant interactions in
+    # the specific sense those events introduced. Split, and both named for
+    # what they actually count.
+    _pageviews = usage_df[usage_df["action"] == "pageview"] if (
+        not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
+    _visits = (int(_pageviews["session_id"].dropna().nunique())
+               if "session_id" in _pageviews.columns else 0)
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    # Unique visits as the delta rather than a sixth column: the two numbers
+    # only mean anything read together, and they differ for two reasons worth
+    # seeing side by side (see the caption).
+    col1.metric("Pageviews", len(_pageviews),
+                delta=f"{_visits} unique visits", delta_color="off")
+    col2.metric("Logged Events", len(usage_df))
+    col3.metric("Survey Responses", len(survey_df))
+    col4.metric("PDF Downloads", len(pdf_downloads_df))
+    col5.metric("Scenario Shares", len(scenario_shares_df))
+    st.caption(
+        "**Pageviews** counts `pageview` rows; **unique visits** de-duplicates "
+        "them by session. They diverge for two reasons, neither of them traffic: "
+        "rows written before `session_id` existed cannot be de-duplicated at all "
+        f"({int(usage_df['session_id'].isna().sum()) if not usage_df.empty and 'session_id' in usage_df.columns else 0} "
+        "of them), and until 2026-08-01 a real browser logged **two** pageviews "
+        "per visit — a race between the write and its guard, since fixed. Both "
+        "inflate the left number only. **Logged Events** is every row of every "
+        "kind, which is what this panel used to call \"App Interactions\"."
+    )
 
     st.divider()
 
