@@ -24,6 +24,8 @@ presentation/
 # Ignored rather than merely untracked -- this repo's commits are routinely
 # staged with `git add -A`, which would sweep an untracked file in silently.
 SCOPE.md
+RETURNING_STUDENT_PLAN.md
+*_PLAN.md
 paper_outline.md
 paper_*.md
 *_draft.md
