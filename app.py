@@ -22,6 +22,7 @@ import html
 import io
 import math
 import re
+import sys
 import uuid
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
@@ -2533,6 +2534,23 @@ def get_major_explicitly_selected() -> bool:
     return bool(st.session_state.get("major_explicitly_selected", False))
 
 
+def report_write_failure(what: str, error: Exception) -> None:
+    """Print why a Supabase write failed, without changing what the visitor sees.
+
+    Every writer in this file catches broadly and returns False, so a page load
+    keeps working when the database is unreachable -- that part is deliberate.
+    What it also did was discard the reason, which makes the two failures that
+    matter indistinguishable from each other and from a healthy no-op: a
+    missing column (PGRST204, the whole row rejected) looks exactly like a
+    network timeout, which looks exactly like nobody having used the feature.
+
+    Goes to the server console, which is the Streamlit Cloud log -- never to
+    the page. A visitor should not be shown a PostgREST error, and the app's
+    own error text stays as it is.
+    """
+    print(f"[supabase] {what} failed: {type(error).__name__}: {error}", file=sys.stderr)
+
+
 def log_usage_event(action: str):
     """Insert a single usage event into the usage_logs table. Tolerates any
     connection/query failure (matching every other save_*/log_* helper in
@@ -2604,7 +2622,8 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("survey_responses insert", error)
         return False
 
 
@@ -10036,9 +10055,22 @@ estimate based on general inflation trends — this one is a judgment call,
 not a number we found in a report. If we don't even know what type of
 school it is, we default to the public-school rate.
 
+**The two questions at the top of the page.** If you answer them, we save
+your answers straight away — before you submit anything else — because the
+whole point is to record what you thought *before* you saw the numbers. If
+you skip them, we record that you skipped, which is a different fact from
+never having been asked. Either way the calculator behaves identically; the
+questions are optional and they never gate a single figure on this page.
+
+Those questions are research, so they're for people 18 and over. If you tell
+us you're a student under 18, we don't ask them and we don't show the survey
+at the bottom either. Everything else still works.
+
 **What we save when you submit the survey.** Each anonymous response
-saves who's answering (Parent/Student/Teacher/Other) and an expected high
-school graduation year (2027-2030), plus your exact inputs and results at
+saves who's answering (Student/Parent/Counselor/Teacher/Other), an expected
+high school graduation year, the two questions from the top asked a second
+time — so a change can be measured rather than remembered — plus your exact
+inputs and results at
 that moment: school, major, loan amount, personal contribution, interest
 rate, repayment strategy, your
 major's starting salary, and something called `dti_ratio` — short for
@@ -10052,6 +10084,14 @@ between the two scenarios' ROI%. None of this is tied to your name or
 any personal identifying information — it's used to help a companion
 research paper understand how tools like this one affect students'
 thinking about college and careers.
+
+**What gets recorded even if you never answer anything.** Opening the page
+records that a page was opened, and changing your major or school records the
+new selection. That happens as you browse, not when you submit — so it is
+recorded whether or not you touch either set of questions. It carries no name,
+no email, no IP address and no account. Each visit gets a random ID that is
+thrown away when you close the tab, so two visits can't be linked to each
+other or to you.
 
 **Advanced Analysis Settings (optional, off by default).** Five extra
 modules live in a sidebar expander. Each one is opt-in, and the calculator
