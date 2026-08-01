@@ -743,3 +743,33 @@ alter table scenario_events
 -- break-even is a deterministic function of major, rate, strategy, horizon and
 -- wage index, all of which this row already carries, so it can be recomputed
 -- offline exactly as analyze_model.py already does.
+
+-- ============================================================================
+-- 2026-08-01  Timestamps before this date are UTC regardless of the visitor
+-- ============================================================================
+-- No schema change. Recorded because nothing in the data marks the boundary
+-- and every timestamp column crosses it.
+--
+-- now_local() reads the visitor's zone from a ?tz= param set by a JS
+-- round-trip. On Streamlit Community Cloud the app runs inside a wrapper
+-- iframe, and the script was writing tz to window.top -- the WRAPPER -- while
+-- Streamlit reads its query params from the app frame at /~/+/. The parameter
+-- therefore never reached Python, and get_user_timezone() fell back to "UTC"
+-- for every visitor since the feature shipped. Measured before the fix: 12 of
+-- 12 production rows stamped +00:00, and the wrapper's URL carried tz while
+-- the app frame's did not.
+--
+-- Consequence for analysis, on usage_logs, scenario_events, survey_responses,
+-- pdf_downloads and scenario_shares alike:
+--
+--   * Rows before 2026-08-01 ~09:03 UTC are the SERVER's clock. They are not
+--     wrong as instants -- the moment is correct -- but the local time of day
+--     they imply is not the visitor's. Any "when do people use this" or
+--     hour-of-day analysis across this boundary compares server time to local
+--     time and will show a spurious shift at this date.
+--   * Rows after it carry the visitor's own offset, so a mixed window needs
+--     everything normalised to UTC first (they are all tz-aware; just convert)
+--     before any hour-of-day bucketing.
+--   * The very first pageview of a session can still be UTC even after the
+--     fix: there is no tz to read until the JS round-trip completes, which is
+--     one rerun later. That is one row per session, not a window.
