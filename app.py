@@ -3121,13 +3121,20 @@ def search_schools_by_budget(cip_family: str, credential: str,
     return matches.reset_index(drop=True)
 
 
-def find_school_coa(school_name: str, coa_df: pd.DataFrame):
+def find_school_coa(school_name: str, coa_df: pd.DataFrame, unitid=None):
     """Case-insensitive lookup by institution name: exact match first, then
     falls back to a substring match. By the time this is called, school_name
     is already a disambiguated single name (see find_matching_schools /
     _resolve_school_name below), so the substring fallback only really
     matters for the 1-match case; it's kept as a safety net. Returns None
     if nothing matches -- expected for a school outside the local dataset."""
+    # A pinned UNITID wins outright. It is the only way to tell two schools
+    # sharing a name apart, and without it the fallbacks below can only guess
+    # -- .iloc[0] on a name shared by a California and a Kansas institution
+    # picks one arbitrarily and reports its cost as though it were certain.
+    pinned = _school_row_by_unitid(unitid, coa_df)
+    if pinned is not None:
+        return pinned
     if not school_name or coa_df.empty:
         return None
     names_lower = coa_df["INSTNM"].str.lower()
@@ -3166,13 +3173,13 @@ def normalize_npc_url(raw) -> str:
     return text.replace(" ", "%20")
 
 
-def get_school_npc_url(school_name: str) -> str:
+def get_school_npc_url(school_name: str, unitid=None) -> str:
     """Resolve a school's own Net Price Calculator URL from the local COA
     dataset, normalized for display. Returns None when the school isn't in the
     dataset or has no URL on file -- callers fall back to NPC_DIRECTORY_URL."""
     if not school_name:
         return None
-    coa_match = find_school_coa(school_name, load_coa_dataset())
+    coa_match = find_school_coa(school_name, load_coa_dataset(), unitid=unitid)
     if coa_match is None:
         return None
     return normalize_npc_url(coa_match.get("NPCURL"))
@@ -3242,8 +3249,62 @@ def find_matching_schools(school_name: str, coa_df: pd.DataFrame, limit: int = 2
     expanded_query = _expand_school_query(school_name)
     names_lower = coa_df["INSTNM"].str.lower()
     search_term = expanded_query if expanded_query != query_lower else query_lower
-    matches = coa_df.loc[names_lower.str.contains(search_term, regex=False), "INSTNM"]
-    return sorted(matches.unique())[:limit]
+    matches = coa_df.loc[names_lower.str.contains(search_term, regex=False)]
+    if matches.empty:
+        return []
+    # UNITIDs, not names. Names are NOT unique: 67 of them are shared by 153
+    # different institutions, and this used to return .unique() names -- so two
+    # "Southwestern College" rows collapsed to one, the picker below never
+    # fired, and find_school_coa silently took whichever row happened to sort
+    # first. The California campus and the Kansas one differ by $36,328 a year.
+    #
+    # Returning one entry per INSTITUTION is what makes the existing
+    # disambiguation picker able to fire for these at all.
+    ordered = matches.sort_values(["INSTNM", "STABBR", "CITY"], na_position="last")
+    return [int(u) for u in ordered["UNITID"].head(limit) if pd.notna(u)]
+
+
+def school_option_label(unitid: int, coa_df: pd.DataFrame) -> str:
+    """How one institution is shown in the picker.
+
+    Plain name when that name is unique, "Name (City, ST)" when it is not.
+    Qualifying every school would be noise; qualifying only the ambiguous ones
+    puts the distinguishing detail exactly where a reader needs it -- and
+    "Southwestern College" alone is unanswerable, which is the whole bug.
+    """
+    row = _school_row_by_unitid(unitid, coa_df)
+    if row is None:
+        return str(unitid)
+    name = row["INSTNM"]
+    if (coa_df["INSTNM"] == name).sum() <= 1:
+        return name
+    city, state = row.get("CITY"), row.get("STABBR")
+    where = ", ".join(str(part) for part in (city, state) if pd.notna(part) and str(part))
+    return f"{name} ({where})" if where else name
+
+
+def _school_row_by_unitid(unitid, coa_df: pd.DataFrame):
+    """The single row for a UNITID, or None. UNITID is IPEDS's institution key
+    and is genuinely unique, which INSTNM is not."""
+    if unitid is None or coa_df.empty or "UNITID" not in coa_df.columns:
+        return None
+    try:
+        hit = coa_df[coa_df["UNITID"] == int(unitid)]
+    except (TypeError, ValueError):
+        return None
+    return None if hit.empty else hit.iloc[0]
+
+
+def school_name_for_unitid(unitid, coa_df: pd.DataFrame):
+    """The plain institution name for a UNITID.
+
+    Deliberately NOT the disambiguated label. school_name flows into the
+    Scorecard API query, the ?school= share parameter and a logged Supabase
+    column; putting "(Chula Vista, CA)" into those would change what three
+    external things receive. The city stays in the picker, where it is read by
+    a human, and the pin below is what carries the identity."""
+    row = _school_row_by_unitid(unitid, coa_df)
+    return None if row is None else row["INSTNM"]
 
 
 def _resolve_school_name(search_key: str, pick_key: str) -> str:
@@ -3253,18 +3314,38 @@ def _resolve_school_name(search_key: str, pick_key: str) -> str:
     otherwise (no match -- the student's free-typed entry, used as-is)."""
     search_text = st.session_state.get(search_key, "")
     matches = find_matching_schools(search_text, load_coa_dataset())
-    if len(matches) >= 2:
-        return st.session_state.get(pick_key, matches[0])
-    if len(matches) == 1:
-        return matches[0]
+    chosen = _resolve_school_unitid(search_key, pick_key)
+    if chosen is not None:
+        return school_name_for_unitid(chosen, load_coa_dataset()) or search_text
     return search_text
 
 
-def get_suggested_coa_per_year(school_name: str, in_state: bool):
+def _resolve_school_unitid(search_key: str, pick_key: str):
+    """The UNITID of the currently-selected institution, or None when the
+    typed text matched nothing in the dataset.
+
+    Separate from _resolve_school_name because the two answer different
+    questions and only one of them is safe to send outward. The NAME goes to
+    the Scorecard API, the share link and Supabase; the UNITID stays inside
+    the app and is what actually identifies which of two same-named schools
+    the visitor meant."""
+    search_text = (st.session_state.get(search_key) or "").strip()
+    if not search_text:
+        return None
+    matches = find_matching_schools(search_text, load_coa_dataset())
+    if not matches:
+        return None
+    if len(matches) >= 2:
+        picked = st.session_state.get(pick_key)
+        return picked if picked in matches else matches[0]
+    return matches[0]
+
+
+def get_suggested_coa_per_year(school_name: str, in_state: bool, unitid=None):
     """Cost of Attendance (in-state or out-of-state, per `in_state`) for a
     school in the local COA dataset, for auto-filling a scenario's per-year
     cost -- or None if the school has no match in the dataset."""
-    match = find_school_coa(school_name, load_coa_dataset())
+    match = find_school_coa(school_name, load_coa_dataset(), unitid=unitid)
     if match is None:
         return None
     return float(match["in_state_coa"] if in_state else match["out_of_state_coa"])
@@ -3283,8 +3364,12 @@ def _autofill_coa(search_key: str, pick_key: str, in_state_key: str, coa_key: st
     number_input's value= argument only sets its first-render default, not
     later reruns, once it has a key."""
     resolved_school_name = _resolve_school_name(search_key, pick_key)
+    # Pinned, so switching the picker between two same-named schools actually
+    # changes the cost that lands in the field. Without it both options
+    # autofilled the same arbitrary row and the picker looked broken.
     suggested = get_suggested_coa_per_year(
         resolved_school_name, st.session_state.get(in_state_key, False),
+        unitid=_resolve_school_unitid(search_key, pick_key),
     )
     if suggested is not None:
         st.session_state[coa_key] = suggested
@@ -6518,12 +6603,18 @@ else:
     )
     matching_schools_a = find_matching_schools(school_search_a, load_coa_dataset())
     if len(matching_schools_a) >= 2:
+        # Options are UNITIDs; format_func renders the human label. The label
+        # carries "(City, ST)" only for names that are actually shared, which
+        # is what makes two "Southwestern College" entries distinguishable
+        # instead of identical.
         st.sidebar.selectbox(
             f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
             matching_schools_a, key="school_pick_a",
+            format_func=lambda u: school_option_label(u, load_coa_dataset()),
             on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
         )
     school_name_a = _resolve_school_name("school_search_a", "school_pick_a")
+    school_unitid_a = _resolve_school_unitid("school_search_a", "school_pick_a")
 
     in_state_a = st.sidebar.checkbox(
         "In-State Student?", value=get_shared_default("in_state", "1") == "1", key="in_state_a",
@@ -6532,7 +6623,8 @@ else:
              "Changes the auto-filled Cost of Attendance and how fast tuition "
              "is estimated to grow each year.",
     )
-    coa_match_a = find_school_coa(school_name_a, load_coa_dataset()) if school_name_a else None
+    coa_match_a = (find_school_coa(school_name_a, load_coa_dataset(), unitid=school_unitid_a)
+                    if school_name_a else None)
     coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
     if coa_caption_a:
         st.sidebar.caption(coa_caption_a)
@@ -7510,9 +7602,11 @@ if compare_mode:
                 st.selectbox(
                     f"Multiple schools matched \"{school_search_b}\" -- pick yours:",
                     matching_schools_b, key="school_pick_b",
+                    format_func=lambda u: school_option_label(u, load_coa_dataset()),
                     on_change=lambda: _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b"),
                 )
             school_name_b = _resolve_school_name("school_search_b", "school_pick_b")
+            school_unitid_b = _resolve_school_unitid("school_search_b", "school_pick_b")
 
             in_state_b = st.checkbox(
                 "In-State Student?", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
@@ -7521,7 +7615,8 @@ if compare_mode:
                      "above. Changes the auto-filled Cost of Attendance and how "
                      "fast tuition is estimated to grow each year.",
             )
-            coa_match_b = find_school_coa(school_name_b, load_coa_dataset()) if school_name_b else None
+            coa_match_b = (find_school_coa(school_name_b, load_coa_dataset(), unitid=school_unitid_b)
+                            if school_name_b else None)
             coa_caption_b = get_coa_confirmation_caption(school_name_b, coa_match_b, in_state_b)
             if coa_caption_b:
                 st.caption(coa_caption_b)
@@ -8096,7 +8191,7 @@ if admin_enabled:
 # per-year Cost of Attendance field (in-state or out-of-state, per the
 # In-State Student? checkbox) -- see _autofill_coa in section 2c.
 
-def render_school_lookup(container, school_name: str, label: str):
+def render_school_lookup(container, school_name: str, label: str, unitid=None):
     """Render one scenario's school lookup (COA match + median debt) into a
     layout container. Used once for the single-scenario view and twice
     (Scenario A / B) in Compare Mode, so the two can't drift apart from
@@ -8107,7 +8202,10 @@ def render_school_lookup(container, school_name: str, label: str):
     with container:
         if not school_name:
             return
-        coa_match = find_school_coa(school_name, load_coa_dataset())
+        coa_match = find_school_coa(school_name, load_coa_dataset(), unitid=unitid)
+        # The API still gets the plain NAME -- Scorecard has no UNITID query
+        # here, and the name is what it matches on. The pin disambiguates only
+        # our own local row.
         debt_data = fetch_median_debt(school_name, scorecard_api_key)
         scenario_prefix = f"Scenario {label}: " if label else ""
 
@@ -8140,13 +8238,13 @@ def render_school_lookup(container, school_name: str, label: str):
 if not enable_prestige_mode:
     if compare_mode and school_name_a and school_name_a == school_name_b:
         # Both scenarios are the same school -- one COA box, not a duplicate pair.
-        render_school_lookup(st.container(), school_name_a, None)
+        render_school_lookup(st.container(), school_name_a, None, unitid=school_unitid_a)
     elif compare_mode:
         lookup_col_a, lookup_col_b = st.columns(2)
-        render_school_lookup(lookup_col_a, school_name_a, "A")
-        render_school_lookup(lookup_col_b, school_name_b, "B")
+        render_school_lookup(lookup_col_a, school_name_a, "A", unitid=school_unitid_a)
+        render_school_lookup(lookup_col_b, school_name_b, "B", unitid=school_unitid_b)
     else:
-        render_school_lookup(st.container(), school_name_a, "A")
+        render_school_lookup(st.container(), school_name_a, "A", unitid=school_unitid_a)
 
 
 def _npc_link_markdown(school_name: str) -> str:
