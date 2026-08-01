@@ -9057,7 +9057,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            hs_wage_index: float = 1.0,
                            federal_cap: float = None, gap_rate: float = None,
                            include_fees: bool = False, cc_mode: str = "none",
-                           wage_row_slots: int = None):
+                           wage_row_slots: int = None,
+                           loan_basis: str = None, program_years: int = None):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -9087,6 +9088,23 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
 
         repayment_result = scenario["repayment_result"]
         roi_result = scenario["roi_result"]
+        # The loan total comes FIRST, above the payment, for the same reason the
+        # single-scenario branch orders it that way: the loan is the input and
+        # the payment is a consequence of it. Leading with "$2,416/month"
+        # invites anchoring on a figure that reads as manageable without the
+        # $190,000 that produced it.
+        #
+        # It was missing from this panel entirely, which meant the ~half of
+        # visitors get_experiment_arm() routes into Compare Mode never saw the
+        # loan amount on screen at all -- while H1 is about borrowing. Same
+        # asymmetry class as the break-even, take-home and wage-geography note
+        # that were already moved into this helper for exactly this reason.
+        #
+        # loan_amount_label rather than a fixed string: it is what keeps the
+        # label honest for a Simplified-mode figure ("school-reported", which
+        # has no time dimension) and for the 430 occupations needing no degree.
+        if loan_basis is not None:
+            st.metric(loan_amount_label(loan_basis, program_years), fmt_money(loan_amount))
         st.metric(
             "Monthly Payment",
             fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
@@ -9398,6 +9416,7 @@ if compare_mode:
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
+        loan_basis=loan_basis_a, program_years=program_years_a,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -9406,6 +9425,7 @@ if compare_mode:
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
+        loan_basis=loan_basis_b, program_years=program_years_b,
     )
 
     # Career mode's underemployment text is national and identical for both
