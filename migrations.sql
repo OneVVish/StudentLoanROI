@@ -596,3 +596,22 @@ alter table survey_responses
 -- deliberately does not store (get_session_id: a per-visit uuid4, no cookie,
 -- no fingerprint). Report the session-to-response ratio so the inflation is
 -- visible rather than silent.
+
+-- ============================================================================
+-- 2026-08-01  Diagnostic probe rows in survey_responses -- DELETE THESE
+-- ============================================================================
+-- While diagnosing the "Something went wrong saving your response" failure,
+-- five rows were inserted into survey_responses to establish where the insert
+-- broke. They are all tagged traffic_source = 'schema_probe' and are NOT
+-- visitor data. The anon key can insert but not delete (RLS), so they must be
+-- removed here.
+--
+-- Run this. It is safe: 'schema_probe' is not a value any real visit can carry,
+-- because traffic_source only ever holds a ?src= tag chosen by whoever built
+-- the link.
+
+delete from survey_responses where traffic_source = 'schema_probe';
+
+-- Expected: DELETE 5, leaving the 5 genuine responses from 2026-07-12..14.
+-- Those five predate any IRB determination and are the pre-approval rows noted
+-- below; they are a separate decision and are deliberately NOT deleted here.

@@ -2570,6 +2570,52 @@ def report_write_failure(what: str, error: Exception) -> None:
     print(f"[supabase] {what} failed: {type(error).__name__}: {error}", file=sys.stderr)
 
 
+def json_safe_row(row: dict) -> dict:
+    """Make one insert payload safe to serialise, replacing values JSON cannot
+    represent with None. Every Supabase writer runs its row through this.
+
+    Two value kinds reach these rows from pandas and break the insert, both of
+    them silently and both of them taking the WHOLE row with them:
+
+    - **NaN / Infinity.** Python's json.dumps emits bare `NaN` and `Infinity`,
+      which are not valid JSON. PostgREST answers PGRST102 "Empty or invalid
+      json" and rejects the entire row -- not just that field. A missing wage
+      or an unreported Cost of Attendance is an ordinary gap in the federal
+      data, so this is reachable from normal use, and it presents to the
+      visitor as "Something went wrong saving your response".
+    - **numpy scalars.** np.float64 happens to survive because it subclasses
+      float; np.int64 does not subclass int and raises TypeError before the
+      request is even sent. A UNITID or any integer column read out of a
+      DataFrame row is an np.int64.
+
+    None rather than 0 is deliberate: the value is unknown, and every one of
+    these columns is nullable. Writing 0 would fabricate a measurement, which
+    is worse than recording that there wasn't one -- the same reasoning that
+    keeps traffic_source NULL instead of "direct".
+    """
+    clean = {}
+    for key, value in row.items():
+        # numpy scalars expose .item(); this covers int64/float64/bool_ without
+        # importing numpy, which app.py does not otherwise need.
+        if hasattr(value, "item") and not isinstance(value, (str, bytes)):
+            try:
+                value = value.item()
+            except (ValueError, AttributeError):
+                pass
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            value = None
+        elif value is not None and value is not True and value is not False:
+            # pandas NA/NaT are not floats and fail isnan; pd.isna answers for
+            # them. Guarded to scalars -- pd.isna on a list returns an array.
+            try:
+                if pd.isna(value):
+                    value = None
+            except (TypeError, ValueError):
+                pass
+        clean[key] = value
+    return clean
+
+
 def log_usage_event(action: str):
     """Insert a single usage event into the usage_logs table. Tolerates any
     connection/query failure (matching every other save_*/log_* helper in
@@ -2583,8 +2629,9 @@ def log_usage_event(action: str):
         conn = get_supabase_connection()
         execute_query(
             conn.table("usage_logs").insert(
-                [{"timestamp": now_local().isoformat(), "session_id": get_session_id(),
-                  "traffic_source": get_traffic_source(), "action": action}],
+                [json_safe_row({
+                    "timestamp": now_local().isoformat(), "session_id": get_session_id(),
+                    "traffic_source": get_traffic_source(), "action": action})],
                 count="None",
             ),
             ttl=0,
@@ -2637,7 +2684,7 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             **context,
         }
         execute_query(
-            conn.table("survey_responses").insert([row], count="None"),
+            conn.table("survey_responses").insert([json_safe_row(row)], count="None"),
             ttl=0,
         )
         return True
@@ -2922,7 +2969,7 @@ def save_pdf_download(context: dict) -> bool:
                "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
-            conn.table("pdf_downloads").insert([row], count="None"),
+            conn.table("pdf_downloads").insert([json_safe_row(row)], count="None"),
             ttl=0,
         )
         return True
@@ -2945,7 +2992,7 @@ def save_scenario_share(context: dict) -> bool:
                "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
-            conn.table("scenario_shares").insert([row], count="None"),
+            conn.table("scenario_shares").insert([json_safe_row(row)], count="None"),
             ttl=0,
         )
         return True
@@ -3011,7 +3058,7 @@ def maybe_log_scenario_event(context: dict) -> bool:
             **context,
         }
         execute_query(
-            conn.table("scenario_events").insert([row], count="None"),
+            conn.table("scenario_events").insert([json_safe_row(row)], count="None"),
             ttl=0,
         )
         return True
