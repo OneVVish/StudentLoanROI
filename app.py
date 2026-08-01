@@ -8427,10 +8427,40 @@ if admin_enabled:
         st.bar_chart(chart_df)
 
     # (b) App interactions by traffic source (?src= tag)
-    st.markdown("#### 🔗 Interactions by traffic source")
-    st.caption("From the `?src=` tag on the link visitors arrived through; "
-               "organic visits carry none.")
-    _admin_count_table(usage_df, "traffic_source", "Source", missing="(organic)")
+    st.markdown("#### 🔗 Traffic by source")
+    st.caption(
+        "From the `?src=` tag on the link visitors arrived through; organic "
+        "visits carry none. **Sorted by pageviews** -- the reach a channel "
+        "actually delivered. *Unique visits* de-duplicates by session; *Logged "
+        "events* counts every row of every kind, so one engaged visitor can "
+        "outweigh several who bounced.\n\n"
+        "**Do not compare `(organic)`'s two columns.** Rows written before "
+        "`session_id` existed cannot be de-duplicated, and almost all of them "
+        "are organic -- so its unique-visit figure counts only the newer rows "
+        "while its pageview figure counts all of them. Tagged sources have no "
+        "such gap; where their two columns differ it is the pre-2026-08-01 "
+        "double-count, which is bounded and now fixed."
+    )
+    if usage_df.empty or "traffic_source" not in usage_df.columns:
+        st.caption("No data yet.")
+    else:
+        _src = usage_df.copy()
+        _src["Source"] = (_src["traffic_source"].astype("object")
+                           .where(_src["traffic_source"].notna(), "(organic)")
+                           .replace("", "(organic)"))
+        _pv_only = _src[_src["action"] == "pageview"] if "action" in _src.columns else _src.iloc[0:0]
+        _by_src = pd.DataFrame({
+            "Pageviews": _pv_only.groupby("Source").size(),
+            "Unique visits": (_pv_only.groupby("Source")["session_id"].nunique()
+                               if "session_id" in _pv_only.columns else 0),
+            "Logged events": _src.groupby("Source").size(),
+        }).fillna(0).astype(int)
+        # Sort on pageviews, then unique visits: two channels with equal reach
+        # are not equally good, and the tie-break should favour the one that
+        # brought distinct people rather than repeat loads.
+        _by_src = (_by_src.sort_values(["Pageviews", "Unique visits"], ascending=False)
+                          .reset_index())
+        render_centered_table(_by_src)
 
     st.divider()
     st.markdown("#### 🎓 What visitors configured")
@@ -8543,6 +8573,38 @@ def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
     return metro_state if metro_state in US_STATES else None
 
 
+# The controls that make a search a SEARCH. Touching any of them is what
+# separates "the visitor ran a query" from "the panel rendered".
+SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential", "search_budget",
+                        "search_home_state", "search_states")
+
+
+def search_was_adjusted() -> bool:
+    """Whether the visitor has touched any search control this session.
+
+    render_school_search runs at MODULE level on every rerun, and Streamlit
+    executes an expander's body even while it is collapsed -- so the search
+    itself executes on every page load. In Major mode the field of study is
+    prefilled from the visitor's major, so a query runs and, before this gate,
+    was logged. Every session therefore recorded a school_search_run: 3 of 3 in
+    the traffic that surfaced it, which made "sessions that ran a search" a
+    synonym for "sessions that loaded the page" and gave the funnel a
+    denominator of all traffic.
+
+    Reuses the set mark_interaction already maintains rather than adding a
+    second flag, so the two cannot disagree about what "touched" means.
+
+    Note what this deliberately does NOT claim: a visitor who opens the panel,
+    reads the prefilled results and changes nothing is not counted. Streamlit
+    does not expose expander state, so that case is indistinguishable from
+    never opening it, and counting it would put the old defect back in a
+    smaller form. The metric is "adjusted a search control", which is narrower
+    than "searched" and is what the data can actually support.
+    """
+    return bool(set(st.session_state.get("_interactions_logged", ()))
+                & set(SEARCH_CONTROL_KEYS))
+
+
 def render_school_search() -> None:
     """Budget-first school search: what could I attend, for this field, at this price?
 
@@ -8587,6 +8649,7 @@ def render_school_search() -> None:
         row_one, row_two = st.columns([3, 2])
         row_one.selectbox(
             "Field of study", families, key="search_cip_family",
+            on_change=lambda: mark_interaction("search_cip_family"),
             index=None if st.session_state.get("search_cip_family") is None else None,
             format_func=lambda code: CIP_FAMILY_TITLES[code],
             placeholder="Pick a field",
@@ -8595,13 +8658,15 @@ def render_school_search() -> None:
                   "accounting, finance and marketing alike, so those return the "
                   "same schools.",
         )
-        row_two.selectbox("Level", list(CREDENTIAL_LEVELS), key="search_credential")
+        row_two.selectbox("Level", list(CREDENTIAL_LEVELS), key="search_credential",
+                           on_change=lambda: mark_interaction("search_credential"))
 
         budget = st.slider(
             "Most I could pay per year (tuition, housing, everything)",
             min_value=2_000, max_value=80_000,
             value=int(st.session_state.get("coa_per_year_a", 25_000)), step=1_000,
             format="$%d", key="search_budget",
+            on_change=lambda: mark_interaction("search_budget"),
         )
         all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
         home_col, states_col = st.columns([2, 3])
@@ -8614,13 +8679,15 @@ def render_school_search() -> None:
             "search_home_state", suggested_home_state(coa_df, city))
         home_col.selectbox(
             "Where do you live?", all_states, key="search_home_state",
+            on_change=lambda: mark_interaction("search_home_state"),
             index=None if st.session_state.get("search_home_state") is None else None,
             placeholder="Pick your state",
             help="Public schools charge residents far less. Without this, every "
                   "school is priced at its higher out-of-state rate.",
         )
         states = states_col.multiselect(
-            "Limit to states (optional)", all_states, key="search_states")
+            "Limit to states (optional)", all_states, key="search_states",
+            on_change=lambda: mark_interaction("search_states"))
 
         family = st.session_state.get("search_cip_family")
         if not family:
@@ -8644,8 +8711,12 @@ def render_school_search() -> None:
             family, credential, budget, home_state,
             states=tuple(states) or None, limit=25)
 
-        _log_school_search(family, budget, states, len(results), home_state,
-                            level=CREDENTIAL_LEVELS.get(credential, (None,))[0])
+        # Only once the visitor has actually adjusted something -- see
+        # search_was_adjusted. The results above still render either way; this
+        # gates the LOG, not the feature.
+        if search_was_adjusted():
+            _log_school_search(family, budget, states, len(results), home_state,
+                                level=CREDENTIAL_LEVELS.get(credential, (None,))[0])
 
         if results.empty:
             # A real answer, not an error state. "Your budget admits nothing in
