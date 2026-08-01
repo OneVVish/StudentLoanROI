@@ -727,6 +727,14 @@ alter table scenario_events
 --     share one city, so they share the level unless the two occupations
 --     differ in which geographies publish them -- which they can. Treat it as
 --     Scenario A's basis, not the row's.
+--   * In CAREER mode it is always one of 'national' / 'state' / 'metro'. The
+--     app stamps a level only when a state or metro overlay replaces the
+--     national spine, so an un-overlaid occupation (39 of 836 in San
+--     Francisco) has no stamp -- build_scenario_context resolves that to the
+--     literal 'national' rather than writing NULL, because NULL is already
+--     what MAJOR mode writes, for the unrelated reason that NY Fed entries
+--     carry no OEWS geography at all. So: NULL + dataset_mode='Career' should
+--     not occur; if it does, it is a pre-2026-08-01 row, not a national wage.
 --
 -- NOT added, deliberately: scenario_a/b_breakeven_debt. It is computed inside
 -- the single-scenario branch only, after that branch's writer; adding it would
