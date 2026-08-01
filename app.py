@@ -2760,6 +2760,22 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # meaningful in Career mode (the radio is disabled in Major mode);
         # read it together with dataset_mode when aggregating.
         "career_data_source": career_data_source,                      # derived state name, or National
+        # Where the numbers came from. Without these three, the outcome
+        # columns in this row cannot be read: every earnings_premium and
+        # roi_pct is cost-of-living adjusted to `city` and metro-scaled to that
+        # city's wages, so a $292,603 premium in San Francisco and a $292,603
+        # premium at National Average are different claims and nothing else
+        # here distinguishes them. Module globals, same as dataset_mode.
+        "city": city,
+        # Which Cost of Attendance fed the loan. $34,200/year apart at Berkeley
+        # alone, so scenario_a_loan_amount is ambiguous without it.
+        "scenario_a_in_state": in_state_a,
+        # national / state / metro -- which geography published the wage. The
+        # app already tells the visitor via render_wage_geography_note, so
+        # before this the visitor knew something the dataset did not. .get()
+        # because NY Fed major entries carry no OEWS geography at all; None
+        # there means "not applicable", not "national".
+        "wage_geography_level": MAJOR_DATA.get(major, {}).get("wage_geography_level"),
         # The two switches that change what every ROI figure in this row MEANS.
         # Neither was logged before, which was survivable while both defaulted
         # off; it stops being survivable the moment one defaults on, because
@@ -2816,6 +2832,10 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
             # cc_mode_b is a module global only in the compare branch (assigned
             # in section 5c), so it is referenced only here, inside compare_mode.
             "cc_mode_b": cc_mode_b,   # none / fulltime / parttime
+            # Inside compare_mode for the same reason cc_mode_b is: in_state_b
+            # is assigned in the compare branch of the sidebar, so referencing
+            # it unconditionally would raise NameError with compare off.
+            "scenario_b_in_state": in_state_b,
             "scenario_b_school_name": school_name_b or None,
             "scenario_b_major": major_b,
             "scenario_b_loan_amount": loan_amount_b,
