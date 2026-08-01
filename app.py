@@ -4451,7 +4451,10 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               working_years: int = 0,
                               baseline_start_age: int = None,
                               federal_cap: float = None, gap_rate: float = None,
-                              include_fees: bool = False) -> dict:
+                              include_fees: bool = False,
+                              baseline_curve=None,
+                              existing_debt: float = 0.0,
+                              existing_debt_rate: float = None) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -4502,13 +4505,48 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         repayment_result = calculate_idr_repayment(
             principal_for_repayment, rate_for_repayment, major_name, roi_window_years=roi_window_years)
         strategy_label = "Income-Driven Repayment"
+    # NEW borrowing only, deliberately. An existing balance is paid whether or
+    # not this degree happens, so it sits on BOTH sides of the comparison and
+    # cancels; charging it to the degree would make the degree look worse than
+    # it is and tell someone not to go back to school because of a loan they
+    # already have -- an answer given for a reason that has nothing to do with
+    # the decision in front of them.
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
                                 total_investment, col_index=col_index, years=roi_window_years,
                                 hs_wage_index=hs_wage_index,
                                 baseline_start_age=baseline_start_age,
                                 personal_contribution=personal_contribution,
                                 enrollment_years=enrollment_years,
-                                working_years=working_years)
+                                working_years=working_years,
+                                baseline_curve=baseline_curve)
+
+    # The other half of that split: what the visitor actually pays each month,
+    # and when they are actually free, DOES include the existing balance --
+    # that burden is the whole subject. Amortised separately rather than blended
+    # into one rate: split_loan_financing's blend is for two tranches of the
+    # same new loan taken and repaid together, whereas an existing balance is
+    # partly repaid and carries its own rate, so blending would misstate both
+    # the payment and the payoff date.
+    existing_result = None
+    if existing_debt and existing_debt > 0:
+        existing_rate = existing_debt_rate if existing_debt_rate is not None else interest_rate
+        if repayment_strategy == "Standard 10-Year":
+            existing_result = calculate_standard_repayment(
+                existing_debt, existing_rate, roi_window_years=roi_window_years)
+        else:
+            existing_result = calculate_idr_repayment(
+                existing_debt, existing_rate, major_name, roi_window_years=roi_window_years)
+
+    combined_repayment = dict(repayment_result)
+    if existing_result:
+        for key in ("monthly_payment", "total_interest", "total_paid_in_roi_window"):
+            if key in repayment_result and key in existing_result:
+                combined_repayment[key] = repayment_result[key] + existing_result[key]
+        # The LATER of the two: you are free when the last loan clears, not the
+        # first. That date is what returning-student mode exists to report.
+        combined_repayment["payoff_years"] = max(
+            repayment_result["payoff_years"], existing_result["payoff_years"])
+
     return {
         "major": major_name,
         "strategy_label": strategy_label,
@@ -4528,7 +4566,16 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # the net-position chart, the PDF) must reuse the value the scenario
         # was actually computed under.
         "baseline_start_age": baseline_start_age,
+        # repayment_result stays NEW borrowing only -- every existing consumer,
+        # including the ROI above and the break-even, depends on that meaning.
+        # combined_repayment is what the visitor is shown; it EQUALS
+        # repayment_result when there is no existing debt, so display code needs
+        # no conditional and cannot accidentally show the wrong one.
         "repayment_result": repayment_result,
+        "existing_debt": existing_debt or 0.0,
+        "existing_debt_result": existing_result,
+        "combined_repayment": combined_repayment,
+        "baseline_curve_used": baseline_curve is not None,
         "roi_result": roi_result,
         # None unless the cap-and-gap split was applied (Detailed mode); the
         # results page / PDF show the federal-vs-gap breakdown when it's set.
