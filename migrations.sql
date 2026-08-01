@@ -773,3 +773,37 @@ alter table scenario_events
 --   * The very first pageview of a session can still be UTC even after the
 --     fix: there is no tz to read until the JS round-trip completes, which is
 --     one rerun later. That is one row per session, not a window.
+
+-- ============================================================================
+-- 2026-08-01  Pre-survey now OFF by default; ?research=1 turns it back on
+-- ============================================================================
+-- No schema change. Recorded because nothing in the data marks it and it
+-- changes what a NULL pre_* column means for a whole population of rows.
+--
+-- The pre-survey renders above the results and is the only real friction in
+-- the instrument, so it is now off for ordinary traffic (PRESURVEY_ENABLED =
+-- False in app.py). The exit survey stays on for everyone -- it sits at the
+-- page bottom where a non-scrolling visitor never meets it, and it carries
+-- perception_change, which is the item H1 and H2 are measured on.
+--
+-- ?research=1 turns BOTH on. Recruitment links already carry ?src=, so
+-- &research=1 rides along with them.
+--
+--   NOTE: ?research=1 meant the OPPOSITE before this date. It was an ethics
+--   gate that HID the instrument while no human-subjects determination
+--   existed. It now SHOWS it. Same parameter, inverted meaning, on the same
+--   day -- do not read a pre-2026-08-01 research=1 row as a recruited visitor.
+--
+-- For analysis:
+--
+--   * Paired pre/post data now comes ONLY from ?research=1 arrivals. That is a
+--     non-random subset -- recruited, and probably more motivated. It does not
+--     threaten H2, which randomises experiment_arm within whoever shows up,
+--     but it does bound generalisation.
+--   * perception_change will exist for BOTH populations while pre_* exists for
+--     only one. Any pooled analysis must condition on which.
+--   * pre_* NULL with pre_skipped = false already means "never shown" and now
+--     covers two different situations: the pre-feature era, and ordinary
+--     traffic after this date. Separate them by timestamp.
+--   * instrument_version stays 'v1'. No question text changed; bumping it
+--     would falsely signal the instrument itself differs.

@@ -1565,6 +1565,25 @@ _ROLE_CODES = {role: role.lower() for role in PRESURVEY_ROLE_OPTIONS}
 # eras apart.
 PRESURVEY_INSTRUMENT_VERSION = "v1"
 
+# Who gets asked, by default. The pre-survey renders ABOVE the results and is
+# the only real friction in the instrument; the exit survey sits at the very
+# bottom, below the charts and Methodology, where a visitor who does not scroll
+# never meets it. So the default is pre off, post on: ordinary traffic gets a
+# calculator with nothing in the way and still yields perception_change, the
+# item H1 and H2 are measured on.
+#
+# ?research=1 overrides BOTH to on -- see research_link(). Recruitment links
+# already carry a ?src= tag, so &research=1 costs nothing to distribute, and it
+# means paired pre/post data comes from people who were actually recruited.
+#
+# Constants, not an admin checkbox: st.session_state is per-visitor, so a
+# checkbox would switch the survey off for the admin alone and for nobody else.
+# Flipping these is a commit, which also puts the on/off history in git --
+# "when was the instrument running" is analysis metadata, and without it a
+# later reader cannot tell a quiet period from a period when nothing was asked.
+PRESURVEY_ENABLED = False
+POSTSURVEY_ENABLED = True
+
 # ---- Budget-first school search (fields of study) ---------------------------
 # The 38 two-digit CIP families the College Scorecard reports program flags
 # for, as carried in data/college_coa_clean.csv's programs_* columns (see
@@ -2321,6 +2340,38 @@ def log_presurvey(answered: bool) -> None:
         f":seq={seq}:arm={get_experiment_arm()}:v={PRESURVEY_INSTRUMENT_VERSION}")
 
 
+def research_link() -> bool:
+    """Did this visitor arrive through a recruitment link (?research=1)?
+
+    LATCHED into session_state on first read, exactly as test_mode and
+    get_traffic_source are, and for the same reason: "Share Scenario" calls
+    st.query_params.from_dict, which REPLACES the whole query string. A live
+    re-read would switch the instrument off mid-session for the one visitor
+    engaged enough to share -- precisely the person whose answers are worth
+    having.
+
+    NOTE FOR ANYONE READING THE HISTORY: ?research=1 meant the OPPOSITE of this
+    until 2026-08-01. It was an ethics gate then -- the instrument was hidden
+    from everyone because no human-subjects determination existed. That
+    determination now exists, so showing the instrument to all visitors is
+    PERMITTED; restricting the pre-survey to recruitment links is a decision
+    about FRICTION, not about ethics. Same spelling, different meaning.
+    """
+    if "research_mode" not in st.session_state:
+        st.session_state.research_mode = get_shared_default("research", "0") == "1"
+    return bool(st.session_state.research_mode)
+
+
+def presurvey_enabled() -> bool:
+    """Whether to render the before-you-look questions for this visitor."""
+    return PRESURVEY_ENABLED or research_link()
+
+
+def postsurvey_enabled() -> bool:
+    """Whether to render the exit survey for this visitor."""
+    return POSTSURVEY_ENABLED or research_link()
+
+
 def research_participation_allowed() -> bool:
     """Whether this visitor may be offered a research instrument.
 
@@ -2403,6 +2454,8 @@ def render_presurvey() -> None:
     # matching save_survey_response, which returns True without inserting so
     # the thank-you UX still appears. Suppressing the render instead would make
     # the one feature that must be verified in a browser unverifiable there.
+    if not presurvey_enabled():
+        return
     if st.session_state.get("presurvey_answered") or st.session_state.get("presurvey_skipped"):
         return
 
@@ -2976,9 +3029,18 @@ def session_query_params() -> dict:
       and recording that they did is fabricated attribution, worse than the
       NULL it replaces.
     - **admin.** Fails safe when dropped -- the dashboard stays hidden -- and
-      should not ride along to a stranger. (research= was here too until the
-      human-subjects determination came through on 2026-08-01 and that gate was
-      removed; the parameter no longer does anything.)
+      should not ride along to a stranger.
+    - **research.** Deliberately NOT carried, even though it now does something
+      again. The sharer keeps it via research_link()'s session_state latch, so
+      dropping it from the URL costs them nothing; the RECIPIENT of a shared
+      link was never recruited, and handing them the pre-survey because someone
+      else was would put non-recruited answers into the paired sample.
+
+      Its meaning inverted on 2026-08-01: it used to HIDE the instrument (an
+      ethics gate, before the human-subjects determination existed) and now
+      SHOWS it (a friction decision, after). Either way it stays out of a
+      shared link -- for opposite reasons, which is worth knowing before
+      "simplifying" this.
     """
     return {"test": "1"} if st.session_state.get("test_mode") else {}
 
@@ -10038,7 +10100,8 @@ render_get_accurate_inputs(
 # A visitor who never answered the role question still sees the survey; an
 # unanswered role is not a claim to be a minor. That path is caught inside the
 # form instead, where selecting Student requires the same attestation.
-if not st.session_state.survey_submitted and research_participation_allowed():
+if (postsurvey_enabled() and not st.session_state.survey_submitted
+        and research_participation_allowed()):
     st.subheader("📋 Help Us Measure Impact")
     # Consent, shown BEFORE the form rather than inside it. Inside an st.form
     # nothing renders until the form is constructed and nothing submits until
