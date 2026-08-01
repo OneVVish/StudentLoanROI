@@ -6548,6 +6548,44 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
 
 st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page_icon="🎓", layout="wide")
 
+# Shared by every components.html snippet that needs to reach the Streamlit
+# app itself -- its query params, or a hidden button in its DOM.
+#
+# Neither window.top nor a fixed window.parent is correct on its own. Locally
+# there is one iframe layer (the component inside the app page) so the two
+# coincide; on Community Cloud the app is itself wrapped, giving
+#     component  <  app frame (/~/+/)  <  wrapper page (/)
+# and window.top is then the WRAPPER -- not where Streamlit reads query params,
+# and not where its buttons live. Climbing until a known button is found works
+# at any nesting depth and assumes nothing about how many layers the host adds.
+#
+# The rule this encodes: window.top for BROWSER EVENTS (keystrokes land on the
+# outermost page), the app frame for anything STREAMLIT ITSELF READS.
+FIND_APP_FRAME_JS = """
+    function findAppFrame(buttonLabel) {
+        let w = window;
+        for (let i = 0; i < 6; i++) {
+            try {
+                for (const b of w.document.querySelectorAll("button")) {
+                    if (b.textContent.trim() === buttonLabel) return w;
+                }
+            } catch (e) { /* cross-origin frame -- keep climbing */ }
+            if (w === w.parent) break;
+            w = w.parent;
+        }
+        return null;
+    }
+    function clickAppButton(buttonLabel) {
+        const w = findAppFrame(buttonLabel);
+        if (!w) return false;
+        for (const b of w.document.querySelectorAll("button")) {
+            if (b.textContent.trim() === buttonLabel) { b.click(); return true; }
+        }
+        return false;
+    }
+"""
+
+
 # Detects the visitor's browser timezone (IANA name, e.g. "America/Los_Angeles")
 # via get_user_timezone()/now_local() below, so logged timestamps and the PDF
 # footer reflect the visitor's local time instead of the server's clock
@@ -6580,47 +6618,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 components.html(
-    """
+    f"""
     <script>
-    (function() {
-        // Find the frame the STREAMLIT APP is running in, by looking for the
-        // hidden button that only exists in its DOM. Neither window.top nor a
-        // fixed window.parent is right on its own: locally there is one iframe
-        // layer (component inside the app page) so they coincide, but on
-        // Community Cloud the app itself is wrapped, giving
-        //   component  <  app frame (/~/+/)  <  wrapper page (/)
-        // window.top is then the WRAPPER -- which is not where Streamlit reads
-        // its query params from, and not where its buttons live. Writing tz
-        // there is why every production timestamp and every PDF footer came
-        // out UTC no matter what the visitor's clock said. Climbing until the
-        // button is found works at any nesting depth and needs no assumption
-        // about how many layers the host adds.
-        function findAppFrame() {
-            let w = window;
-            for (let i = 0; i < 6; i++) {
-                try {
-                    for (const b of w.document.querySelectorAll("button")) {
-                        if (b.textContent.trim() === "Set Timezone") return w;
-                    }
-                } catch (e) { /* cross-origin frame -- keep climbing */ }
-                if (w === w.parent) break;
-                w = w.parent;
-            }
-            return null;
-        }
-        const appWin = findAppFrame();
-        if (!appWin) return;      // button not rendered yet; a later rerun retries
+    (function() {{
+        {FIND_APP_FRAME_JS}
+        const appWin = findAppFrame("Set Timezone");
+        if (!appWin) return;   // button not rendered yet; a later rerun retries
         const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const params = new URLSearchParams(appWin.location.search);
-        if (params.get("tz") !== detected) {
+        if (params.get("tz") !== detected) {{
             params.set("tz", detected);
             appWin.history.replaceState(
                 null, "", appWin.location.pathname + "?" + params.toString());
-            for (const b of appWin.document.querySelectorAll("button")) {
-                if (b.textContent.trim() === "Set Timezone") { b.click(); break; }
-            }
-        }
-    })();
+            clickAppButton("Set Timezone");
+        }}
+    }})();
     </script>
     """,
     height=0,
@@ -7697,25 +7709,24 @@ st.markdown(
     unsafe_allow_html=True,
 )
 components.html(
-    """
+    f"""
     <script>
-    (function() {
-        function findRevealButton() {
-            const doc = window.top.document;
-            const buttons = doc.querySelectorAll("button");
-            for (const b of buttons) {
-                if (b.textContent.trim() === "Reveal Admin Panel") return b;
-            }
-            return null;
-        }
-        window.top.document.addEventListener("keydown", function (e) {
-            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {
+    (function() {{
+        {FIND_APP_FRAME_JS}
+        // The listener stays on window.top: keystrokes are dispatched on the
+        // outermost page the visitor is actually focused in, so a listener any
+        // lower never sees them. The BUTTON is a different matter -- it lives
+        // in the Streamlit app's DOM, one frame down from the wrapper, so
+        // looking for it on window.top.document found nothing on the deployed
+        // app and Ctrl+Shift+A silently did nothing there. Same snippet, two
+        // different frames, on purpose.
+        window.top.document.addEventListener("keydown", function (e) {{
+            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {{
                 e.preventDefault();
-                const btn = findRevealButton();
-                if (btn) btn.click();
-            }
-        });
-    })();
+                clickAppButton("Reveal Admin Panel");
+            }}
+        }});
+    }})();
     </script>
     """,
     height=0,
