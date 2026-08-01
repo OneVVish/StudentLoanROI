@@ -2411,7 +2411,15 @@ def render_presurvey() -> None:
         st.session_state["presurvey_shown_logged"] = True
         log_usage_event("presurvey_shown")
 
-    with st.expander("📝 Two quick questions before you start (optional)", expanded=True):
+    # A bordered container, not an expander. An expander offers a collapse
+    # control, and a collapsed prompt is one the visitor never returns to --
+    # it reads as chrome to dismiss rather than as part of the page. This is
+    # deliberately the ONLY change to how hard the prompt is to ignore: it is
+    # not a gate, and must not become one. The consent text promises "the
+    # calculator works exactly the same whether you answer or not", and Skip
+    # stays a single click for exactly that reason.
+    with st.container(border=True):
+        st.markdown("#### 📝 Two quick questions before you start (optional)")
         st.caption(
             "Answering these before you explore lets us measure whether tools like "
             "this actually change anything — we ask the same two at the end. Skip "
@@ -2468,8 +2476,10 @@ def render_presurvey() -> None:
             and bool(st.session_state.get("presurvey_schools"))
             and (not borrowing_applies or bool(st.session_state.get("presurvey_borrowing")))
         )
+        # Primary on Save, default on Skip. Both stay one click -- the weighting
+        # says which is more useful to the research, not which is permitted.
         if save_col.button("Save answers", disabled=not answered_required,
-                            use_container_width=True):
+                            type="primary", use_container_width=True):
             st.session_state["presurvey_answered"] = True
             log_presurvey(answered=True)
             st.rerun()
@@ -8084,15 +8094,22 @@ st.caption(
 )
 if st.session_state.get("test_mode"):
     st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
-st.info(
-    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
-    "anything. Everything below updates instantly as you change it, no button to click."
-)
 
 # The before-you-look questions. Above the results because that is the only
 # place a "before" measurement can be taken, and skippable because the results
 # are the point -- see render_presurvey.
+#
+# Above the "update your profile" banner too: that banner is an instruction
+# about the sidebar, and a visitor who reads it acts on it and never comes back
+# up. Putting the one-time question first costs the banner nothing -- it is
+# still the next thing on screen -- and is the whole of what "more prominent"
+# means here. It is NOT a gate; everything below renders regardless.
 render_presurvey()
+
+st.info(
+    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
+    "anything. Everything below updates instantly as you change it, no button to click."
+)
 
 # Collapsed on purpose. This app's whole premise is that real numbers are on
 # screen before you touch anything -- there is deliberately no "calculate"
