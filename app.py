@@ -3351,6 +3351,35 @@ def get_suggested_coa_per_year(school_name: str, in_state: bool, unitid=None):
     return float(match["in_state_coa"] if in_state else match["out_of_state_coa"])
 
 
+def _apply_pending_school() -> None:
+    """Move a school chosen in the search results into the sidebar's own state.
+
+    The search block lives in section 5 (main page), which Streamlit runs
+    AFTER section 4 (sidebar) -- so its button cannot assign school_search_a
+    directly; by then the widget exists and Streamlit raises. The button
+    instead parks a value and reruns, and this runs at the top of the sidebar
+    block on the next pass, before the widget is created.
+
+    Clears the picker too: a stale school_pick_a from the previous search
+    would either not be among the new options, or -- worse -- silently select
+    the wrong institution of a same-named pair.
+    """
+    pending = st.session_state.pop("_pending_school", None)
+    if not pending:
+        return
+    name, unitid = pending
+    st.session_state["school_search_a"] = name
+    st.session_state.pop("school_pick_a", None)
+    if unitid is not None:
+        # Seed the picker so an ambiguous name lands on the institution that
+        # was actually clicked, not on whichever sorts first.
+        st.session_state["school_pick_a"] = int(unitid)
+    suggested = get_suggested_coa_per_year(
+        name, st.session_state.get("in_state_a", False), unitid=unitid)
+    if suggested is not None:
+        st.session_state["coa_per_year_a"] = int(suggested)
+
+
 def _autofill_coa(search_key: str, pick_key: str, in_state_key: str, coa_key: str):
     """on_change callback for the school search text_input, its disambiguation
     picker (when the search matched 2+ schools), or the In-State checkbox:
@@ -6593,9 +6622,16 @@ else:
     # school names collide on a simple substring search (e.g. every
     # "University of California" campus), so a search matching 2+ schools
     # shows a picker instead of silently guessing which one was meant.
+    # setdefault rather than value=, because the school search below writes
+    # this key directly. Streamlit raises if a widget carries both a default
+    # and a key whose state is assigned elsewhere -- the pattern CLAUDE.md
+    # describes, and the reason coa_per_year_a already works this way.
+    _apply_pending_school()
+    st.session_state.setdefault("school_search_a",
+                                 get_shared_default("school", "UC Berkeley"))
     school_search_a = st.sidebar.text_input(
         "Target Undergraduate School", placeholder="e.g. University of Michigan",
-        value=get_shared_default("school", "UC Berkeley"), key="school_search_a",
+        key="school_search_a",
         on_change=lambda: _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a"),
         help="Type a school name to auto-fill Cost of Attendance below from "
              "real government data, if we have it on file. If your school "
@@ -8191,6 +8227,158 @@ if admin_enabled:
 # per-year Cost of Attendance field (in-state or out-of-state, per the
 # In-State Student? checkbox) -- see _autofill_coa in section 2c.
 
+def render_school_search() -> None:
+    """Budget-first school search: what could I attend, for this field, at this price?
+
+    The inverse of everything else on this page. Every other surface starts
+    from a school the visitor already named; this one starts from what they
+    can pay. A seventeen-year-old knows a handful of school names, and the
+    dataset holds 5,035.
+
+    Rendered at MODULE LEVEL, after the school lookup and before the
+    single/compare fork. That placement is the whole H2 story: nothing inside
+    either result branch changes, so this cannot become a difference between
+    the randomly-assigned arms. render_get_accurate_inputs documents the same
+    reasoning for the same reason.
+
+    Applies to Scenario A only. An "apply to A or B" control would render just
+    in Compare Mode, reintroducing exactly the arm-dependent difference the
+    placement avoids.
+    """
+    coa_df = load_coa_dataset()
+    if coa_df.empty or "programs_bachl" not in coa_df.columns:
+        return                      # dataset predates the program columns
+
+    with st.expander("🔎 Find schools that fit a budget", expanded=False):
+        st.caption(
+            "Sorted by cost, and by nothing else. Every salary in this app comes "
+            "from the occupation or major you picked — never from the school — so "
+            "this can't tell you which of these leads to higher pay. What it can "
+            "tell you is which ones teach your field at a price you could cover."
+        )
+
+        # Prefilled from the major ONLY in Major mode. A major and a CIP family
+        # are both fields of study, so that is a correspondence. An occupation
+        # is not, and mapping one to a field of study is the crosswalk this
+        # codebase already declined to trust.
+        default_family = (MAJOR_TO_CIP_FAMILY.get(major)
+                           if dataset_mode == DATASET_MODE_MAJOR else None)
+        families = sorted(CIP_FAMILY_TITLES, key=lambda code: CIP_FAMILY_TITLES[code])
+        st.session_state.setdefault(
+            "search_cip_family",
+            default_family if default_family in CIP_FAMILY_TITLES else None)
+
+        row_one, row_two = st.columns([3, 2])
+        row_one.selectbox(
+            "Field of study", families, key="search_cip_family",
+            index=None if st.session_state.get("search_cip_family") is None else None,
+            format_func=lambda code: CIP_FAMILY_TITLES[code],
+            placeholder="Pick a field",
+            help="Fields come from the federal CIP classification, which is broader "
+                  "than a major -- 'Business, Management & Marketing' covers "
+                  "accounting, finance and marketing alike, so those return the "
+                  "same schools.",
+        )
+        row_two.selectbox("Level", list(CREDENTIAL_LEVELS), key="search_credential")
+
+        budget = st.slider(
+            "Most I could pay per year (tuition, housing, everything)",
+            min_value=2_000, max_value=80_000,
+            value=int(st.session_state.get("coa_per_year_a", 25_000)), step=1_000,
+            format="$%d", key="search_budget",
+        )
+        states = st.multiselect(
+            "Limit to states (optional)",
+            sorted({s for s in coa_df["STABBR"].dropna().unique()}),
+            key="search_states",
+        )
+
+        family = st.session_state.get("search_cip_family")
+        if not family:
+            st.info("Pick a field of study to search.")
+            return
+
+        results = search_schools_by_budget(
+            family, st.session_state.get("search_credential", "Bachelor's degree"),
+            budget, st.session_state.get("in_state_a", True),
+            states=tuple(states) or None, limit=25)
+
+        _log_school_search(family, budget, states, len(results))
+
+        if results.empty:
+            # A real answer, not an error state. "Your budget admits nothing in
+            # this field" is the finding this feature exists to surface, and
+            # hiding it would turn the most decision-relevant result into a
+            # blank panel.
+            st.warning(
+                f"No schools teach **{CIP_FAMILY_TITLES[family]}** at that level "
+                f"for {fmt_money(budget)}/year"
+                + (f" in {', '.join(states)}" if states else "")
+                + ". Raising the budget or widening the states will find some — "
+                "and the fact that this combination has none is itself worth knowing."
+            )
+            return
+
+        st.caption(
+            f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
+            "These are **sticker prices before aid** — a pricier school can end up "
+            "cheaper once grants are applied, so treat this as a starting list and "
+            "check each one's net price calculator below."
+        )
+        table = pd.DataFrame({
+            "School": results["INSTNM"],
+            "Where": results["CITY"].fillna("") + ", " + results["STABBR"].fillna(""),
+            "Type": results["control_type"],
+            "Per year": results["coa_per_year"].map(fmt_money),
+            "Whole program": results["total_program_cost"].map(fmt_money),
+            "Admits": results["ADM_RATE"].map(
+                lambda rate: f"{rate:.0%}" if pd.notna(rate) else "open / not reported"),
+        })
+        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.caption(
+            "**Admits** is the share of applicants accepted. Blank means the school "
+            "reports none — usually because it admits nearly everyone. It is shown "
+            "for context and is never what the list is sorted by."
+        )
+
+        # One selectbox and one button, not a button per row: 25 widgets would
+        # re-render every pass and need stable keys for no gain.
+        choice = st.selectbox(
+            "Use one of these as your school",
+            list(results.index),
+            format_func=lambda i: f"{results.at[i, 'INSTNM']} — "
+                                   f"{fmt_money(results.at[i, 'coa_per_year'])}/yr",
+            key="search_pick",
+        )
+        if st.button("Use this school", type="primary"):
+            picked = results.loc[choice]
+            st.session_state["_pending_school"] = (
+                picked["INSTNM"],
+                int(picked["UNITID"]) if pd.notna(picked.get("UNITID")) else None)
+            log_usage_event(
+                f"school_search_apply:unitid={picked.get('UNITID')}"
+                f":coa={int(picked['coa_per_year'])}")
+            st.rerun()
+
+
+def _log_school_search(family: str, budget: int, states: list, hit_count: int) -> None:
+    """Record a search, once per distinct query rather than once per rerun.
+
+    This runs on every pass of the script, so without the dedupe a slider drag
+    would write a row per tick -- the same reason maybe_log_scenario_event
+    keeps a signature. Zero-result searches are logged deliberately: they are
+    the direct evidence that a visitor's budget admits nothing in their field,
+    which is the finding this feature exists to produce.
+    """
+    signature = (family, budget, tuple(states), hit_count)
+    if st.session_state.get("_last_school_search") == signature:
+        return
+    st.session_state["_last_school_search"] = signature
+    log_usage_event(
+        f"school_search_run:cip={family}:budget={budget}"
+        f":states={'+'.join(states) if states else 'any'}:n={hit_count}")
+
+
 def render_school_lookup(container, school_name: str, label: str, unitid=None):
     """Render one scenario's school lookup (COA match + median debt) into a
     layout container. Used once for the single-scenario view and twice
@@ -8245,6 +8433,12 @@ if not enable_prestige_mode:
         render_school_lookup(lookup_col_b, school_name_b, "B", unitid=school_unitid_b)
     else:
         render_school_lookup(st.container(), school_name_a, "A", unitid=school_unitid_a)
+
+    # Directly under the lookup, which has just printed what the named school
+    # costs -- so the obvious next question ("is there anything cheaper that
+    # teaches this?") is answerable in the same breath. Above the 5c fork, so
+    # no result branch changes.
+    render_school_search()
 
 
 def _npc_link_markdown(school_name: str) -> str:
