@@ -9146,9 +9146,70 @@ render_get_accurate_inputs(
 # ---- 5e. Anonymous Impact Survey ------------------------------------------
 
 if not st.session_state.survey_submitted:
+    st.subheader("📋 Help Us Measure Impact")
+    # Consent, shown BEFORE the form rather than inside it. Inside an st.form
+    # nothing renders until the form is constructed and nothing submits until
+    # the button, so a notice in there is read at the same moment it is agreed
+    # to -- which is not consent, it is a receipt.
+    #
+    # Deliberately short and in the app's own register. The elements 45 CFR
+    # 46.116 requires for minimal-risk research are all here -- that it is
+    # research, its purpose, what is asked, voluntariness, risks, benefits,
+    # what is recorded, a contact, and an affirmative act -- but a wall of
+    # legalese aimed at an 18-year-old is consent in form only.
+    #
+    # ACCURACY NOTE, do not "simplify" this away: the text says the SURVEY
+    # saves nothing until submitted, which is true, and separately admits that
+    # page views and scenario changes are recorded as you go, which is also
+    # true (log_usage_event and maybe_log_scenario_event both fire before any
+    # consent is given). An earlier draft said "nothing is saved until you
+    # press Save" full stop, which would have been a false statement about the
+    # page as a whole.
+    with st.expander("Before you answer — what this is and what's recorded", expanded=False):
+        st.markdown(
+            f"""
+These questions are part of a **research project** on whether tools like this change
+how people think about college debt. Taking part is **voluntary** and takes about a
+minute. The calculator works exactly the same whether you answer or not.
+
+**What's recorded if you submit:** your answers, plus the scenario on screen at that
+moment — school, major, loan amount, and the resulting figures. Separately, and as you
+go, the app records that a page was opened and which majors and schools were tried.
+
+**What's never recorded:** your name, email, IP address, or any account — there isn't
+one. Each visit gets a random ID that is discarded when you close the tab, so two
+visits cannot be linked to each other or to you.
+
+**Risks and benefits:** no known risks beyond using any web page, and no direct benefit
+to you. Results may be published in aggregate; nothing identifying anyone will appear.
+
+**You can stop at any time** by not submitting, or by closing the tab. The survey itself
+saves nothing until you press Submit.
+
+Questions about the research? Contact **veervish11@gmail.com**.
+
+*By submitting, you agree to take part. You must be {RESEARCH_MIN_AGE} or over.*
+"""
+        )
     with st.form("survey_form", clear_on_submit=True):
-        st.subheader("📋 Help Us Measure Impact")
-        respondent_role = st.selectbox("I am a...", ["Parent", "Student", "Teacher", "Other"])
+        # Asked here only if the pre block did not already get it. Asking the
+        # same person their role twice in one session is not just redundant --
+        # the two answers can disagree, and nothing in the schema says which
+        # one the scenario columns were recorded under.
+        #
+        # index=None so an ignored dropdown stays distinguishable from an
+        # answer. The old version defaulted to "Parent", which meant a row
+        # could not tell a parent from someone who never touched the control
+        # -- the answer-vs-absence failure major_explicitly_selected exists to
+        # prevent for the major, and it silently inflated one category.
+        _pre_role = st.session_state.get("presurvey_role")
+        if _pre_role:
+            st.caption(f"Answering as: **{_pre_role}** (from the questions at the top)")
+            respondent_role = _pre_role
+        else:
+            respondent_role = st.selectbox(
+                "I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
+                placeholder="Select one")
         hs_graduation_year = st.selectbox(
             "Expected High School Graduation Year", ["2027", "2028", "2029", "2030"],
         )
