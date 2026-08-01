@@ -607,6 +607,15 @@ def analyze_school_search(usage_df: pd.DataFrame):
     visitor switched TO, the one they were already modelling, and the
     difference. A negative delta is the feature working.
 
+    "Adjusted", not "ran": before 2026-08-01 the app logged a school_search_run
+    on EVERY page load, because render_school_search executes on every rerun and
+    Streamlit runs an expander's body even while collapsed -- with the field of
+    study prefilled from the visitor's major, a query ran and was logged for
+    people who never opened the panel. Rows before that date therefore have a
+    denominator of all traffic and their conversion rate is meaningless; they
+    cannot be repaired, because nothing distinguishes a rendered search from a
+    real one. Filter to timestamps after the fix before quoting a rate.
+
     Reported as a funnel, because the interesting failures are at the joins:
     a search that returns nothing is a real answer ("your budget admits nothing
     in this field") and is logged deliberately, so a high zero-result rate is a
@@ -637,7 +646,7 @@ def analyze_school_search(usage_df: pd.DataFrame):
     # 100%, which reads as a broken report rather than as the missing row it is.
     converted = searchers & appliers
 
-    print(f"  sessions that ran a search : {len(searchers)}")
+    print(f"  sessions that adjusted one : {len(searchers)}")
     print(f"  sessions that applied one  : {len(converted)}"
           + (f"  ({len(converted) / len(searchers):.0%} of searchers)"
              if searchers else ""))
