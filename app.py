@@ -2291,6 +2291,23 @@ def counterfactual_vocab() -> dict:
     return _COUNTERFACTUAL_RETURNING if returning else _COUNTERFACTUAL_FIRST
 
 
+def fmt_money_md(value) -> str:
+    """fmt_money with the dollar sign escaped for Streamlit markdown.
+
+    st.markdown/st.info/st.warning render LaTeX between paired `$`, so TWO
+    money figures in one string silently become one math expression: "$681 and
+    $447 a month" renders as an italic "681 and 447" with both dollar signs
+    eaten. One figure is safe, which is why this only surfaced when a second
+    was added to the same sentence -- and it surfaces as missing punctuation
+    rather than an error, so it is easy to ship.
+
+    Use this for any money inside a markdown-rendered string. Plain fmt_money
+    is still correct inside st.dataframe cells and st.metric, which do not
+    parse markdown.
+    """
+    return fmt_money(value).replace("$", "\\$")
+
+
 def fmt_money(value):
     return f"${value:,.0f}"
 
@@ -10584,7 +10601,16 @@ if compare_mode:
 # calculator renders. Pure helpers -- no scenario, no module globals.
 
 # Payments already made under ANY income-driven plan carry forward INTO RAP,
-# but RAP payments do not generally carry back OUT. studentaid.gov:
+# but RAP payments do not generally carry back OUT.
+#
+#   https://studentaid.gov/announcements-events/big-updates/definitions#rap
+#
+# Both passages are inside the "Repayment Assistance Plan" accordion, well past
+# the payment-amount chart -- which is why a first read of that section can
+# miss them entirely. The list this footnotes reads: "Qualifying payments for
+# RAP include ... Any progress toward discharge earned before entering RAP,
+# which could include payments made under income-driven repayment (IDR)
+# plans.*"
 #
 #   "If you change from one IDR plan to another, your repayment period might
 #    also change. For example, if you're enrolled in the PAYE Plan, which has a
@@ -10831,7 +10857,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     f"the {_back['total']} RAP payments modelled above would count "
                     f"toward IBR/ICR/PAYE if you switched back — a month only counts "
                     f"when the RAP payment is at least the 10-year Standard payment "
-                    f"of {fmt_money(_std_row['monthly_payment'])}, and at this income "
+                    f"of {fmt_money_md(_std_row['monthly_payment'])}, and at this income "
                     f"RAP never reaches it. The lower your payment, the more you "
                     f"give up by switching."
                 )
@@ -10841,9 +10867,37 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     f"{_back['counting']} of {_back['total']} RAP payments "
                     f"({_back['share']:.0%}) would count toward IBR/ICR/PAYE if you "
                     f"returned — only months where the RAP payment reaches the "
-                    f"10-year Standard payment of {fmt_money(_std_row['monthly_payment'])} "
+                    f"10-year Standard payment of {fmt_money_md(_std_row['monthly_payment'])} "
                     f"count."
                 )
+
+        # The SAVE wind-down, stated WITHOUT a date on purpose. TICAS describes
+        # it as "the 90-day period communicated by their servicer", so the
+        # deadline is per-borrower and starts whenever that notice arrives --
+        # printing a fixed national date would assert a precision the source
+        # does not have, to the population most likely to act on it.
+        #
+        # What IS worth stating precisely is the default, in this visitor's own
+        # figures: doing nothing lands you on a fixed-payment plan, which is
+        # the one outcome that ignores income entirely. Both of those numbers
+        # are already computed for the table above.
+        _tiered_row = next((r for label, r, _ in rows
+                            if label.startswith("2026 Tiered Standard")), None)
+        if forgivable and _std_row is not None and _tiered_row is not None:
+            st.info(
+                "**If you're on SAVE, a clock may already be running.** Your "
+                "servicer's notice to leave SAVE starts a 90-day window to "
+                "choose a plan. Miss it and you are enrolled automatically — "
+                "into Standard or the new Tiered Standard, "
+                f"{fmt_money_md(_std_row['monthly_payment'])} and "
+                f"{fmt_money_md(_tiered_row['monthly_payment'])} a month on this "
+                "balance. Neither is income-driven and neither forgives "
+                "anything, so the automatic outcome is the one that ignores "
+                "your income. **The window runs from your servicer's notice, "
+                "not a fixed national date** — check yours rather than this "
+                "page. Source: TICAS, *Upcoming Changes to Income-Driven "
+                "Repayment Plans*."
+            )
 
         if forgivable:
             st.caption(
@@ -10861,9 +10915,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "**And the way back is closing.** ICR and PAYE terminate on "
                 "July 1, 2028, leaving IBR as the only plan RAP credit could "
                 "return to — and IBR is itself shut to loans originated on or "
-                "after July 1, 2026. Sources: studentaid.gov guidance on "
-                "changing IDR plans; TICAS, *Upcoming Changes to Income-Driven "
-                "Repayment Plans*."
+                "after July 1, 2026. Sources: studentaid.gov OBBBA "
+                "definitions, *Repayment Assistance Plan*; TICAS, *Upcoming "
+                "Changes to Income-Driven Repayment Plans*."
             )
 
         # A chart for whichever plan the visitor wants to look at. Without one,
@@ -13553,13 +13607,23 @@ payments count toward IBR/ICR/PAYE only in months where the RAP payment was at
 least the 10-year Standard payment; for most income-driven borrowers that never
 happens, which the page states in the terms of the visitor's own figures.
 
+**SAVE borrowers are on a servicer-set clock.** Servicers issue a notice to
+leave SAVE that starts a 90-day window to choose a plan; a borrower who does
+not choose is enrolled automatically into Standard or the new Tiered Standard —
+both fixed-payment plans that forgive nothing, so the automatic outcome is the
+one that ignores income. This app states the window but deliberately prints **no
+date**: the source describes it as "the 90-day period communicated by their
+servicer", which is per-borrower, and a fixed national date would claim a
+precision the source does not have.
+
 That return route is also time-limited: **ICR and PAYE terminate on July 1,
 2028**, after which IBR is the only plan RAP credit could count toward — and
 IBR is closed to loans originated on or after July 1, 2026, so a borrower whose
 loans start after that date has RAP as their only income-driven option and no
 plan to switch back to at all. Sources: studentaid.gov guidance on changing IDR
-plans; TICAS, *Upcoming Changes to Income-Driven Repayment Plans*
-(ticas.org).
+plans
+([studentaid.gov OBBBA definitions, "Repayment Assistance Plan"](https://studentaid.gov/announcements-events/big-updates/definitions#rap));
+TICAS, *Upcoming Changes to Income-Driven Repayment Plans* (ticas.org).
 
 **Standard 10-Year and IBR-style IDR are not offered**, because a loan
 originated on or after July 1, 2026 cannot be repaid under either. They are

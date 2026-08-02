@@ -3,7 +3,11 @@
 
     python3 check_plan_switching.py     (exit 1 on any violation)
 
-studentaid.gov states two rules that pull in opposite directions:
+studentaid.gov states two rules that pull in opposite directions. Both are in
+the "Repayment Assistance Plan" accordion, below the payment-amount chart:
+
+    https://studentaid.gov/announcements-events/big-updates/definitions#rap
+
 
     "If you change from one IDR plan to another, your repayment period might
      also change. For example, if you're enrolled in the PAYE Plan, which has a
