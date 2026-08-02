@@ -3964,10 +3964,43 @@ def apply_shared_flag(param_name: str, state_key: str) -> None:
 
 def get_user_timezone() -> str:
     """The visitor's browser-detected IANA timezone (e.g. "America/Denver"),
-    set via the hidden "Set Timezone" trigger + JS near the top of section 3.
-    Falls back to UTC before that round-trip completes, or if a browser ever
-    supplies something zoneinfo doesn't recognize."""
-    return get_shared_default("tz", "UTC")
+    from st.context.timezone. Falls back to UTC if a browser ever supplies
+    something zoneinfo doesn't recognize.
+
+    LATCHED into session_state on first sight, like test_mode, admin_revealed
+    and get_traffic_source. "Share Scenario" calls st.query_params.from_dict,
+    which REPLACES the whole query string -- and build_share_params does not
+    emit tz (it is a browser fact, not a scenario field), so a live re-read
+    would return "UTC" for every timestamp written after a share. The JS does
+    re-add the param on a later rerun, but that is a race this function should
+    not depend on winning twice.
+
+    st.context.timezone is the PRIMARY source and needs no round-trip -- the
+    frontend sends it with the initial connection, so it is populated on the
+    very first render, before anything is drawn or logged.
+
+    The ?tz= param is a fallback, kept because it still arrives on old links.
+    It cannot be the primary source: the JS that sets it uses
+    history.replaceState, which changes the browser's URL without telling the
+    SERVER, so st.query_params never saw the value on the visit that detected
+    it. Proven by isolation -- a real page load carrying ?tz=America/Los_Angeles
+    produced a "01:14 PM PDT" PDF footer, while a fresh visit whose URL the JS
+    had just rewritten to the identical string produced "08:13 PM UTC" from the
+    same code path. The URL looked right in the address bar the whole time,
+    which is why this survived so long.
+
+    Reads the param directly rather than through get_shared_default so an
+    empty ?tz= cannot overwrite a good latched value with "".
+    """
+    try:
+        detected = getattr(st.context, "timezone", None) or st.query_params.get("tz", "")
+        if detected:
+            st.session_state["_user_timezone"] = detected
+        return st.session_state.get("_user_timezone", "UTC")
+    except Exception:
+        # No Streamlit runtime (analyze_model.py execs this section). UTC is
+        # the right answer there -- there is no visitor to be local to.
+        return "UTC"
 
 
 def now_local() -> datetime:
@@ -8323,57 +8356,33 @@ FIND_APP_FRAME_JS = """
 """
 
 
-# Detects the visitor's browser timezone (IANA name, e.g. "America/Los_Angeles")
-# via get_user_timezone()/now_local() below, so logged timestamps and the PDF
-# footer reflect the visitor's local time instead of the server's clock
-# (UTC on Streamlit Cloud). Same hidden-button pattern as the admin-reveal
-# trigger further down: a real (invisible) Streamlit button is the only way
-# to get a rerun that picks up the newly-set query param, since changing the
-# URL via JS alone doesn't notify the running Python session. The script
-# re-checks on every rerun but only clicks the button when the detected
-# timezone doesn't match what's already in the URL, so this settles after
-# one extra rerun and never loops. The very first "pageview" log below still
-# can't benefit -- there's no timezone to read until this round-trip
-# completes -- so it's the one timestamp that may land in UTC regardless.
-# Targets the frame the Streamlit APP runs in -- NOT window.top. That
-# distinction was got backwards once already, and the note it replaced claimed
-# the opposite: on Community Cloud the app is itself wrapped, so the layers are
-# component < app frame (/~/+/) < wrapper page (/), and window.top is the
-# WRAPPER. Streamlit reads its query params from the app frame, so writing tz
-# to the wrapper put it somewhere Python never looks -- which is precisely why
-# every production timestamp and every PDF footer read UTC regardless of the
-# visitor's clock. Measured on the deployed app: the wrapper's URL carried tz
-# and the app frame's did not, across 12/12 production rows stamped +00:00.
+# The visitor's timezone comes from st.context.timezone (see
+# get_user_timezone in section 2). There is no JS round-trip here any more.
 #
-# window.top IS right for the admin panel's keydown listener further down --
-# keystrokes land on the outermost page. The rule is not "always top", it is
-# "top for browser events, the app frame for anything Streamlit itself reads".
-with st.container(key="tz_trigger_wrap"):
-    st.button("Set Timezone", key="tz_trigger")
-st.markdown(
-    "<style>div.st-key-tz_trigger_wrap { display: none !important; }</style>",
-    unsafe_allow_html=True,
-)
-components.html(
-    f"""
-    <script>
-    (function() {{
-        {FIND_APP_FRAME_JS}
-        const appWin = findAppFrame("Set Timezone");
-        if (!appWin) return;   // button not rendered yet; a later rerun retries
-        const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        const params = new URLSearchParams(appWin.location.search);
-        if (params.get("tz") !== detected) {{
-            params.set("tz", detected);
-            appWin.history.replaceState(
-                null, "", appWin.location.pathname + "?" + params.toString());
-            clickAppButton("Set Timezone");
-        }}
-    }})();
-    </script>
-    """,
-    height=0,
-)
+# There used to be: a hidden "Set Timezone" button, plus a component script that
+# detected the zone, wrote it to the URL with history.replaceState, and clicked
+# the button to force a rerun that would "pick up the newly-set query param".
+# It never worked. replaceState changes the browser's address bar WITHOUT
+# telling the server, and Streamlit sends the frontend's query params as
+# captured at page load -- so the rerun the click produced read exactly the
+# same params as before it. The URL looked right the whole time, which is why
+# this survived two rounds of fixing.
+#
+# Proven by isolation before removing it: a real page load carrying
+# ?tz=America/Los_Angeles produced a "01:14 PM PDT" PDF footer, while a fresh
+# visit whose URL that script had just rewritten to the byte-identical string
+# produced "08:13 PM UTC" from the same code path. The earlier fix in this spot
+# -- targeting the app frame rather than window.top -- was diagnosing the wrong
+# layer of a mechanism that could not work at any layer.
+#
+# st.context.timezone arrives with the initial connection, so it is populated
+# on the FIRST render. That also fixes the caveat the old note conceded but
+# could not solve: the pageview logged below no longer has to land in UTC.
+# ?tz= is still read as a fallback for links that carry it.
+#
+# FIND_APP_FRAME_JS above is still used -- the admin-reveal keydown listener
+# needs it. The frame-climbing rule it encodes remains correct; it was the
+# replaceState half that was doomed.
 
 # Log exactly one "pageview" per browser session. This check runs before any
 # widgets are drawn, so later reruns triggered by moving a slider or opening

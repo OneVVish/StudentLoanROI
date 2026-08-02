@@ -94,7 +94,9 @@ SHARE_EXEMPT = {
 # Query params read by get_shared_* that are not scenario fields, so
 # build_share_params correctly does not emit them.
 PARAM_EXEMPT = {
-    "tz": "browser-detected timezone, set by JS on arrival",
+    "tz": "browser-detected timezone, set by JS on arrival; a browser fact, "
+          "not a scenario field. get_user_timezone latches it into "
+          "session_state so a share replacing the query string cannot wipe it",
     "test": "test-mode flag; carried separately by session_query_params()",
     "admin": "admin reveal; deliberately not propagated by a share link",
     "src": "traffic source; a share link must not inherit the sharer's source",

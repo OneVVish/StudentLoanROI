@@ -1124,3 +1124,46 @@ alter table scenario_events
 --     only proxy is a session_id join against the existing-loan
 --     interaction rows, which undercounts: it finds only the sessions
 --     that touched a control, not those that landed and left.
+
+
+-- =====================================================================
+-- 2026-08-02  timestamp was UTC for EVERY row written before this date
+-- =====================================================================
+-- NO DDL REQUIRED. Recorded because it changes how an existing column
+-- must be read, which no schema diff will ever show you.
+--
+-- All five tables stamp `timestamp` with now_local() -- the visitor's own
+-- local time, by design, so a timestamp means something to the person who
+-- generated it. The timezone behind that came from a JS round-trip:
+-- detect the zone, write it into the URL with history.replaceState, click
+-- a hidden button to force a rerun that would pick the new param up.
+--
+-- It never worked. replaceState changes the browser's address bar without
+-- telling the server, and Streamlit sends the query params the frontend
+-- captured at PAGE LOAD -- so the rerun read exactly what it read before.
+-- The address bar showed the right value the entire time, which is why it
+-- survived two rounds of fixing. From this date the zone comes from
+-- st.context.timezone, which arrives with the initial connection.
+--
+-- Reading this later:
+--
+--   * Every `timestamp` written BEFORE 2026-08-02 is UTC, whatever zone
+--     the visitor was in. Not "usually UTC" -- always, since the
+--     mechanism could not succeed. Rows at +00:00 are not a cluster of
+--     UK/Iceland traffic.
+--
+--   * Any time-of-day analysis that crosses this date is comparing UTC
+--     against local. "Do people use this in the evening?" is the obvious
+--     casualty: a US visitor at 8pm local was stamped 03:00 the next day,
+--     so pre-fix rows push evening usage into the small hours AND onto
+--     the following calendar date. Day-boundary buckets are affected too,
+--     not just hour-of-day.
+--
+--   * Not recoverable. No column records the visitor's zone, so a
+--     pre-fix UTC timestamp cannot be converted back. Restrict
+--     time-of-day work to rows from this date onward.
+--
+--   * Ordering is unaffected -- UTC is monotonic. The existing guidance
+--     to order scenario_events by event_seq rather than timestamp still
+--     holds, for the separate reason that post-fix timestamps come from
+--     the visitor's clock and can tie or move backwards.
