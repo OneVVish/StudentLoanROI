@@ -1961,19 +1961,30 @@ RAP_PRINCIPAL_MATCH_CAP = 50  # $/month government principal-match subsidy
 STANDARD_STRATEGY_LABEL = "Standard 10-Year"
 IDR_STRATEGY_LABEL = "Income-Driven Repayment (IDR)"
 RAP_STRATEGY_LABEL = "Repayment Assistance Plan (RAP)"
+TIERED_STANDARD_STRATEGY_LABEL = "2026 Tiered Standard Plan"
 RAP_FIRST_ORIGINATION_YEAR = 2026
+# The pre-OBBBA pair. Reachable only via the Advanced Analysis toggle, or on a
+# start year before the cutoff -- which the start-year list no longer offers.
+LEGACY_STRATEGY_LABELS = [STANDARD_STRATEGY_LABEL, IDR_STRATEGY_LABEL]
+# What a 2026 plan replaced, for mapping an older shared link onto the list a
+# scenario actually offers. Standard 10-Year's successor is the Tiered Standard
+# Plan; IBR's is RAP.
+LEGACY_STRATEGY_SUCCESSOR = {
+    STANDARD_STRATEGY_LABEL: TIERED_STANDARD_STRATEGY_LABEL,
+    IDR_STRATEGY_LABEL: RAP_STRATEGY_LABEL,
+}
 
 
 REPAYMENT_STRATEGY_HELP = (
-    "Standard 10-Year: a fixed payment every month for 10 years. The "
-    "income-driven option depends on your start year, because the plans do: "
-    "for loans originated before July 1, 2026 it is IBR-style IDR (payment is "
-    "10% of income above a $22,000 allowance, remainder forgiven at 20 years); "
-    "from July 1, 2026 IBR is closed to new loans and the plan is RAP (1-10% "
-    "of total income, all unpaid interest waived, remainder forgiven at 30 "
-    "years). Since the start-year list begins at the current year, in practice "
-    "this is RAP. Anything forgiven is taxable income that year. See "
-    "Methodology."
+    "The two plans OBBBA gives a borrower whose loans start on or after "
+    "July 1, 2026. Repayment Assistance Plan (RAP): payment is 1-10% of your "
+    "total income, all unpaid interest is waived, and any remainder is "
+    "forgiven after 30 years -- forgiven amounts are taxable income that year. "
+    "2026 Tiered Standard Plan: a fixed payment over a term set by how much "
+    "you owe, forgiving nothing. The pre-2026 plans (Standard 10-Year and "
+    "IBR-style IDR) are closed to new loans; tick 'Compare against pre-2026 "
+    "plans' under Advanced Analysis to add them back for comparison. "
+    "See Methodology."
 )
 
 
@@ -1993,8 +2004,21 @@ def income_driven_label_for(start_year) -> str:
         return RAP_STRATEGY_LABEL
 
 
-def repayment_strategy_options_for(start_year) -> list:
-    return [STANDARD_STRATEGY_LABEL, income_driven_label_for(start_year)]
+def repayment_strategy_options_for(start_year, include_legacy: bool = False) -> list:
+    """The plans this scenario can actually be repaid under.
+
+    For a start year on or after the cutoff those are OBBBA's two: RAP first,
+    because the income-driven plan is the one whose payment a borrower can
+    influence and the one this app exists to reason about, then the Tiered
+    Standard Plan. Standard 10-Year and IBR are not offered -- a loan
+    originated then cannot be repaid under either -- unless the visitor asks
+    for them via Advanced Analysis, which is there for comparing against the
+    old rules rather than for pretending they still apply.
+    """
+    if income_driven_label_for(start_year) != RAP_STRATEGY_LABEL:
+        return list(LEGACY_STRATEGY_LABELS)
+    options = [RAP_STRATEGY_LABEL, TIERED_STANDARD_STRATEGY_LABEL]
+    return options + LEGACY_STRATEGY_LABELS if include_legacy else options
 
 
 def resolve_shared_strategy(shared_value, options) -> str:
@@ -2008,8 +2032,21 @@ def resolve_shared_strategy(shared_value, options) -> str:
     """
     if shared_value in options:
         return shared_value
+    if not shared_value:
+        return options[0]
+    # Map a superseded plan onto the one that replaced it, rather than dropping
+    # to index 0. A link built under the old rules names a real choice; turning
+    # "Standard 10-Year" into RAP because RAP happens to be first would invert
+    # what it was sharing.
+    successor = LEGACY_STRATEGY_SUCCESSOR.get(shared_value)
+    if successor in options:
+        return successor
     if shared_value in (IDR_STRATEGY_LABEL, RAP_STRATEGY_LABEL, "Income-Driven Repayment"):
-        return options[1]
+        return RAP_STRATEGY_LABEL if RAP_STRATEGY_LABEL in options else options[0]
+    if shared_value in (STANDARD_STRATEGY_LABEL, TIERED_STANDARD_STRATEGY_LABEL):
+        for candidate in (TIERED_STANDARD_STRATEGY_LABEL, STANDARD_STRATEGY_LABEL):
+            if candidate in options:
+                return candidate
     return options[0]
 
 # Who is going to school. The app has always modelled one person -- an
@@ -3341,6 +3378,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     # not. Found by check_share_coverage.py, not by anyone noticing.
     params["foregone"] = "1" if st.session_state.get("count_foregone_earnings") else "0"
     params["deps"] = str(st.session_state.get("rap_dependents", 0))
+    params["legacy"] = "1" if st.session_state.get("enable_legacy_plans") else "0"
     params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
     params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
     params["future"] = "1" if st.session_state.get("enable_future_proofing") else "0"
@@ -5126,6 +5164,17 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         repayment_result = calculate_standard_repayment(
             principal_for_repayment, rate_for_repayment, roi_window_years=roi_window_years)
         strategy_label = "Standard 10-Year"
+    elif repayment_strategy == TIERED_STANDARD_STRATEGY_LABEL:
+        # OBBBA's replacement for Standard 10-Year: a fixed payment, but over a
+        # term set by how much is owed (calculate_tiered_standard_term). It
+        # forgives nothing, so unlike RAP and IDR it needs no forgivable-pool
+        # split -- both pools are repaid in full either way, which is also what
+        # keeps the blended rate legitimate here.
+        _tiered_term = calculate_tiered_standard_term(principal_for_repayment)
+        repayment_result = calculate_standard_repayment(
+            principal_for_repayment, rate_for_repayment, _tiered_term,
+            roi_window_years=roi_window_years)
+        strategy_label = TIERED_STANDARD_STRATEGY_LABEL
     elif repayment_strategy == RAP_STRATEGY_LABEL:
         # RAP forgives at 30 years, so it takes the same forgivable-pool split
         # as IDR. `dependents` is a real parameter rather than a session_state
@@ -5205,7 +5254,12 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     existing_result = None
     if existing_debt and existing_debt > 0:
         existing_rate = existing_debt_rate if existing_debt_rate is not None else interest_rate
-        if repayment_strategy == STANDARD_STRATEGY_LABEL:
+        if repayment_strategy == TIERED_STANDARD_STRATEGY_LABEL:
+            existing_result = calculate_standard_repayment(
+                existing_debt, existing_rate,
+                calculate_tiered_standard_term(existing_debt),
+                roi_window_years=roi_window_years)
+        elif repayment_strategy == STANDARD_STRATEGY_LABEL:
             existing_result = calculate_standard_repayment(
                 existing_debt, existing_rate, roi_window_years=roi_window_years)
         elif repayment_strategy == RAP_STRATEGY_LABEL:
@@ -5619,7 +5673,8 @@ def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_
     # payment column. Testing for the column rather than for the strategy NAME
     # is what lets a new income-driven plan be added without this silently
     # reading a column that isn't there.
-    if strategy == STANDARD_STRATEGY_LABEL or "payment" not in schedule.columns:
+    if strategy in (STANDARD_STRATEGY_LABEL, TIERED_STANDARD_STRATEGY_LABEL) \
+            or "payment" not in schedule.columns:
         return repayment_result.get("monthly_payment", 0.0)
     row = schedule[schedule["month"] == target_month]
     return row.iloc[0]["payment"] if not row.empty else 0.0
@@ -7708,6 +7763,11 @@ scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 # exists, the same pattern the Career section's controls use. See the
 # Methodology footer for what each module models and, just as importantly,
 # what it deliberately does NOT claim.
+# Adds the pre-2026 plans back to the Repayment Strategy dropdown. Read here,
+# with the other Advanced Analysis flags, because the strategy widget builds
+# its option list further down and needs to know.
+st.session_state.setdefault("enable_legacy_plans", get_shared_default("legacy", "0") == "1")
+enable_legacy_plans = st.session_state["enable_legacy_plans"]
 st.session_state.setdefault("enable_prestige_mode", get_shared_default("prestige", "0") == "1")
 st.session_state.setdefault("enable_ai_mode", get_shared_default("ai", "0") == "1")
 st.session_state.setdefault("enable_future_proofing", get_shared_default("future", "0") == "1")
@@ -8307,8 +8367,13 @@ else:
 # reconcile_cc_mode exists for), and without one, changing the year would reset
 # an income-driven choice to Standard -- silently answering a different
 # question. resolve_shared_strategy maps income-driven to income-driven.
-repayment_strategy_options = repayment_strategy_options_for(start_year_a)
-shared_repayment_strategy = get_shared_default("strategy", STANDARD_STRATEGY_LABEL)
+repayment_strategy_options = repayment_strategy_options_for(start_year_a, enable_legacy_plans)
+# Fallback None, NOT a plan name. Defaulting this to "Standard 10-Year" meant a
+# visitor with no ?strategy= was treated as having asked for Standard, which the
+# successor mapping then turned into Tiered Standard -- so the intended default
+# of RAP was unreachable on a fresh visit. Absent means "no preference": take
+# the list's first entry.
+shared_repayment_strategy = get_shared_default("strategy", None)
 st.session_state.setdefault(
     "repayment_strategy_a",
     resolve_shared_strategy(shared_repayment_strategy, repayment_strategy_options))
@@ -8840,6 +8905,15 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
              "the Repayment Assistance Plan (RAP) and the Tiered Standard Plan, "
              "both effective July 1, 2026. See Methodology.",
     )
+    enable_legacy_plans = st.checkbox(
+        "Compare against pre-2026 repayment plans", key="enable_legacy_plans",
+        on_change=lambda: mark_interaction("enable_legacy_plans"),
+        help="Adds Standard 10-Year and IBR-style Income-Driven Repayment back "
+             "to the Repayment Strategy dropdown. Both are closed to loans "
+             "originated on or after July 1, 2026, so they are a comparison "
+             "against the old rules -- not plans you could choose. Off by "
+             "default for that reason.",
+    )
     enable_foregone_earnings = st.checkbox(
         "Count foregone earnings during enrollment", key="count_foregone_earnings", on_change=lambda: mark_interaction("count_foregone_earnings"),
         help=f"Charge the ~{UNDERGRAD_YEARS} years of wages a student gives up "
@@ -9348,8 +9422,8 @@ if compare_mode:
         # Scenario B's own start year decides its options -- it used to reuse
         # Scenario A's list, so a B starting in 2025 was offered whatever plan
         # A's year implied. Same reconcile-before-the-widget treatment as A.
-        repayment_strategy_options_b = repayment_strategy_options_for(start_year_b)
-        shared_repayment_strategy_b = get_shared_default("strategy_b", STANDARD_STRATEGY_LABEL)
+        repayment_strategy_options_b = repayment_strategy_options_for(start_year_b, enable_legacy_plans)
+        shared_repayment_strategy_b = get_shared_default("strategy_b", None)
         st.session_state.setdefault(
             "repayment_strategy_b",
             resolve_shared_strategy(shared_repayment_strategy_b, repayment_strategy_options_b))
@@ -11810,14 +11884,23 @@ before July 1, 2014). For borrowing from July 1, 2026 the income-driven plan
 is the **Repayment Assistance Plan (RAP)**: 30 years rather than 20, **1–10%
 of total income** rather than 10% of income above an allowance, a $10/month
 minimum, all unpaid interest waived for the full term, and a $50/month
-principal match. **The app picks the plan from your start year**: choose the income-driven
-strategy with a start year of 2026 or later and you are modelling RAP; with an
-earlier start year, IBR. The strategy dropdown names whichever one applies, so
-the two are never silently swapped. In practice that means **RAP** — the start
-year list begins at the current year, because you cannot enrol in the past, so
-every scenario the app can build now falls after the July 1, 2026 cutoff. The
-IBR model is kept for older shared links and for reproducing the app's earlier
-figures, not because it is reachable from the sidebar. (RAP also still appears under **Advanced
+principal match. **The dropdown offers the plans you could actually be repaid under.** For a
+start year of 2026 or later — which is every scenario the app can build, since
+the start-year list begins at the current year — those are OBBBA's two, and
+only those:
+
+- **Repayment Assistance Plan (RAP)**, the default. 1–10% of total income, all
+  unpaid interest waived, remainder forgiven at 30 years (and taxed).
+- **2026 Tiered Standard Plan.** A fixed payment over a term set by how much
+  you owe. Forgives nothing, so nothing is taxed either.
+
+**Standard 10-Year and IBR-style IDR are not offered**, because a loan
+originated on or after July 1, 2026 cannot be repaid under either. They are
+still modelled — tick **Compare against pre-2026 repayment plans** under
+Advanced Analysis to add them back — but as a comparison against the old rules,
+not as choices. A shared link naming a superseded plan is mapped to the plan
+that replaced it (Standard 10-Year → Tiered Standard, IDR → RAP) rather than
+being dropped to whatever happens to be first. (RAP also still appears under **Advanced
 Analysis → 2026 Regulatory & Macro Forecasting**, which additionally models the
 Tiered Standard Plan.) **Parent PLUS is not eligible for RAP**, which is why it
 sits in the non-forgivable pool described above.
