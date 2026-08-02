@@ -1167,3 +1167,39 @@ alter table scenario_events
 --     to order scenario_events by event_seq rather than timestamp still
 --     holds, for the separate reason that post-fix timestamps come from
 --     the visitor's clock and can tie or move backwards.
+
+
+-- =====================================================================
+-- 2026-08-02  usage_logs.action gains "pageview_schools"
+-- =====================================================================
+-- NO DDL REQUIRED, same as the pageview_repayment note above. Recorded
+-- for the same reason: the schema did not change but the data's meaning
+-- did.
+--
+-- The budget school search got its own standalone page at ?tool=schools,
+-- which logs "pageview_schools" rather than a plain "pageview".
+--
+-- Reading this later:
+--
+--   * "pageview" narrowed a SECOND time on this date. It now means
+--     "calculator landing" only -- not repayment, not schools. Both
+--     narrowings happened the same day, so a single cut at 2026-08-02
+--     separates the old pooled meaning from the current split one.
+--
+--   * Total traffic is now THREE actions. Prefer a prefix match --
+--         action like 'pageview%'
+--     -- over an enumerated list, so a future tool page is counted
+--     without anyone remembering to update the query. app.py exposes
+--     PAGEVIEW_ACTIONS, derived from STANDALONE_TOOLS for the same
+--     reason; analyze_survey.py uses the prefix form.
+--
+--   * The survey rate still uses bare "pageview" alone, deliberately.
+--     No standalone tool page renders the survey, so including those
+--     visits would divide by people who were never asked.
+--
+--   * Pre-split school-search visits are not recoverable as landings,
+--     but unlike the repayment case there IS a partial proxy: the module
+--     logged "school_search_run:..." from the day it shipped. That finds
+--     sessions that ran a search, not sessions that landed and left, so
+--     it undercounts -- but it is a real lower bound, which the
+--     repayment module has no equivalent of.

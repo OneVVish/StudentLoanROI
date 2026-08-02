@@ -3150,21 +3150,57 @@ def get_traffic_source() -> str:
     return st.session_state["traffic_source"]
 
 
-# Every action that represents one visit landing. Split so calculator and
-# repayment-page traffic can be told apart -- but anything asking "how many
-# people came at all" must use BOTH, or it silently undercounts the moment the
-# repayment link is shared.
-PAGEVIEW_ACTIONS = ("pageview", "pageview_repayment")
+# The standalone single-purpose pages, each reachable at ?tool=<key>. Every
+# entry needs its own pageview action: the whole point is that these visitors
+# are a different population from the calculator's, asking a different
+# question, and pooling them would inflate calculator traffic the moment one of
+# these links is shared.
+#
+# Adding a tool here gives it the action, the traffic split and the admin
+# breakdown for free. What it does NOT give it is a renderer -- see the
+# standalone block in section 5.
+STANDALONE_TOOLS = {
+    "repayment": {
+        "action": "pageview_repayment",
+        "title": "💸 Compare Student Loan Repayment Plans",
+        "caption": "**Free · anonymous · no sign-up** — an educational estimate, "
+                   "not financial advice. For a balance you already owe.",
+        "label": "Compare repayment plans",
+    },
+    "schools": {
+        "action": "pageview_schools",
+        "title": "🔎 Find Schools That Fit a Budget",
+        "caption": "**Free · anonymous · no sign-up** — real published costs from "
+                   "the U.S. Department of College Scorecard, priced for where "
+                   "you live.",
+        "label": "Find schools that fit a budget",
+    },
+}
+
+# Every action that represents one visit landing. Anything asking "how many
+# people came at all" must use ALL of them, or it silently undercounts the
+# moment a tool link is shared. Derived, so a new tool cannot be added to the
+# split without also being added to the totals.
+PAGEVIEW_ACTIONS = ("pageview",) + tuple(t["action"] for t in STANDALONE_TOOLS.values())
 
 
-def repayment_page_requested() -> bool:
-    """Whether this visit asked for the standalone repayment tool.
+def requested_tool() -> str:
+    """Which standalone tool this visit asked for, or "" for the calculator.
 
     Reads the query param directly so it can be called before the session latch
-    exists -- the pageview logger runs long before section 5. The latch below
-    is seeded FROM this, so the two cannot disagree about which page a visit was.
+    exists -- the pageview logger runs long before section 5. The latch in
+    section 5 is seeded FROM this, so the two cannot disagree about which page
+    a visit was. An unknown ?tool= falls back to the calculator rather than a
+    blank page.
     """
-    return get_shared_default("tool", "") == "repayment"
+    return get_shared_default("tool", "") if \
+        get_shared_default("tool", "") in STANDALONE_TOOLS else ""
+
+
+def pageview_action() -> str:
+    """The landing action for this visit."""
+    tool = requested_tool()
+    return STANDALONE_TOOLS[tool]["action"] if tool else "pageview"
 
 
 def mark_interaction(field: str):
@@ -8491,7 +8527,7 @@ if "pageview_logged" not in st.session_state:
     # set hundreds of lines later and this fires first. Safe: a pageview
     # describes the visit as it ARRIVED, which is exactly what the param says
     # on the first render, and pageview_logged stops any rerun re-entering.
-    log_usage_event("pageview_repayment" if repayment_page_requested() else "pageview")
+    log_usage_event(pageview_action())
 
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
@@ -11009,22 +11045,22 @@ def render_rap_subsidy_answer(rows: list) -> None:
 #
 # Latched like test_mode: Share Scenario replaces the whole query string, so a
 # live re-read would drop the visitor back into the calculator mid-session.
-if "repayment_only" not in st.session_state:
-    st.session_state.repayment_only = repayment_page_requested()
-repayment_only = st.session_state.repayment_only
+if "active_tool" not in st.session_state:
+    st.session_state.active_tool = requested_tool()
+active_tool = st.session_state.active_tool
+# Kept as its own name because several places below read it and "the repayment
+# page" is a clearer thing to test for than "active_tool == 'repayment'".
+repayment_only = active_tool == "repayment"
 
-if repayment_only:
+if active_tool:
     # The sidebar still executes -- it defines names section 5 reads -- but it
     # describes a scenario this page is not about, so it is hidden rather than
     # shown empty. Cheaper and far less invasive than making 2,000 lines of
     # module-level sidebar code conditional.
     st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>",
                 unsafe_allow_html=True)
-    st.title("💸 Compare Student Loan Repayment Plans")
-    st.caption(
-        "**Free · anonymous · no sign-up** — an educational estimate, not financial "
-        "advice. For a balance you already owe."
-    )
+    st.title(STANDALONE_TOOLS[active_tool]["title"])
+    st.caption(STANDALONE_TOOLS[active_tool]["caption"])
 else:
     st.title("🎓 Student Loan Payoff & Major ROI Calculator")
     st.caption(
@@ -11046,341 +11082,15 @@ if st.session_state.get("test_mode"):
 # The research instrument belongs to the college-decision flow. A visitor on
 # the repayment page was never recruited for it and is answering a different
 # question, so showing it would put unrelated answers in the paired sample.
-if not repayment_only:
+if not active_tool:
     render_presurvey()
 
-# Everything below this point is the college calculator. On ?tool=repayment we
-# render the repayment comparison instead and stop -- the sidebar is already
-# hidden above, so the page is that tool and nothing else.
-if repayment_only:
-    render_existing_loan_comparison(always_open=True)
-    st.caption(
-        "Looking at whether a degree is worth borrowing for instead? "
-        "[Open the full calculator](./)."
-    )
-    st.stop()
-
-st.info(
-    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
-    "anything. Everything below updates instantly as you change it, no button to click."
-)
-
-# Collapsed on purpose. This app's whole premise is that real numbers are on
-# screen before you touch anything -- there is deliberately no "calculate"
-# button -- so a guide that interrupts that is worse than no guide. Costs
-# nothing to a visitor who doesn't want it, one click for one who's lost.
-# The st.info above is the one-second version; this is the sixty-second one.
-#
-# Aimed at a student landing cold. Before this, a first-time visitor got three
-# lines of orientation (title, disclaimer, the banner above) and everything
-# else was either a hover-only help= tooltip -- invisible on a phone -- or
-# 4,000 words of Methodology at the very bottom of the page.
-with st.expander("❓ New here? Start with this"):
-    st.markdown((
-        f"""
-**What this compares.** Two futures: you, after this major and this loan — and someone
-who skipped college, took no debt, and started working right away. Both adjusted for what
-it costs to live in your city. Everything on this page is some version of that one
-comparison.
-
-**What to do.** Pick your major and school on the left. Your loan fills in automatically
-from what graduates of that school typically borrow (**Simplified**); switch **Loan
-estimate** to **Detailed** to build it from your own cost and aid instead. Numbers update
-as you change them. Nothing is saved, there's no login, and you can't break it — try the
-majors you're actually deciding between. Don't know your real cost or family contribution?
-The **🎯 Get Your Real Numbers** section lower down links to two free official tools.
-
-**The two settings that change the answer most:**
-
-- **Choose by: Major or Career.** *Major* is what everyone who studied that subject
-  earns — including the {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs
-  that don't need a degree. *Career* is what people already doing that job earn, which
-  assumes you become one of them. Same nominal path, about $233,000 apart over 10 years.
-  Major is the honest default; Career is the richer data.
-- **ROI Horizon.** How far ahead to look. This matters more than it sounds: careers that
-  train before they earn look terrible at 10 years, because 10 years is mostly training.
-  Medicine comes out **$146,000 behind** a high school graduate at 10 years, and
-  **$3.5 million ahead** at 30. Same data. The only thing that changed is where you stop
-  counting.
-
-**Two senses of "worth it."** This does answer whether a major is worth it *financially* —
-whether the extra earnings beat the cost of the debt. That's the **"Is this debt worth it?"**
-verdict at the top. What it can't answer is whether it's worth it *to you*: a field you'd
-love for less money can easily beat a lucrative one you'd dread, and only you can weigh
-that trade. Every number here is also an average for a whole major, not a prediction about
-you personally. Sources and assumptions are in **📚 Methodology & Sources** at the bottom.
-        """
-    ).replace("$", r"\$"))
-
-# Reserved here, at the top of the page, so the Download PDF Report / Share
-# Scenario buttons render in this position even though the code that fills
-# them in runs much later (after the PDF bytes and share params are actually
-# computed) -- st.container() is position-anchored: content written into a
-# container later in the script still renders wherever the container was
-# first created, not wherever that code physically executes.
-top_actions_container = st.container()
-
-# The break-even verdict, anchored high on the page (same position-anchored
-# st.container() trick as top_actions_container above): it's the one output a
-# student can act on -- "is this debt worth it, yes or no" -- so it leads
-# rather than sitting under the ROI chart where it was easy to miss. Filled
-# from the single-scenario branch once the scenario is computed. Compare Mode
-# leaves it empty and shows a per-column verdict in each panel instead, since
-# a single top banner can't answer for two scenarios at once.
-breakeven_banner_container = st.container()
-
-# ---- 5a. Admin Analytics Dashboard: aggregation helpers -------------------
-
-def _admin_parse_dates(df: pd.DataFrame) -> pd.Series:
-    """usage_logs timestamps are ISO strings stamped in the visitor's own
-    timezone (now_local), so offsets vary row to row -- utc=True normalizes
-    them to one axis, errors='coerce' turns anything unparseable into NaT
-    rather than raising. Returns a Series of python dates aligned to df.index."""
-    return pd.to_datetime(df["timestamp"], utc=True, errors="coerce").dt.date
-
-
-def _admin_final_per_session(events_df: pd.DataFrame) -> pd.DataFrame:
-    """One row per session_id -- the visitor's LAST scenario_events row (max
-    event_seq) -- so the breakdowns read as 'what each distinct visitor ended
-    up configuring', not raw event volume (a session that tried five majors
-    would otherwise count five times). Order by event_seq, never timestamp:
-    timestamps come from the visitor's own clock and can tie or run backwards."""
-    if events_df.empty or "session_id" not in events_df.columns:
-        return events_df
-    df = events_df.copy()
-    if "event_seq" in df.columns:
-        df["_seq"] = pd.to_numeric(df["event_seq"], errors="coerce").fillna(-1)
-        df = df.sort_values("_seq")
-    df = df.drop_duplicates(subset="session_id", keep="last")
-    return df.drop(columns=[c for c in ["_seq"] if c in df.columns])
-
-
-def _admin_count_table(df: pd.DataFrame, column: str, label: str,
-                        missing: str = "(none)") -> None:
-    """value_counts on one column, rendered via render_centered_table. NULL or
-    empty values fold into `missing` (newly-logged columns are all-NULL on
-    historical rows, so this is the common case at first). Emits a 'No data
-    yet' caption and returns when the column is absent or the frame is empty."""
-    if df.empty or column not in df.columns:
-        st.caption("No data yet.")
-        return
-    series = df[column].astype("object").where(df[column].notna(), missing)
-    series = series.replace("", missing)
-    counts = series.value_counts().reset_index()
-    counts.columns = [label, "Count"]
-    render_centered_table(counts)
-
-
-def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
-    """Distinct session_ids across the union of the given tables -- the funnel
-    counts visitors, not rows, and a visitor can appear in several tables."""
-    parts = [d["session_id"] for d in dfs if not d.empty and "session_id" in d.columns]
-    if not parts:
-        return 0
-    return int(pd.concat(parts, ignore_index=True).dropna().nunique())
-
-
-# ---- 5a. Admin Analytics Dashboard (hidden behind sidebar checkbox) ------
-
-if admin_enabled:
-    st.subheader("📊 Admin Analytics Dashboard")
-
-    # load_table_safe does select("*"); the columns= list is only the fallback
-    # frame's shape when a table can't be read, so it names what each panel needs.
-    usage_df = load_table_safe(
-        "usage_logs", columns=["timestamp", "action", "traffic_source", "session_id"])
-    events_df = load_table_safe(
-        "scenario_events",
-        columns=["timestamp", "session_id", "event_seq", "dataset_mode",
-                 "career_data_source", "loan_mode", "cc_mode_a", "scenario_a_major",
-                 "scenario_a_loan_amount", "scenario_a_repayment_strategy",
-                 "roi_horizon_years", "experiment_arm"])
-    pdf_downloads_df = load_table_safe("pdf_downloads", columns=["timestamp", "session_id"])
-    scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp", "session_id"])
-    survey_df = load_table_safe("survey_responses", columns=["timestamp", "session_id"])
-
-    # One row per distinct visitor's final configuration -- the basis for every
-    # "what visitors configured" breakdown below.
-    final_df = _admin_final_per_session(events_df)
-
-    # Pageviews and "everything logged" are separate numbers and were being
-    # conflated: the old single "Total App Interactions" was len(usage_df),
-    # i.e. every row of every kind -- pageviews, presurvey_shown, searches and
-    # the interaction: events -- which now reads as if it meant interactions in
-    # the specific sense those events introduced. Split, and both named for
-    # what they actually count.
-    # BOTH pageview actions: this metric answers "how many visits", and a
-    # repayment-page visit is a visit. The split is reported separately below
-    # rather than by quietly dropping one of them here.
-    _pageviews = usage_df[usage_df["action"].isin(PAGEVIEW_ACTIONS)] if (
-        not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
-    _repay_views = int((usage_df["action"] == "pageview_repayment").sum()) if (
-        not usage_df.empty and "action" in usage_df.columns) else 0
-    _visits = (int(_pageviews["session_id"].dropna().nunique())
-               if "session_id" in _pageviews.columns else 0)
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-    # Unique visits as the delta rather than a sixth column: the two numbers
-    # only mean anything read together, and they differ for two reasons worth
-    # seeing side by side (see the caption).
-    col1.metric("Pageviews", len(_pageviews),
-                delta=f"{_visits} unique visits", delta_color="off")
-    col2.metric("Logged Events", len(usage_df))
-    col3.metric("Survey Responses", len(survey_df))
-    col4.metric("PDF Downloads", len(pdf_downloads_df))
-    col5.metric("Scenario Shares", len(scenario_shares_df))
-    st.caption(
-        "**Pageviews** counts both landing actions -- `pageview` (the calculator) "
-        f"and `pageview_repayment` (the standalone `?tool=repayment` page, "
-        f"{_repay_views} of them). They are logged separately because they are "
-        "different populations asking different questions, but a visit is a visit, "
-        "so this total counts both. "
-        "**Unique visits** de-duplicates "
-        "them by session. They diverge for two reasons, neither of them traffic: "
-        "rows written before `session_id` existed cannot be de-duplicated at all "
-        f"({int(usage_df['session_id'].isna().sum()) if not usage_df.empty and 'session_id' in usage_df.columns else 0} "
-        "of them), and until 2026-08-01 a real browser logged **two** pageviews "
-        "per visit — a race between the write and its guard, since fixed. Both "
-        "inflate the left number only. **Logged Events** is every row of every "
-        "kind, which is what this panel used to call \"App Interactions\"."
-    )
-
-    st.divider()
-
-    # (a) App interactions over time
-    st.markdown("#### 📈 App interactions over time")
-    _daily = _admin_parse_dates(usage_df).dropna() if (
-        not usage_df.empty and "timestamp" in usage_df.columns) else pd.Series([], dtype=object)
-    if _daily.empty:
-        st.caption("No data yet.")
-    else:
-        by_day = _daily.value_counts().sort_index()
-        chart_df = pd.DataFrame({"Interactions": by_day.values},
-                                index=pd.to_datetime(list(by_day.index)))
-        st.bar_chart(chart_df)
-
-    # (b) App interactions by traffic source (?src= tag)
-    st.markdown("#### 🔗 Traffic by source")
-    st.caption(
-        "From the `?src=` tag on the link visitors arrived through; organic "
-        "visits carry none. **Sorted by pageviews** -- the reach a channel "
-        "actually delivered. *Unique visits* de-duplicates by session; *Logged "
-        "events* counts every row of every kind, so one engaged visitor can "
-        "outweigh several who bounced.\n\n"
-        "**Do not compare `(organic)`'s two columns.** Rows written before "
-        "`session_id` existed cannot be de-duplicated, and almost all of them "
-        "are organic -- so its unique-visit figure counts only the newer rows "
-        "while its pageview figure counts all of them. Tagged sources have no "
-        "such gap; where their two columns differ it is the pre-2026-08-01 "
-        "double-count, which is bounded and now fixed."
-    )
-    if usage_df.empty or "traffic_source" not in usage_df.columns:
-        st.caption("No data yet.")
-    else:
-        _src = usage_df.copy()
-        _src["Source"] = (_src["traffic_source"].astype("object")
-                           .where(_src["traffic_source"].notna(), "(organic)")
-                           .replace("", "(organic)"))
-        _pv_only = (_src[_src["action"].isin(PAGEVIEW_ACTIONS)]
-                if "action" in _src.columns else _src.iloc[0:0])
-        _by_src = pd.DataFrame({
-            "Pageviews": _pv_only.groupby("Source").size(),
-            "Unique visits": (_pv_only.groupby("Source")["session_id"].nunique()
-                               if "session_id" in _pv_only.columns else 0),
-            "Logged events": _src.groupby("Source").size(),
-        }).fillna(0).astype(int)
-        # Sort on pageviews, then unique visits: two channels with equal reach
-        # are not equally good, and the tie-break should favour the one that
-        # brought distinct people rather than repeat loads.
-        _by_src = (_by_src.sort_values(["Pageviews", "Unique visits"], ascending=False)
-                          .reset_index())
-        render_centered_table(_by_src)
-
-    st.divider()
-    st.markdown("#### 🎓 What visitors configured")
-    st.caption(f"One row per distinct visitor ({len(final_df)} sessions with a "
-               "scenario), taking each session's final selection.")
-
-    # (e) Major vs Career
-    st.markdown("**Chose by — Major vs Career**")
-    _admin_count_table(final_df, "dataset_mode", "Mode")
-
-    # (f) National vs California (Career mode only -- the radio is disabled in
-    # Major mode, so a Major-mode row's value is just the inert default)
-    st.markdown("**Wage dataset — National vs California**")
-    st.caption("Career mode only; Major mode has no geography, so those "
-               "sessions are excluded rather than counted as the default.")
-    _career_only = final_df[final_df["dataset_mode"] == DATASET_MODE_CAREER] if (
-        not final_df.empty and "dataset_mode" in final_df.columns) else final_df
-    _admin_count_table(_career_only, "career_data_source", "Dataset")
-
-    # (c) Community-college path
-    st.markdown("**Community-college path**")
-    _admin_count_table(final_df, "cc_mode_a", "CC mode")
-
-    # (d) Loan estimate -- amount ranges AND Simplified/Detailed mode
-    st.markdown("**Loan estimate — amount ranges**")
-    _amounts = pd.to_numeric(final_df["scenario_a_loan_amount"], errors="coerce").dropna() if (
-        not final_df.empty and "scenario_a_loan_amount" in final_df.columns) else pd.Series([], dtype=float)
-    if _amounts.empty:
-        st.caption("No data yet.")
-    else:
-        _bins = [-0.01, 0, 10_000, 25_000, 50_000, 100_000, float("inf")]
-        _labels = ["$0", "≤ $10k", "≤ $25k", "≤ $50k", "≤ $100k", "> $100k"]
-        _buckets = pd.cut(_amounts, bins=_bins, labels=_labels)
-        _table = _buckets.value_counts().reindex(_labels).fillna(0).astype(int).reset_index()
-        _table.columns = ["Loan amount", "Count"]
-        render_centered_table(_table)
-
-    st.markdown("**Loan estimate — Simplified vs Detailed**")
-    _admin_count_table(final_df, "loan_mode", "Loan mode")
-
-    st.divider()
-    st.markdown("#### 🔎 Other breakdowns")
-
-    # Top majors / careers chosen
-    st.markdown("**Top 10 majors / careers chosen**")
-    if final_df.empty or "scenario_a_major" not in final_df.columns or \
-            final_df["scenario_a_major"].dropna().empty:
-        st.caption("No data yet.")
-    else:
-        _top = final_df["scenario_a_major"].dropna().value_counts().head(10).reset_index()
-        _top.columns = ["Major / career", "Count"]
-        render_centered_table(_top)
-
-    # Repayment strategy
-    st.markdown("**Repayment strategy**")
-    _admin_count_table(final_df, "scenario_a_repayment_strategy", "Strategy")
-
-    # ROI horizon
-    st.markdown("**ROI horizon (years)**")
-    _admin_count_table(final_df, "roi_horizon_years", "Horizon (yrs)")
-
-    # Experiment arm (H2 randomised assignment)
-    st.markdown("**Experiment arm (H2 assignment)**")
-    _admin_count_table(final_df, "experiment_arm", "Arm")
-
-    # Engagement funnel -- distinct visitors reaching each stage
-    st.markdown("**Engagement funnel (distinct sessions)**")
-    _funnel = pd.DataFrame({
-        "Stage": ["Visited (pageviews)", "Configured a scenario",
-                  "Committed (PDF / share / survey)"],
-        "Sessions": [_admin_n_sessions(usage_df),
-                     _admin_n_sessions(events_df),
-                     _admin_n_sessions(pdf_downloads_df, scenario_shares_df, survey_df)],
-    })
-    render_centered_table(_funnel)
-
-    st.divider()
-
-# ---- 5b. School Data Lookup (local COA dataset + College Scorecard API) --
-# Cost of Attendance (in/out-of-state) comes from the local dataset built by
-# clean_college_scorecard.py, run against the real College Scorecard
-# institution file (data/college_coa_clean.csv, 5,000+ real schools).
-# Median debt is still fetched live, which works for any school regardless of local
-# dataset coverage. A matched school's COA also auto-fills that scenario's
-# per-year Cost of Attendance field (in-state or out-of-state, per the
-# In-State Student? checkbox) -- see _autofill_coa in section 2c.
+# The budget school search and its helpers. Defined HERE, above the
+# standalone-tool dispatch below, because ?tool=schools calls
+# render_school_search from that dispatch -- hundreds of lines above the
+# calculator flow where this used to sit. Module-level defs execute in
+# order, so a def that lives below its caller is a NameError at runtime
+# that py_compile cannot see.
 
 def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
     """Best available guess at where the visitor lives, for pricing search
@@ -11441,7 +11151,7 @@ def search_was_adjusted() -> bool:
 
 
 
-def render_school_search() -> None:
+def render_school_search(always_open: bool = False) -> None:
     """Budget-first school search: what could I attend, for this field, at this price?
 
     The inverse of everything else on this page. Every other surface starts
@@ -11463,7 +11173,10 @@ def render_school_search() -> None:
     if coa_df.empty or "programs_bachl" not in coa_df.columns:
         return                      # dataset predates the program columns
 
-    with st.expander("🔎 Find schools that fit a budget", expanded=False):
+    # Open by default on its own page: a visitor who followed a link TO this
+    # tool should not have to click to reach it. Same treatment as
+    # render_existing_loan_comparison.
+    with st.expander("🔎 Find schools that fit a budget", expanded=always_open):
         st.caption(
             "Sorted by cost, and by nothing else. Every salary in this app comes "
             "from the occupation or major you picked — never from the school — so "
@@ -11675,6 +11388,18 @@ def render_school_search() -> None:
                 f":prev_coa={int(prev_coa) if prev_coa is not None else 'unset'}"
                 f":delta_coa={delta_coa if delta_coa is not None else 'unset'}"
                 f":in_state={int(bool(picked['is_home_state']))}")
+            # On the standalone ?tool=schools page there is nothing below to
+            # show the applied school -- the sidebar is hidden and the page
+            # stops after this module, so "Use this school" would look like it
+            # did nothing. Hand the visitor to the calculator instead, which is
+            # what applying a school MEANS. Clearing the latch is required:
+            # active_tool lives in session_state precisely so a share cannot
+            # drop the visitor out of a tool, so rewriting the URL alone would
+            # not release them.
+            if st.session_state.get("active_tool") == "schools":
+                st.session_state.active_tool = ""
+                st.query_params.from_dict(session_query_params())
+                st.rerun()
             st.rerun()
 
 
@@ -11705,6 +11430,356 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
         f":home={home_state or 'unset'}"
         f":states={'+'.join(states) if states else 'any'}:n={hit_count}")
 
+
+
+# Everything below this point is the college calculator. On a ?tool= page we
+# render that tool instead and stop -- the sidebar is already hidden above, so
+# the page is that tool and nothing else.
+#
+# Each renderer takes always_open: a visitor who followed a link TO a tool
+# should not have to open an expander to reach it.
+if active_tool == "repayment":
+    render_existing_loan_comparison(always_open=True)
+elif active_tool == "schools":
+    render_school_search(always_open=True)
+if active_tool:
+    st.caption(
+        "Looking at whether a degree is worth borrowing for instead? "
+        "[Open the full calculator](./)."
+    )
+    # The other tools, so each standalone page is a way IN to the rest rather
+    # than a dead end. Only ever the ones this page is not.
+    _others = [f"[{t['label']}](./?tool={key})"
+               for key, t in STANDALONE_TOOLS.items() if key != active_tool]
+    if _others:
+        st.caption("Other tools: " + " · ".join(_others))
+    st.stop()
+
+st.info(
+    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
+    "anything. Everything below updates instantly as you change it, no button to click."
+)
+
+# Collapsed on purpose. This app's whole premise is that real numbers are on
+# screen before you touch anything -- there is deliberately no "calculate"
+# button -- so a guide that interrupts that is worse than no guide. Costs
+# nothing to a visitor who doesn't want it, one click for one who's lost.
+# The st.info above is the one-second version; this is the sixty-second one.
+#
+# Aimed at a student landing cold. Before this, a first-time visitor got three
+# lines of orientation (title, disclaimer, the banner above) and everything
+# else was either a hover-only help= tooltip -- invisible on a phone -- or
+# 4,000 words of Methodology at the very bottom of the page.
+with st.expander("❓ New here? Start with this"):
+    st.markdown((
+        f"""
+**What this compares.** Two futures: you, after this major and this loan — and someone
+who skipped college, took no debt, and started working right away. Both adjusted for what
+it costs to live in your city. Everything on this page is some version of that one
+comparison.
+
+**What to do.** Pick your major and school on the left. Your loan fills in automatically
+from what graduates of that school typically borrow (**Simplified**); switch **Loan
+estimate** to **Detailed** to build it from your own cost and aid instead. Numbers update
+as you change them. Nothing is saved, there's no login, and you can't break it — try the
+majors you're actually deciding between. Don't know your real cost or family contribution?
+The **🎯 Get Your Real Numbers** section lower down links to two free official tools.
+
+**The two settings that change the answer most:**
+
+- **Choose by: Major or Career.** *Major* is what everyone who studied that subject
+  earns — including the {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs
+  that don't need a degree. *Career* is what people already doing that job earn, which
+  assumes you become one of them. Same nominal path, about $233,000 apart over 10 years.
+  Major is the honest default; Career is the richer data.
+- **ROI Horizon.** How far ahead to look. This matters more than it sounds: careers that
+  train before they earn look terrible at 10 years, because 10 years is mostly training.
+  Medicine comes out **$146,000 behind** a high school graduate at 10 years, and
+  **$3.5 million ahead** at 30. Same data. The only thing that changed is where you stop
+  counting.
+
+**Two senses of "worth it."** This does answer whether a major is worth it *financially* —
+whether the extra earnings beat the cost of the debt. That's the **"Is this debt worth it?"**
+verdict at the top. What it can't answer is whether it's worth it *to you*: a field you'd
+love for less money can easily beat a lucrative one you'd dread, and only you can weigh
+that trade. Every number here is also an average for a whole major, not a prediction about
+you personally. Sources and assumptions are in **📚 Methodology & Sources** at the bottom.
+        """
+    ).replace("$", r"\$"))
+
+# Reserved here, at the top of the page, so the Download PDF Report / Share
+# Scenario buttons render in this position even though the code that fills
+# them in runs much later (after the PDF bytes and share params are actually
+# computed) -- st.container() is position-anchored: content written into a
+# container later in the script still renders wherever the container was
+# first created, not wherever that code physically executes.
+top_actions_container = st.container()
+
+# The break-even verdict, anchored high on the page (same position-anchored
+# st.container() trick as top_actions_container above): it's the one output a
+# student can act on -- "is this debt worth it, yes or no" -- so it leads
+# rather than sitting under the ROI chart where it was easy to miss. Filled
+# from the single-scenario branch once the scenario is computed. Compare Mode
+# leaves it empty and shows a per-column verdict in each panel instead, since
+# a single top banner can't answer for two scenarios at once.
+breakeven_banner_container = st.container()
+
+# ---- 5a. Admin Analytics Dashboard: aggregation helpers -------------------
+
+def _admin_parse_dates(df: pd.DataFrame) -> pd.Series:
+    """usage_logs timestamps are ISO strings stamped in the visitor's own
+    timezone (now_local), so offsets vary row to row -- utc=True normalizes
+    them to one axis, errors='coerce' turns anything unparseable into NaT
+    rather than raising. Returns a Series of python dates aligned to df.index."""
+    return pd.to_datetime(df["timestamp"], utc=True, errors="coerce").dt.date
+
+
+def _admin_final_per_session(events_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per session_id -- the visitor's LAST scenario_events row (max
+    event_seq) -- so the breakdowns read as 'what each distinct visitor ended
+    up configuring', not raw event volume (a session that tried five majors
+    would otherwise count five times). Order by event_seq, never timestamp:
+    timestamps come from the visitor's own clock and can tie or run backwards."""
+    if events_df.empty or "session_id" not in events_df.columns:
+        return events_df
+    df = events_df.copy()
+    if "event_seq" in df.columns:
+        df["_seq"] = pd.to_numeric(df["event_seq"], errors="coerce").fillna(-1)
+        df = df.sort_values("_seq")
+    df = df.drop_duplicates(subset="session_id", keep="last")
+    return df.drop(columns=[c for c in ["_seq"] if c in df.columns])
+
+
+def _admin_count_table(df: pd.DataFrame, column: str, label: str,
+                        missing: str = "(none)") -> None:
+    """value_counts on one column, rendered via render_centered_table. NULL or
+    empty values fold into `missing` (newly-logged columns are all-NULL on
+    historical rows, so this is the common case at first). Emits a 'No data
+    yet' caption and returns when the column is absent or the frame is empty."""
+    if df.empty or column not in df.columns:
+        st.caption("No data yet.")
+        return
+    series = df[column].astype("object").where(df[column].notna(), missing)
+    series = series.replace("", missing)
+    counts = series.value_counts().reset_index()
+    counts.columns = [label, "Count"]
+    render_centered_table(counts)
+
+
+def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
+    """Distinct session_ids across the union of the given tables -- the funnel
+    counts visitors, not rows, and a visitor can appear in several tables."""
+    parts = [d["session_id"] for d in dfs if not d.empty and "session_id" in d.columns]
+    if not parts:
+        return 0
+    return int(pd.concat(parts, ignore_index=True).dropna().nunique())
+
+
+# ---- 5a. Admin Analytics Dashboard (hidden behind sidebar checkbox) ------
+
+if admin_enabled:
+    st.subheader("📊 Admin Analytics Dashboard")
+
+    # load_table_safe does select("*"); the columns= list is only the fallback
+    # frame's shape when a table can't be read, so it names what each panel needs.
+    usage_df = load_table_safe(
+        "usage_logs", columns=["timestamp", "action", "traffic_source", "session_id"])
+    events_df = load_table_safe(
+        "scenario_events",
+        columns=["timestamp", "session_id", "event_seq", "dataset_mode",
+                 "career_data_source", "loan_mode", "cc_mode_a", "scenario_a_major",
+                 "scenario_a_loan_amount", "scenario_a_repayment_strategy",
+                 "roi_horizon_years", "experiment_arm"])
+    pdf_downloads_df = load_table_safe("pdf_downloads", columns=["timestamp", "session_id"])
+    scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp", "session_id"])
+    survey_df = load_table_safe("survey_responses", columns=["timestamp", "session_id"])
+
+    # One row per distinct visitor's final configuration -- the basis for every
+    # "what visitors configured" breakdown below.
+    final_df = _admin_final_per_session(events_df)
+
+    # Pageviews and "everything logged" are separate numbers and were being
+    # conflated: the old single "Total App Interactions" was len(usage_df),
+    # i.e. every row of every kind -- pageviews, presurvey_shown, searches and
+    # the interaction: events -- which now reads as if it meant interactions in
+    # the specific sense those events introduced. Split, and both named for
+    # what they actually count.
+    # BOTH pageview actions: this metric answers "how many visits", and a
+    # repayment-page visit is a visit. The split is reported separately below
+    # rather than by quietly dropping one of them here.
+    _pageviews = usage_df[usage_df["action"].isin(PAGEVIEW_ACTIONS)] if (
+        not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
+    # Per-tool landings, so a new standalone page shows up here without an edit.
+    _tool_views = {
+        t["label"]: int((usage_df["action"] == t["action"]).sum())
+        for t in STANDALONE_TOOLS.values()
+    } if (not usage_df.empty and "action" in usage_df.columns) else {}
+    _visits = (int(_pageviews["session_id"].dropna().nunique())
+               if "session_id" in _pageviews.columns else 0)
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    # Unique visits as the delta rather than a sixth column: the two numbers
+    # only mean anything read together, and they differ for two reasons worth
+    # seeing side by side (see the caption).
+    col1.metric("Pageviews", len(_pageviews),
+                delta=f"{_visits} unique visits", delta_color="off")
+    col2.metric("Logged Events", len(usage_df))
+    col3.metric("Survey Responses", len(survey_df))
+    col4.metric("PDF Downloads", len(pdf_downloads_df))
+    col5.metric("Scenario Shares", len(scenario_shares_df))
+    st.caption(
+        "**Pageviews** counts every landing action -- `pageview` (the calculator) "
+        "plus one per standalone tool ("
+        + ", ".join(f"{label}: {n}" for label, n in _tool_views.items())
+        + "). Each tool is logged separately because they are different "
+        "populations asking different questions, but a visit is a visit, so this "
+        "total counts all of them. "
+        "**Unique visits** de-duplicates "
+        "them by session. They diverge for two reasons, neither of them traffic: "
+        "rows written before `session_id` existed cannot be de-duplicated at all "
+        f"({int(usage_df['session_id'].isna().sum()) if not usage_df.empty and 'session_id' in usage_df.columns else 0} "
+        "of them), and until 2026-08-01 a real browser logged **two** pageviews "
+        "per visit — a race between the write and its guard, since fixed. Both "
+        "inflate the left number only. **Logged Events** is every row of every "
+        "kind, which is what this panel used to call \"App Interactions\"."
+    )
+
+    st.divider()
+
+    # (a) App interactions over time
+    st.markdown("#### 📈 App interactions over time")
+    _daily = _admin_parse_dates(usage_df).dropna() if (
+        not usage_df.empty and "timestamp" in usage_df.columns) else pd.Series([], dtype=object)
+    if _daily.empty:
+        st.caption("No data yet.")
+    else:
+        by_day = _daily.value_counts().sort_index()
+        chart_df = pd.DataFrame({"Interactions": by_day.values},
+                                index=pd.to_datetime(list(by_day.index)))
+        st.bar_chart(chart_df)
+
+    # (b) App interactions by traffic source (?src= tag)
+    st.markdown("#### 🔗 Traffic by source")
+    st.caption(
+        "From the `?src=` tag on the link visitors arrived through; organic "
+        "visits carry none. **Sorted by pageviews** -- the reach a channel "
+        "actually delivered. *Unique visits* de-duplicates by session; *Logged "
+        "events* counts every row of every kind, so one engaged visitor can "
+        "outweigh several who bounced.\n\n"
+        "**Do not compare `(organic)`'s two columns.** Rows written before "
+        "`session_id` existed cannot be de-duplicated, and almost all of them "
+        "are organic -- so its unique-visit figure counts only the newer rows "
+        "while its pageview figure counts all of them. Tagged sources have no "
+        "such gap; where their two columns differ it is the pre-2026-08-01 "
+        "double-count, which is bounded and now fixed."
+    )
+    if usage_df.empty or "traffic_source" not in usage_df.columns:
+        st.caption("No data yet.")
+    else:
+        _src = usage_df.copy()
+        _src["Source"] = (_src["traffic_source"].astype("object")
+                           .where(_src["traffic_source"].notna(), "(organic)")
+                           .replace("", "(organic)"))
+        _pv_only = (_src[_src["action"].isin(PAGEVIEW_ACTIONS)]
+                if "action" in _src.columns else _src.iloc[0:0])
+        _by_src = pd.DataFrame({
+            "Pageviews": _pv_only.groupby("Source").size(),
+            "Unique visits": (_pv_only.groupby("Source")["session_id"].nunique()
+                               if "session_id" in _pv_only.columns else 0),
+            "Logged events": _src.groupby("Source").size(),
+        }).fillna(0).astype(int)
+        # Sort on pageviews, then unique visits: two channels with equal reach
+        # are not equally good, and the tie-break should favour the one that
+        # brought distinct people rather than repeat loads.
+        _by_src = (_by_src.sort_values(["Pageviews", "Unique visits"], ascending=False)
+                          .reset_index())
+        render_centered_table(_by_src)
+
+    st.divider()
+    st.markdown("#### 🎓 What visitors configured")
+    st.caption(f"One row per distinct visitor ({len(final_df)} sessions with a "
+               "scenario), taking each session's final selection.")
+
+    # (e) Major vs Career
+    st.markdown("**Chose by — Major vs Career**")
+    _admin_count_table(final_df, "dataset_mode", "Mode")
+
+    # (f) National vs California (Career mode only -- the radio is disabled in
+    # Major mode, so a Major-mode row's value is just the inert default)
+    st.markdown("**Wage dataset — National vs California**")
+    st.caption("Career mode only; Major mode has no geography, so those "
+               "sessions are excluded rather than counted as the default.")
+    _career_only = final_df[final_df["dataset_mode"] == DATASET_MODE_CAREER] if (
+        not final_df.empty and "dataset_mode" in final_df.columns) else final_df
+    _admin_count_table(_career_only, "career_data_source", "Dataset")
+
+    # (c) Community-college path
+    st.markdown("**Community-college path**")
+    _admin_count_table(final_df, "cc_mode_a", "CC mode")
+
+    # (d) Loan estimate -- amount ranges AND Simplified/Detailed mode
+    st.markdown("**Loan estimate — amount ranges**")
+    _amounts = pd.to_numeric(final_df["scenario_a_loan_amount"], errors="coerce").dropna() if (
+        not final_df.empty and "scenario_a_loan_amount" in final_df.columns) else pd.Series([], dtype=float)
+    if _amounts.empty:
+        st.caption("No data yet.")
+    else:
+        _bins = [-0.01, 0, 10_000, 25_000, 50_000, 100_000, float("inf")]
+        _labels = ["$0", "≤ $10k", "≤ $25k", "≤ $50k", "≤ $100k", "> $100k"]
+        _buckets = pd.cut(_amounts, bins=_bins, labels=_labels)
+        _table = _buckets.value_counts().reindex(_labels).fillna(0).astype(int).reset_index()
+        _table.columns = ["Loan amount", "Count"]
+        render_centered_table(_table)
+
+    st.markdown("**Loan estimate — Simplified vs Detailed**")
+    _admin_count_table(final_df, "loan_mode", "Loan mode")
+
+    st.divider()
+    st.markdown("#### 🔎 Other breakdowns")
+
+    # Top majors / careers chosen
+    st.markdown("**Top 10 majors / careers chosen**")
+    if final_df.empty or "scenario_a_major" not in final_df.columns or \
+            final_df["scenario_a_major"].dropna().empty:
+        st.caption("No data yet.")
+    else:
+        _top = final_df["scenario_a_major"].dropna().value_counts().head(10).reset_index()
+        _top.columns = ["Major / career", "Count"]
+        render_centered_table(_top)
+
+    # Repayment strategy
+    st.markdown("**Repayment strategy**")
+    _admin_count_table(final_df, "scenario_a_repayment_strategy", "Strategy")
+
+    # ROI horizon
+    st.markdown("**ROI horizon (years)**")
+    _admin_count_table(final_df, "roi_horizon_years", "Horizon (yrs)")
+
+    # Experiment arm (H2 randomised assignment)
+    st.markdown("**Experiment arm (H2 assignment)**")
+    _admin_count_table(final_df, "experiment_arm", "Arm")
+
+    # Engagement funnel -- distinct visitors reaching each stage
+    st.markdown("**Engagement funnel (distinct sessions)**")
+    _funnel = pd.DataFrame({
+        "Stage": ["Visited (pageviews)", "Configured a scenario",
+                  "Committed (PDF / share / survey)"],
+        "Sessions": [_admin_n_sessions(usage_df),
+                     _admin_n_sessions(events_df),
+                     _admin_n_sessions(pdf_downloads_df, scenario_shares_df, survey_df)],
+    })
+    render_centered_table(_funnel)
+
+    st.divider()
+
+# ---- 5b. School Data Lookup (local COA dataset + College Scorecard API) --
+# Cost of Attendance (in/out-of-state) comes from the local dataset built by
+# clean_college_scorecard.py, run against the real College Scorecard
+# institution file (data/college_coa_clean.csv, 5,000+ real schools).
+# Median debt is still fetched live, which works for any school regardless of local
+# dataset coverage. A matched school's COA also auto-fills that scenario's
+# per-year Cost of Attendance field (in-state or out-of-state, per the
+# In-State Student? checkbox) -- see _autofill_coa in section 2c.
 
 def render_school_lookup(container, school_name: str, label: str, unitid=None):
     """Render one scenario's school lookup (COA match + median debt) into a

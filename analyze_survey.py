@@ -733,7 +733,7 @@ def analyze_interactions(usage_df: pd.DataFrame):
     # "pageview_repayment", and a session that never touched the calculator is
     # still a session. Filtering on the bare string would silently shrink the
     # denominator every control's uptake is measured against.
-    _landings = usage_df["action"].isin(("pageview", "pageview_repayment"))
+    _landings = usage_df["action"].astype(str).str.startswith("pageview")
     sessions = set(usage_df.loc[_landings, "session_id"].dropna())
     if acts.empty:
         print(f"  0 of {len(sessions)} sessions touched any control")
@@ -802,15 +802,15 @@ def main():
         # visits in would divide by a population that was never asked and
         # report a falling response rate as if people had declined.
         pageviews = (usage_df["action"] == "pageview").sum()
-        repay_views = (usage_df["action"] == "pageview_repayment").sum()
+        tool_views = int((usage_df["action"].astype(str).str.startswith("pageview_")).sum())
         if pageviews:
             print(f"Total calculator pageviews logged: {pageviews}")
             print(f"Survey response rate: {len(df) / pageviews * 100:.1f}% of "
                   f"calculator pageviews (the survey is not shown on the "
                   f"repayment page)")
-        if repay_views:
-            print(f"Standalone repayment-page views: {repay_views} "
-                  f"(no survey shown; excluded from the rate above)")
+        if tool_views:
+            print(f"Standalone tool-page views: {tool_views} "
+                  f"(no survey shown on those pages; excluded from the rate above)")
     print("\nBy respondent role:")
     print(df["respondent_role"].value_counts().to_string())
     print("\nBy expected HS graduation year:")
