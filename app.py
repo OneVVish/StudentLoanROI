@@ -2852,6 +2852,28 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # OEWS geography at all), and the two are not the same fact. Making the
         # Career case explicit means NULL has exactly one meaning per mode:
         # "not applicable", never "national".
+        # Returning-student mode. student_mode is the one that changes what
+        # every OTHER column in this row means: a "Going back to school" row's
+        # earnings_premium is measured against baseline_salary_now, not against
+        # a high school graduate, and the two must never be pooled without
+        # conditioning on it.
+        "student_mode": student_mode,
+        "current_age": (int(st.session_state["current_age"])
+                         if is_returning and st.session_state.get("current_age") else None),
+        # NULL in returning mode until BOTH are entered -- the app deliberately
+        # keeps the old baseline until then, so NULL here means "still measured
+        # against a high school graduate", not "missing data".
+        "baseline_salary_now": (float(st.session_state["current_salary"])
+                                 if is_returning and returning_baseline_ready() else None),
+        "baseline_salary_in_10y": (float(st.session_state["salary_no_degree_10y"])
+                                    if is_returning and returning_baseline_ready() else None),
+        # Excluded from scenario_a_loan_amount and from the ROI by design; it
+        # moves payoff_age and the monthly payment only.
+        "existing_debt": (float(st.session_state.get("existing_debt", 0) or 0)
+                           if is_returning else None),
+        "payoff_age": payoff_age_for(
+            scenario_a, st.session_state.get("current_age") if is_returning else None,
+            program_years_for_major(major)),
         "wage_geography_level": (
             (MAJOR_DATA.get(major, {}).get("wage_geography_level") or "national")
             if dataset_mode == DATASET_MODE_CAREER else None),
