@@ -19,9 +19,9 @@ Run it:  python3 check_share_coverage.py     (exit 1 on an uncovered input)
 
 Two independent checks, because the two halves fail separately:
 
-  1. READ SIDE  -- every non-exempt widget `key=` is seeded from a
-     `get_shared_*` getter, either inline in the widget call (`value=`) or via
-     a `st.session_state.setdefault(key, get_shared_*(...))`.
+  1. READ SIDE  -- every non-exempt widget `key=` is seeded from a shared
+     param: a `get_shared_*` getter (inline in the widget call, or via a
+     `setdefault`), or an `apply_shared_flag("param", "key")` call.
   2. EMIT SIDE  -- every param name any `get_shared_*` call reads is actually
      emitted by `build_share_params`. Catches the reverse mistake: a getter
      added, the emit forgotten, so the link never carries what it reads.
@@ -190,6 +190,17 @@ def main() -> int:
         elif name.startswith("get_shared_") and node.args:
             if isinstance(node.args[0], ast.Constant):
                 read_params.add(node.args[0].value)
+
+        # apply_shared_flag("param", "session_key") is the OTHER seeding
+        # mechanism -- it reads st.query_params directly rather than through a
+        # get_shared_* getter, because it has to detect a value CHANGE to
+        # survive a same-tab URL edit. It seeds its key and reads its param
+        # just as truly, so the check must count both or it reports five wired
+        # inputs as unwired.
+        elif name == "apply_shared_flag" and len(node.args) >= 2:
+            if all(isinstance(a, ast.Constant) for a in node.args[:2]):
+                read_params.add(node.args[0].value)
+                setdefault_cov[node.args[1].value] = True
 
     # Every string key build_share_params puts in its dict, whether via the
     # literal, a params[...] assignment, or a .update({...}).
