@@ -173,12 +173,13 @@ _PHYSICIAN_TRAINING = {
     "unpaid_training_years": 4, "stipend_training_years": 3,
     "stipend_salary": 65000, "additional_training_debt": 205000,
 }
-for _title in [
+PHYSICIAN_TITLES = [
     "Anesthesiologists", "Cardiologists", "Emergency Medicine Physicians",
     "Family Medicine Physicians", "Neurologists", "Obstetricians and Gynecologists",
     "Ophthalmologists, Except Pediatric", "Orthopedic Surgeons, Except Pediatric",
     "Pediatric Surgeons", "Physicians, Pathologists", "Psychiatrists", "Radiologists",
-]:
+]
+for _title in PHYSICIAN_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_PHYSICIAN_TRAINING)
 
 # Dentists: 4 years of dental school. Debt is the ADA/ADEA 2024 Survey of
@@ -190,8 +191,26 @@ for _title in [
 _DENTIST_TRAINING = {
     "unpaid_training_years": 4, "additional_training_debt": 293900,
 }
-for _title in ["Oral and Maxillofacial Surgeons", "Prosthodontists", "Dentists, All Other Specialists"]:
+DENTIST_TITLES = ["Oral and Maxillofacial Surgeons", "Prosthodontists",
+                  "Dentists, All Other Specialists"]
+for _title in DENTIST_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_DENTIST_TRAINING)
+
+# Which professional program each of these paths attends, keying
+# data/professional_debt_clean.csv. Built from the same title lists above
+# rather than retyped, so a title added there cannot be forgotten here.
+#
+# The debt figures in CURATED_MAJOR_DATA and the two overlays above are now
+# NATIONAL FALLBACKS, used when the visitor has not named a school or the
+# school publishes no figure -- not "the figure the app uses". Where a school
+# is named, its own median replaces them and the spread is large: medical
+# school debt runs from $47,503 to $330,479 across schools.
+PROFESSIONAL_PROGRAM_BY_OCCUPATION = {
+    **{title: "medicine" for title in PHYSICIAN_TITLES},
+    **{title: "dentistry" for title in DENTIST_TITLES},
+    "Medicine": "medicine",
+    "Law": "law",
+}
 
 
 # BLS OEWS-sourced careers from data_pipeline.py's output, in the same
@@ -2431,12 +2450,17 @@ def get_annual_salary_for_year(major_name: str, year_index: int) -> float:
     return data["starting_salary"] * (1 + get_major_growth_rate(major_name)) ** practicing_year
 
 
-def get_effective_principal(major_name: str, loan_amount: float) -> float:
+def get_effective_principal(major_name: str, loan_amount: float,
+                             professional_debt: float = None) -> float:
     """The true total debt behind a major's salary, including any
     professional-school debt beyond the undergrad loan slider (e.g.
     Medicine's median medical school debt). Used as the actual loan
     principal AND the ROI% denominator -- see calculate_roi."""
-    return loan_amount + MAJOR_DATA[major_name].get("additional_training_debt", 0)
+    # professional_debt=None means "use the national figure" -- the pre-picker
+    # behaviour, and what analyze_model.py gets by not passing one.
+    if professional_debt is None:
+        professional_debt = MAJOR_DATA[major_name].get("additional_training_debt", 0)
+    return loan_amount + professional_debt
 
 
 def get_prestige_adjusted_major_name(major_name: str, tier_label: str) -> str:
@@ -3233,6 +3257,19 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", False)),
         "loan_mode": st.session_state.get("loan_mode", "Simplified"),  # Simplified / Detailed
         "cc_mode_a": cc_mode_a,                                         # none / fulltime / parttime
+        # The professional school, and the debt figure it produced. Both are
+        # needed: the name alone cannot be re-resolved later (the dataset is
+        # regenerated from new Scorecard releases), and the figure alone cannot
+        # say whether it was a school median or the national fallback.
+        # NULL means this path attends no professional school at all.
+        "prof_school_a": st.session_state.get("prof_school_a")
+                          if professional_program_for(major) else None,
+        "prof_school_b": st.session_state.get("prof_school_b")
+                          if compare_mode and professional_program_for(major_b) else None,
+        "professional_debt_a": resolve_professional_debt(
+            major, st.session_state.get("prof_school_a")) or None,
+        "professional_debt_b": (resolve_professional_debt(
+            major_b, st.session_state.get("prof_school_b")) or None) if compare_mode else None,
         # The horizon every roi_pct/earnings_premium below was computed over.
         # Without it those columns aren't comparable across rows: a 30-year
         # ROI and a 10-year ROI are different quantities wearing the same
@@ -3379,6 +3416,14 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     params["foregone"] = "1" if st.session_state.get("count_foregone_earnings") else "0"
     params["deps"] = str(st.session_state.get("rap_dependents", 0))
     params["legacy"] = "1" if st.session_state.get("enable_legacy_plans") else "0"
+    # Professional school. Only meaningful for the paths that attend one, so
+    # emitted only when set -- a link for Software Developers carrying an empty
+    # medical-school param would be noise.
+    if st.session_state.get("prof_school_a", PROFESSIONAL_SCHOOL_NATIONAL) != PROFESSIONAL_SCHOOL_NATIONAL:
+        params["prof_school"] = st.session_state["prof_school_a"]
+    if compare_mode and st.session_state.get(
+            "prof_school_b", PROFESSIONAL_SCHOOL_NATIONAL) != PROFESSIONAL_SCHOOL_NATIONAL:
+        params["prof_school_b"] = st.session_state["prof_school_b"]
     params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
     params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
     params["future"] = "1" if st.session_state.get("enable_future_proofing") else "0"
@@ -3725,6 +3770,10 @@ def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
 # dataset's current (small sample) coverage.
 
 COA_DATASET_PATH = "data/college_coa_clean.csv"
+PROFESSIONAL_DEBT_PATH = "data/professional_debt_clean.csv"
+# Label for the picker's first option -- the national fallback, named rather
+# than left blank so "no school chosen" cannot be mistaken for "no debt".
+PROFESSIONAL_SCHOOL_NATIONAL = "National average (no specific school)"
 
 
 @st.cache_data(show_spinner=False)
@@ -3742,6 +3791,126 @@ def load_coa_dataset() -> pd.DataFrame:
             "INSTNM", "STABBR", "control_type", "in_state_coa", "out_of_state_coa",
             "NPCURL", "UNITID", "CITY", "CURROPER", "DISTANCEONLY", "ADM_RATE",
         ] + [f"programs_{suffix}" for suffix, _ in CREDENTIAL_LEVELS.values()])
+
+
+@st.cache_data(show_spinner=False)
+def load_professional_debt() -> pd.DataFrame:
+    """Per-school median debt for medical, dental and law school
+    (build_professional_debt.py), or an empty frame when the file is absent so
+    a deploy without it loses a feature rather than a page -- the same contract
+    load_coa_dataset has.
+
+    NOTE this is a SEPARATE dataset from the undergraduate one and cannot be
+    replaced by it. college_coa_clean.csv drops any institution with no
+    undergraduate cost of attendance, which is every graduate-only school:
+    Icahn School of Medicine and Mayo Clinic have zero rows there. They are in
+    this file, which is the point.
+    """
+    try:
+        return pd.read_csv(PROFESSIONAL_DEBT_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=["UNITID", "INSTNM", "CONTROL", "control_type",
+                                     "CIPCODE", "CREDLEV", "program_key",
+                                     "debt_median", "debt_10yr_payment"])
+
+
+PROFESSIONAL_SCHOOL_LABEL = {
+    "medicine": "Medical school",
+    "law": "Law school",
+    "dentistry": "Dental school",
+}
+
+
+def professional_debt_caption(major_name: str, school_name: str, debt: float) -> str:
+    """One line saying which figure is in play and where it came from.
+
+    Shared by the sidebar and both result branches: the number changes the
+    whole loan, so a visitor must be able to see whether they are looking at
+    their school's median or a national average, without opening Methodology.
+    """
+    if not debt:
+        return ""
+    national = national_professional_debt(major_name)
+    if not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL:
+        return (f"Using the national average of {fmt_money(national)} for "
+                f"{'medical' if professional_program_for(major_name) == 'medicine' else 'this'} "
+                "school debt. Pick your school to use its own figure.")
+    delta = debt - national
+    direction = "above" if delta > 0 else "below"
+    over_cap = max(debt - PROFESSIONAL_AGGREGATE_LIMIT, 0)
+    text = (f"{fmt_money(debt)} median debt at {school_name} — "
+            f"{fmt_money(abs(delta))} {direction} the national average.")
+    if over_cap > 0:
+        # The part that cannot be a federal loan at all is the actionable half
+        # of this number, and it is invisible in the median itself.
+        text += (f" {fmt_money(over_cap)} of it is above the "
+                 f"{fmt_money(PROFESSIONAL_AGGREGATE_LIMIT)} federal cap and would be "
+                 "private borrowing.")
+    return text
+
+
+def render_professional_debt_caption(major_name, school_name, debt, container=None) -> None:
+    text = professional_debt_caption(major_name, school_name, debt)
+    if text:
+        (container or st).caption(text.replace("$", chr(92) + "$"))
+
+
+def professional_program_for(major_name: str):
+    """The program key ("medicine"/"law"/"dentistry") this occupation attends,
+    or None if it needs no professional school."""
+    return PROFESSIONAL_PROGRAM_BY_OCCUPATION.get(major_name)
+
+
+def professional_schools_for(program_key: str) -> list:
+    """School names offering this program, for the picker's option list."""
+    if not program_key:
+        return []
+    df = load_professional_debt()
+    if df.empty:
+        return []
+    return sorted(df[df["program_key"] == program_key]["INSTNM"].dropna().unique())
+
+
+def national_professional_debt(major_name: str) -> float:
+    """The hand-curated national figure for this path -- AAMC/ABA/ADEA. The
+    fallback whenever no school is named or the named school publishes none."""
+    try:
+        return float(MAJOR_DATA.get(major_name, {}).get("additional_training_debt", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def resolve_professional_debt(major_name: str, school_name: str = None) -> float:
+    """What this path's professional school actually costs to finance.
+
+    The named school's median where there is one, else the national constant.
+    Every consumer must take the value from HERE and from nowhere else: the
+    model reads this debt in three independent places
+    (get_effective_principal, professional_debt_cap, and split_loan_financing's
+    professional_principal), and if any one of them re-derives it the loan, the
+    federal cap and the tranche split describe different debts. That failure is
+    silent and it flatters the result.
+
+    A missing or privacy-suppressed school must fall back to the national
+    figure, never to zero: professional_debt_cap treats a falsy debt as "no
+    professional tranche" and returns a cap of 0.0, which split_loan_financing
+    reads as a real cap rather than "unset" -- pushing the whole tranche to
+    private while the principal simultaneously loses the debt. Two different
+    wrong answers from one absent row. Suppressed schools are dropped at build
+    time so they never reach the picker, and this is the second line of defence.
+    """
+    national = national_professional_debt(major_name)
+    program_key = professional_program_for(major_name)
+    if not program_key or not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL:
+        return national
+    df = load_professional_debt()
+    if df.empty:
+        return national
+    match = df[(df["program_key"] == program_key) & (df["INSTNM"] == school_name)]
+    if match.empty:
+        return national
+    value = pd.to_numeric(match.iloc[0]["debt_median"], errors="coerce")
+    return float(value) if pd.notna(value) and value > 0 else national
 
 
 def search_schools_by_budget(cip_family: str, credential: str,
@@ -4790,7 +4959,7 @@ def parent_plus_cap(schedule: list, dependency: str, start_year: int = None) -> 
     return min(total, PARENT_PLUS_AGGREGATE_LIMIT)
 
 
-def professional_debt_cap(major_name: str) -> float:
+def professional_debt_cap(major_name: str, professional_debt: float = None) -> float:
     """How much of a major's `additional_training_debt` can be borrowed from
     the federal government, post-OBBBA: $50,000 per year of professional school
     (its `unpaid_training_years`), bounded by the $200,000 aggregate.
@@ -4814,7 +4983,8 @@ def professional_debt_cap(major_name: str) -> float:
     updated 2026-07-30.]
     """
     entry = MAJOR_DATA.get(major_name, {})
-    debt = entry.get("additional_training_debt", 0)
+    debt = (entry.get("additional_training_debt", 0)
+            if professional_debt is None else professional_debt)
     if not debt:
         return 0.0
     years = entry.get("unpaid_training_years", 0)
@@ -5105,6 +5275,7 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               federal_cap: float = None, gap_rate: float = None,
                               plus_cap: float = None,
                               dependents: int = 0,
+                              professional_debt: float = None,
                               include_fees: bool = False,
                               baseline_salary_now: float = None,
                               baseline_salary_in_10y: float = None,
@@ -5136,7 +5307,12 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     and isn't. Note the repayment *strategy* named "Standard 10-Year" is a
     real 10-year loan term and is unrelated to this window.
     """
-    effective_principal = get_effective_principal(major_name, loan_amount)
+    # Resolved once, here, and passed to all three consumers. See
+    # resolve_professional_debt: re-deriving it in any of them makes the
+    # principal, the federal cap and the tranche split describe different debts.
+    _professional_debt = (professional_debt if professional_debt is not None
+                          else MAJOR_DATA.get(major_name, {}).get("additional_training_debt", 0))
+    effective_principal = get_effective_principal(major_name, loan_amount, _professional_debt)
     total_investment = effective_principal + personal_contribution
     # Cap-and-gap financing (Option A): when a federal Direct cap and a gap rate
     # are supplied (Detailed mode), split the loan into the capped federal
@@ -5150,9 +5326,8 @@ def compute_scenario_results(major_name: str, loan_amount: float,
             # Derived here rather than threaded through every caller: this
             # function already knows the major, and get_effective_principal
             # above folded that debt into the principal a line earlier.
-            professional_principal=MAJOR_DATA.get(major_name, {}).get(
-                "additional_training_debt", 0),
-            professional_cap=professional_debt_cap(major_name),
+            professional_principal=_professional_debt,
+            professional_cap=professional_debt_cap(major_name, _professional_debt),
             professional_rate=PROFESSIONAL_DIRECT_RATE)
         principal_for_repayment = financing["financed_principal"]
         rate_for_repayment = financing["blended_rate"]
@@ -5331,6 +5506,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          working_years: int = 0,
                          baseline_start_age: int = None,
                          federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
+                         professional_debt: float = None,
                          include_fees: bool = False,
                          baseline_salary_now: float = None,
                          baseline_salary_in_10y: float = None) -> dict:
@@ -5393,7 +5569,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             enrollment_years=enrollment_years,
             working_years=working_years,
             baseline_start_age=baseline_start_age,
-            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, include_fees=include_fees,
+            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees,
             # The same baseline the ROI used. Without this the break-even would
             # be solved against the high-school-graduate curve while the premium
             # beside it used the visitor's own salary -- two numbers on one
@@ -5427,6 +5603,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        working_years: int = 0,
                        baseline_start_age: int = None,
                        federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
+                         professional_debt: float = None,
                        include_fees: bool = False,
                        baseline_salary_now: float = None,
                        baseline_salary_in_10y: float = None) -> dict:
@@ -5463,7 +5640,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   enrollment_years=enrollment_years,
                                   working_years=working_years,
                                   baseline_start_age=baseline_start_age,
-                                  federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents,
+                                  federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt,
                                   include_fees=include_fees,
                                   baseline_salary_now=baseline_salary_now,
                                   baseline_salary_in_10y=baseline_salary_in_10y)
@@ -7131,6 +7308,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                                 roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None,
                                 loan_source_a: str = "personal",
                                 federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
+                                professional_debt_a: float = None,
                                 include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
@@ -7298,6 +7476,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
+        professional_debt=professional_debt_a,
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
             **breakeven_kwargs())
     story += _pdf_breakeven_block(breakeven, styles)
@@ -7355,7 +7534,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  loan_source_a: str = "personal",
                                  loan_source_b: str = "personal",
                                  federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
-                                 federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None,
+                                professional_debt_a: float = None,
+                                 federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None, professional_debt_b: float = None,
                                  include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, per-scenario break-even, plus the
@@ -7417,6 +7597,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_a["enrollment_years"],
                               working_years=scenario_a["working_years"],
                               baseline_start_age=scenario_a["baseline_start_age"],
+                              professional_debt=professional_debt_a,
                               federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario A"),
@@ -7441,6 +7622,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_b["enrollment_years"],
                               working_years=scenario_b["working_years"],
                               baseline_start_age=scenario_b["baseline_start_age"],
+                              professional_debt=professional_debt_b,
                               federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=dependents, include_fees=include_fees,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario B"),
@@ -8745,6 +8927,44 @@ major = st.sidebar.selectbox(
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
 )
+# Which medical/dental/law school, for the paths that attend one. Placed here
+# for the same reason as the salary override below -- it needs the chosen
+# occupation -- and it must resolve BEFORE
+# get_prestige_adjusted_major_name further down rewrites `major` to
+# "Family Medicine Physicians (Tier 1)", which no occupation lookup matches.
+#
+# Hidden in prestige mode: that mode replaces the school with a tier label and
+# skips the Scorecard lookup entirely, so there is no school to name.
+_program_key_a = None if enable_prestige_mode else professional_program_for(major)
+professional_debt_a = None
+if _program_key_a:
+    _prof_options_a = [PROFESSIONAL_SCHOOL_NATIONAL] + professional_schools_for(_program_key_a)
+    # Re-pin when the program changes, or a medical school rides along into a
+    # law scenario -- and worse, a stored value absent from the new options
+    # makes Streamlit RAISE on a keyed widget (the reconcile_cc_mode trap).
+    st.session_state.setdefault("prof_school_a",
+                                get_shared_default("prof_school", PROFESSIONAL_SCHOOL_NATIONAL))
+    # Seed the memory from the link's own program so a fresh visit counts as
+    # "no change" -- otherwise the re-pin below fires on the first render and
+    # discards ?prof_school=, the trap _salary_override_major closes for ?sso=.
+    st.session_state.setdefault("_prof_program_a", _program_key_a)
+    if (st.session_state["_prof_program_a"] != _program_key_a
+            or st.session_state["prof_school_a"] not in _prof_options_a):
+        st.session_state["prof_school_a"] = PROFESSIONAL_SCHOOL_NATIONAL
+    st.session_state["_prof_program_a"] = _program_key_a
+    st.sidebar.selectbox(
+        PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
+        key="prof_school_a", on_change=lambda: mark_interaction("prof_school_a"),
+        help="Median debt that this school's graduates leave with, from College "
+             "Scorecard. It replaces the national average, and the spread is "
+             "wide -- medical school debt runs from about $48,000 to $330,000 "
+             "depending on where you go. Leave on the national average if you "
+             "don't know yet. See Methodology.",
+    )
+    professional_debt_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
+    render_professional_debt_caption(major, st.session_state["prof_school_a"],
+                                      professional_debt_a, st.sidebar)
+
 # Returning students only. Placed here because it needs the chosen major to
 # pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
 # apply_starting_salary_override rewrites the entry the whole model reads
@@ -9051,6 +9271,33 @@ if compare_mode:
                  "box and type part of your major or career to jump "
                  "straight to it.",
         )
+        # Scenario B's own professional school -- A and B can be different
+        # careers, so it cannot share A's picker. Same placement rule: before
+        # get_prestige_adjusted_major_name rewrites major_b further down.
+        _program_key_b = None if enable_prestige_mode else professional_program_for(major_b)
+        professional_debt_b = None
+        if _program_key_b:
+            _prof_options_b = [PROFESSIONAL_SCHOOL_NATIONAL] + professional_schools_for(_program_key_b)
+            st.session_state.setdefault(
+                "prof_school_b",
+                get_shared_default("prof_school_b", PROFESSIONAL_SCHOOL_NATIONAL))
+            st.session_state.setdefault("_prof_program_b", _program_key_b)
+            if (st.session_state["_prof_program_b"] != _program_key_b
+                    or st.session_state["prof_school_b"] not in _prof_options_b):
+                st.session_state["prof_school_b"] = PROFESSIONAL_SCHOOL_NATIONAL
+            st.session_state["_prof_program_b"] = _program_key_b
+            st.selectbox(
+                PROFESSIONAL_SCHOOL_LABEL[_program_key_b], _prof_options_b,
+                key="prof_school_b", on_change=lambda: mark_interaction("prof_school_b"),
+                help="Median debt this school's graduates leave with (College "
+                     "Scorecard). Comparing two schools for the same career is "
+                     "what this control is for.",
+            )
+            professional_debt_b = resolve_professional_debt(
+                major_b, st.session_state["prof_school_b"])
+            render_professional_debt_caption(
+                major_b, st.session_state["prof_school_b"], professional_debt_b)
+
         typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
         if typical_education_b in MISMODELLED_EDUCATION_LEVELS:
             st.caption((
@@ -10451,6 +10698,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            col_index: float, career_data_source_name: str,
                            hs_wage_index: float = 1.0,
                            federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
+                         professional_debt: float = None,
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
                            loan_basis: str = None, program_years: int = None,
@@ -10538,7 +10786,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             personal_contribution=scenario["personal_contribution"],
             enrollment_years=scenario["enrollment_years"],
             baseline_start_age=scenario["baseline_start_age"],
-            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, include_fees=include_fees,
+            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees,
             **breakeven_kwargs())
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
@@ -10812,7 +11060,7 @@ if compare_mode:
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                           federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
+                                           federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
                                            **returning_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
@@ -10821,7 +11069,7 @@ if compare_mode:
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, include_fees=True,
+                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
                                            **returning_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
@@ -10837,7 +11085,7 @@ if compare_mode:
         loan_amount, interest_rate, repayment_strategy,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_a, program_years=program_years_a,
         current_age=st.session_state.get("current_age") if is_returning else None,
@@ -10847,7 +11095,7 @@ if compare_mode:
         loan_amount_b, interest_rate_b, repayment_strategy_b,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, include_fees=True,
+        federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_b, program_years=program_years_b,
         current_age=st.session_state.get("current_age") if is_returning else None,
@@ -10948,8 +11196,8 @@ if compare_mode:
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
         cc_info_b=_cc_info_for_pdf(cc_mode_b, cc_state_key_b, effective_cc_coa_per_year_b, cc_oop_b, cc_years_b),
         loan_source_a=loan_source_a, loan_source_b=loan_source_b,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents,
-        federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, include_fees=True,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a,
+        federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, include_fees=True,
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
@@ -11002,7 +11250,7 @@ else:
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
+                                         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
                                            **returning_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
@@ -11184,7 +11432,7 @@ else:
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
             **breakeven_kwargs())
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
@@ -11258,7 +11506,7 @@ else:
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
         loan_source_a=loan_source_a,
         loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, include_fees=True,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, include_fees=True,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     )
     with top_actions_container:
@@ -11506,7 +11754,7 @@ Questions about the research? Contact **veervish11@gmail.com**.
                                                        enrollment_years=enrollment_years_a,
                                                        working_years=working_years_a,
                                                        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                                       federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
+                                                       federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
                                                **returning_kwargs())
                 # major_b/loan_amount_b/etc. only exist as script variables when
                 # compare_mode is on (they're assigned inside that sidebar
@@ -11522,7 +11770,7 @@ Questions about the research? Contact **veervish11@gmail.com**.
                                                            enrollment_years=enrollment_years_b,
                                                            working_years=working_years_b,
                                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, include_fees=True,
+                                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
                                                **returning_kwargs())
                     compare_mode_kwargs = dict(
                         compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
@@ -11678,12 +11926,14 @@ right away:
   pay, which actually rises a bit each year — simplified here to one
   number; source: AAMC's 2024 median first-year resident stipend). After
   that, the real Family Medicine Physician salary from the table above
-  kicks in. On top of your loan, we add **$205,000** — the median amount
-  medical school itself costs, according to AAMC's 2024 data
+  kicks in. On top of your loan we add medical school's own debt — **your
+  school's median if you name one in the sidebar**, otherwise a national
+  **$205,000** from AAMC's 2024 data
   ([source](https://www.aamc.org/data-reports/students-residents/report/physician-education-debt-and-cost-attend-medical-school)).
 - **Law**: 3 years with no income (law school), then the real Lawyer
-  salary from the table above kicks in. We add **$130,000** on top of your
-  loan for average law school debt, from the ABA's 2024 survey
+  salary from the table above kicks in. We add law school's debt on top of
+  your loan — your school's median where you name one, otherwise a national
+  **$130,000** from the ABA's 2024 survey
   ([source](https://www.americanbar.org/groups/young_lawyers/resources/after-the-bar/personal-financial/young-lawyers-significantly-impacted-by-high-debt-burdens/)).
 
 During those unpaid years, this calculator shows $0 income — and any loan
@@ -12139,12 +12389,46 @@ professional study, and there is nothing federal behind it. So that debt is now
 split at its own cap, at the published graduate/professional Direct rate
 (8.07%), with the remainder private:
 
-- **Medicine** — $205,000 of median medical school debt against 4 years ×
-  $50,000, capped at the $200,000 aggregate: **$5,000 private**.
-- **Dentistry** — $293,900 against the same $200,000 ceiling: **$93,900
-  private**, the largest federal shortfall of any path here.
-- **Law** — $130,000 against 3 years × $50,000 = $150,000: **fits entirely**,
-  nothing private.
+Against the national averages that gives **$5,000 private** for Medicine
+($205,000 vs a $200,000 ceiling), **$93,900** for Dentistry ($293,900), and
+nothing for Law ($130,000 against 3 × $50,000 = $150,000). **Name your actual
+school in the sidebar and these change**, often a lot: across the schools that
+publish a figure, **43% of medical and 78% of dental schools** sit above the
+$200,000 ceiling, so for many the private share is larger than the national
+average implies — and for some it is nothing at all.
+
+**Where the school-specific figures come from.** College Scorecard publishes
+cumulative debt at graduation for each school × field of study × credential
+level. This app uses the **First Professional** level for medicine, law and
+dentistry — 381 schools that publish a figure. The definition is the one this
+model needs: *"cumulative loan debt only includes loans disbursed at the same
+academic level as the evaluated credential level"*, so it is graduate borrowing
+only and excludes the undergraduate loan charged separately above. It measures
+what graduates actually **borrowed**, not what the school charges, so it is
+already net of scholarships and family money — which is why Harvard's medical
+school shows **$99,160** against a $205,000 national average, and why the
+overall range runs from about **$48,000 to $330,000**.
+
+Three limits worth knowing:
+
+- **These medians include Grad PLUS**, which OBBBA abolished on July 1, 2026.
+  So every figure describes borrowing that a student starting now **cannot
+  replicate federally** — the app applies the new $200,000 ceiling to it and
+  shows the excess as private, which is the honest translation, but the
+  underlying number came from a world with a loan that no longer exists.
+- **Not every school publishes one.** Small programs are privacy-suppressed —
+  Yale Law is one — so they are absent from the picker and fall back to the
+  national average rather than showing a wrong number.
+- **The data is pooled across award years and is a few years old.** Treat it as
+  a reliable signal of how schools differ *from each other*, and a rough one
+  for the exact dollar figure.
+[Source: College Scorecard, Most Recent Data by Field of Study, released
+June 10, 2026](https://collegescorecard.ed.gov/data/).
+
+There is **no graduate cost-of-attendance** anywhere in College Scorecard —
+`COSTT4_A` and the tuition fields are undergraduate figures — which is why this
+uses debt rather than cost. The undergraduate Cost of Attendance in the sidebar
+prices the bachelor's degree only.
 
 The aggregate covers graduate and professional study only — undergraduate
 borrowing does not count against it, though the pre-OBBBA $138,500 limit it
