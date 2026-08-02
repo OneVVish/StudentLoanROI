@@ -4879,6 +4879,15 @@ def _merge_balance_schedules(a, b, a_flat=0.0, b_flat=0.0):
     still owes something -- otherwise a combined schedule would report the
     income-driven payment alone as if the private loan cost nothing.
     """
+    # Deduplicate on month before indexing. The IDR and RAP simulators append a
+    # closing zero-balance row at max_months when the term runs out and the
+    # remainder is forgiven -- and when the loop itself already emitted that
+    # month, the schedule carries it twice. Reindexing on a duplicated label
+    # raises, so this crashed for exactly the scenarios where forgiveness
+    # happens, which is the case the split exists to model. keep="last" takes
+    # the closing row, which is the post-forgiveness balance.
+    a = a.drop_duplicates(subset="month", keep="last")
+    b = b.drop_duplicates(subset="month", keep="last")
     months = sorted(set(a["month"]).union(set(b["month"])))
 
     def balances(df):
