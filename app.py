@@ -7132,12 +7132,24 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
                        personal_contribution_per_year, grants_per_year,
                        interest_rate_pct, repayment_strategy_label,
                        city_name=None, start_year=None,
-                       cc_info=None, loan_source: str = "personal") -> list:
+                       cc_info=None, loan_source: str = "personal",
+                       professional_school=None, professional_debt=None) -> list:
     rows = [
         ["Profession", major_name],
         ["School", school_name or "(not entered)"],
         ["In-State", "Yes" if in_state else "No"],
     ]
+    # The professional school is a second, separate school -- the "School" row
+    # above is the undergraduate one. Naming only that would let a report show
+    # UC Berkeley beside $99,160 of Harvard medical school debt with nothing
+    # saying so.
+    _prof_program = professional_program_for(major_name)
+    if _prof_program and professional_debt:
+        _label = PROFESSIONAL_SCHOOL_LABEL[_prof_program]
+        if professional_school and professional_school != PROFESSIONAL_SCHOOL_NATIONAL:
+            rows.append([_label, f"{professional_school} — {fmt_money(professional_debt)} median debt"])
+        else:
+            rows.append([_label, f"National average — {fmt_money(professional_debt)}"])
     if city_name is not None:
         rows.append(["City / Metro Area", city_name])
     if start_year is not None:
@@ -7309,6 +7321,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                                 loan_source_a: str = "personal",
                                 federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
                                 professional_debt_a: float = None,
+                                professional_school_a: str = None,
                                 include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
@@ -7375,7 +7388,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
                                interest_rate, repayment_strategy, city,
-                               start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a),
+                               start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a,
+                               professional_school=professional_school_a,
+                               professional_debt=professional_debt_a),
             header=False, full_width=True,
         ),
         PageBreak(),
@@ -7535,7 +7550,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  loan_source_b: str = "personal",
                                  federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
                                 professional_debt_a: float = None,
-                                 federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None, professional_debt_b: float = None,
+                                professional_school_a: str = None,
+                                 federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None, professional_debt_b: float = None, professional_school_b: str = None,
                                  include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, per-scenario break-even, plus the
@@ -7579,7 +7595,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             _pdf_profile_rows(major, school_name_a, in_state_a, coa_per_year_a,
                                personal_contribution_per_year_a, grants_per_year_a,
                                interest_rate, repayment_strategy, city_name=city,
-                               start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a),
+                               start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a,
+                               professional_school=professional_school_a,
+                               professional_debt=professional_debt_a),
             header=False, full_width=True,
         ),
         Spacer(1, 6),
@@ -7607,7 +7625,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             _pdf_profile_rows(major_b, school_name_b, in_state_b, coa_per_year_b,
                                personal_contribution_per_year_b, grants_per_year_b,
                                interest_rate_b, repayment_strategy_b, city_name=city,
-                               start_year=start_year_b, cc_info=cc_info_b, loan_source=loan_source_b),
+                               start_year=start_year_b, cc_info=cc_info_b, loan_source=loan_source_b,
+                               professional_school=professional_school_b,
+                               professional_debt=professional_debt_b),
             header=False, full_width=True,
         ),
         Spacer(1, 6),
@@ -11196,8 +11216,8 @@ if compare_mode:
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
         cc_info_b=_cc_info_for_pdf(cc_mode_b, cc_state_key_b, effective_cc_coa_per_year_b, cc_oop_b, cc_years_b),
         loan_source_a=loan_source_a, loan_source_b=loan_source_b,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a,
-        federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, include_fees=True,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'),
+        federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, professional_school_b=st.session_state.get('prof_school_b'), include_fees=True,
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
@@ -11506,7 +11526,7 @@ else:
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
         loan_source_a=loan_source_a,
         loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, include_fees=True,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'), include_fees=True,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     )
     with top_actions_container:
