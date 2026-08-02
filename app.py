@@ -4650,11 +4650,20 @@ def professional_debt_cap(major_name: str) -> float:
     Zero-length or absent training means no professional tranche, and the
     caller falls back to treating the whole loan as undergraduate.
 
-    Which programs count as "professional" is currently unsettled -- a
-    2026-06-24 court order preliminarily stayed part of ED's professional-degree
-    definition -- but the three groups this app models (physicians, dentists,
-    lawyers) are the uncontested core of it. Anything at the margin of that
-    definition would need its own entry here, not a silent default.
+    Medicine (M.D.), Dentistry (D.D.S./D.M.D.) and Law (LL.B./J.D.) -- the three
+    groups this app models -- are on ED's ORIGINAL 11-field professional-degree
+    list AND on the expanded list the 2026-06-24 court stay temporarily added,
+    so they qualify under either outcome of the litigation. That is why the cap
+    can be applied to them unconditionally.
+
+    Programs at the margin are a different matter: the stay temporarily brought
+    in Nursing (M.S.N./D.N.P.), Physical and Occupational Therapy, Athletic
+    Training, the psychology doctorates and others, and ED is appealing. If the
+    appeal succeeds the list reverts to the original 11. Any such program would
+    need its own entry here with its own program length -- never a silent
+    default, because the answer changes with the case.
+    [Source: NASFAA, "Temporary Changes to Professional Student Loan Limits",
+    updated 2026-07-30.]
     """
     entry = MAJOR_DATA.get(major_name, {})
     debt = entry.get("additional_training_debt", 0)
@@ -11862,11 +11871,24 @@ caps above already keep every path in this app well below.
 [Source: studentaid.gov, OBBBA – Important Definitions, "Professional students"
 tables](https://studentaid.gov/announcements-events/big-updates/definitions).
 
-*Worth knowing:* which programs count as "professional" is unsettled — a
-**June 24, 2026** court order preliminarily stayed part of the Department of
-Education's professional-degree definition, so some programs move in and out of
-that category for the duration. Medicine, dentistry and law are the
-uncontested core of it and are what this app models.
+*Worth knowing:* which programs count as "professional" is partly unsettled.
+The Department of Education initially limited it to **11 fields**; on **June 24,
+2026** a court stayed part of that definition and temporarily expanded the list
+to include nursing (M.S.N./D.N.P.), physical and occupational therapy, athletic
+training, the psychology doctorates and others. The Department is appealing,
+final briefing is due **December 4**, and if the stay is lifted the list reverts
+to the original 11. **Medicine, dentistry and law appear on both lists**, so the
+figures above hold either way — but a student in one of the temporarily-added
+programs could see their limit fall back to the graduate $20,500/year, possibly
+mid-year. NASFAA's guidance is to have a backup plan before borrowing the full
+$50,000 on the strength of the stay.
+[Source: NASFAA, "Temporary Changes to Professional Student Loan Limits", updated
+July 30, 2026](https://www.nasfaa.org/uploads/documents/OB3_Temp_Changes_Prof_Degree.pdf).
+
+*One more ceiling this app can't see:* $50,000/year is the federal maximum, not
+an entitlement — **schools may set their own lower limits** for a program, and
+have the authority to do so. The model assumes the full amount is available, so
+where a school caps it lower the private shortfall is larger than shown.
 
 *A simplification worth knowing:* both non-federal tranches are priced at your
 single **Gap financing rate**. Real private loans are credit-priced and
