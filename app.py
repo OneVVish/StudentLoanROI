@@ -11179,9 +11179,27 @@ def render_school_search() -> None:
             help="Public schools charge residents far less. Without this, every "
                   "school is priced at its higher out-of-state rate.",
         )
+        # Default the state filter to where the visitor lives. Without it the
+        # search spans every state, and since results are the CHEAPEST 50 of
+        # however many match, an expensive-but-obvious school could never
+        # appear: 751 US schools award an engineering bachelor's, the 50
+        # cheapest all cost under $24,602, and a Californian searching
+        # engineering therefore never saw a single UC campus -- all nine are in
+        # the data and all nine offer it. Scoping to one state takes 751 to
+        # about 40 and the cap stops binding at all.
+        #
+        # setdefault, not a forced value: it seeds the first render and then
+        # leaves the control alone, so clearing it to search nationally sticks.
+        _home = st.session_state.get("search_home_state")
+        if _home:
+            st.session_state.setdefault("search_states", [_home])
         states = states_col.multiselect(
             "Limit to states (optional)", all_states, key="search_states",
-            on_change=lambda: mark_interaction("search_states"))
+            on_change=lambda: mark_interaction("search_states"),
+            help="Defaults to your home state, where public schools charge you "
+                  "the resident rate. Clear it to search the whole country -- "
+                  "results are the cheapest matches, so a national search "
+                  "surfaces low-cost schools rather than well-known ones.")
 
         family = st.session_state.get("search_cip_family")
         if not family:
