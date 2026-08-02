@@ -4795,6 +4795,7 @@ def _close_schedule_at_forgiveness(schedule_rows: list, max_months: int) -> None
 def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              major_name: str,
                              annual_income: float = None, income_growth: float = 0.03,
+                             starting_interest: float = 0.0,
                              living_adjustment: float = IDR_LIVING_ADJUSTMENT,
                              payment_rate: float = IDR_PAYMENT_RATE,
                              max_term_years: int = IDR_MAX_TERM_YEARS,
@@ -4809,7 +4810,12 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
     `max_term_years` is forgiven.
     """
     monthly_rate = annual_rate_pct / 100 / 12
-    balance = principal
+    # `principal` is the whole balance owed; starting_interest says how much of
+    # it is already-accrued unpaid interest rather than borrowed money. Default
+    # zero, which is the prospective case -- nobody has accrued anything yet.
+    principal_balance = max(principal - starting_interest, 0.0)
+    interest_balance = min(max(starting_interest, 0.0), principal)
+    balance = principal_balance + interest_balance
     total_interest = 0.0
     total_paid_in_roi_window = 0.0
     forgiven_amount = 0.0
@@ -4830,13 +4836,26 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         # payment on every loan. Caught by check_repayment_invariants.py, which
         # is exactly the identity it exists to enforce.
         payment = min(payment, balance + interest)
-        balance = max(balance + interest - payment, 0.0)
+
+        # Two pools, not one. A payment covers accrued interest first and only
+        # then principal -- the ordinary convention, and the thing that makes an
+        # income-driven balance GROW when the payment falls short: the shortfall
+        # lands in the interest pool while principal does not move at all. One
+        # balance can show that it grew; only the split shows why.
+        interest_balance += interest
+        to_interest = min(payment, interest_balance)
+        interest_balance -= to_interest
+        principal_balance = max(principal_balance - (payment - to_interest), 0.0)
+        balance = principal_balance + interest_balance
 
         total_interest += interest
         if month <= roi_window_years * 12:
             total_paid_in_roi_window += payment
 
-        schedule_rows.append({"month": month, "year": month / 12, "balance": balance, "payment": payment})
+        schedule_rows.append({"month": month, "year": month / 12, "balance": balance,
+                              "payment": payment,
+                              "principal_balance": principal_balance,
+                              "interest_balance": interest_balance})
         if balance <= 0:
             break
     else:
@@ -5648,6 +5667,26 @@ def _merge_balance_schedules(a, b, a_flat=0.0, b_flat=0.0):
     out = pd.DataFrame({"month": months})
     out["year"] = out["month"] / 12
     out["balance"] = (balances(a).values + balances(b).values)
+
+    # Carry the principal/unpaid-interest split through the merge. Without this
+    # the combined schedule loses the columns entirely and the stacked chart
+    # silently falls back to a single line -- which is exactly the case that
+    # needs it, since a federal tranche on an income-driven plan is where the
+    # interest pool grows. A tranche that tracks no split (Standard, and the
+    # private side generally) contributes its whole balance as principal and
+    # nothing as interest, which is true of it.
+    def component(df, column):
+        if column in df.columns:
+            return df.set_index("month")[column].reindex(months).ffill().fillna(0.0)
+        if column == "principal_balance":
+            return balances(df)
+        return pd.Series(0.0, index=months)
+
+    if ("principal_balance" in a.columns) or ("principal_balance" in b.columns):
+        out["principal_balance"] = (component(a, "principal_balance").values
+                                    + component(b, "principal_balance").values)
+        out["interest_balance"] = (component(a, "interest_balance").values
+                                   + component(b, "interest_balance").values)
     if "payment" in a.columns or "payment" in b.columns:
         out["payment"] = (payments(a, a_flat).values + payments(b, b_flat).values)
     return out
@@ -6360,7 +6399,53 @@ def build_wage_distribution(percentiles: dict) -> list:
     return bins
 
 
+def balance_split_is_informative(schedule_df: pd.DataFrame) -> bool:
+    """Whether splitting the balance into principal and unpaid interest says
+    anything.
+
+    It does NOT for most plans. Under Standard, Extended or Tiered Standard
+    every payment covers that month's interest, so the unpaid-interest pool is
+    always zero and a stacked chart would be one solid colour -- strictly worse
+    than the line it replaced. Under RAP the unpaid part is waived rather than
+    accrued, so the same applies.
+
+    It says a great deal under an income-driven plan whose payment falls short:
+    principal sits still while the interest pool balloons. On $190,000 at 6.5%
+    for a $38,000 earner, principal stays at $190,000 for nineteen years while
+    unpaid interest grows to $366,046 -- a balance that nearly triples with
+    every dollar of the growth being interest. A single line shows only that it
+    grew.
+    """
+    if not {"principal_balance", "interest_balance"} <= set(schedule_df.columns):
+        return False
+    interest = schedule_df["interest_balance"]
+    if interest.max() <= 0:
+        return False
+    # A trivial sliver -- one month's accrual before the first payment lands --
+    # is not worth a second colour and a legend.
+    return interest.max() > 0.02 * max(schedule_df["balance"].max(), 1.0)
+
+
 def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
+    if balance_split_is_informative(schedule_df):
+        stacked = schedule_df.melt(
+            id_vars="year", value_vars=["principal_balance", "interest_balance"],
+            var_name="component", value_name="amount")
+        stacked["component"] = stacked["component"].map(
+            {"principal_balance": "Principal", "interest_balance": "Unpaid interest"})
+        fig = px.area(
+            stacked, x="year", y="amount", color="component",
+            title="Loan Balance Over Time — principal vs unpaid interest",
+            labels={"year": "Years", "amount": "Remaining Balance ($)",
+                    "component": ""},
+            color_discrete_map={"Principal": "#4C78A8", "Unpaid interest": "#E45756"},
+        )
+        _tickvals, _ticktext = money_k_ticks(schedule_df["balance"])
+        fig.update_layout(
+            hovermode="x unified", title_font_size=14,
+            yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
+        )
+        return fig
     fig = px.line(
         schedule_df, x="year", y="balance",
         title="Loan Balance Over Time",
@@ -10778,7 +10863,8 @@ def search_was_adjusted() -> bool:
 
 
 def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
-                                 dependents: int = 0, forgivable: bool = True) -> list:
+                                 dependents: int = 0, forgivable: bool = True,
+                                 starting_interest: float = 0.0) -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -10807,7 +10893,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
         rows.append(("Repayment Assistance Plan (RAP)", rap,
                      "1-10% of total income. Unpaid interest waived. "
                      "Remainder forgiven at 30 years."))
-        idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income)
+        idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
+                                       starting_interest=starting_interest)
         rows.append(("IBR-style income-driven", idr,
                      "10% of income above a $22,000 allowance. Forgiven at 20 years. "
                      "Closed to loans originated on or after July 1, 2026."))
@@ -10837,11 +10924,19 @@ def render_existing_loan_comparison() -> None:
                                   step=1_000, key="existing_income",
                                   help="Adjusted gross income. The income-driven plans "
                                        "size their payment from it; the fixed plans ignore it.")
-        c4, c5 = st.columns(2)
+        c4, c5, c6 = st.columns(3)
         deps = c4.number_input("Dependent children", min_value=0, max_value=10, step=1,
                                 key="existing_dependents",
                                 help="RAP lowers the payment by $50/month each.")
-        forgivable = c5.checkbox(
+        accrued = c5.number_input(
+            "of which unpaid interest ($)", min_value=0, max_value=2_000_000, step=1_000,
+            key="existing_accrued_interest",
+            help="If your servicer shows principal and accrued interest separately "
+                 "-- common after a period on SAVE, where interest never "
+                 "capitalised -- put the interest part here. It changes how "
+                 "payments are applied and is shown separately on the balance chart. "
+                 "Leave at 0 if you only know one number.")
+        forgivable = c6.checkbox(
             "These are my own federal Direct loans", value=True, key="existing_forgivable",
             help="Untick for Parent PLUS or private loans. Parent PLUS is not "
                  "eligible for RAP or IBR, and private loans are outside the "
@@ -10851,7 +10946,8 @@ def render_existing_loan_comparison() -> None:
             st.info("Enter a balance and a rate to compare plans.")
             return
 
-        rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable)
+        rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable,
+                                            starting_interest=accrued)
         st.dataframe(pd.DataFrame([{
             "Plan": label,
             "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
@@ -10859,6 +10955,12 @@ def render_existing_loan_comparison() -> None:
             "Payoff": f"{r['payoff_years']:.1f} yrs",
             "Total interest": fmt_money(r["total_interest"]),
             "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
+            # Only RAP has a subsidy, so every other row is an em dash rather
+            # than $0 -- "$0" would read as a subsidy that failed rather than a
+            # plan that has none.
+            "Interest waived": (fmt_money(r["waived_interest"])
+                                if r.get("waived_interest") else
+                                ("$0" if "RAP" in label else "—")),
             "What it is": note,
         } for label, r, note in rows]), hide_index=True, use_container_width=True)
 

@@ -80,6 +80,7 @@ SHARE_EXEMPT = {
     # share link is a URL that gets pasted into chats and emails.
     "existing_balance": "existing-loan comparison; not a scenario field, and personal",
     "existing_rate": "existing-loan comparison; not a scenario field",
+    "existing_accrued_interest": "existing-loan comparison; not a scenario field, and personal",
     "existing_income": "existing-loan comparison; not a scenario field, and personal",
     "existing_dependents": "existing-loan comparison; not a scenario field",
     "existing_forgivable": "existing-loan comparison; not a scenario field",
