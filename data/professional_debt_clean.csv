@@ -1,0 +1,382 @@
+UNITID,INSTNM,CONTROL,control_type,CIPCODE,CREDLEV,program_key,debt_median,debt_10yr_payment
+177834,A T Still University of Health Sciences,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,431585.0,4909.0
+482149,Augusta University,Public,Public,5104,7,dentistry,232467.0,2644.0
+164988,Boston University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,310944.0,3537.0
+201645,Case Western Reserve University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,360396.0,4100.0
+190150,Columbia University in the City of New York,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,324057.0,3686.0
+181002,Creighton University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,297323.0,3382.0
+198464,East Carolina University,Public,Public,5104,7,dentistry,126524.0,1439.0
+166027,Harvard University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,184220.0,2096.0
+131520,Howard University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,316095.0,3596.0
+151111,Indiana University-Indianapolis,Public,Public,5104,7,dentistry,257402.0,2928.0
+407629,Lake Erie College of Osteopathic Medicine,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,356049.0,4050.0
+117636,Loma Linda University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,365728.0,4160.0
+159373,Louisiana State University Health Sciences Center-New Orleans,Public,Public,5104,7,dentistry,225325.0,2563.0
+239105,Marquette University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,229890.0,2615.0
+218335,Medical University of South Carolina,Public,Public,5104,7,dentistry,357444.0,4066.0
+204796,Ohio State University-Main Campus,Public,Public,5104,7,dentistry,207650.0,2362.0
+209490,Oregon Health & Science University,Public,Public,5104,7,dentistry,312308.0,3553.0
+186380,Rutgers University-New Brunswick,Public,Public,5104,7,dentistry,254122.0,2891.0
+149231,Southern Illinois University Edwardsville,Public,Public,5104,7,dentistry,252399.0,2871.0
+196097,Stony Brook University,Public,Public,5104,7,dentistry,268332.0,3052.0
+216339,Temple University,Public,Public,5104,7,dentistry,296851.0,3377.0
+228723,Texas A&M University-College Station,Public,Public,5104,7,dentistry,170918.0,1944.0
+487010,The University of Tennessee Health Science Center,Public,Public,5104,7,dentistry,250824.0,2853.0
+229300,The University of Texas Health Science Center at Houston,Public,Public,5104,7,dentistry,168997.0,1922.0
+228644,The University of Texas Health Science Center at San Antonio,Public,Public,5104,7,dentistry,192648.0,2191.0
+196592,Touro University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,362539.0,4124.0
+168148,Tufts University,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,368587.0,4193.0
+196088,University at Buffalo,Public,Public,5104,7,dentistry,196586.0,2236.0
+110662,University of California-Los Angeles,Public,Public,5104,7,dentistry,222633.0,2532.0
+110699,University of California-San Francisco,Public,Public,5104,7,dentistry,202253.0,2301.0
+126562,University of Colorado Denver/Anschutz Medical Campus,Public,Public,5104,7,dentistry,242379.0,2757.0
+129020,University of Connecticut,Public,Public,5104,7,dentistry,143655.0,1634.0
+436827,University of Connecticut-Avery Point,Public,Public,5104,7,dentistry,143655.0,1634.0
+463056,University of Connecticut-Hartford Campus,Public,Public,5104,7,dentistry,143655.0,1634.0
+436836,University of Connecticut-Stamford,Public,Public,5104,7,dentistry,143655.0,1634.0
+436818,University of Connecticut-Waterbury Campus,Public,Public,5104,7,dentistry,143655.0,1634.0
+169716,University of Detroit Mercy,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,366862.0,4173.0
+134130,University of Florida,Public,Public,5104,7,dentistry,237788.0,2705.0
+145600,University of Illinois Chicago,Public,Public,5104,7,dentistry,323938.0,3685.0
+153658,University of Iowa,Public,Public,5104,7,dentistry,241115.0,2743.0
+157085,University of Kentucky,Public,Public,5104,7,dentistry,249454.0,2838.0
+157289,University of Louisville,Public,Public,5104,7,dentistry,305953.0,3480.0
+163259,"University of Maryland, Baltimore",Public,Public,5104,7,dentistry,258834.0,2944.0
+170976,University of Michigan-Ann Arbor,Public,Public,5104,7,dentistry,224000.0,2548.0
+174066,University of Minnesota-Twin Cities,Public,Public,5104,7,dentistry,272055.0,3095.0
+178402,University of Missouri-Kansas City,Public,Public,5104,7,dentistry,220937.0,2513.0
+181428,University of Nebraska Medical Center,Public,Public,5104,7,dentistry,201388.0,2291.0
+182281,University of Nevada-Las Vegas,Public,Public,5104,7,dentistry,317068.0,3607.0
+199120,University of North Carolina at Chapel Hill,Public,Public,5104,7,dentistry,214834.0,2444.0
+207342,University of Oklahoma-Health Sciences Center,Public,Public,5104,7,dentistry,272159.0,3096.0
+207500,University of Oklahoma-Norman Campus,Public,Public,5104,7,dentistry,272159.0,3096.0
+215293,University of Pittsburgh-Pittsburgh Campus,Public,Public,5104,7,dentistry,235835.0,2683.0
+243203,University of Puerto Rico-Medical Sciences,Public,Public,5104,7,dentistry,123473.0,1405.0
+123961,University of Southern California,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,439325.0,4997.0
+230764,University of Utah,Public,Public,5104,7,dentistry,261254.0,2972.0
+236948,University of Washington-Seattle Campus,Public,Public,5104,7,dentistry,282467.0,3213.0
+120883,University of the Pacific,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,349063.0,3971.0
+234030,Virginia Commonwealth University,Public,Public,5104,7,dentistry,273400.0,3110.0
+238032,West Virginia University,Public,Public,5104,7,dentistry,189776.0,2159.0
+112525,Western University of Health Sciences,"Private, nonprofit",Private Non-Profit,5104,7,dentistry,421897.0,4799.0
+131159,American University,"Private, nonprofit",Private Non-Profit,2201,7,law,161696.0,1839.0
+432348,Appalachian School of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,123970.0,1410.0
+138929,Atlanta's John Marshall Law School,"Private, for-profit",Private For-Profit,2201,7,law,193041.0,2196.0
+442295,Ave Maria School of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,144259.0,1641.0
+132471,Barry University,"Private, nonprofit",Private Non-Profit,2201,7,law,154477.0,1757.0
+164924,Boston College,"Private, nonprofit",Private Non-Profit,2201,7,law,123000.0,1399.0
+164988,Boston University,"Private, nonprofit",Private Non-Profit,2201,7,law,117740.0,1339.0
+189501,Brooklyn Law School,"Private, nonprofit",Private Non-Profit,2201,7,law,96951.0,1103.0
+190682,CUNY School of Law,Public,Public,2201,7,law,81666.0,929.0
+111391,California Western School of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,179866.0,2046.0
+198136,Campbell University,"Private, nonprofit",Private Non-Profit,2201,7,law,135880.0,1546.0
+201548,Capital University,"Private, nonprofit",Private Non-Profit,2201,7,law,106377.0,1210.0
+201645,Case Western Reserve University,"Private, nonprofit",Private Non-Profit,2201,7,law,98460.0,1120.0
+111948,Chapman University,"Private, nonprofit",Private Non-Profit,2201,7,law,170800.0,1943.0
+451510,Charleston School of Law,"Private, for-profit",Private For-Profit,2201,7,law,152981.0,1740.0
+202134,Cleveland State University,Public,Public,2201,7,law,71500.0,813.0
+190150,Columbia University in the City of New York,"Private, nonprofit",Private Non-Profit,2201,7,law,198924.0,2263.0
+181002,Creighton University,"Private, nonprofit",Private Non-Profit,2201,7,law,128182.0,1458.0
+144740,DePaul University,"Private, nonprofit",Private Non-Profit,2201,7,law,131463.0,1495.0
+153269,Drake University,"Private, nonprofit",Private Non-Profit,2201,7,law,83526.0,950.0
+212054,Drexel University,"Private, nonprofit",Private Non-Profit,2201,7,law,72191.0,821.0
+212106,Duquesne University,"Private, nonprofit",Private Non-Profit,2201,7,law,72500.0,825.0
+198516,Elon University,"Private, nonprofit",Private Non-Profit,2201,7,law,119023.0,1354.0
+139658,Emory University,"Private, nonprofit",Private Non-Profit,2201,7,law,134617.0,1531.0
+101189,Faulkner University,"Private, nonprofit",Private Non-Profit,2201,7,law,137560.0,1565.0
+133650,Florida Agricultural and Mechanical University,Public,Public,2201,7,law,115500.0,1314.0
+134097,Florida State University,Public,Public,2201,7,law,66707.0,759.0
+191241,Fordham University,"Private, nonprofit",Private Non-Profit,2201,7,law,147561.0,1679.0
+232186,George Mason University,Public,Public,2201,7,law,65077.0,740.0
+131469,George Washington University,"Private, nonprofit",Private Non-Profit,2201,7,law,176325.0,2006.0
+131496,Georgetown University,"Private, nonprofit",Private Non-Profit,2201,7,law,162286.0,1846.0
+139940,Georgia State University,Public,Public,2201,7,law,72563.0,825.0
+115083,Golden Gate University,"Private, nonprofit",Private Non-Profit,2201,7,law,154813.0,1761.0
+235316,Gonzaga University,"Private, nonprofit",Private Non-Profit,2201,7,law,110687.0,1259.0
+166027,Harvard University,"Private, nonprofit",Private Non-Profit,2201,7,law,93235.0,1061.0
+191649,Hofstra University,"Private, nonprofit",Private Non-Profit,2201,7,law,163347.0,1858.0
+131520,Howard University,"Private, nonprofit",Private Non-Profit,2201,7,law,185348.0,2108.0
+145725,Illinois Institute of Technology,"Private, nonprofit",Private Non-Profit,2201,7,law,97727.0,1112.0
+151351,Indiana University-Bloomington,Public,Public,2201,7,law,92000.0,1047.0
+151111,Indiana University-Indianapolis,Public,Public,2201,7,law,97806.0,1113.0
+242723,Inter American University of Puerto Rico-School of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,110693.0,1259.0
+220631,Lincoln Memorial University,"Private, nonprofit",Private Non-Profit,2201,7,law,108228.0,1231.0
+159391,Louisiana State University and Agricultural & Mechanical College,Public,Public,2201,7,law,88622.0,1008.0
+117946,Loyola Marymount University,"Private, nonprofit",Private Non-Profit,2201,7,law,155436.0,1768.0
+146719,Loyola University Chicago,"Private, nonprofit",Private Non-Profit,2201,7,law,119367.0,1358.0
+239105,Marquette University,"Private, nonprofit",Private Non-Profit,2201,7,law,137200.0,1561.0
+171100,Michigan State University,Public,Public,2201,7,law,103630.0,1179.0
+176053,Mississippi Christian University,"Private, nonprofit",Private Non-Profit,2201,7,law,143299.0,1630.0
+175281,Mitchell Hamline School of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,101761.0,1158.0
+167215,New England Law-Boston,"Private, nonprofit",Private Non-Profit,2201,7,law,126248.0,1436.0
+193821,New York Law School,"Private, nonprofit",Private Non-Profit,2201,7,law,142500.0,1621.0
+199157,North Carolina Central University,Public,Public,2201,7,law,117597.0,1338.0
+167358,Northeastern University,"Private, nonprofit",Private Non-Profit,2201,7,law,70571.0,803.0
+147703,Northern Illinois University,Public,Public,2201,7,law,75688.0,861.0
+157447,Northern Kentucky University,Public,Public,2201,7,law,101097.0,1150.0
+147767,Northwestern University,"Private, nonprofit",Private Non-Profit,2201,7,law,154286.0,1755.0
+136215,Nova Southeastern University,"Private, nonprofit",Private Non-Profit,2201,7,law,162455.0,1848.0
+204635,Ohio Northern University,"Private, nonprofit",Private Non-Profit,2201,7,law,61500.0,700.0
+204796,Ohio State University-Main Campus,Public,Public,2201,7,law,91529.0,1041.0
+207458,Oklahoma City University,"Private, nonprofit",Private Non-Profit,2201,7,law,145281.0,1653.0
+194310,Pace University,"Private, nonprofit",Private Non-Profit,2201,7,law,94737.0,1078.0
+214777,Pennsylvania State University-Main Campus,Public,Public,2201,7,law,65436.0,744.0
+241410,Pontifical Catholic University of Puerto Rico-Ponce,"Private, nonprofit",Private Non-Profit,2201,7,law,122712.0,1396.0
+489779,Purdue University Global,Public,Public,2201,7,law,81926.0,932.0
+130226,Quinnipiac University,"Private, nonprofit",Private Non-Profit,2201,7,law,81000.0,921.0
+231651,Regent University,"Private, nonprofit",Private Non-Profit,2201,7,law,85898.0,977.0
+217518,Roger Williams University,"Private, nonprofit",Private Non-Profit,2201,7,law,122459.0,1393.0
+409616,Roger Williams University School of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,122459.0,1393.0
+179159,Saint Louis University,"Private, nonprofit",Private Non-Profit,2201,7,law,99458.0,1131.0
+122649,San Joaquin College of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,109339.0,1244.0
+122931,Santa Clara University,"Private, nonprofit",Private Non-Profit,2201,7,law,180127.0,2049.0
+236595,Seattle University,"Private, nonprofit",Private Non-Profit,2201,7,law,144542.0,1644.0
+186584,Seton Hall University,"Private, nonprofit",Private Non-Profit,2201,7,law,115179.0,1310.0
+228194,South Texas College of Law Houston,"Private, nonprofit",Private Non-Profit,2201,7,law,142976.0,1626.0
+149222,Southern Illinois University-Carbondale,Public,Public,2201,7,law,91500.0,1041.0
+228246,Southern Methodist University,"Private, nonprofit",Private Non-Profit,2201,7,law,145569.0,1656.0
+440916,Southern University Law Center,Public,Public,2201,7,law,118010.0,1342.0
+160621,Southern University and A & M College,Public,Public,2201,7,law,118010.0,1342.0
+123970,Southwestern Law School,"Private, nonprofit",Private Non-Profit,2201,7,law,203702.0,2317.0
+195809,St. John's University-New York,"Private, nonprofit",Private Non-Profit,2201,7,law,112017.0,1274.0
+228149,St. Mary's University,"Private, nonprofit",Private Non-Profit,2201,7,law,145002.0,1649.0
+243744,Stanford University,"Private, nonprofit",Private Non-Profit,2201,7,law,153302.0,1744.0
+137546,Stetson University,"Private, nonprofit",Private Non-Profit,2201,7,law,142533.0,1621.0
+196413,Syracuse University,"Private, nonprofit",Private Non-Profit,2201,7,law,113050.0,1286.0
+454689,Taft University System,"Private, for-profit",Private For-Profit,2201,7,law,60864.0,692.0
+216339,Temple University,Public,Public,2201,7,law,81733.0,930.0
+228723,Texas A&M University-College Station,Public,Public,2201,7,law,71446.0,813.0
+229115,Texas Tech University,Public,Public,2201,7,law,86163.0,980.0
+131283,The Catholic University of America,"Private, nonprofit",Private Non-Profit,2201,7,law,147964.0,1683.0
+475228,The Colleges of Law at Santa Barbara,"Private, nonprofit",Private Non-Profit,2201,7,law,100502.0,1143.0
+125037,The Colleges of Law at Ventura,"Private, nonprofit",Private Non-Profit,2201,7,law,100502.0,1143.0
+100751,The University of Alabama,Public,Public,2201,7,law,61500.0,700.0
+180489,The University of Montana,Public,Public,2201,7,law,72126.0,820.0
+221759,The University of Tennessee-Knoxville,Public,Public,2201,7,law,61500.0,700.0
+126049,Thomas Jefferson School of Law,"Private, nonprofit",Private Non-Profit,2201,7,law,229699.0,2613.0
+172477,Thomas M Cooley Law School,"Private, nonprofit",Private Non-Profit,2201,7,law,202668.0,2305.0
+196592,Touro University,"Private, nonprofit",Private Non-Profit,2201,7,law,132011.0,1502.0
+149514,Trinity International University-Illinois,"Private, nonprofit",Private Non-Profit,2201,7,law,155602.0,1770.0
+123448,Trinity Law School,"Private, nonprofit",Private Non-Profit,2201,7,law,155602.0,1770.0
+160755,Tulane University of Louisiana,"Private, nonprofit",Private Non-Profit,2201,7,law,149237.0,1698.0
+196088,University at Buffalo,Public,Public,2201,7,law,94242.0,1072.0
+200800,University of Akron Main Campus,Public,Public,2201,7,law,71000.0,808.0
+104179,University of Arizona,Public,Public,2201,7,law,67750.0,771.0
+106397,University of Arkansas,Public,Public,2201,7,law,65000.0,739.0
+106245,University of Arkansas at Little Rock,Public,Public,2201,7,law,61500.0,700.0
+161873,University of Baltimore,Public,Public,2201,7,law,106102.0,1207.0
+110398,University of California College of the Law-San Francisco,Public,Public,2201,7,law,139352.0,1585.0
+110635,University of California-Berkeley,Public,Public,2201,7,law,155891.0,1773.0
+110644,University of California-Davis,Public,Public,2201,7,law,92689.0,1054.0
+110653,University of California-Irvine,Public,Public,2201,7,law,133605.0,1520.0
+110662,University of California-Los Angeles,Public,Public,2201,7,law,135373.0,1540.0
+144050,University of Chicago,"Private, nonprofit",Private Non-Profit,2201,7,law,188691.0,2146.0
+201885,University of Cincinnati-Main Campus,Public,Public,2201,7,law,66694.0,759.0
+126614,University of Colorado Boulder,Public,Public,2201,7,law,105696.0,1202.0
+129020,University of Connecticut,Public,Public,2201,7,law,96386.0,1096.0
+436827,University of Connecticut-Avery Point,Public,Public,2201,7,law,96386.0,1096.0
+463056,University of Connecticut-Hartford Campus,Public,Public,2201,7,law,96386.0,1096.0
+436836,University of Connecticut-Stamford,Public,Public,2201,7,law,96386.0,1096.0
+436818,University of Connecticut-Waterbury Campus,Public,Public,2201,7,law,96386.0,1096.0
+127060,University of Denver,"Private, nonprofit",Private Non-Profit,2201,7,law,161053.0,1832.0
+169716,University of Detroit Mercy,"Private, nonprofit",Private Non-Profit,2201,7,law,122626.0,1395.0
+134130,University of Florida,Public,Public,2201,7,law,71483.0,813.0
+139959,University of Georgia,Public,Public,2201,7,law,82694.0,941.0
+141574,University of Hawaii at Manoa,Public,Public,2201,7,law,98536.0,1121.0
+225511,University of Houston,Public,Public,2201,7,law,86372.0,982.0
+142285,University of Idaho,Public,Public,2201,7,law,100091.0,1139.0
+153658,University of Iowa,Public,Public,2201,7,law,80268.0,913.0
+155317,University of Kansas,Public,Public,2201,7,law,61500.0,700.0
+157085,University of Kentucky,Public,Public,2201,7,law,75150.0,855.0
+157289,University of Louisville,Public,Public,2201,7,law,96424.0,1097.0
+163259,"University of Maryland, Baltimore",Public,Public,2201,7,law,118506.0,1348.0
+220862,University of Memphis,Public,Public,2201,7,law,92250.0,1049.0
+135726,University of Miami,"Private, nonprofit",Private Non-Profit,2201,7,law,148750.0,1692.0
+170976,University of Michigan-Ann Arbor,Public,Public,2201,7,law,132524.0,1507.0
+174066,University of Minnesota-Twin Cities,Public,Public,2201,7,law,98423.0,1120.0
+176017,University of Mississippi,Public,Public,2201,7,law,69701.0,793.0
+178396,University of Missouri-Columbia,Public,Public,2201,7,law,73501.0,836.0
+178402,University of Missouri-Kansas City,Public,Public,2201,7,law,97000.0,1103.0
+181464,University of Nebraska-Lincoln,Public,Public,2201,7,law,54456.0,619.0
+182281,University of Nevada-Las Vegas,Public,Public,2201,7,law,82985.0,944.0
+199120,University of North Carolina at Chapel Hill,Public,Public,2201,7,law,91570.0,1042.0
+200280,University of North Dakota,Public,Public,2201,7,law,61500.0,700.0
+152080,University of Notre Dame,"Private, nonprofit",Private Non-Profit,2201,7,law,128413.0,1461.0
+209551,University of Oregon,Public,Public,2201,7,law,98655.0,1122.0
+215062,University of Pennsylvania,"Private, nonprofit",Private Non-Profit,2201,7,law,171488.0,1951.0
+215293,University of Pittsburgh-Pittsburgh Campus,Public,Public,2201,7,law,109178.0,1242.0
+233374,University of Richmond,"Private, nonprofit",Private Non-Profit,2201,7,law,100229.0,1140.0
+122436,University of San Diego,"Private, nonprofit",Private Non-Profit,2201,7,law,145850.0,1659.0
+122612,University of San Francisco,"Private, nonprofit",Private Non-Profit,2201,7,law,169229.0,1925.0
+218663,University of South Carolina-Columbia,Public,Public,2201,7,law,115354.0,1312.0
+123961,University of Southern California,"Private, nonprofit",Private Non-Profit,2201,7,law,138518.0,1576.0
+161554,University of Southern Maine,Public,Public,2201,7,law,85950.0,978.0
+174914,University of St Thomas,"Private, nonprofit",Private Non-Profit,2201,7,law,74968.0,853.0
+206084,University of Toledo,Public,Public,2201,7,law,76000.0,865.0
+207971,University of Tulsa,"Private, nonprofit",Private Non-Profit,2201,7,law,90365.0,1028.0
+230764,University of Utah,Public,Public,2201,7,law,74012.0,842.0
+234076,University of Virginia-Main Campus,Public,Public,2201,7,law,178812.0,2034.0
+236948,University of Washington-Seattle Campus,Public,Public,2201,7,law,108519.0,1234.0
+240444,University of Wisconsin-Madison,Public,Public,2201,7,law,61500.0,700.0
+240727,University of Wyoming,Public,Public,2201,7,law,70488.0,802.0
+131399,University of the District of Columbia,Public,Public,2201,7,law,110258.0,1254.0
+120883,University of the Pacific,"Private, nonprofit",Private Non-Profit,2201,7,law,147082.0,1673.0
+152600,Valparaiso University,"Private, nonprofit",Private Non-Profit,2201,7,law,89751.0,1021.0
+221999,Vanderbilt University,"Private, nonprofit",Private Non-Profit,2201,7,law,139857.0,1591.0
+231147,Vermont Law and Graduate School,"Private, nonprofit",Private Non-Profit,2201,7,law,139540.0,1587.0
+216597,Villanova University,"Private, nonprofit",Private Non-Profit,2201,7,law,69861.0,795.0
+199847,Wake Forest University,"Private, nonprofit",Private Non-Profit,2201,7,law,105023.0,1195.0
+156082,Washburn University,Public,Public,2201,7,law,77330.0,880.0
+179867,Washington University in St Louis,"Private, nonprofit",Private Non-Profit,2201,7,law,92540.0,1053.0
+234207,Washington and Lee University,"Private, nonprofit",Private Non-Profit,2201,7,law,97335.0,1107.0
+172644,Wayne State University,Public,Public,2201,7,law,61466.0,699.0
+238032,West Virginia University,Public,Public,2201,7,law,93735.0,1066.0
+490133,Westcliff University,"Private, for-profit",Private For-Profit,2201,7,law,45240.0,515.0
+125763,Whittier College,"Private, nonprofit",Private Non-Profit,2201,7,law,227419.0,2587.0
+216852,Widener University,"Private, nonprofit",Private Non-Profit,2201,7,law,131126.0,1492.0
+210401,Willamette University,"Private, nonprofit",Private Non-Profit,2201,7,law,162945.0,1854.0
+231624,William & Mary,Public,Public,2201,7,law,105023.0,1195.0
+197708,Yeshiva University,"Private, nonprofit",Private Non-Profit,2201,7,law,101500.0,1155.0
+177834,A T Still University of Health Sciences,"Private, nonprofit",Private Non-Profit,5112,7,medicine,316647.0,3602.0
+483975,Alabama College of Osteopathic Medicine,"Private, nonprofit",Private Non-Profit,5112,7,medicine,303298.0,3450.0
+188580,Albany Medical College,"Private, nonprofit",Private Non-Profit,5112,7,medicine,247523.0,2816.0
+385415,Albert Einstein College of Medicine,"Private, nonprofit",Private Non-Profit,5112,7,medicine,47503.0,540.0
+482149,Augusta University,Public,Public,5112,7,medicine,186680.0,2124.0
+132471,Barry University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,278906.0,3173.0
+223223,Baylor College of Medicine,"Private, nonprofit",Private Non-Profit,5112,7,medicine,99030.0,1126.0
+164988,Boston University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,205222.0,2334.0
+217156,Brown University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,146880.0,1671.0
+488554,Burrell College of Osteopathic Medicine,"Private, for-profit",Private For-Profit,5112,7,medicine,85315.0,970.0
+190567,CUNY City College,Public,Public,5112,7,medicine,171263.0,1948.0
+198136,Campbell University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,272392.0,3099.0
+201645,Case Western Reserve University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,187457.0,2132.0
+169248,Central Michigan University,Public,Public,5112,7,medicine,254007.0,2889.0
+190150,Columbia University in the City of New York,"Private, nonprofit",Private Non-Profit,5112,7,medicine,63865.0,726.0
+181002,Creighton University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,244227.0,2778.0
+182670,Dartmouth College,"Private, nonprofit",Private Non-Profit,5112,7,medicine,210783.0,2398.0
+154156,Des Moines University-Osteopathic Medical Center,"Private, nonprofit",Private Non-Profit,5112,7,medicine,239574.0,2725.0
+212054,Drexel University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,259179.0,2948.0
+198464,East Carolina University,Public,Public,5112,7,medicine,152343.0,1733.0
+220075,East Tennessee State University,Public,Public,5112,7,medicine,194983.0,2218.0
+442806,Edward Via College of Osteopathic Medicine,"Private, nonprofit",Private Non-Profit,5112,7,medicine,283568.0,3226.0
+139658,Emory University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,181971.0,2070.0
+133669,Florida Atlantic University,Public,Public,5112,7,medicine,171228.0,1948.0
+133951,Florida International University,Public,Public,5112,7,medicine,207971.0,2366.0
+134097,Florida State University,Public,Public,5112,7,medicine,175432.0,1996.0
+131469,George Washington University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,197284.0,2244.0
+131496,Georgetown University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,249194.0,2835.0
+166027,Harvard University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,99160.0,1128.0
+191649,Hofstra University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,153791.0,1749.0
+131520,Howard University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,247248.0,2812.0
+151111,Indiana University-Indianapolis,Public,Public,5112,7,medicine,210632.0,2396.0
+162928,Johns Hopkins University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,109070.0,1241.0
+179812,Kansas City University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,280113.0,3186.0
+490601,Kansas City University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,280113.0,3186.0
+203517,Kent State University at Kent,Public,Public,5112,7,medicine,236752.0,2693.0
+407629,Lake Erie College of Osteopathic Medicine,"Private, nonprofit",Private Non-Profit,5112,7,medicine,240729.0,2738.0
+220631,Lincoln Memorial University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,315197.0,3585.0
+117636,Loma Linda University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,242970.0,2764.0
+159373,Louisiana State University Health Sciences Center-New Orleans,Public,Public,5112,7,medicine,190588.0,2168.0
+435000,Louisiana State University Health Sciences Center-Shreveport,Public,Public,5112,7,medicine,188122.0,2140.0
+146719,Loyola University Chicago,"Private, nonprofit",Private Non-Profit,5112,7,medicine,249216.0,2835.0
+237525,Marshall University,Public,Public,5112,7,medicine,150015.0,1706.0
+173957,Mayo Clinic College of Medicine and Science,"Private, nonprofit",Private Non-Profit,5112,7,medicine,105294.0,1198.0
+239169,Medical College of Wisconsin,"Private, nonprofit",Private Non-Profit,5112,7,medicine,212224.0,2414.0
+218335,Medical University of South Carolina,Public,Public,5112,7,medicine,214651.0,2442.0
+171100,Michigan State University,Public,Public,5112,7,medicine,251502.0,2861.0
+140562,Morehouse School of Medicine,"Private, nonprofit",Private Non-Profit,5112,7,medicine,249700.0,2840.0
+194091,New York Institute of Technology,"Private, nonprofit",Private Non-Profit,5112,7,medicine,271124.0,3084.0
+193830,New York Medical College,"Private, nonprofit",Private Non-Profit,5112,7,medicine,278775.0,3171.0
+204477,Northeast Ohio Medical University,Public,Public,5112,7,medicine,194149.0,2208.0
+147767,Northwestern University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,201568.0,2293.0
+204796,Ohio State University-Main Campus,Public,Public,5112,7,medicine,193467.0,2201.0
+204857,Ohio University-Main Campus,Public,Public,5112,7,medicine,250362.0,2848.0
+207315,Oklahoma State University Center for Health Sciences,Public,Public,5112,7,medicine,193977.0,2207.0
+209490,Oregon Health & Science University,Public,Public,5112,7,medicine,236822.0,2694.0
+455406,Pacific Northwest University of Health Sciences,"Private, nonprofit",Private Non-Profit,5112,7,medicine,312242.0,3552.0
+214777,Pennsylvania State University-Main Campus,Public,Public,5112,7,medicine,215577.0,2452.0
+215123,Philadelphia College of Osteopathic Medicine,"Private, nonprofit",Private Non-Profit,5112,7,medicine,279923.0,3184.0
+480790,Rocky Vista University,"Private, for-profit",Private For-Profit,5112,7,medicine,326640.0,3716.0
+148511,Rush University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,214974.0,2445.0
+186380,Rutgers University-New Brunswick,Public,Public,5112,7,medicine,184017.0,2093.0
+179159,Saint Louis University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,239229.0,2721.0
+420246,Sonoran University of Health Sciences,"Private, nonprofit",Private Non-Profit,5112,7,medicine,224000.0,2548.0
+149222,Southern Illinois University-Carbondale,Public,Public,5112,7,medicine,222981.0,2536.0
+243744,Stanford University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,71477.0,813.0
+196097,Stony Brook University,Public,Public,5112,7,medicine,235558.0,2680.0
+216339,Temple University,Public,Public,5112,7,medicine,208393.0,2371.0
+228723,Texas A&M University-College Station,Public,Public,5112,7,medicine,147832.0,1682.0
+487010,The University of Tennessee Health Science Center,Public,Public,5112,7,medicine,190581.0,2168.0
+229300,The University of Texas Health Science Center at Houston,Public,Public,5112,7,medicine,139347.0,1585.0
+228644,The University of Texas Health Science Center at San Antonio,Public,Public,5112,7,medicine,138096.0,1571.0
+228653,The University of Texas Medical Branch at Galveston,Public,Public,5112,7,medicine,140138.0,1594.0
+227368,The University of Texas Rio Grande Valley,Public,Public,5112,7,medicine,104124.0,1184.0
+228778,The University of Texas at Austin,Public,Public,5112,7,medicine,121190.0,1379.0
+216366,Thomas Jefferson University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,181998.0,2070.0
+196592,Touro University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,330479.0,3759.0
+459736,Touro University California,"Private, nonprofit",Private Non-Profit,5112,7,medicine,313933.0,3571.0
+459824,Touro University Nevada,"Private, nonprofit",Private Non-Profit,5112,7,medicine,313933.0,3571.0
+168148,Tufts University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,218623.0,2487.0
+160755,Tulane University of Louisiana,"Private, nonprofit",Private Non-Profit,5112,7,medicine,322603.0,3670.0
+243568,Universidad Central Del Caribe,"Private, nonprofit",Private Non-Profit,5112,7,medicine,191451.0,2178.0
+196088,University at Buffalo,Public,Public,5112,7,medicine,215899.0,2456.0
+104179,University of Arizona,Public,Public,5112,7,medicine,192899.0,2194.0
+106263,University of Arkansas for Medical Sciences,Public,Public,5112,7,medicine,197462.0,2246.0
+110644,University of California-Davis,Public,Public,5112,7,medicine,126027.0,1434.0
+110653,University of California-Irvine,Public,Public,5112,7,medicine,191478.0,2178.0
+110662,University of California-Los Angeles,Public,Public,5112,7,medicine,163032.0,1855.0
+110699,University of California-San Francisco,Public,Public,5112,7,medicine,131110.0,1491.0
+132903,University of Central Florida,Public,Public,5112,7,medicine,187833.0,2137.0
+144050,University of Chicago,"Private, nonprofit",Private Non-Profit,5112,7,medicine,141166.0,1606.0
+201885,University of Cincinnati-Main Campus,Public,Public,5112,7,medicine,188938.0,2149.0
+126562,University of Colorado Denver/Anschutz Medical Campus,Public,Public,5112,7,medicine,212811.0,2421.0
+129020,University of Connecticut,Public,Public,5112,7,medicine,120716.0,1373.0
+436827,University of Connecticut-Avery Point,Public,Public,5112,7,medicine,120716.0,1373.0
+463056,University of Connecticut-Hartford Campus,Public,Public,5112,7,medicine,120716.0,1373.0
+436836,University of Connecticut-Stamford,Public,Public,5112,7,medicine,120716.0,1373.0
+436818,University of Connecticut-Waterbury Campus,Public,Public,5112,7,medicine,120716.0,1373.0
+134130,University of Florida,Public,Public,5112,7,medicine,180021.0,2048.0
+141574,University of Hawaii at Manoa,Public,Public,5112,7,medicine,161000.0,1831.0
+145600,University of Illinois Chicago,Public,Public,5112,7,medicine,263341.0,2996.0
+153658,University of Iowa,Public,Public,5112,7,medicine,177014.0,2014.0
+155317,University of Kansas,Public,Public,5112,7,medicine,179778.0,2045.0
+157085,University of Kentucky,Public,Public,5112,7,medicine,212674.0,2419.0
+157289,University of Louisville,Public,Public,5112,7,medicine,199999.0,2275.0
+163259,"University of Maryland, Baltimore",Public,Public,5112,7,medicine,180500.0,2053.0
+135726,University of Miami,"Private, nonprofit",Private Non-Profit,5112,7,medicine,202806.0,2307.0
+170976,University of Michigan-Ann Arbor,Public,Public,5112,7,medicine,146559.0,1667.0
+174066,University of Minnesota-Twin Cities,Public,Public,5112,7,medicine,142289.0,1619.0
+178396,University of Missouri-Columbia,Public,Public,5112,7,medicine,197576.0,2247.0
+178402,University of Missouri-Kansas City,Public,Public,5112,7,medicine,183284.0,2085.0
+181428,University of Nebraska Medical Center,Public,Public,5112,7,medicine,187596.0,2134.0
+182290,University of Nevada-Reno,Public,Public,5112,7,medicine,172471.0,1962.0
+199120,University of North Carolina at Chapel Hill,Public,Public,5112,7,medicine,144732.0,1646.0
+200280,University of North Dakota,Public,Public,5112,7,medicine,161183.0,1833.0
+228909,University of North Texas Health Science Center,Public,Public,5112,7,medicine,165702.0,1885.0
+207342,University of Oklahoma-Health Sciences Center,Public,Public,5112,7,medicine,170890.0,1944.0
+207500,University of Oklahoma-Norman Campus,Public,Public,5112,7,medicine,170890.0,1944.0
+215062,University of Pennsylvania,"Private, nonprofit",Private Non-Profit,5112,7,medicine,109430.0,1245.0
+157535,University of Pikeville,"Private, nonprofit",Private Non-Profit,5112,7,medicine,246625.0,2805.0
+215293,University of Pittsburgh-Pittsburgh Campus,Public,Public,5112,7,medicine,181338.0,2063.0
+243203,University of Puerto Rico-Medical Sciences,Public,Public,5112,7,medicine,114070.0,1298.0
+195030,University of Rochester,"Private, nonprofit",Private Non-Profit,5112,7,medicine,170110.0,1935.0
+218663,University of South Carolina-Columbia,Public,Public,5112,7,medicine,210899.0,2399.0
+137351,University of South Florida,Public,Public,5112,7,medicine,180457.0,2053.0
+123961,University of Southern California,"Private, nonprofit",Private Non-Profit,5112,7,medicine,234702.0,2670.0
+228635,University of Texas Southwestern Medical Center,Public,Public,5112,7,medicine,130658.0,1486.0
+206084,University of Toledo,Public,Public,5112,7,medicine,227010.0,2582.0
+230764,University of Utah,Public,Public,5112,7,medicine,190914.0,2172.0
+231174,University of Vermont,Public,Public,5112,7,medicine,219221.0,2494.0
+234076,University of Virginia-Main Campus,Public,Public,5112,7,medicine,159017.0,1809.0
+236948,University of Washington-Seattle Campus,Public,Public,5112,7,medicine,189915.0,2160.0
+240444,University of Wisconsin-Madison,Public,Public,5112,7,medicine,179642.0,2043.0
+196307,Upstate Medical University,Public,Public,5112,7,medicine,231479.0,2633.0
+221999,Vanderbilt University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,172764.0,1965.0
+234030,Virginia Commonwealth University,Public,Public,5112,7,medicine,202416.0,2303.0
+233921,Virginia Polytechnic Institute and State University,Public,Public,5112,7,medicine,251904.0,2865.0
+199847,Wake Forest University,"Private, nonprofit",Private Non-Profit,5112,7,medicine,193205.0,2198.0
+179867,Washington University in St Louis,"Private, nonprofit",Private Non-Profit,5112,7,medicine,99009.0,1126.0
+172644,Wayne State University,Public,Public,5112,7,medicine,165514.0,1883.0
+237880,West Virginia School of Osteopathic Medicine,Public,Public,5112,7,medicine,269399.0,3064.0
+238032,West Virginia University,Public,Public,5112,7,medicine,178036.0,2025.0
+112525,Western University of Health Sciences,"Private, nonprofit",Private Non-Profit,5112,7,medicine,296307.0,3371.0

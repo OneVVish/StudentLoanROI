@@ -944,3 +944,56 @@ alter table scenario_events
 --   * enable_legacy_plans is not currently logged. If the distinction above
 --     matters, it needs a column on all four tables before it can be
 --     recovered -- it cannot be reconstructed after the fact.
+
+
+-- ============================================================
+-- 2026-08-02 -- per-school professional-school debt
+-- ============================================================
+-- RUN THIS BEFORE DEPLOYING THE CODE THAT WRITES IT. PostgREST rejects the
+-- ENTIRE row on an unknown column (PGRST204), so a missing column here does
+-- not drop one field -- it drops every survey response, PDF download and share
+-- from any session that reached a medical, dental or law scenario, and those
+-- visits then look identical to "nobody used the feature".
+
+alter table survey_responses
+  add column if not exists prof_school_a text,
+  add column if not exists prof_school_b text,
+  add column if not exists professional_debt_a numeric,
+  add column if not exists professional_debt_b numeric;
+
+alter table pdf_downloads
+  add column if not exists prof_school_a text,
+  add column if not exists prof_school_b text,
+  add column if not exists professional_debt_a numeric,
+  add column if not exists professional_debt_b numeric;
+
+alter table scenario_shares
+  add column if not exists prof_school_a text,
+  add column if not exists prof_school_b text,
+  add column if not exists professional_debt_a numeric,
+  add column if not exists professional_debt_b numeric;
+
+-- Reading these later:
+--
+--   * professional_debt_a's MEANING CHANGED on 2026-08-02. Before it, medical,
+--     dental and law school debt was a single national constant per path
+--     ($205,000 / $293,900 / $130,000) fully determined by scenario_a_major.
+--     After it, a visitor can name their school and the figure becomes that
+--     school's Scorecard median -- which ranges from about $48,000 to $330,000
+--     for medicine. Any comparison of effective_principal, roi_pct or the
+--     federal/private split across that date must condition on prof_school_a.
+--
+--   * prof_school_a IS NULL means one of two different things, and they are
+--     distinguishable only via scenario_a_major: either the path attends no
+--     professional school at all (most careers), or it does and the visitor
+--     left the picker on the national average. professional_debt_a is NULL in
+--     the first case and non-NULL in the second.
+--
+--   * Both columns are NULL for every row written before this date, including
+--     rows whose scenario DID carry professional debt. Treat NULL there as
+--     "national constant", not as "no professional school".
+--
+--   * The school name is stored as free text rather than a UNITID because it is
+--     what the picker shows and what a share link carries. It is NOT stable
+--     across Scorecard releases -- an institution can be renamed or merged --
+--     so join on it with care, and prefer professional_debt_a for arithmetic.
