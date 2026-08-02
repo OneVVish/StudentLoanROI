@@ -2162,6 +2162,41 @@ def financing_summary_text(financing: dict) -> str:
     )
 
 
+def render_forgiveness_note(repayment_result: dict, compact: bool = False) -> None:
+    """The forgiveness figure, and the fact that it is taxable income.
+
+    Shared by both result branches. It was two inline copies saying only that
+    the balance is forgiven, which read as a clean write-off -- and since
+    2026-01-01 a discharged balance is taxed as ordinary income in the year it
+    is discharged. On a professional degree that number is large enough for the
+    tax alone to be a six-figure event, so stating the forgiveness without the
+    tax is the more misleading of the two.
+
+    The app does not model the tax: it lands decades out, at a rate set by
+    income and law neither of which is knowable now, and inventing a figure
+    would be worse than naming the liability. [Source: TICAS, "Comparing
+    Income-Driven Repayment Plans", 2025-09-16.]
+    """
+    forgiven = repayment_result.get("forgiven_amount", 0) or 0
+    if forgiven <= 0:
+        return
+    if compact:
+        st.warning(
+            f"{fmt_money(forgiven)} forgiven after {IDR_MAX_TERM_YEARS} years — "
+            "taxable as income that year, and not modelled here."
+            .replace("$", chr(92) + "$")
+        )
+        return
+    st.warning(
+        f"Under IDR, {fmt_money(forgiven)} of principal remains unpaid after "
+        f"{IDR_MAX_TERM_YEARS} years and is forgiven. **Since January 1, 2026 a "
+        "discharged balance is taxed as ordinary income in the year it is "
+        "discharged**, so this is a bill deferred rather than cancelled — the "
+        "tax on it is not included in any figure on this page."
+        .replace("$", chr(92) + "$")
+    )
+
+
 def render_financing_note(financing: dict) -> None:
     """On-screen version of financing_summary_text: the breakdown caption, plus
     a hard error when any of the loan cannot be borrowed federally at all, plus
@@ -8173,7 +8208,11 @@ repayment_strategy = st.sidebar.selectbox(
     on_change=lambda: mark_interaction("repayment_strategy_a"),
     help="Standard 10-Year: a fixed payment every month for 10 years. "
          "Income-Driven Repayment (IDR): your payment is based on your "
-         "income instead, and whatever's left is forgiven after 20 years.",
+         "income instead, and whatever's left is forgiven after 20 years -- "
+         "modelled on IBR, which is only open to loans originated BEFORE "
+         "July 1, 2026. For borrowing after that date the income-driven plan "
+         "is RAP (30 years, 1-10% of total income), under Advanced Analysis. "
+         "See Methodology.",
 )
 
 # How far out every comparison on this page looks. Was a fixed 10 years, and
@@ -10280,10 +10319,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             fmt_money(roi_result["earnings_premium"]),
             delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
         )
-        if repayment_result["forgiven_amount"] > 0:
-            st.warning(
-                f"{fmt_money(repayment_result['forgiven_amount'])} forgiven after {IDR_MAX_TERM_YEARS} years."
-            )
+        render_forgiveness_note(repayment_result, compact=True)
 
         # loan_amount/interest_rate/repayment_strategy are parameters rather
         # than globals because Scenario B has its own -- reading the globals
@@ -10867,11 +10903,7 @@ else:
 
     render_financing_note(scenario.get("financing"))
 
-    if repayment_result["forgiven_amount"] > 0:
-        st.warning(
-            f"Under IDR, {fmt_money(repayment_result['forgiven_amount'])} of principal remains "
-            f"unpaid after {IDR_MAX_TERM_YEARS} years and is forgiven."
-        )
+    render_forgiveness_note(repayment_result)
 
     st.plotly_chart(
         build_balance_chart(repayment_result["schedule"], strategy_label),
@@ -11637,6 +11669,31 @@ This is a simplified version of real federal IDR plans, not an exact
 copy of federal rules. For Medicine, Law, and Athletic Training, both
 options are calculated using your loan *plus* the extra training debt
 described above — not just the loan by itself.
+
+**Which income-driven plan you can actually get depends on when you borrow.**
+The IDR option above is modelled on **IBR**, and IBR is closed to loans
+originated on or after **July 1, 2026** (the 2014 version covers loans from
+July 1, 2014 to July 1, 2026; the original version, at 25 years, covers loans
+before July 1, 2014). For borrowing from July 1, 2026 the income-driven plan
+is the **Repayment Assistance Plan (RAP)**: 30 years rather than 20, **1–10%
+of total income** rather than 10% of income above an allowance, a $10/month
+minimum, all unpaid interest waived for the full term, and a $50/month
+principal match. RAP is modelled in this app under **Advanced Analysis →
+2026 Regulatory & Macro Forecasting**, and is the more realistic comparison
+for anyone starting now. **Parent PLUS is not eligible for RAP**, which is why
+it sits in the non-forgivable pool described above.
+
+**Forgiveness is taxed.** Since **January 1, 2026**, a balance discharged at
+the end of an income-driven plan is **taxed as ordinary income in the year it
+is discharged** — under RAP, IBR and the original IBR alike. This app does
+**not** model that tax: it lands twenty or thirty years out, at a rate set by
+income and by tax law neither of which is knowable now, and a made-up figure
+would be worse than naming the liability. But it means a forgiveness figure is
+a bill deferred, not a bill cancelled, and on a professional degree — where the
+forgiven balance can exceed the amount borrowed — the tax alone can be a
+six-figure event. Read every forgiveness number on this page with that in mind.
+[Source: TICAS, "Comparing Income-Driven Repayment Plans", September 16,
+2025](https://ticas.org/wp-content/uploads/2025/09/IDR-Plan-Chart-9.16.25.pdf).
 
 **Cumulative Gross Pay minus loan payments.** These figures are **before
 tax**. The ROI model sums each year's gross salary and subtracts the loan
