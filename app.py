@@ -2163,9 +2163,9 @@ def financing_summary_text(financing: dict) -> str:
 
 
 def render_financing_note(financing: dict) -> None:
-    """On-screen version of financing_summary_text: the breakdown caption plus a
-    warning when the gap tranche is large (those loans carry the higher rate and
-    generally aren't IDR/forgiveness-eligible, so IDR results flatter the gap)."""
+    """On-screen version of financing_summary_text: the breakdown caption, plus
+    a hard error when any of the loan cannot be borrowed federally at all, plus
+    a warning when the non-forgivable share is large."""
     text = financing_summary_text(financing)
     if not text:
         return
@@ -2184,10 +2184,11 @@ def render_financing_note(financing: dict) -> None:
         )
     if financing.get("gap_share", 0) > 0.4:
         st.warning(
-            f"About {fmt_pct(financing['gap_share'] * 100)} of this loan is gap financing "
-            "(Direct PLUS or private). It carries the higher rate above and generally "
-            "isn't eligible for income-driven repayment or forgiveness — so under an IDR "
-            "strategy the gap portion is modeled more favorably than it would really be."
+            f"About {fmt_pct(financing['gap_share'] * 100)} of this loan is Direct PLUS or "
+            "private. Those carry the higher rate above and are **not** eligible for "
+            "income-driven repayment or forgiveness — under an IDR or RAP strategy they are "
+            "repaid in full on an ordinary fixed schedule alongside the federal part, and "
+            "nothing about them is written off at the end of the term."
         )
 
 
@@ -4845,7 +4846,85 @@ def split_loan_financing(effective_principal: float, federal_cap: float,
         "fees_included": include_fees,
         "gap_share": (gap_principal / effective_principal) if effective_principal > 0 else 0.0,
         "private_share": (private_principal / effective_principal) if effective_principal > 0 else 0.0,
+        # The two pools that matter for FORGIVENESS, already fee-grossed and
+        # rate-weighted so a caller can amortise each on its own terms:
+        #
+        #   forgivable    -- the student's own Direct loans (undergraduate
+        #                    Sub/Unsub + graduate/professional Unsub). These are
+        #                    the only loans an income-driven plan can forgive.
+        #   nonforgivable -- Parent PLUS and private money. Parent PLUS is the
+        #                    parent's loan and is not IDR-eligible; private
+        #                    loans are outside the federal system entirely.
+        #                    Neither is ever written off at the end of a term.
+        "forgivable_principal": federal_financed,
+        "forgivable_rate": ((ug_federal_financed * federal_rate
+                             + prof_federal_financed * prof_rate) / federal_financed
+                            if federal_financed > 0 else federal_rate),
+        "nonforgivable_principal": gap_financed,
+        "nonforgivable_rate": gap_rate,
     }
+
+
+def _merge_balance_schedules(a, b, a_flat=0.0, b_flat=0.0):
+    """Two amortisation schedules added into one, month by month.
+
+    Needed because the balance chart and cumulative_loan_paid_by_year read the
+    schedule directly: hand back only one tranche's schedule and the chart
+    draws half the debt while the metrics above it describe all of it.
+
+    Balances are forward-filled past the shorter schedule's payoff, where its
+    final row is already zero, so the sum stays correct after one loan clears.
+    The per-month `payment` column is reconstructed for whichever side lacks it
+    (only the IDR simulator emits one) from that side's flat payment while it
+    still owes something -- otherwise a combined schedule would report the
+    income-driven payment alone as if the private loan cost nothing.
+    """
+    months = sorted(set(a["month"]).union(set(b["month"])))
+
+    def balances(df):
+        return df.set_index("month")["balance"].reindex(months).ffill().fillna(0.0)
+
+    def payments(df, flat):
+        if "payment" in df.columns:
+            return df.set_index("month")["payment"].reindex(months).fillna(0.0)
+        # No per-month column: this side pays `flat` for exactly the months it
+        # appears in, and nothing after it clears.
+        owed = df.set_index("month")["balance"].reindex(months)
+        return pd.Series([flat if pd.notna(v) else 0.0 for v in owed], index=months)
+
+    out = pd.DataFrame({"month": months})
+    out["year"] = out["month"] / 12
+    out["balance"] = (balances(a).values + balances(b).values)
+    if "payment" in a.columns or "payment" in b.columns:
+        out["payment"] = (payments(a, a_flat).values + payments(b, b_flat).values)
+    return out
+
+
+def combine_repayment_results(primary: dict, secondary: dict) -> dict:
+    """Two separately-amortised loans presented as the one bill a person pays.
+
+    Sums what adds (payment, interest, amount forgiven, paid-in-window) and
+    takes the LATER payoff, because you are free when the last loan clears.
+
+    Amortising separately rather than blending into one rate is the same
+    reasoning split_loan_financing's blend already documents, applied one level
+    up: a blend is only honest for tranches taken and repaid on the SAME terms.
+    An existing balance isn't, and neither is a private loan sitting beside an
+    income-driven federal one.
+    """
+    if not secondary:
+        return dict(primary)
+    out = dict(primary)
+    for key in ("monthly_payment", "total_interest", "total_paid_in_roi_window",
+                "forgiven_amount"):
+        if key in primary and key in secondary:
+            out[key] = primary[key] + secondary[key]
+    out["payoff_years"] = max(primary["payoff_years"], secondary["payoff_years"])
+    if "schedule" in primary and "schedule" in secondary:
+        out["schedule"] = _merge_balance_schedules(
+            primary["schedule"], secondary["schedule"],
+            primary.get("monthly_payment", 0.0), secondary.get("monthly_payment", 0.0))
+    return out
 
 
 def compute_scenario_results(major_name: str, loan_amount: float,
@@ -4918,6 +4997,27 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         repayment_result = calculate_standard_repayment(
             principal_for_repayment, rate_for_repayment, roi_window_years=roi_window_years)
         strategy_label = "Standard 10-Year"
+    elif financing and financing.get("nonforgivable_principal", 0) > 0:
+        # Income-driven repayment writes off whatever is left at the end of the
+        # term -- but ONLY on the student's own federal Direct loans. Parent
+        # PLUS is the parent's loan and is not IDR-eligible; private loans are
+        # outside the federal system altogether. Running one blended balance
+        # through the IDR simulator forgave both, which is the single most
+        # flattering thing this model could do to a plan that is mostly private
+        # money: the larger the private tranche, the bigger the imaginary
+        # write-off. Post-OBBBA that tranche is often most of the loan.
+        #
+        # So the two pools are amortised on their own terms and added: the
+        # federal part income-driven and forgivable, the rest on an ordinary
+        # fixed schedule that runs to completion.
+        federal_part = calculate_idr_repayment(
+            financing["forgivable_principal"], financing["forgivable_rate"],
+            major_name, roi_window_years=roi_window_years)
+        nonfederal_part = calculate_standard_repayment(
+            financing["nonforgivable_principal"], financing["nonforgivable_rate"],
+            roi_window_years=roi_window_years)
+        repayment_result = combine_repayment_results(federal_part, nonfederal_part)
+        strategy_label = "Income-Driven Repayment"
     else:
         repayment_result = calculate_idr_repayment(
             principal_for_repayment, rate_for_repayment, major_name, roi_window_years=roi_window_years)
@@ -4964,15 +5064,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
             existing_result = calculate_idr_repayment(
                 existing_debt, existing_rate, major_name, roi_window_years=roi_window_years)
 
-    combined_repayment = dict(repayment_result)
-    if existing_result:
-        for key in ("monthly_payment", "total_interest", "total_paid_in_roi_window"):
-            if key in repayment_result and key in existing_result:
-                combined_repayment[key] = repayment_result[key] + existing_result[key]
-        # The LATER of the two: you are free when the last loan clears, not the
-        # first. That date is what returning-student mode exists to report.
-        combined_repayment["payoff_years"] = max(
-            repayment_result["payoff_years"], existing_result["payoff_years"])
+    # Same combiner as the forgivable/non-forgivable split above -- it also
+    # takes the LATER payoff, which is what returning-student mode reports, and
+    # merges the schedules so the balance chart shows the whole debt rather
+    # than only the new loan.
+    combined_repayment = combine_repayment_results(repayment_result, existing_result)
 
     return {
         "major": major_name,
@@ -10269,10 +10365,26 @@ def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: f
     widget calls, safe to call a second time outside the on-screen
     closure with the same inputs."""
     effective_principal = scenario["effective_principal"]
+    financing = scenario.get("financing")
+    nonforgivable = (financing or {}).get("nonforgivable_principal", 0) or 0
     if future_plan == "2026 Tiered Standard Plan":
         term_years = calculate_tiered_standard_term(effective_principal)
         result = calculate_standard_repayment(effective_principal, interest_rate, term_years,
                                                roi_window_years=roi_window_years)
+    elif nonforgivable > 0:
+        # RAP is a federal plan and forgives at the end of its term, so it has
+        # the same problem the main IDR path did: Parent PLUS and private money
+        # are not eligible and must not be written off with the rest. Run RAP on
+        # the student's own Direct loans and amortise the rest beside it.
+        # Tiered Standard above needs no split -- it forgives nothing, so both
+        # pools are already repaid in full.
+        federal_part = simulate_rap_schedule(
+            financing["forgivable_principal"], financing["forgivable_rate"],
+            major_name, dependents, roi_window_years=roi_window_years)
+        nonfederal_part = calculate_standard_repayment(
+            financing["nonforgivable_principal"], financing["nonforgivable_rate"],
+            roi_window_years=roi_window_years)
+        result = combine_repayment_results(federal_part, nonfederal_part)
     else:
         result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents,
                                         roi_window_years=roi_window_years)
@@ -11754,12 +11866,24 @@ anything *understated* — the app has one non-federal rate input and inventing
 a spread would be a made-up number. The origination fee is applied to the PLUS
 portion only, since private lenders generally charge none.
 
-*A simplification worth knowing:* the model repays everything at one blended
-rate, so under **Income-Driven Repayment** it applies forgiveness to the whole
-balance. In reality private and PLUS gap loans generally **aren't**
-IDR/forgiveness-eligible, so IDR results flatter the gap portion — the app
-warns you when the gap is a large share of the loan. Simplified mode's median
-debt is **federal loans only** and excludes PLUS/private entirely.
+**Only federal Direct loans are forgiven.** Under **Income-Driven Repayment**
+or **RAP**, whatever is left at the end of the term is written off — but that
+applies to the student's own Direct loans only. **Parent PLUS is the parent's
+loan and is not IDR-eligible; private loans are outside the federal system
+entirely.** So the app amortises the two pools separately: the federal part on
+the income-driven plan with forgiveness at the end, the PLUS-and-private part
+on an ordinary fixed schedule that runs to completion. The payment you see is
+the sum of both, and the payoff date is when the *later* one clears.
+
+This matters more than it sounds. The model used to repay one blended balance,
+which forgave private money along with federal — and because income-driven
+payments can sit below the interest, the balance grew and the imaginary
+write-off grew with it. On the Berkeley example above that was a **$464,000**
+forgiveness that could never happen. Under OBBBA the non-forgivable share is
+larger than it used to be, so this would only have got worse.
+
+Simplified mode's median debt is **federal loans only** and excludes
+PLUS/private entirely, so no split applies there.
 
 **Getting your own numbers instead of school averages.** The Cost of
 Attendance we auto-fill is a school-wide *average sticker price* — what a
