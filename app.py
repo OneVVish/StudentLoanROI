@@ -1081,6 +1081,12 @@ IDR_PAYMENT_RATE = 0.10
 IDR_MAX_TERM_YEARS = 20
 
 STANDARD_TERM_YEARS = 10
+# The Extended Standard plan: a fixed payment stretched to 25 years, for
+# borrowers with enough balance to qualify. Included in the existing-loan
+# comparison because for someone NOT seeking forgiveness it is often the lowest
+# fixed payment available, and leaving it out would make the comparison look
+# like RAP is the only way to a manageable monthly figure.
+EXTENDED_STANDARD_TERM_YEARS = 25
 ROI_WINDOW_YEARS = 10
 
 # Federal Direct (Subsidized + Unsubsidized) borrowing limits. These cap how
@@ -2559,6 +2565,26 @@ def get_major_growth_rate(major_name: str) -> float:
     data = MAJOR_DATA[major_name]
     span_years = data.get("wage_growth_span_years", WAGE_GROWTH_SPAN_YEARS_BLS)
     return (data["median_salary"] / data["starting_salary"]) ** (1 / span_years) - 1
+
+
+def income_for_year(major_name: str, year_index: int,
+                     annual_income: float = None, income_growth: float = 0.03) -> float:
+    """The borrower's income in a given year, from a major OR from a figure
+    they gave us.
+
+    The income-driven simulators originally derived income from a major,
+    because every borrower they modelled was hypothetical. Someone already in
+    repayment has no major -- they have a salary. Passing it explicitly keeps
+    those simulators usable for both without a second copy of the amortisation.
+
+    Two scalars rather than a callable, deliberately: find_breakeven_loan is
+    @st.cache_data, a lambda is unhashable, and a function crossing that
+    boundary would either raise or be keyed by object identity and cache the
+    wrong answer. Same reasoning returning_student_curve documents.
+    """
+    if annual_income is not None:
+        return float(annual_income) * ((1 + income_growth) ** max(year_index, 0))
+    return get_annual_salary_for_year(major_name, year_index)
 
 
 def get_annual_salary_for_year(major_name: str, year_index: int) -> float:
@@ -4768,6 +4794,7 @@ def _close_schedule_at_forgiveness(schedule_rows: list, max_months: int) -> None
 
 def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              major_name: str,
+                             annual_income: float = None, income_growth: float = 0.03,
                              living_adjustment: float = IDR_LIVING_ADJUSTMENT,
                              payment_rate: float = IDR_PAYMENT_RATE,
                              max_term_years: int = IDR_MAX_TERM_YEARS,
@@ -4791,7 +4818,7 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
 
     for month in range(1, max_months + 1):
         year_index = (month - 1) // 12
-        current_salary = get_annual_salary_for_year(major_name, year_index)
+        current_salary = income_for_year(major_name, year_index, annual_income, income_growth)
         discretionary_monthly = max((current_salary / 12) - (living_adjustment / 12), 0.0)
         payment = discretionary_monthly * payment_rate
 
@@ -4864,7 +4891,9 @@ def calculate_rap_payment(agi: float, dependents: int = 0) -> dict:
 
 
 def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: str,
-                           dependents: int = 0, max_term_years: int = RAP_MAX_TERM_YEARS,
+                           dependents: int = 0,
+                           annual_income: float = None, income_growth: float = 0.03,
+                           max_term_years: int = RAP_MAX_TERM_YEARS,
                            roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """Year-by-year RAP amortization: payment = calculate_rap_payment against
     that year's real salary (get_annual_salary_for_year), with RAP's real
@@ -4890,7 +4919,7 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
     for month in range(1, max_months + 1):
         year_index = (month - 1) // 12
-        agi = get_annual_salary_for_year(major_name, year_index)
+        agi = income_for_year(major_name, year_index, annual_income, income_growth)
         payment = calculate_rap_payment(agi, dependents)["monthly_payment"]
         interest = balance * monthly_rate
         # Same final-month cap as the IDR simulator -- see the note there.
@@ -10748,6 +10777,136 @@ def search_was_adjusted() -> bool:
                 & set(SEARCH_CONTROL_KEYS))
 
 
+def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
+                                 dependents: int = 0, forgivable: bool = True) -> list:
+    """Every repayment plan a borrower with an EXISTING balance could be on.
+
+    Pure computation, no Streamlit, so it can be tested directly -- and it
+    reuses the same four simulators the prospective side uses rather than
+    growing a second amortisation. The only reason it needs new code at all is
+    that those simulators derived income from a major; income_for_year now lets
+    them take a salary instead.
+
+    `forgivable` is False for Parent PLUS, which is not eligible for RAP or
+    IBR at all. Returning the rows anyway with a note would invite a borrower
+    to compare against plans they cannot join.
+    """
+    rows = []
+    std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
+    rows.append(("Standard (10-year)", std, "Fixed payment. No forgiveness."))
+    ext = calculate_standard_repayment(balance, rate, EXTENDED_STANDARD_TERM_YEARS)
+    rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", ext,
+                 "Fixed payment stretched out. No forgiveness, more interest."))
+    tiered_term = calculate_tiered_standard_term(balance)
+    tiered = calculate_standard_repayment(balance, rate, tiered_term)
+    rows.append((f"2026 Tiered Standard ({tiered_term}-year)", tiered,
+                 "Fixed payment over a term set by your balance."))
+    if forgivable:
+        rap = simulate_rap_schedule(balance, rate, None, dependents,
+                                     annual_income=annual_income)
+        rows.append(("Repayment Assistance Plan (RAP)", rap,
+                     "1-10% of total income. Unpaid interest waived. "
+                     "Remainder forgiven at 30 years."))
+        idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income)
+        rows.append(("IBR-style income-driven", idr,
+                     "10% of income above a $22,000 allowance. Forgiven at 20 years. "
+                     "Closed to loans originated on or after July 1, 2026."))
+    return rows
+
+
+def render_existing_loan_comparison() -> None:
+    """Plan comparison for someone already in repayment.
+
+    A different question from the rest of the app, which asks whether a degree
+    is worth borrowing for. This one takes the borrowing as given and asks what
+    to do about it -- so it lives in its own expander, takes its own inputs and
+    shares none of the scenario machinery.
+    """
+    with st.expander("💸 Already have loans? Compare repayment plans", expanded=False):
+        st.caption(
+            "For a balance you already owe. Everything else on this page is "
+            "about whether to borrow in the first place — this is about what "
+            "to do once you have."
+        )
+        c1, c2, c3 = st.columns(3)
+        balance = c1.number_input("Current balance ($)", min_value=0, max_value=2_000_000,
+                                   step=1_000, key="existing_balance")
+        rate = c2.number_input("Interest rate (%)", min_value=0.0, max_value=20.0,
+                                step=0.1, key="existing_rate")
+        income = c3.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
+                                  step=1_000, key="existing_income",
+                                  help="Adjusted gross income. The income-driven plans "
+                                       "size their payment from it; the fixed plans ignore it.")
+        c4, c5 = st.columns(2)
+        deps = c4.number_input("Dependent children", min_value=0, max_value=10, step=1,
+                                key="existing_dependents",
+                                help="RAP lowers the payment by $50/month each.")
+        forgivable = c5.checkbox(
+            "These are my own federal Direct loans", value=True, key="existing_forgivable",
+            help="Untick for Parent PLUS or private loans. Parent PLUS is not "
+                 "eligible for RAP or IBR, and private loans are outside the "
+                 "federal system entirely, so the income-driven rows are hidden.")
+
+        if not balance or not rate:
+            st.info("Enter a balance and a rate to compare plans.")
+            return
+
+        rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable)
+        st.dataframe(pd.DataFrame([{
+            "Plan": label,
+            "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
+                        else fmt_money(first_payment_of(r))),
+            "Payoff": f"{r['payoff_years']:.1f} yrs",
+            "Total interest": fmt_money(r["total_interest"]),
+            "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
+            "What it is": note,
+        } for label, r, note in rows]), hide_index=True, use_container_width=True)
+
+        render_rap_subsidy_answer(rows)
+        st.caption(
+            "Simplified models of the real plans, not your servicer's figures — payments "
+            "here come from this app's own formulas and your actual bill will differ. "
+            "Forgiven balances are taxable as ordinary income in the year they are "
+            "discharged, and that tax is **not** included above. Extra payments are not "
+            "modelled: paying more than the minimum shortens every row, and under RAP it "
+            "also forfeits the subsidy in any month the extra covers the interest."
+        )
+
+
+def first_payment_of(result: dict) -> float:
+    """Month-1 payment for a plan whose payment moves with income."""
+    schedule = result.get("schedule")
+    if schedule is None or "payment" not in schedule.columns or schedule.empty:
+        return 0.0
+    return float(schedule["payment"].iloc[0])
+
+
+def render_rap_subsidy_answer(rows: list) -> None:
+    """What RAP's interest subsidy is actually worth to THIS borrower.
+
+    The headline question for anyone weighing RAP, and one the plan's own
+    description answers misleadingly: "unpaid interest is waived" sounds like a
+    benefit to everyone, when a borrower whose payment covers the interest gets
+    nothing. Stating the figure is the only way to tell those apart.
+    """
+    rap = next((r for label, r, _ in rows if "RAP" in label), None)
+    if rap is None:
+        return
+    waived = rap.get("waived_interest", 0) or 0
+    if waived > 0:
+        st.success(
+            f"**RAP's interest subsidy is worth {fmt_money(waived)} to you.** That is "
+            "interest your payment doesn't cover, which RAP writes off instead of "
+            "letting it accrue.".replace("$", chr(92) + "$")
+        )
+    else:
+        st.info(
+            "**RAP's interest subsidy is worth nothing to you.** It only waives interest "
+            "your payment fails to cover, and at this income your payment covers all of "
+            "it. RAP may still win on the monthly figure — but not for that reason."
+        )
+
+
 def render_school_search() -> None:
     """Budget-first school search: what could I attend, for this field, at this price?
 
@@ -11036,6 +11195,11 @@ if not enable_prestige_mode:
     # teaches this?") is answerable in the same breath. Above the 5c fork, so
     # no result branch changes.
     render_school_search()
+    # Also above the 5c fork, so both result branches get it and the H2 arms
+    # cannot differ by it. Placed last because it answers a different question
+    # from everything above -- what to do about debt you already have, rather
+    # than whether to take it on.
+    render_existing_loan_comparison()
 
 
 def _npc_link_markdown(school_name: str) -> str:

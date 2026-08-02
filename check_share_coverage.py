@@ -72,6 +72,17 @@ SHARE_EXEMPT = {
     "school_search_b": "raw search text; ?school_b= carries the resolved name",
     "school_pick_a": "disambiguation picker; ?school= carries the resolved name",
     "school_pick_b": "disambiguation picker; ?school_b= carries the resolved name",
+    # The existing-loan comparison. A separate question from the scenario --
+    # what to do about debt you already have, not whether to take it on -- so
+    # these are not scenario fields and a shared link has nothing to say about
+    # them. Deliberately NOT round-tripped for a second reason: a balance and
+    # an income are the most identifying numbers a visitor can type, and a
+    # share link is a URL that gets pasted into chats and emails.
+    "existing_balance": "existing-loan comparison; not a scenario field, and personal",
+    "existing_rate": "existing-loan comparison; not a scenario field",
+    "existing_income": "existing-loan comparison; not a scenario field, and personal",
+    "existing_dependents": "existing-loan comparison; not a scenario field",
+    "existing_forgivable": "existing-loan comparison; not a scenario field",
     # Display-only / derived.
     "loan_mode_unavailable_display": "read-only display of a forced value",
 }
