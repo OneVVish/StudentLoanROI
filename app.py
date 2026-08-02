@@ -6992,6 +6992,42 @@ if "admin_revealed" not in st.session_state:
 
 st.sidebar.header("🎓 Your Profile")
 
+# Resolved HERE, at the top of section 4, because the Financing block below
+# reads is_returning when it computes working_years -- well before this
+# section's own widget renders. Same read-before-the-widget pattern
+# dataset_mode and city already use, and the reason the constants sit above
+# rather than beside the radio.
+# Who is going to school. The app has always modelled exactly one person -- an
+# 18-year-old starting a first degree, measured against a debt-free high school
+# graduate -- and that is now the minority case: 24.6M federal borrowers are 35+
+# against 20.2M under 35, and over-50s owe more on average than under-35s. For
+# someone going back at 49 the high-school-graduate counterfactual is
+# meaningless; her alternative was her existing job at her existing salary.
+#
+# Read from session_state before the widget renders, the same pattern
+# dataset_mode uses, because the Financing block above needs it.
+STUDENT_MODE_FIRST = "Straight from high school"
+STUDENT_MODE_RETURNING = "Going back to school"
+STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
+RETURNING_STOP_WORK = "No — I'll study full-time"
+RETURNING_KEEP_WORKING = "Yes — evenings, online or part-time"
+RETURNING_ENROLLMENT_OPTIONS = [RETURNING_KEEP_WORKING, RETURNING_STOP_WORK]
+st.session_state.setdefault("student_mode_radio", STUDENT_MODE_FIRST)
+student_mode = st.session_state["student_mode_radio"]
+is_returning = student_mode == STUDENT_MODE_RETURNING
+st.session_state.setdefault("current_age", 30)
+# Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
+# 4,950% ROI on the default San Francisco scenario, because $50k is below what
+# a high school graduate earns there -- so the app invented a spectacular
+# return for someone who had entered nothing. An unanswered question must look
+# unanswered.
+st.session_state.setdefault("current_salary", 0)
+st.session_state.setdefault("salary_no_degree_10y", 0)
+st.session_state.setdefault("existing_debt", 0)
+st.session_state.setdefault("existing_debt_rate", DEFAULT_FEDERAL_RATE)
+st.session_state.setdefault("returning_enrollment", RETURNING_KEEP_WORKING)
+
+
 # Global styling for every number_input in the sidebar (Scenario A and B
 # alike): hide the +/- stepper buttons, and show a $ or % unit prefix on
 # the left based on which one appears in the widget's own label -- every
@@ -7472,6 +7508,16 @@ federal_cap_a = federal_direct_cap(_schedule_a, loan_dependency) if loan_source_
 _foregone_on = st.session_state.get("count_foregone_earnings", False)
 enrollment_years_a = (cc_years_a + university_years_a) if _foregone_on else 0
 working_years_a = cc_years_a if (is_parttime_a and _foregone_on) else 0
+
+# Returning students answer the same question the community-college path asks,
+# but about their own job rather than a transfer plan, so it overrides
+# working_years here rather than adding a parallel mechanism. Keeping the salary
+# means the whole enrolment period is worked, so the foregone penalty cancels
+# exactly -- which is what the CC part-time path already models.
+if is_returning and _foregone_on:
+    working_years_a = (enrollment_years_a
+                        if st.session_state.get("returning_enrollment") == RETURNING_KEEP_WORKING
+                        else 0)
 # Double-count guard: the per-year family contribution applies only to the
 # financed university years; the CC tuition (cc_oop_a) is a separate additive
 # out-of-pocket cost. No CC (university_years=4, cc_oop=0) => pc_per_year*4,
@@ -7700,31 +7746,6 @@ careers_csv_path = CAREERS_CSV_PATH_NATIONAL
 # making -- they pick a major and a school, and the occupation is a
 # consequence they're guessing at. Career mode is the richer dataset and
 # stays one click away for anyone who does have a specific job in mind.
-# Who is going to school. The app has always modelled exactly one person -- an
-# 18-year-old starting a first degree, measured against a debt-free high school
-# graduate -- and that is now the minority case: 24.6M federal borrowers are 35+
-# against 20.2M under 35, and over-50s owe more on average than under-35s. For
-# someone going back at 49 the high-school-graduate counterfactual is
-# meaningless; her alternative was her existing job at her existing salary.
-#
-# Read from session_state before the widget renders, the same pattern
-# dataset_mode uses, because the Financing block above needs it.
-STUDENT_MODE_FIRST = "Straight from high school"
-STUDENT_MODE_RETURNING = "Going back to school"
-STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
-st.session_state.setdefault("student_mode_radio", STUDENT_MODE_FIRST)
-student_mode = st.session_state["student_mode_radio"]
-is_returning = student_mode == STUDENT_MODE_RETURNING
-st.session_state.setdefault("current_age", 30)
-# Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
-# 4,950% ROI on the default San Francisco scenario, because $50k is below what
-# a high school graduate earns there -- so the app invented a spectacular
-# return for someone who had entered nothing. An unanswered question must look
-# unanswered.
-st.session_state.setdefault("current_salary", 0)
-st.session_state.setdefault("salary_no_degree_10y", 0)
-st.session_state.setdefault("existing_debt", 0)
-st.session_state.setdefault("existing_debt_rate", DEFAULT_FEDERAL_RATE)
 
 dataset_mode_options = [DATASET_MODE_MAJOR, DATASET_MODE_CAREER]
 shared_dataset_mode = get_shared_default("mode", DATASET_MODE_MAJOR)
@@ -7893,6 +7914,35 @@ if is_returning:
             step=0.1, key="existing_debt_rate",
             on_change=lambda: mark_interaction("existing_debt_rate"),
         )
+    # Two options, not three, because the model only has two states: whether
+    # the salary continues during study. "Part-time" and "evenings/online"
+    # would be the same arithmetic under different names, and offering a choice
+    # that changes nothing is worse than not offering it.
+    #
+    # This is the biggest lever on the answer for a returning student -- for
+    # someone on $60k, foregone earnings dwarf tuition -- which is exactly why
+    # it is asked rather than assumed.
+    st.sidebar.radio(
+        "While you study, will you keep working?",
+        RETURNING_ENROLLMENT_OPTIONS, key="returning_enrollment",
+        on_change=lambda: mark_interaction("returning_enrollment"),
+        help="Stopping work means giving up your salary for the length of the "
+              "programme, which is usually the largest single cost of going "
+              "back -- larger than tuition.",
+    )
+
+    # The radio above only bites when foregone earnings are being counted. If
+    # they are off and she plans to stop working, the app is ignoring the
+    # largest cost of the decision, and it should say so rather than quietly
+    # producing a flattering number.
+    if (st.session_state.get("returning_enrollment") == RETURNING_STOP_WORK
+            and not st.session_state.get("count_foregone_earnings", True)):
+        st.sidebar.warning(
+            "You've said you'll stop working, but **foregone earnings are "
+            "switched off** below. The salary you'd give up is usually the "
+            "biggest cost of going back — these figures leave it out entirely."
+        )
+
     # Says which comparison is actually running. Without this the visitor sees
     # returning-student inputs on screen and assumes the figures already use
     # them, when a blank salary leaves the old baseline in force.
