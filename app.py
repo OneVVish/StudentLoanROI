@@ -2153,6 +2153,41 @@ def get_prestige_adjusted_major_name(major_name: str, tier_label: str) -> str:
     return synthetic_name
 
 
+def apply_starting_salary_override(major_name: str, entered: float) -> None:
+    """Re-anchor a major's whole salary curve to a figure the visitor entered.
+
+    The BLS number is what EVERYONE in an occupation earns -- it is not what a
+    50-year-old entering it earns in year one. A career-changer typically starts
+    below it and may never reach it, and the app has no data for that, so it
+    lets the visitor say rather than guessing on their behalf.
+
+    Scales starting_salary AND median_salary by the same ratio, exactly as the
+    metro wage index and the prestige multiplier already do. Overriding only
+    the start would silently change the implied growth rate, because
+    get_major_growth_rate derives it from median/starting -- entering a lower
+    figure would make the model grow FASTER to the same median, which is the
+    opposite of what a late entrant should expect. Scaling both preserves the
+    curve's shape and moves only its level.
+
+    Builds a NEW dict rather than mutating. load_bls_careers is cached and its
+    inner dicts are shared references, so an in-place edit here would rewrite
+    one visitor's salary for everyone until the cache cleared.
+    """
+    base = MAJOR_DATA.get(major_name)
+    if not base or not entered or entered <= 0:
+        return
+    current = base.get("starting_salary") or 0
+    if current <= 0:
+        return
+    ratio = entered / current
+    MAJOR_DATA[major_name] = {
+        **base,
+        "starting_salary": entered,
+        "median_salary": base["median_salary"] * ratio,
+        "salary_overridden": True,
+    }
+
+
 def get_ai_exposure_for_major(major_name: str) -> dict:
     """AI_EXPOSURE_BY_SOC_GROUP entry for major_name's SOC major group, or a
     graceful "Unclassified" placeholder if this major/career isn't mapped to
@@ -2852,6 +2887,28 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # OEWS geography at all), and the two are not the same fact. Making the
         # Career case explicit means NULL has exactly one meaning per mode:
         # "not applicable", never "national".
+        # Returning-student mode. student_mode is the one that changes what
+        # every OTHER column in this row means: a "Going back to school" row's
+        # earnings_premium is measured against baseline_salary_now, not against
+        # a high school graduate, and the two must never be pooled without
+        # conditioning on it.
+        "student_mode": student_mode,
+        "current_age": (int(st.session_state["current_age"])
+                         if is_returning and st.session_state.get("current_age") else None),
+        # NULL in returning mode until BOTH are entered -- the app deliberately
+        # keeps the old baseline until then, so NULL here means "still measured
+        # against a high school graduate", not "missing data".
+        "baseline_salary_now": (float(st.session_state["current_salary"])
+                                 if is_returning and returning_baseline_ready() else None),
+        "baseline_salary_in_10y": (float(st.session_state["salary_no_degree_10y"])
+                                    if is_returning and returning_baseline_ready() else None),
+        # Excluded from scenario_a_loan_amount and from the ROI by design; it
+        # moves payoff_age and the monthly payment only.
+        "existing_debt": (float(st.session_state.get("existing_debt", 0) or 0)
+                           if is_returning else None),
+        "payoff_age": payoff_age_for(
+            scenario_a, st.session_state.get("current_age") if is_returning else None,
+            program_years_for_major(major)),
         "wage_geography_level": (
             (MAJOR_DATA.get(major, {}).get("wage_geography_level") or "national")
             if dataset_mode == DATASET_MODE_CAREER else None),
@@ -6935,6 +6992,42 @@ if "admin_revealed" not in st.session_state:
 
 st.sidebar.header("🎓 Your Profile")
 
+# Resolved HERE, at the top of section 4, because the Financing block below
+# reads is_returning when it computes working_years -- well before this
+# section's own widget renders. Same read-before-the-widget pattern
+# dataset_mode and city already use, and the reason the constants sit above
+# rather than beside the radio.
+# Who is going to school. The app has always modelled exactly one person -- an
+# 18-year-old starting a first degree, measured against a debt-free high school
+# graduate -- and that is now the minority case: 24.6M federal borrowers are 35+
+# against 20.2M under 35, and over-50s owe more on average than under-35s. For
+# someone going back at 49 the high-school-graduate counterfactual is
+# meaningless; her alternative was her existing job at her existing salary.
+#
+# Read from session_state before the widget renders, the same pattern
+# dataset_mode uses, because the Financing block above needs it.
+STUDENT_MODE_FIRST = "Straight from high school"
+STUDENT_MODE_RETURNING = "Going back to school"
+STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
+RETURNING_STOP_WORK = "No — I'll study full-time"
+RETURNING_KEEP_WORKING = "Yes — evenings, online or part-time"
+RETURNING_ENROLLMENT_OPTIONS = [RETURNING_KEEP_WORKING, RETURNING_STOP_WORK]
+st.session_state.setdefault("student_mode_radio", STUDENT_MODE_FIRST)
+student_mode = st.session_state["student_mode_radio"]
+is_returning = student_mode == STUDENT_MODE_RETURNING
+st.session_state.setdefault("current_age", 30)
+# Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
+# 4,950% ROI on the default San Francisco scenario, because $50k is below what
+# a high school graduate earns there -- so the app invented a spectacular
+# return for someone who had entered nothing. An unanswered question must look
+# unanswered.
+st.session_state.setdefault("current_salary", 0)
+st.session_state.setdefault("salary_no_degree_10y", 0)
+st.session_state.setdefault("existing_debt", 0)
+st.session_state.setdefault("existing_debt_rate", DEFAULT_FEDERAL_RATE)
+st.session_state.setdefault("returning_enrollment", RETURNING_KEEP_WORKING)
+
+
 # Global styling for every number_input in the sidebar (Scenario A and B
 # alike): hide the +/- stepper buttons, and show a $ or % unit prefix on
 # the left based on which one appears in the widget's own label -- every
@@ -7415,6 +7508,16 @@ federal_cap_a = federal_direct_cap(_schedule_a, loan_dependency) if loan_source_
 _foregone_on = st.session_state.get("count_foregone_earnings", False)
 enrollment_years_a = (cc_years_a + university_years_a) if _foregone_on else 0
 working_years_a = cc_years_a if (is_parttime_a and _foregone_on) else 0
+
+# Returning students answer the same question the community-college path asks,
+# but about their own job rather than a transfer plan, so it overrides
+# working_years here rather than adding a parallel mechanism. Keeping the salary
+# means the whole enrolment period is worked, so the foregone penalty cancels
+# exactly -- which is what the CC part-time path already models.
+if is_returning and _foregone_on:
+    working_years_a = (enrollment_years_a
+                        if st.session_state.get("returning_enrollment") == RETURNING_KEEP_WORKING
+                        else 0)
 # Double-count guard: the per-year family contribution applies only to the
 # financed university years; the CC tuition (cc_oop_a) is a separate additive
 # out-of-pocket cost. No CC (university_years=4, cc_oop=0) => pc_per_year*4,
@@ -7643,31 +7746,6 @@ careers_csv_path = CAREERS_CSV_PATH_NATIONAL
 # making -- they pick a major and a school, and the occupation is a
 # consequence they're guessing at. Career mode is the richer dataset and
 # stays one click away for anyone who does have a specific job in mind.
-# Who is going to school. The app has always modelled exactly one person -- an
-# 18-year-old starting a first degree, measured against a debt-free high school
-# graduate -- and that is now the minority case: 24.6M federal borrowers are 35+
-# against 20.2M under 35, and over-50s owe more on average than under-35s. For
-# someone going back at 49 the high-school-graduate counterfactual is
-# meaningless; her alternative was her existing job at her existing salary.
-#
-# Read from session_state before the widget renders, the same pattern
-# dataset_mode uses, because the Financing block above needs it.
-STUDENT_MODE_FIRST = "Straight from high school"
-STUDENT_MODE_RETURNING = "Going back to school"
-STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
-st.session_state.setdefault("student_mode_radio", STUDENT_MODE_FIRST)
-student_mode = st.session_state["student_mode_radio"]
-is_returning = student_mode == STUDENT_MODE_RETURNING
-st.session_state.setdefault("current_age", 30)
-# Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
-# 4,950% ROI on the default San Francisco scenario, because $50k is below what
-# a high school graduate earns there -- so the app invented a spectacular
-# return for someone who had entered nothing. An unanswered question must look
-# unanswered.
-st.session_state.setdefault("current_salary", 0)
-st.session_state.setdefault("salary_no_degree_10y", 0)
-st.session_state.setdefault("existing_debt", 0)
-st.session_state.setdefault("existing_debt_rate", DEFAULT_FEDERAL_RATE)
 
 dataset_mode_options = [DATASET_MODE_MAJOR, DATASET_MODE_CAREER]
 shared_dataset_mode = get_shared_default("mode", DATASET_MODE_MAJOR)
@@ -7836,6 +7914,35 @@ if is_returning:
             step=0.1, key="existing_debt_rate",
             on_change=lambda: mark_interaction("existing_debt_rate"),
         )
+    # Two options, not three, because the model only has two states: whether
+    # the salary continues during study. "Part-time" and "evenings/online"
+    # would be the same arithmetic under different names, and offering a choice
+    # that changes nothing is worse than not offering it.
+    #
+    # This is the biggest lever on the answer for a returning student -- for
+    # someone on $60k, foregone earnings dwarf tuition -- which is exactly why
+    # it is asked rather than assumed.
+    st.sidebar.radio(
+        "While you study, will you keep working?",
+        RETURNING_ENROLLMENT_OPTIONS, key="returning_enrollment",
+        on_change=lambda: mark_interaction("returning_enrollment"),
+        help="Stopping work means giving up your salary for the length of the "
+              "programme, which is usually the largest single cost of going "
+              "back -- larger than tuition.",
+    )
+
+    # The radio above only bites when foregone earnings are being counted. If
+    # they are off and she plans to stop working, the app is ignoring the
+    # largest cost of the decision, and it should say so rather than quietly
+    # producing a flattering number.
+    if (st.session_state.get("returning_enrollment") == RETURNING_STOP_WORK
+            and not st.session_state.get("count_foregone_earnings", True)):
+        st.sidebar.warning(
+            "You've said you'll stop working, but **foregone earnings are "
+            "switched off** below. The salary you'd give up is usually the "
+            "biggest cost of going back — these figures leave it out entirely."
+        )
+
     # Says which comparison is actually running. Without this the visitor sees
     # returning-student inputs on screen and assumes the figures already use
     # them, when a blank salary leaves the old baseline in force.
@@ -7913,6 +8020,38 @@ major = st.sidebar.selectbox(
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
 )
+# Returning students only. Placed here because it needs the chosen major to
+# pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
+# apply_starting_salary_override rewrites the entry the whole model reads
+# through get_annual_salary_for_year.
+if is_returning and major in MAJOR_DATA:
+    _bls_start = MAJOR_DATA[major].get("starting_salary", 0)
+    st.session_state.setdefault("starting_salary_override", int(_bls_start))
+    # Re-pin when the major changes, or the previous occupation's figure rides
+    # along silently -- the same stale-value trap the major dropdown's mode
+    # re-pinning exists to prevent.
+    if st.session_state.get("_salary_override_major") != major:
+        st.session_state["_salary_override_major"] = major
+        st.session_state["starting_salary_override"] = int(_bls_start)
+    st.sidebar.number_input(
+        "Your expected starting salary ($/yr)",
+        min_value=0, max_value=1_000_000, step=1_000,
+        key="starting_salary_override",
+        on_change=lambda: mark_interaction("starting_salary_override"),
+        help="Pre-filled with the BLS figure for this occupation. Change it if "
+              "you expect to start somewhere else.",
+    )
+    st.sidebar.caption(
+        f"The {fmt_money(_bls_start)} pre-filled here is what **everyone** in this "
+        "occupation earns at entry level — not what someone entering it mid-career "
+        "earns in year one. Career-changers commonly start below it, and some never "
+        "reach the median. If you have a real offer or a local posting, that number "
+        "is better than this one.".replace("$", chr(92) + "$")
+    )
+    _entered = st.session_state.get("starting_salary_override")
+    if _entered and _entered != _bls_start:
+        apply_starting_salary_override(major, float(_entered))
+
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
 if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
     st.sidebar.caption((
@@ -9520,6 +9659,45 @@ def render_cc_path_note(cc_mode: str) -> None:
         )
 
 
+def payoff_age_for(scenario: dict, current_age, program_years: int):
+    """The age at which the LAST loan clears, or None when it cannot be said.
+
+    "10.0 yrs" is not the question someone going back at 49 is asking; "repaid
+    at 61" is. The article this was built for is entirely about debt outliving
+    the ability to choose when to stop working, and the app already held every
+    term needed to answer it.
+
+    current_age + program_years + payoff, because repayment starts after the
+    programme ends, not today. Uses combined_repayment, so an existing balance
+    pushes the date out -- that balance is exactly what keeps the article's
+    subjects working.
+
+    None outside returning mode: current_age is only asked there, and inventing
+    an age for an 18-year-old would be asserting something never entered.
+    """
+    if not current_age:
+        return None
+    repayment = scenario.get("combined_repayment") or scenario["repayment_result"]
+    return float(current_age) + float(program_years or 0) + repayment["payoff_years"]
+
+
+def render_payoff_age(scenario: dict, current_age, program_years: int,
+                       retirement_age: int = 67) -> None:
+    """Caption under the payoff metric. Shared by both 5c branches -- rendering
+    it in one and not the other is an H2 confound, not a cosmetic gap."""
+    age = payoff_age_for(scenario, current_age, program_years)
+    if age is None:
+        return
+    if age >= retirement_age:
+        st.warning(
+            f"You'd be **{age:.0f}** when this is repaid — past the "
+            f"{retirement_age} most people plan to retire at. The debt outlasts "
+            "the working years you were counting on."
+        )
+    else:
+        st.caption(f"You'd be **{age:.0f}** when this is fully repaid.")
+
+
 def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: int,
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
                            col_index: float, career_data_source_name: str,
@@ -9527,7 +9705,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            federal_cap: float = None, gap_rate: float = None,
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
-                           loan_basis: str = None, program_years: int = None):
+                           loan_basis: str = None, program_years: int = None,
+                           current_age: int = None):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -9574,12 +9753,24 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # has no time dimension) and for the 430 occupations needing no degree.
         if loan_basis is not None:
             st.metric(loan_amount_label(loan_basis, program_years), fmt_money(loan_amount))
+        # combined_repayment, not repayment_result: what the visitor pays and
+        # when they are free includes any existing balance. It EQUALS
+        # repayment_result when there is none, so this needs no conditional.
+        shown = scenario.get("combined_repayment") or repayment_result
         st.metric(
             "Monthly Payment",
-            fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+            fmt_money(shown["monthly_payment"]) if "monthly_payment" in shown else "Varies (IDR)",
         )
-        st.metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
-        st.metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
+        st.metric("Payoff Timeline", f"{shown['payoff_years']:.1f} yrs")
+        render_payoff_age(scenario, current_age, program_years)
+        st.metric("Total Interest Paid", fmt_money(shown["total_interest"]))
+        if scenario.get("existing_debt"):
+            st.caption(
+                f"Includes {fmt_money(scenario['existing_debt'])} of student debt you "
+                "already owe. That is in the payment and the payoff date, but not "
+                "charged against this degree — you'd be repaying it either way."
+                .replace("$", chr(92) + "$")
+            )
         render_financing_note(scenario.get("financing"))
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
@@ -9888,6 +10079,7 @@ if compare_mode:
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_a, program_years=program_years_a,
+        current_age=st.session_state.get("current_age") if is_returning else None,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -9897,6 +10089,7 @@ if compare_mode:
         federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_b, program_years=program_years_b,
+        current_age=st.session_state.get("current_age") if is_returning else None,
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -10134,13 +10327,24 @@ else:
                 "but every calculation below uses your overridden total instead."
             ).replace("$", r"\$"))
 
+    # See the compare branch: combined_repayment includes any existing balance
+    # and equals repayment_result when there is none.
+    _shown = scenario.get("combined_repayment") or repayment_result
     loan_metric_cols = st.columns(3)
     loan_metric_cols[0].metric(
         "Monthly Payment",
-        fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+        fmt_money(_shown["monthly_payment"]) if "monthly_payment" in _shown else "Varies (IDR)",
     )
-    loan_metric_cols[1].metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
-    loan_metric_cols[2].metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
+    loan_metric_cols[1].metric("Payoff Timeline", f"{_shown['payoff_years']:.1f} yrs")
+    loan_metric_cols[2].metric("Total Interest Paid", fmt_money(_shown["total_interest"]))
+    render_payoff_age(scenario, st.session_state.get("current_age") if is_returning else None,
+                       program_years_a)
+    if scenario.get("existing_debt"):
+        st.caption(
+            f"Includes {fmt_money(scenario['existing_debt'])} of student debt you already "
+            "owe. That is in the payment and the payoff date, but not charged against "
+            "this degree — you'd be repaying it either way.".replace("$", chr(92) + "$")
+        )
 
     render_financing_note(scenario.get("financing"))
 
