@@ -1078,3 +1078,49 @@ alter table scenario_events
 --     radio, on the reasoning that a visitor comparing two majors is one
 --     person choosing one level. It is independently derived only in Career
 --     mode. Do not read a B/A difference in Major mode as a visitor choice.
+
+
+-- =====================================================================
+-- 2026-08-02  usage_logs.action gains "pageview_repayment"
+-- =====================================================================
+-- NO DDL REQUIRED. usage_logs.action is free text and already carries
+-- several shapes ("interaction:<field>", "horizon_changed:<n>",
+-- "school_search_run:..."). Nothing to paste into the SQL editor. This
+-- section exists because the DATA changed meaning even though the SCHEMA
+-- did not -- which is the harder kind to notice later.
+--
+-- What changed: the standalone repayment page (?tool=repayment) used to
+-- log a plain "pageview", identical to a calculator visit. From this date
+-- it logs "pageview_repayment" instead.
+--
+-- Reading this later:
+--
+--   * "pageview" NARROWED on 2026-08-02. Before this date it meant "any
+--     landing, either page". After it, "calculator landing only". A
+--     query filtering on action = 'pageview' therefore counts repayment
+--     visits before the date and drops them after -- so an unconditioned
+--     time series shows calculator traffic FALLING at exactly the point
+--     the split shipped, and the drop is entirely definitional. Any
+--     comparison spanning this date must either use both actions or
+--     restrict to one side of it.
+--
+--   * Total traffic = both actions. Use:
+--         action in ('pageview', 'pageview_repayment')
+--     app.py exposes this as PAGEVIEW_ACTIONS; the admin panel's
+--     Pageviews metric and the traffic-by-source table both use it.
+--
+--   * The SURVEY RATE deliberately does NOT. The survey is rendered by
+--     the calculator's section 5e and the repayment page never shows it,
+--     so its denominator is "pageview" alone. Folding repayment visits
+--     in would divide by people who were never asked and report a
+--     falling response rate as though they had declined. See
+--     analyze_survey.py, which prints the repayment count separately for
+--     this reason.
+--
+--   * There is no way to recover the split retroactively. Repayment
+--     visits before this date are indistinguishable from calculator
+--     visits in usage_logs -- no column, in that table, records which
+--     page was rendered. If a pre-split repayment count is needed, the
+--     only proxy is a session_id join against the existing-loan
+--     interaction rows, which undercounts: it finds only the sessions
+--     that touched a control, not those that landed and left.

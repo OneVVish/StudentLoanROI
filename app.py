@@ -3130,6 +3130,23 @@ def get_traffic_source() -> str:
     return st.session_state["traffic_source"]
 
 
+# Every action that represents one visit landing. Split so calculator and
+# repayment-page traffic can be told apart -- but anything asking "how many
+# people came at all" must use BOTH, or it silently undercounts the moment the
+# repayment link is shared.
+PAGEVIEW_ACTIONS = ("pageview", "pageview_repayment")
+
+
+def repayment_page_requested() -> bool:
+    """Whether this visit asked for the standalone repayment tool.
+
+    Reads the query param directly so it can be called before the session latch
+    exists -- the pageview logger runs long before section 5. The latch below
+    is seeded FROM this, so the two cannot disagree about which page a visit was.
+    """
+    return get_shared_default("tool", "") == "repayment"
+
+
 def mark_interaction(field: str):
     """Log each control a visitor touches, ONCE PER FIELD per session.
 
@@ -8401,7 +8418,17 @@ if "pageview_logged" not in st.session_state:
     # this order, which is why it never doubled -- the contrast is what
     # identified the bug.
     st.session_state.pageview_logged = True
-    log_usage_event("pageview")
+    # A distinct action for the standalone repayment page. Without it those
+    # visits land in the same "pageview" bucket as the calculator's, and the
+    # two are different populations answering different questions -- pooling
+    # them would quietly inflate calculator traffic the moment the repayment
+    # link is shared anywhere.
+    #
+    # Reads the query param rather than the latch below, because the latch is
+    # set hundreds of lines later and this fires first. Safe: a pageview
+    # describes the visit as it ARRIVED, which is exactly what the param says
+    # on the first render, and pageview_logged stops any rerun re-entering.
+    log_usage_event("pageview_repayment" if repayment_page_requested() else "pageview")
 
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
@@ -10742,7 +10769,7 @@ def render_rap_subsidy_answer(rows: list) -> None:
 # Latched like test_mode: Share Scenario replaces the whole query string, so a
 # live re-read would drop the visitor back into the calculator mid-session.
 if "repayment_only" not in st.session_state:
-    st.session_state.repayment_only = get_shared_default("tool", "") == "repayment"
+    st.session_state.repayment_only = repayment_page_requested()
 repayment_only = st.session_state.repayment_only
 
 if repayment_only:
@@ -10941,8 +10968,13 @@ if admin_enabled:
     # the interaction: events -- which now reads as if it meant interactions in
     # the specific sense those events introduced. Split, and both named for
     # what they actually count.
-    _pageviews = usage_df[usage_df["action"] == "pageview"] if (
+    # BOTH pageview actions: this metric answers "how many visits", and a
+    # repayment-page visit is a visit. The split is reported separately below
+    # rather than by quietly dropping one of them here.
+    _pageviews = usage_df[usage_df["action"].isin(PAGEVIEW_ACTIONS)] if (
         not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
+    _repay_views = int((usage_df["action"] == "pageview_repayment").sum()) if (
+        not usage_df.empty and "action" in usage_df.columns) else 0
     _visits = (int(_pageviews["session_id"].dropna().nunique())
                if "session_id" in _pageviews.columns else 0)
 
@@ -10957,7 +10989,12 @@ if admin_enabled:
     col4.metric("PDF Downloads", len(pdf_downloads_df))
     col5.metric("Scenario Shares", len(scenario_shares_df))
     st.caption(
-        "**Pageviews** counts `pageview` rows; **unique visits** de-duplicates "
+        "**Pageviews** counts both landing actions -- `pageview` (the calculator) "
+        f"and `pageview_repayment` (the standalone `?tool=repayment` page, "
+        f"{_repay_views} of them). They are logged separately because they are "
+        "different populations asking different questions, but a visit is a visit, "
+        "so this total counts both. "
+        "**Unique visits** de-duplicates "
         "them by session. They diverge for two reasons, neither of them traffic: "
         "rows written before `session_id` existed cannot be de-duplicated at all "
         f"({int(usage_df['session_id'].isna().sum()) if not usage_df.empty and 'session_id' in usage_df.columns else 0} "
@@ -11003,7 +11040,8 @@ if admin_enabled:
         _src["Source"] = (_src["traffic_source"].astype("object")
                            .where(_src["traffic_source"].notna(), "(organic)")
                            .replace("", "(organic)"))
-        _pv_only = _src[_src["action"] == "pageview"] if "action" in _src.columns else _src.iloc[0:0]
+        _pv_only = (_src[_src["action"].isin(PAGEVIEW_ACTIONS)]
+                if "action" in _src.columns else _src.iloc[0:0])
         _by_src = pd.DataFrame({
             "Pageviews": _pv_only.groupby("Source").size(),
             "Unique visits": (_pv_only.groupby("Source")["session_id"].nunique()
