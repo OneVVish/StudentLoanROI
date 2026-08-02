@@ -4879,6 +4879,7 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              living_adjustment: float = IDR_LIVING_ADJUSTMENT,
                              payment_rate: float = IDR_PAYMENT_RATE,
                              max_term_years: int = IDR_MAX_TERM_YEARS,
+                             max_months: int = None,
                              roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """
     Models a payment as 10% of discretionary income (salary above a flat
@@ -4900,7 +4901,11 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
     total_paid_in_roi_window = 0.0
     forgiven_amount = 0.0
     schedule_rows = []
-    max_months = max_term_years * 12
+    # `max_months` overrides the year-based term so a borrower who has ALREADY
+    # made qualifying payments can be modelled with only the months they have
+    # left. Months, not years, because servicers report a payment COUNT and
+    # rounding it to a year moves forgiveness by up to eleven payments.
+    max_months = max_term_years * 12 if max_months is None else int(max_months)
 
     for month in range(1, max_months + 1):
         year_index = (month - 1) // 12
@@ -5024,6 +5029,7 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
                            dependents: int = 0,
                            annual_income: float = None, income_growth: float = 0.03,
                            max_term_years: int = RAP_MAX_TERM_YEARS,
+                           max_months: int = None,
                            roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
     """Year-by-year RAP amortization: payment = calculate_rap_payment against
     that year's real salary (get_annual_salary_for_year), with RAP's real
@@ -5045,7 +5051,11 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
     # invariant check cannot tell that from a real accounting bug.
     government_match = 0.0
     schedule_rows = []
-    max_months = max_term_years * 12
+    # `max_months` overrides the year-based term so a borrower who has ALREADY
+    # made qualifying payments can be modelled with only the months they have
+    # left. Months, not years, because servicers report a payment COUNT and
+    # rounding it to a year moves forgiveness by up to eleven payments.
+    max_months = max_term_years * 12 if max_months is None else int(max_months)
 
     for month in range(1, max_months + 1):
         year_index = (month - 1) // 12
@@ -10573,10 +10583,48 @@ if compare_mode:
 # ?tool=repayment serves this on its own and has to call it before the
 # calculator renders. Pure helpers -- no scenario, no module globals.
 
+# Payments already made under ANY income-driven plan carry forward INTO RAP,
+# but RAP payments do not generally carry back OUT. studentaid.gov:
+#
+#   "If you change from one IDR plan to another, your repayment period might
+#    also change. For example, if you're enrolled in the PAYE Plan, which has a
+#    20-year repayment period, and you subsequently enroll in RAP, which has a
+#    30-year repayment period, then your payments under the PAYE Plan will count
+#    toward discharge under RAP, but your repayment period would increase from
+#    20 to 30 years."
+#
+#   "...payments made under RAP won't count toward discharge under the IBR, ICR
+#    or PAYE plans, with the following exception: If the monthly payment amount
+#    while under RAP is greater than or equal to the 10-year Standard Repayment
+#    Plan monthly payment amount, then the month can count toward the IBR, ICR,
+#    and PAYE plans."
+#
+# The second rule is the one worth putting on screen. It is written so it
+# almost never fires for the borrowers RAP is aimed at: the low payment that
+# makes RAP attractive is exactly what fails the >= 10-year-Standard test. So
+# the lower the income, the more nearly irreversible the switch -- the opposite
+# of what "there's an exception" sounds like.
+def rap_months_counting_back(rap_result: dict, standard_monthly: float) -> dict:
+    """How many RAP months would still count toward IBR/ICR/PAYE if the
+    borrower switched back, by the >= 10-year-Standard-payment test.
+
+    Returns counts rather than a verdict: "0 of 360" is the finding, and it is
+    a much sharper statement than "switching may be irreversible".
+    """
+    schedule = rap_result.get("schedule")
+    if schedule is None or schedule.empty or "payment" not in schedule.columns:
+        return {"counting": 0, "total": 0, "share": 0.0}
+    total = int(len(schedule))
+    counting = int((schedule["payment"] >= standard_monthly - 0.005).sum())
+    return {"counting": counting, "total": total,
+            "share": counting / total if total else 0.0}
+
+
 def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
                                  dependents: int = 0, forgivable: bool = True,
                                  starting_interest: float = 0.0,
-                                 pslf: bool = False) -> list:
+                                 pslf: bool = False,
+                                 prior_payments: int = 0) -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -10594,6 +10642,19 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     # same accrual, the balance is simply written off ten years in.
     idr_term = PSLF_QUALIFYING_YEARS if pslf else IDR_MAX_TERM_YEARS
     rap_term = PSLF_QUALIFYING_YEARS if pslf else RAP_MAX_TERM_YEARS
+
+    # Qualifying payments already made shorten what is LEFT, on the
+    # income-driven rows only. The fixed-term plans are unaffected: Standard,
+    # Extended and Tiered forgive nothing, so there is no clock to have made
+    # progress against -- their term is just how long the balance takes to
+    # amortise, and the balance entered is already net of what has been paid.
+    #
+    # Under PSLF the same subtraction applies to the 120-payment count, which
+    # is why this is computed from the term resolved above rather than from
+    # the constants.
+    prior = max(int(prior_payments or 0), 0)
+    idr_months = max(idr_term * 12 - prior, 0)
+    rap_months = max(rap_term * 12 - prior, 0)
 
     rows = []
     std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
@@ -10613,7 +10674,13 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     if forgivable:
         rap = simulate_rap_schedule(balance, rate, None, dependents,
                                      annual_income=annual_income,
-                                     max_term_years=rap_term)
+                                     max_term_years=rap_term,
+                                     max_months=rap_months)
+        # The count-back finding is deliberately NOT put in this cell. The
+        # "What it is" column is the last one in a six-column dataframe and
+        # Streamlit clips it -- the row renders as "...forgiven at 30 y" with
+        # the warning invisible. It is surfaced below the table instead, by
+        # render_existing_loan_comparison calling rap_months_counting_back.
         rows.append(("Repayment Assistance Plan (RAP)", rap,
                      f"Qualifies. Unpaid interest waived, remainder forgiven at "
                      f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
@@ -10621,7 +10688,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                      "Unpaid interest waived. Remainder forgiven at 30 years."))
         idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
                                        starting_interest=starting_interest,
-                                       max_term_years=idr_term)
+                                       max_term_years=idr_term,
+                                       max_months=idr_months)
         rows.append(("IBR-style income-driven", idr,
                      f"Qualifies. Remainder forgiven at {PSLF_QUALIFYING_PAYMENTS} "
                      "payments." if pslf else
@@ -10687,9 +10755,41 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "for parents — and any consolidation containing one — cannot qualify."
             )
 
+        # Months, not years: servicers report a qualifying-payment COUNT, and
+        # rounding it to a year moves forgiveness by up to eleven payments.
+        prior_payments = st.number_input(
+            "Qualifying payments already made (months)", min_value=0, max_value=480,
+            step=1, key="existing_prior_payments", disabled=not forgivable,
+            help="From your servicer or the IDR tracker on StudentAid.gov. "
+                 "Payments you made under ANY income-driven plan count toward "
+                 "discharge under RAP, so they shorten what is left — the "
+                 "income-driven rows below already subtract them. Leave at 0 if "
+                 "you have never been on an income-driven plan, or don't know. "
+                 "The fixed-term plans ignore this: they forgive nothing, so "
+                 "there is no clock to have made progress against.")
+
         if not balance or not rate:
             st.info("Enter a balance and a rate to compare plans.")
             return
+
+        # A payment count that has already reached a plan's term means the
+        # balance is dischargeable now, not that it pays off in six weeks.
+        # Without this the row reads "0.1 yrs" -- an artefact of the single
+        # closing row the simulators emit so the balance chart has something to
+        # draw, not a finding.
+        if forgivable and prior_payments >= IDR_MAX_TERM_YEARS * 12:
+            st.warning(
+                f"You've entered {prior_payments} qualifying payments, which is "
+                f"already at or past the {IDR_MAX_TERM_YEARS}-year IBR/ICR/PAYE "
+                f"term ({IDR_MAX_TERM_YEARS * 12} payments)"
+                + (f" and the {RAP_MAX_TERM_YEARS}-year RAP term "
+                   f"({RAP_MAX_TERM_YEARS * 12})."
+                   if prior_payments >= RAP_MAX_TERM_YEARS * 12 else ".")
+                + " If those payments qualified, the remaining balance should "
+                "already be dischargeable — the near-zero payoff figures below "
+                "are that, not a real repayment period. Check your count with "
+                "your servicer rather than acting on this page."
+            )
 
         # Counted here, not when the expander renders. Reaching this line means
         # a balance AND a rate were entered and a comparison is on screen --
@@ -10698,7 +10798,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         mark_interaction("module_repayment_comparison")
         rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable,
                                             starting_interest=accrued,
-                                            pslf=pslf and forgivable)
+                                            pslf=pslf and forgivable,
+                                            prior_payments=prior_payments)
         st.dataframe(pd.DataFrame([{
             "Plan": label,
             "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
@@ -10714,6 +10815,56 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                 ("$0" if "RAP" in label else "—")),
             "What it is": note,
         } for label, r, note in rows]), hide_index=True, use_container_width=True)
+
+        # The one-way door, given its own block because it is the single most
+        # decision-relevant fact on this page and it inverts against intuition:
+        # the low payment that makes RAP attractive is exactly what fails the
+        # ">= 10-year Standard" test, so the LOWER the income the more nearly
+        # irreversible the switch.
+        _rap_row = next((r for label, r, _ in rows if "RAP" in label), None)
+        _std_row = next((r for label, r, _ in rows if label.startswith("Standard")), None)
+        if _rap_row is not None and _std_row is not None:
+            _back = rap_months_counting_back(_rap_row, _std_row["monthly_payment"])
+            if _back["total"] and _back["counting"] == 0:
+                st.warning(
+                    f"**Moving to RAP is close to a one-way door for you.** None of "
+                    f"the {_back['total']} RAP payments modelled above would count "
+                    f"toward IBR/ICR/PAYE if you switched back — a month only counts "
+                    f"when the RAP payment is at least the 10-year Standard payment "
+                    f"of {fmt_money(_std_row['monthly_payment'])}, and at this income "
+                    f"RAP never reaches it. The lower your payment, the more you "
+                    f"give up by switching."
+                )
+            elif _back["total"] and _back["share"] < 1:
+                st.info(
+                    f"**Switching back would cost you some credit.** "
+                    f"{_back['counting']} of {_back['total']} RAP payments "
+                    f"({_back['share']:.0%}) would count toward IBR/ICR/PAYE if you "
+                    f"returned — only months where the RAP payment reaches the "
+                    f"10-year Standard payment of {fmt_money(_std_row['monthly_payment'])} "
+                    f"count."
+                )
+
+        if forgivable:
+            st.caption(
+                f"**Payoff is time from today**, not from when you first borrowed"
+                + (f" — the {prior_payments} payments you have already made are "
+                   "subtracted from the income-driven rows." if prior_payments else ".")
+                + "  \n**Switching plans is not symmetric.** Payments you made "
+                "under any income-driven plan count toward discharge under RAP, "
+                "but moving to RAP also moves your finish line out to RAP's 30 "
+                "years — a PAYE borrower 20 years in does not finish sooner by "
+                "switching. Going the other way, RAP payments count toward "
+                "IBR/ICR/PAYE only in months where the RAP payment was at least "
+                "the 10-year Standard payment, which for most income-driven "
+                "borrowers is never.  \n"
+                "**And the way back is closing.** ICR and PAYE terminate on "
+                "July 1, 2028, leaving IBR as the only plan RAP credit could "
+                "return to — and IBR is itself shut to loans originated on or "
+                "after July 1, 2026. Sources: studentaid.gov guidance on "
+                "changing IDR plans; TICAS, *Upcoming Changes to Income-Driven "
+                "Repayment Plans*."
+            )
 
         # A chart for whichever plan the visitor wants to look at. Without one,
         # the principal/unpaid-interest split had nowhere to appear -- which is
@@ -13392,6 +13543,23 @@ only those:
   income the $10 floor *is* the payment.
 - **2026 Tiered Standard Plan.** A fixed payment over a term set by how much
   you owe. Forgives nothing, so nothing is taxed either.
+
+**Switching between income-driven plans is not symmetric**, and the repayment
+comparison models both directions. Payments made under any income-driven plan
+count toward discharge under RAP — so the "Qualifying payments already made"
+input subtracts them from the income-driven rows — but enrolling in RAP also
+extends the repayment period to RAP's 30 years. In the other direction, RAP
+payments count toward IBR/ICR/PAYE only in months where the RAP payment was at
+least the 10-year Standard payment; for most income-driven borrowers that never
+happens, which the page states in the terms of the visitor's own figures.
+
+That return route is also time-limited: **ICR and PAYE terminate on July 1,
+2028**, after which IBR is the only plan RAP credit could count toward — and
+IBR is closed to loans originated on or after July 1, 2026, so a borrower whose
+loans start after that date has RAP as their only income-driven option and no
+plan to switch back to at all. Sources: studentaid.gov guidance on changing IDR
+plans; TICAS, *Upcoming Changes to Income-Driven Repayment Plans*
+(ticas.org).
 
 **Standard 10-Year and IBR-style IDR are not offered**, because a loan
 originated on or after July 1, 2026 cannot be repaid under either. They are
