@@ -1551,7 +1551,12 @@ ROLES_WITHOUT_BORROWING = {"Counselor"}
 # construction -- asking them to attest reads as an accusation and collects
 # nothing.
 RESEARCH_MIN_AGE = 18
-ROLES_REQUIRING_AGE_ATTESTATION = {"Student"}
+# Every role, not just Student. The consent says "You must be 18 or over" with
+# no qualification, and enforcing it for one role made the check narrower than
+# the promise -- an under-18 selecting "Other" submitted with no age check at
+# all. Kept as a set rather than collapsed to a boolean because the pre-survey
+# still asks role FIRST and can react to it, where the exit form cannot.
+ROLES_REQUIRING_AGE_ATTESTATION = set(PRESURVEY_ROLE_OPTIONS)
 
 # Lower-case codes for the log line, so a reworded option label cannot
 # silently change what a stored value means.
@@ -4017,6 +4022,38 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
 # ---- 2f. 10-Year ROI ------------------------------------------------------
 
+def returning_student_curve(current_salary: float, salary_in_10_years: float,
+                            hs_wage_index: float = 1.0):
+    """The baseline for someone already working: what they'd earn WITHOUT the
+    degree, year by year.
+
+    Replaces the debt-free-high-school-graduate curve, which is meaningless for
+    a 49-year-old going back for a master's -- her alternative was her existing
+    job at her existing salary, not being a teenager. The article this was built
+    for makes the point directly: 24.6M federal borrowers are 35+ against 20.2M
+    under 35, and policy (and this app) assumed the 20-something.
+
+    Two anchors, because staying put is not standing still: today's salary and
+    what they expect in ten years without the degree. Linear between them, then
+    the same annual growth beyond -- deliberately NOT compounding from year 0,
+    which would let a small entered growth rate balloon over a 30-year horizon
+    and quietly make the degree look bad.
+
+    NOT scaled by hs_wage_index. That index moves a NATIONAL median to a city;
+    a salary the visitor typed is already their real, local pay, and scaling it
+    would inflate a figure that needs no adjusting -- the same
+    double-counting the metro-wage comment in calculate_roi warns about,
+    arriving from the other direction. The argument is accepted and ignored so
+    callers can pass it uniformly.
+    """
+    annual_step = (salary_in_10_years - current_salary) / 10.0
+
+    def wage(year_index: int) -> float:
+        return max(current_salary + annual_step * year_index, 0.0)
+
+    return wage
+
+
 def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    total_investment: float, col_index: float = 100.0,
                    years: int = ROI_WINDOW_YEARS,
@@ -4024,7 +4061,8 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    personal_contribution: float = 0.0,
                    enrollment_years: int = 0,
                    working_years: int = 0,
-                   baseline_start_age: int = None) -> dict:
+                   baseline_start_age: int = None,
+                   baseline_curve=None) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window, minus any personal_contribution) compared against a
@@ -4104,9 +4142,17 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     #
     # baseline_start_age (None = off) makes each of those years use that age's
     # own wage rather than one all-ages median -- see hs_wage_for_timeline_year.
+    # ONE callable, used for both sums below. The two used to repeat the same
+    # hs_wage_for_timeline_year call, and CLAUDE.md warns that they only cancel
+    # in the premium if computed identically -- so a returning-student baseline
+    # that replaced one and not the other would invent an earnings premium out
+    # of nothing, silently. Binding it once makes that mistake unavailable
+    # rather than merely documented.
+    baseline_wage = baseline_curve or (
+        lambda y: hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age))
+
     hs_cumulative_earnings = sum(
-        hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age)
-        for y in range(years + enrollment_years)
+        baseline_wage(y) for y in range(years + enrollment_years)
     )
     # Part-time-while-working community-college years: the major side earns a
     # HS-equivalent wage for the first `working_years` of the timeline (front,
@@ -4119,8 +4165,7 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # sides are computed identically. Scaling one and not the other would
     # invent an earnings premium out of the part-time community-college path.
     major_working_earnings = sum(
-        hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age)
-        for y in range(working_years)
+        baseline_wage(y) for y in range(working_years)
     )
 
     major_net_position_nominal = (
@@ -4411,7 +4456,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               working_years: int = 0,
                               baseline_start_age: int = None,
                               federal_cap: float = None, gap_rate: float = None,
-                              include_fees: bool = False) -> dict:
+                              include_fees: bool = False,
+                              baseline_salary_now: float = None,
+                              baseline_salary_in_10y: float = None,
+                              existing_debt: float = 0.0,
+                              existing_debt_rate: float = None) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -4462,13 +4511,58 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         repayment_result = calculate_idr_repayment(
             principal_for_repayment, rate_for_repayment, major_name, roi_window_years=roi_window_years)
         strategy_label = "Income-Driven Repayment"
+    # NEW borrowing only, deliberately. An existing balance is paid whether or
+    # not this degree happens, so it sits on BOTH sides of the comparison and
+    # cancels; charging it to the degree would make the degree look worse than
+    # it is and tell someone not to go back to school because of a loan they
+    # already have -- an answer given for a reason that has nothing to do with
+    # the decision in front of them.
+    # Built here from SCALARS rather than accepting a callable, because
+    # find_breakeven_loan is @st.cache_data and calls this function: a lambda is
+    # not hashable, so a callable crossing that boundary would either raise or
+    # be keyed by object identity, which caches the wrong answer. Two floats key
+    # the cache correctly and cannot go stale when the visitor edits either.
+    baseline_curve = (
+        returning_student_curve(baseline_salary_now, baseline_salary_in_10y)
+        if baseline_salary_now is not None and baseline_salary_in_10y is not None
+        else None)
+
     roi_result = calculate_roi(major_name, repayment_result["total_paid_in_roi_window"],
                                 total_investment, col_index=col_index, years=roi_window_years,
                                 hs_wage_index=hs_wage_index,
                                 baseline_start_age=baseline_start_age,
                                 personal_contribution=personal_contribution,
                                 enrollment_years=enrollment_years,
-                                working_years=working_years)
+                                working_years=working_years,
+                                baseline_curve=baseline_curve)
+
+    # The other half of that split: what the visitor actually pays each month,
+    # and when they are actually free, DOES include the existing balance --
+    # that burden is the whole subject. Amortised separately rather than blended
+    # into one rate: split_loan_financing's blend is for two tranches of the
+    # same new loan taken and repaid together, whereas an existing balance is
+    # partly repaid and carries its own rate, so blending would misstate both
+    # the payment and the payoff date.
+    existing_result = None
+    if existing_debt and existing_debt > 0:
+        existing_rate = existing_debt_rate if existing_debt_rate is not None else interest_rate
+        if repayment_strategy == "Standard 10-Year":
+            existing_result = calculate_standard_repayment(
+                existing_debt, existing_rate, roi_window_years=roi_window_years)
+        else:
+            existing_result = calculate_idr_repayment(
+                existing_debt, existing_rate, major_name, roi_window_years=roi_window_years)
+
+    combined_repayment = dict(repayment_result)
+    if existing_result:
+        for key in ("monthly_payment", "total_interest", "total_paid_in_roi_window"):
+            if key in repayment_result and key in existing_result:
+                combined_repayment[key] = repayment_result[key] + existing_result[key]
+        # The LATER of the two: you are free when the last loan clears, not the
+        # first. That date is what returning-student mode exists to report.
+        combined_repayment["payoff_years"] = max(
+            repayment_result["payoff_years"], existing_result["payoff_years"])
+
     return {
         "major": major_name,
         "strategy_label": strategy_label,
@@ -4488,7 +4582,16 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # the net-position chart, the PDF) must reuse the value the scenario
         # was actually computed under.
         "baseline_start_age": baseline_start_age,
+        # repayment_result stays NEW borrowing only -- every existing consumer,
+        # including the ROI above and the break-even, depends on that meaning.
+        # combined_repayment is what the visitor is shown; it EQUALS
+        # repayment_result when there is no existing debt, so display code needs
+        # no conditional and cannot accidentally show the wrong one.
         "repayment_result": repayment_result,
+        "existing_debt": existing_debt or 0.0,
+        "existing_debt_result": existing_result,
+        "combined_repayment": combined_repayment,
+        "baseline_curve_used": baseline_curve is not None,
         "roi_result": roi_result,
         # None unless the cap-and-gap split was applied (Detailed mode); the
         # results page / PDF show the federal-vs-gap breakdown when it's set.
@@ -4515,7 +4618,9 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          working_years: int = 0,
                          baseline_start_age: int = None,
                          federal_cap: float = None, gap_rate: float = None,
-                         include_fees: bool = False) -> dict:
+                         include_fees: bool = False,
+                         baseline_salary_now: float = None,
+                         baseline_salary_in_10y: float = None) -> dict:
     """The undergraduate loan at which `major_name` stops beating a debt-free
     high school graduate — i.e. where earnings_premium crosses zero.
 
@@ -4576,6 +4681,12 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             working_years=working_years,
             baseline_start_age=baseline_start_age,
             federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
+            # The same baseline the ROI used. Without this the break-even would
+            # be solved against the high-school-graduate curve while the premium
+            # beside it used the visitor's own salary -- two numbers on one
+            # screen quietly answering different questions.
+            baseline_salary_now=baseline_salary_now,
+            baseline_salary_in_10y=baseline_salary_in_10y,
         )["roi_result"]["earnings_premium"]
 
     if premium_at(0.0) <= 0:
@@ -4603,7 +4714,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        working_years: int = 0,
                        baseline_start_age: int = None,
                        federal_cap: float = None, gap_rate: float = None,
-                       include_fees: bool = False) -> dict:
+                       include_fees: bool = False,
+                       baseline_salary_now: float = None,
+                       baseline_salary_in_10y: float = None) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
     borrowing, shared by the on-screen section and its PDF counterpart so
     the two can't drift.
@@ -4637,7 +4750,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   working_years=working_years,
                                   baseline_start_age=baseline_start_age,
                                   federal_cap=federal_cap, gap_rate=gap_rate,
-                                  include_fees=include_fees)
+                                  include_fees=include_fees,
+                                  baseline_salary_now=baseline_salary_now,
+                                  baseline_salary_in_10y=baseline_salary_in_10y)
     years = roi_window_years
     # Career-mode names are plural BLS occupations ("Software Developers")
     # while Major-mode names are singular ("Computer Science"), so any verb
@@ -6460,7 +6575,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
-    )
+            **breakeven_kwargs())
     story += _pdf_breakeven_block(breakeven, styles)
     story += _pdf_wage_distribution_block(major, styles)
 
@@ -6577,7 +6692,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_a["enrollment_years"],
                               working_years=scenario_a["working_years"],
                               baseline_start_age=scenario_a["baseline_start_age"],
-                              federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees),
+                              federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
+            **breakeven_kwargs()),
             styles, scenario_label="Scenario A"),
         PageBreak(),
         Paragraph(f"Scenario B: {scenario_b['major']} — {scenario_b['strategy_label']}", styles["section"]),
@@ -6600,7 +6716,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_b["enrollment_years"],
                               working_years=scenario_b["working_years"],
                               baseline_start_age=scenario_b["baseline_start_age"],
-                              federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=include_fees),
+                              federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=include_fees,
+            **breakeven_kwargs()),
             styles, scenario_label="Scenario B"),
         PageBreak(),
         Paragraph(_strip_emoji("📊 Side-by-Side Charts"), styles["section"]),
@@ -7526,6 +7643,32 @@ careers_csv_path = CAREERS_CSV_PATH_NATIONAL
 # making -- they pick a major and a school, and the occupation is a
 # consequence they're guessing at. Career mode is the richer dataset and
 # stays one click away for anyone who does have a specific job in mind.
+# Who is going to school. The app has always modelled exactly one person -- an
+# 18-year-old starting a first degree, measured against a debt-free high school
+# graduate -- and that is now the minority case: 24.6M federal borrowers are 35+
+# against 20.2M under 35, and over-50s owe more on average than under-35s. For
+# someone going back at 49 the high-school-graduate counterfactual is
+# meaningless; her alternative was her existing job at her existing salary.
+#
+# Read from session_state before the widget renders, the same pattern
+# dataset_mode uses, because the Financing block above needs it.
+STUDENT_MODE_FIRST = "Straight from high school"
+STUDENT_MODE_RETURNING = "Going back to school"
+STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
+st.session_state.setdefault("student_mode_radio", STUDENT_MODE_FIRST)
+student_mode = st.session_state["student_mode_radio"]
+is_returning = student_mode == STUDENT_MODE_RETURNING
+st.session_state.setdefault("current_age", 30)
+# Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
+# 4,950% ROI on the default San Francisco scenario, because $50k is below what
+# a high school graduate earns there -- so the app invented a spectacular
+# return for someone who had entered nothing. An unanswered question must look
+# unanswered.
+st.session_state.setdefault("current_salary", 0)
+st.session_state.setdefault("salary_no_degree_10y", 0)
+st.session_state.setdefault("existing_debt", 0)
+st.session_state.setdefault("existing_debt_rate", DEFAULT_FEDERAL_RATE)
+
 dataset_mode_options = [DATASET_MODE_MAJOR, DATASET_MODE_CAREER]
 shared_dataset_mode = get_shared_default("mode", DATASET_MODE_MAJOR)
 st.session_state.setdefault(
@@ -7533,6 +7676,49 @@ st.session_state.setdefault(
     shared_dataset_mode if shared_dataset_mode in dataset_mode_options else DATASET_MODE_MAJOR,
 )
 dataset_mode = st.session_state["dataset_mode_radio"]
+
+# One place the baseline arguments are assembled, spread into every
+# compute_scenario_results / find_breakeven_loan call. Threading them by hand
+# through five call sites is exactly how hs_wage_index went missing from
+# compute_future_plan_result and put a 76% overstatement on screen -- a dict
+# spread cannot be half-applied.
+def returning_kwargs() -> dict:
+    """Baseline + existing-debt arguments, or empty in first-time mode."""
+    if not is_returning:
+        return {}
+    # Existing debt applies as soon as it is entered; the BASELINE only swaps
+    # once she has said what she earns. Swapping to a zero baseline would
+    # compare the degree against earning nothing and report a spectacular
+    # return -- the app would be answering a question she has not been asked yet.
+    kwargs = {
+        "existing_debt": float(st.session_state.get("existing_debt", 0) or 0),
+        "existing_debt_rate": float(st.session_state.get("existing_debt_rate")
+                                     if st.session_state.get("existing_debt", 0) else 0) or None,
+    }
+    if returning_baseline_ready():
+        kwargs["baseline_salary_now"] = float(st.session_state["current_salary"])
+        kwargs["baseline_salary_in_10y"] = float(st.session_state["salary_no_degree_10y"])
+    return kwargs
+
+
+def returning_baseline_ready() -> bool:
+    """Both salary answers present. Until then the comparison stays on the
+    high-school-graduate baseline and the page says so, rather than silently
+    measuring a degree against zero."""
+    return bool(st.session_state.get("current_salary", 0)
+                and st.session_state.get("salary_no_degree_10y", 0))
+
+
+def breakeven_kwargs() -> dict:
+    """The baseline half only -- find_breakeven_loan solves for NEW borrowing,
+    so an existing balance has no place in it."""
+    if not is_returning or not returning_baseline_ready():
+        return {}
+    return {
+        "baseline_salary_now": float(st.session_state["current_salary"]),
+        "baseline_salary_in_10y": float(st.session_state["salary_no_degree_10y"]),
+    }
+
 
 # City drives the wage dataset now, not just the cost-of-living index, so it
 # must be resolved before MAJOR_DATA is built. Its widget renders further
@@ -7601,6 +7787,65 @@ if not MAJOR_DATA:
 # ("what am I choosing?" then "which one?"). No index= -- session_state already
 # holds this widget's value from the setdefault above, and passing both would
 # trigger Streamlit's widget-default-conflict warning.
+# Rendered before "Choose by" because it changes what the whole section means:
+# in returning mode the comparison is against the visitor's own salary, not a
+# high school graduate's.
+st.sidebar.radio(
+    "Who is going to school?", STUDENT_MODE_OPTIONS, key="student_mode_radio",
+    on_change=lambda: mark_interaction("student_mode_radio"),
+    help="Straight from high school compares against a debt-free high school "
+          "graduate. Going back to school compares against your own current "
+          "pay -- which is the honest question if you already have a job.",
+)
+
+if is_returning:
+    # Everything here is something the visitor knows about themselves. The app
+    # asks rather than infers, because the alternative is guessing at a career
+    # history it has no data for.
+    st.sidebar.number_input(
+        "Your age now", min_value=18, max_value=80, step=1, key="current_age",
+        on_change=lambda: mark_interaction("current_age"),
+        help="Used to say when you'd finish repaying -- 'repaid at 63' rather "
+              "than 'payoff 14 years'.",
+    )
+    st.sidebar.number_input(
+        "Your salary now ($/yr)", min_value=0, max_value=1_000_000, step=1_000,
+        key="current_salary", on_change=lambda: mark_interaction("current_salary"),
+        help="What you earn today. This replaces the high-school-graduate "
+              "figure as the thing the degree is measured against.",
+    )
+    st.sidebar.number_input(
+        "Your salary in 10 years WITHOUT the degree ($/yr)",
+        min_value=0, max_value=1_000_000, step=1_000,
+        key="salary_no_degree_10y",
+        on_change=lambda: mark_interaction("salary_no_degree_10y"),
+        help="Staying put isn't standing still. Leaving this at your current "
+              "salary assumes no raises ever, which flatters the degree.",
+    )
+    st.sidebar.number_input(
+        "Existing student debt ($)", min_value=0, max_value=1_000_000, step=1_000,
+        key="existing_debt",
+        on_change=lambda: mark_interaction("existing_debt"),
+        help="Any student loan you already owe. It is added to your monthly "
+              "payment and payoff date, but NOT charged against this degree -- "
+              "you'd be paying it either way.",
+    )
+    if st.session_state.get("existing_debt", 0):
+        st.sidebar.number_input(
+            "Rate on that existing debt (%)", min_value=0.0, max_value=20.0,
+            step=0.1, key="existing_debt_rate",
+            on_change=lambda: mark_interaction("existing_debt_rate"),
+        )
+    # Says which comparison is actually running. Without this the visitor sees
+    # returning-student inputs on screen and assumes the figures already use
+    # them, when a blank salary leaves the old baseline in force.
+    if not returning_baseline_ready():
+        st.sidebar.warning(
+            "Enter both salaries above to compare against **your own pay**. "
+            "Until then the figures still compare against a debt-free high "
+            "school graduate, which understates what this degree has to beat."
+        )
+
 dataset_mode = st.sidebar.radio(
     "Choose by", dataset_mode_options, key="dataset_mode_radio", on_change=lambda: mark_interaction("dataset_mode_radio"),
     help="Major: what people who studied that subject actually earn, "
@@ -9358,7 +9603,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             enrollment_years=scenario["enrollment_years"],
             baseline_start_age=scenario["baseline_start_age"],
             federal_cap=federal_cap, gap_rate=gap_rate, include_fees=include_fees,
-        )
+            **breakeven_kwargs())
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
             st.markdown(breakeven["headline"].replace("$", r"\$"))
@@ -9615,7 +9860,8 @@ if compare_mode:
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                           federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
+                                           federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                           **returning_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
@@ -9623,7 +9869,8 @@ if compare_mode:
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                           federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
+                                           federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
+                                           **returning_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
     # national curve -- the one series genuinely common to A and B -- sits at
@@ -9801,7 +10048,8 @@ else:
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
+                                         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                           **returning_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -9973,7 +10221,7 @@ else:
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
-    )
+            **breakeven_kwargs())
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
         # here, so the verdict leads instead of trailing the ROI chart. The
@@ -10147,174 +10395,210 @@ Questions about the research? Contact **veervish11@gmail.com**.
 *By submitting, you agree to take part. You must be {RESEARCH_MIN_AGE} or over.*
 """
         )
-    with st.form("survey_form", clear_on_submit=True):
-        # Asked here only if the pre block did not already get it. Asking the
-        # same person their role twice in one session is not just redundant --
-        # the two answers can disagree, and nothing in the schema says which
-        # one the scenario columns were recorded under.
-        #
-        # index=None so an ignored dropdown stays distinguishable from an
-        # answer. The old version defaulted to "Parent", which meant a row
-        # could not tell a parent from someone who never touched the control
-        # -- the answer-vs-absence failure major_explicitly_selected exists to
-        # prevent for the major, and it silently inflated one category.
-        _pre_role = st.session_state.get("presurvey_role")
-        if _pre_role:
-            st.caption(f"Answering as: **{_pre_role}** (from the questions at the top)")
-            respondent_role = _pre_role
-            # Already attested at the top, or this block would not render.
-            form_age_ok = True
-        else:
-            respondent_role = st.selectbox(
-                "I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
-                placeholder="Select one")
-            # Shown unconditionally rather than only for Students: inside an
-            # st.form nothing reruns until submit, so the checkbox cannot
-            # appear in response to the role choice the way it does at the top
-            # of the page. Asking everyone is the cost of that constraint --
-            # it is only ENFORCED for the roles that need it, below.
-            form_age_ok = st.checkbox(f"I am {RESEARCH_MIN_AGE} or older")
-        # index=None for the same answer-vs-absence reason as the role above.
-        # "Already graduated" is new and is not padding: the 18+ floor means a
-        # participating student has often finished high school already, and
-        # without it they must either pick a false year or leave the default.
-        hs_graduation_year = st.selectbox(
-            "Expected High School Graduation Year",
-            ["Already graduated", "2026", "2027", "2028", "2029", "2030", "Not applicable"],
-            index=None, placeholder="Select one",
+    # The age gate sits OUTSIDE the form, so it can react. Inside an st.form
+    # nothing reruns until submit, which is why the in-form checkbox could only
+    # ever refuse a submission after every question had been answered -- and
+    # render_presurvey's own comment rejects exactly that: "an ineligible
+    # visitor is never asked a research question at all -- collecting the
+    # answers and discarding them afterwards would still be collecting them."
+    # That held while the pre-survey ran first. With the pre-survey off by
+    # default it stopped holding, and this restores it.
+    #
+    # Skipped when the pre block already attested, so a recruited visitor is
+    # not asked twice.
+    _pre_attested = bool(st.session_state.get("presurvey_role")
+                          and st.session_state.get("presurvey_age_ok"))
+    if not _pre_attested:
+        gate_ok = st.checkbox(
+            f"I am {RESEARCH_MIN_AGE} or older",
+            key="survey_age_gate",
+            help="These questions are research, and taking part is limited to "
+                  f"people {RESEARCH_MIN_AGE} and over. The calculator above is "
+                  "unaffected either way.",
         )
-
-        # ---- The post half of the paired measurement -------------------------
-        # Above perception_change deliberately. That item asks whether the tool
-        # CHANGED anything, which is the most leading question on the page; a
-        # respondent who answers it first has been told what the researcher is
-        # looking for, and the paired items are the better measures. Let the
-        # legacy item absorb the priming rather than spread it.
-        #
-        # Wording is present-tense state ("...now"), never "did this change
-        # your mind?". We difference the two answers ourselves; asking the
-        # respondent to report the change invites them to supply one.
-        st.markdown("---")
-        post_schools = st.radio(POSTSURVEY_SCHOOLS_QUESTION,
-                                 list(PRESURVEY_SCHOOLS_OPTIONS),
-                                 index=None, horizontal=True)
-
-        # A counsellor is not answering about their own borrowing, so the
-        # question is not put to them -- matching the pre block. Only
-        # suppressible when the role is already known: inside a form nothing
-        # reruns, so if the role is being chosen right here the question has to
-        # render, and an answer from a counsellor is dropped at submit instead.
-        _post_borrowing_applies = _pre_role not in ROLES_WITHOUT_BORROWING
-        if _post_borrowing_applies:
-            post_borrowing = st.radio(POSTSURVEY_BORROWING_QUESTION,
-                                       list(PRESURVEY_BORROWING_OPTIONS),
-                                       index=None, format_func=escape_money_markdown)
-        else:
-            post_borrowing = None
-        st.markdown("---")
-
-        perception_change = st.radio(
-            "Did this tool change how you view your target major or university choice?",
-            ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
-        )
-        feedback_text = st.text_area("How did this data influence your thinking? (optional)")
-        submitted = st.form_submit_button("Submit Feedback")
-
-        # Enforced at submit because a form cannot react before it. Checked
-        # BEFORE compute_scenario_results and before any write: an ineligible
-        # submission must not be assembled and then discarded, since the
-        # discarding is the only thing standing between it and Supabase.
-        if submitted and respondent_role in ROLES_REQUIRING_AGE_ATTESTATION \
-                and not form_age_ok:
-            st.warning(
-                f"This survey is for people {RESEARCH_MIN_AGE} and over, so this "
-                "response wasn't recorded. Everything else on the page is "
-                "unaffected — the calculator is yours to use."
+        if not gate_ok:
+            st.caption(
+                f"The questions appear once you confirm you're {RESEARCH_MIN_AGE} "
+                "or over. **Nothing else on this page changes** — the calculator "
+                "is yours to use regardless."
             )
-            log_usage_event("survey_blocked_minor")
-            submitted = False
+    # Gated on the attestation above, so an ineligible visitor is never ASKED
+    # a research question -- not asked and then refused. render_presurvey made
+    # exactly this point ("collecting the answers and discarding them
+    # afterwards would still be collecting them"), and it held only while the
+    # pre-survey ran first. With the pre-survey off by default it stopped
+    # holding, and this restores it.
+    if _pre_attested or st.session_state.get("survey_age_gate"):
+        with st.form("survey_form", clear_on_submit=True):
+            # Asked here only if the pre block did not already get it. Asking the
+            # same person their role twice in one session is not just redundant --
+            # the two answers can disagree, and nothing in the schema says which
+            # one the scenario columns were recorded under.
+            #
+            # index=None so an ignored dropdown stays distinguishable from an
+            # answer. The old version defaulted to "Parent", which meant a row
+            # could not tell a parent from someone who never touched the control
+            # -- the answer-vs-absence failure major_explicitly_selected exists to
+            # prevent for the major, and it silently inflated one category.
+            _pre_role = st.session_state.get("presurvey_role")
+            if _pre_role:
+                st.caption(f"Answering as: **{_pre_role}** (from the questions at the top)")
+                respondent_role = _pre_role
+                # Already attested at the top, or this block would not render.
+                form_age_ok = True
+            else:
+                respondent_role = st.selectbox(
+                    "I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
+                    placeholder="Select one")
+                # Shown unconditionally rather than only for Students: inside an
+                # st.form nothing reruns until submit, so the checkbox cannot
+                # appear in response to the role choice the way it does at the top
+                # of the page. Asking everyone is the cost of that constraint --
+                # it is only ENFORCED for the roles that need it, below.
+                form_age_ok = st.checkbox(f"I am {RESEARCH_MIN_AGE} or older")
+            # index=None for the same answer-vs-absence reason as the role above.
+            # "Already graduated" is new and is not padding: the 18+ floor means a
+            # participating student has often finished high school already, and
+            # without it they must either pick a false year or leave the default.
+            hs_graduation_year = st.selectbox(
+                "Expected High School Graduation Year",
+                ["Already graduated", "2026", "2027", "2028", "2029", "2030", "Not applicable"],
+                index=None, placeholder="Select one",
+            )
 
-        if submitted:
-            # Dropped rather than stored when the role turns out not to take
-            # the question. Only reachable when the role was chosen inside the
-            # form, where the widget could not be hidden reactively -- storing
-            # it anyway would put a counsellor's borrowing answer in the same
-            # column as a student's, which is the noise the exclusion exists
-            # to prevent.
-            if respondent_role in ROLES_WITHOUT_BORROWING:
+            # ---- The post half of the paired measurement -------------------------
+            # Above perception_change deliberately. That item asks whether the tool
+            # CHANGED anything, which is the most leading question on the page; a
+            # respondent who answers it first has been told what the researcher is
+            # looking for, and the paired items are the better measures. Let the
+            # legacy item absorb the priming rather than spread it.
+            #
+            # Wording is present-tense state ("...now"), never "did this change
+            # your mind?". We difference the two answers ourselves; asking the
+            # respondent to report the change invites them to supply one.
+            st.markdown("---")
+            post_schools = st.radio(POSTSURVEY_SCHOOLS_QUESTION,
+                                     list(PRESURVEY_SCHOOLS_OPTIONS),
+                                     index=None, horizontal=True)
+
+            # A counsellor is not answering about their own borrowing, so the
+            # question is not put to them -- matching the pre block. Only
+            # suppressible when the role is already known: inside a form nothing
+            # reruns, so if the role is being chosen right here the question has to
+            # render, and an answer from a counsellor is dropped at submit instead.
+            _post_borrowing_applies = _pre_role not in ROLES_WITHOUT_BORROWING
+            if _post_borrowing_applies:
+                post_borrowing = st.radio(POSTSURVEY_BORROWING_QUESTION,
+                                           list(PRESURVEY_BORROWING_OPTIONS),
+                                           index=None, format_func=escape_money_markdown)
+            else:
                 post_borrowing = None
+            st.markdown("---")
 
-            # Coded once, so every consumer sees the same vocabulary as the
-            # pre answers. "n_a" is not "skip": never asked and
-            # asked-then-declined are different facts.
-            postsurvey_codes = build_instrument_context(
-                post_schools, post_borrowing, respondent_role)
+            perception_change = st.radio(
+                "Did this tool change how you view your target major or university choice?",
+                ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
+            )
+            feedback_text = st.text_area("How did this data influence your thinking? (optional)")
+            submitted = st.form_submit_button("Submit Feedback")
 
-            # Recomputed fresh (cheap, pure functions, no API calls) rather
-            # than reused from st.session_state, so the survey reflects
-            # exact click-time state.
-            scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                                   personal_contribution, city_info["col_index"],
-                                                   roi_window_years=roi_horizon_years,
-                                                   hs_wage_index=get_metro_wage_index(city),
-                                                   enrollment_years=enrollment_years_a,
-                                                   working_years=working_years_a,
-                                                   baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                                   federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True)
-            # major_b/loan_amount_b/etc. only exist as script variables when
-            # compare_mode is on (they're assigned inside that sidebar
-            # expander) -- referencing them outside an "if compare_mode:"
-            # guard would raise NameError, so Scenario B's args are only
-            # ever built when there's a Scenario B to build them from.
-            compare_mode_kwargs = {}
-            if compare_mode:
-                scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
-                                                       personal_contribution_b, city_info["col_index"],
+            # Enforced at submit because a form cannot react before it. Checked
+            # BEFORE compute_scenario_results and before any write: an ineligible
+            # submission must not be assembled and then discarded, since the
+            # discarding is the only thing standing between it and Supabase.
+            if submitted and respondent_role in ROLES_REQUIRING_AGE_ATTESTATION \
+                    and not form_age_ok:
+                st.warning(
+                    f"This survey is for people {RESEARCH_MIN_AGE} and over, so this "
+                    "response wasn't recorded. Everything else on the page is "
+                    "unaffected — the calculator is yours to use."
+                )
+                log_usage_event("survey_blocked_minor")
+                submitted = False
+
+            if submitted:
+                # Dropped rather than stored when the role turns out not to take
+                # the question. Only reachable when the role was chosen inside the
+                # form, where the widget could not be hidden reactively -- storing
+                # it anyway would put a counsellor's borrowing answer in the same
+                # column as a student's, which is the noise the exclusion exists
+                # to prevent.
+                if respondent_role in ROLES_WITHOUT_BORROWING:
+                    post_borrowing = None
+
+                # Coded once, so every consumer sees the same vocabulary as the
+                # pre answers. "n_a" is not "skip": never asked and
+                # asked-then-declined are different facts.
+                postsurvey_codes = build_instrument_context(
+                    post_schools, post_borrowing, respondent_role)
+
+                # Recomputed fresh (cheap, pure functions, no API calls) rather
+                # than reused from st.session_state, so the survey reflects
+                # exact click-time state.
+                scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
+                                                       personal_contribution, city_info["col_index"],
                                                        roi_window_years=roi_horizon_years,
                                                        hs_wage_index=get_metro_wage_index(city),
-                                                       enrollment_years=enrollment_years_b,
-                                                       working_years=working_years_b,
-                                                       baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                                       federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True)
-                compare_mode_kwargs = dict(
-                    compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
-                    interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
-                    personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
-                    inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
-                    scenario_b=scenario_b, start_year_b=start_year_b,
-                )
-            context = {
-                **build_scenario_context(
-                    major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
-                    school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
-                    roi_horizon_years=roi_horizon_years,
-                    start_year_a=start_year_a, **compare_mode_kwargs,
-                ),
-                **module_context,
-            }
+                                                       enrollment_years=enrollment_years_a,
+                                                       working_years=working_years_a,
+                                                       baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
+                                                       federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                               **returning_kwargs())
+                # major_b/loan_amount_b/etc. only exist as script variables when
+                # compare_mode is on (they're assigned inside that sidebar
+                # expander) -- referencing them outside an "if compare_mode:"
+                # guard would raise NameError, so Scenario B's args are only
+                # ever built when there's a Scenario B to build them from.
+                compare_mode_kwargs = {}
+                if compare_mode:
+                    scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
+                                                           personal_contribution_b, city_info["col_index"],
+                                                           roi_window_years=roi_horizon_years,
+                                                           hs_wage_index=get_metro_wage_index(city),
+                                                           enrollment_years=enrollment_years_b,
+                                                           working_years=working_years_b,
+                                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
+                                                           federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
+                                               **returning_kwargs())
+                    compare_mode_kwargs = dict(
+                        compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+                        interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+                        personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+                        inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+                        scenario_b=scenario_b, start_year_b=start_year_b,
+                    )
+                context = {
+                    **build_scenario_context(
+                        major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                        school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                        roi_horizon_years=roi_horizon_years,
+                        start_year_a=start_year_a, **compare_mode_kwargs,
+                    ),
+                    **module_context,
+                }
 
-            # Logged to usage_logs as well as (eventually) the survey row.
-            # Same reasoning as the pre answers: this channel needs no
-            # migration, so the paired measurement starts producing data
-            # immediately, and a survey insert that fails silently -- every
-            # writer here catches and returns False -- does not take the
-            # answers with it. The survey-row copy arrives with the migration
-            # and is what makes the pair atomic on one row.
-            log_usage_event(
-                "postsurvey_answered"
-                f":considering={postsurvey_codes['post_schools_considered']}"
-                f":borrow={postsurvey_codes['post_borrow_willingness']}"
-                f":pre={'1' if st.session_state.get('presurvey_answered') else '0'}"
-                f":v={PRESURVEY_INSTRUMENT_VERSION}")
+                # Logged to usage_logs as well as (eventually) the survey row.
+                # Same reasoning as the pre answers: this channel needs no
+                # migration, so the paired measurement starts producing data
+                # immediately, and a survey insert that fails silently -- every
+                # writer here catches and returns False -- does not take the
+                # answers with it. The survey-row copy arrives with the migration
+                # and is what makes the pair atomic on one row.
+                log_usage_event(
+                    "postsurvey_answered"
+                    f":considering={postsurvey_codes['post_schools_considered']}"
+                    f":borrow={postsurvey_codes['post_borrow_willingness']}"
+                    f":pre={'1' if st.session_state.get('presurvey_answered') else '0'}"
+                    f":v={PRESURVEY_INSTRUMENT_VERSION}")
 
-            saved = save_survey_response(respondent_role, hs_graduation_year,
-                                          perception_change, feedback_text, context,
-                                          instrument=postsurvey_codes)
-            if saved:
-                st.session_state.survey_submitted = True
-                st.rerun()
-            else:
-                st.error("Something went wrong saving your response -- please try again.")
+                saved = save_survey_response(respondent_role, hs_graduation_year,
+                                              perception_change, feedback_text, context,
+                                              instrument=postsurvey_codes)
+                if saved:
+                    st.session_state.survey_submitted = True
+                    st.rerun()
+                else:
+                    st.error("Something went wrong saving your response -- please try again.")
 elif st.session_state.survey_submitted:
     # Only for someone who actually submitted. This was a bare `else`, which
     # after the eligibility condition was added to the `if` above began
