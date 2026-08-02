@@ -1952,6 +1952,66 @@ RAP_MIN_PAYMENT = 10  # $/month floor for AGI <= $10,000
 RAP_MAX_TERM_YEARS = 30  # forgiveness after 360 on-time payments
 RAP_PRINCIPAL_MATCH_CAP = 50  # $/month government principal-match subsidy
 
+# Which income-driven plan a borrower can actually get, by when they borrow.
+# IBR -- what IDR_* above models -- is closed to loans originated on or after
+# July 1, 2026. From then the income-driven plan is RAP. Offering IBR to a
+# visitor starting in 2026 modelled a plan they cannot choose, on the app's own
+# default start year.
+# [Source: TICAS, "Comparing Income-Driven Repayment Plans", 2025-09-16.]
+STANDARD_STRATEGY_LABEL = "Standard 10-Year"
+IDR_STRATEGY_LABEL = "Income-Driven Repayment (IDR)"
+RAP_STRATEGY_LABEL = "Repayment Assistance Plan (RAP)"
+RAP_FIRST_ORIGINATION_YEAR = 2026
+
+
+REPAYMENT_STRATEGY_HELP = (
+    "Standard 10-Year: a fixed payment every month for 10 years. The "
+    "income-driven option depends on your start year, because the plans do: "
+    "for loans originated before July 1, 2026 it is IBR-style IDR (payment is "
+    "10% of income above a $22,000 allowance, remainder forgiven at 20 years); "
+    "from July 1, 2026 IBR is closed to new loans and the plan is RAP (1-10% "
+    "of total income, all unpaid interest waived, remainder forgiven at 30 "
+    "years). Since the start-year list begins at the current year, in practice "
+    "this is RAP. Anything forgiven is taxable income that year. See "
+    "Methodology."
+)
+
+
+def income_driven_label_for(start_year) -> str:
+    """The income-driven plan available to someone starting in `start_year`.
+
+    Keyed on the start year rather than each year's disbursement: the app
+    models one balance at one plan, and a borrower already enrolled before the
+    cutoff keeps the old regime under OBBBA's interim exception anyway. A 2025
+    starter whose later years cross into RAP is the case this simplifies, and
+    the Methodology says so.
+    """
+    try:
+        return (RAP_STRATEGY_LABEL if int(start_year) >= RAP_FIRST_ORIGINATION_YEAR
+                else IDR_STRATEGY_LABEL)
+    except (TypeError, ValueError):
+        return RAP_STRATEGY_LABEL
+
+
+def repayment_strategy_options_for(start_year) -> list:
+    return [STANDARD_STRATEGY_LABEL, income_driven_label_for(start_year)]
+
+
+def resolve_shared_strategy(shared_value, options) -> str:
+    """A strategy label from a shared link, mapped onto the options this
+    scenario actually offers.
+
+    A link built under one start year can name the other era's plan. Falling
+    back to index 0 would silently turn an income-driven scenario into a
+    Standard one -- the strategy is the whole point of such a link, so map
+    income-driven to income-driven and only then give up.
+    """
+    if shared_value in options:
+        return shared_value
+    if shared_value in (IDR_STRATEGY_LABEL, RAP_STRATEGY_LABEL, "Income-Driven Repayment"):
+        return options[1]
+    return options[0]
+
 # Who is going to school. The app has always modelled one person -- an
 # 18-year-old starting a first degree, measured against a debt-free high school
 # graduate -- and that is now the minority case. Returning mode measures the
@@ -2162,7 +2222,8 @@ def financing_summary_text(financing: dict) -> str:
     )
 
 
-def render_forgiveness_note(repayment_result: dict, compact: bool = False) -> None:
+def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
+                             compact: bool = False) -> None:
     """The forgiveness figure, and the fact that it is taxable income.
 
     Shared by both result branches. It was two inline copies saying only that
@@ -2180,16 +2241,22 @@ def render_forgiveness_note(repayment_result: dict, compact: bool = False) -> No
     forgiven = repayment_result.get("forgiven_amount", 0) or 0
     if forgiven <= 0:
         return
+    # The term is the PLAN's, not a constant: RAP forgives at 30 years and IBR
+    # at 20, so naming one number for both would misdate the write-off -- and
+    # the tax on it -- by a decade.
+    is_rap = strategy_label == RAP_STRATEGY_LABEL
+    term = RAP_MAX_TERM_YEARS if is_rap else IDR_MAX_TERM_YEARS
+    plan = "RAP" if is_rap else "IDR"
     if compact:
         st.warning(
-            f"{fmt_money(forgiven)} forgiven after {IDR_MAX_TERM_YEARS} years — "
+            f"{fmt_money(forgiven)} forgiven after {term} years — "
             "taxable as income that year, and not modelled here."
             .replace("$", chr(92) + "$")
         )
         return
     st.warning(
-        f"Under IDR, {fmt_money(forgiven)} of principal remains unpaid after "
-        f"{IDR_MAX_TERM_YEARS} years and is forgiven. **Since January 1, 2026 a "
+        f"Under {plan}, {fmt_money(forgiven)} of principal remains unpaid after "
+        f"{term} years and is forgiven. **Since January 1, 2026 a "
         "discharged balance is taxed as ordinary income in the year it is "
         "discharged**, so this is a bill deferred rather than cancelled — the "
         "tax on it is not included in any figure on this page."
@@ -4308,13 +4375,20 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
         balance = max(balance - principal_reduction, 0.0)
         if month <= roi_window_years * 12:
             total_paid_in_roi_window += payment
-        schedule_rows.append({"month": month, "year": month / 12, "balance": balance})
+        # `payment` is emitted for the same reason the IDR simulator emits it:
+        # a RAP payment moves with income, so payment_for_month and the
+        # schedule merge cannot reconstruct it from a flat figure. Without this
+        # column, promoting RAP to a selectable strategy raises a KeyError in
+        # the take-home charts rather than at import.
+        schedule_rows.append({"month": month, "year": month / 12,
+                              "balance": balance, "payment": payment})
         if balance <= 0:
             break
     else:
         forgiven_amount = balance
         balance = 0.0
-        schedule_rows.append({"month": max_months, "year": max_months / 12, "balance": 0.0})
+        schedule_rows.append({"month": max_months, "year": max_months / 12,
+                              "balance": 0.0, "payment": 0.0})
 
     schedule_df = pd.DataFrame(schedule_rows)
     return {
@@ -5050,6 +5124,24 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         repayment_result = calculate_standard_repayment(
             principal_for_repayment, rate_for_repayment, roi_window_years=roi_window_years)
         strategy_label = "Standard 10-Year"
+    elif repayment_strategy == RAP_STRATEGY_LABEL:
+        # RAP forgives at 30 years, so it takes the same forgivable-pool split
+        # as IDR. dependents is 0 here: the main page has no dependants input
+        # (only the Advanced Analysis module does), and 0 is the conservative
+        # reading -- each dependant would lower the payment by $50/month.
+        if financing and financing.get("nonforgivable_principal", 0) > 0:
+            federal_part = simulate_rap_schedule(
+                financing["forgivable_principal"], financing["forgivable_rate"],
+                major_name, 0, roi_window_years=roi_window_years)
+            nonfederal_part = calculate_standard_repayment(
+                financing["nonforgivable_principal"], financing["nonforgivable_rate"],
+                roi_window_years=roi_window_years)
+            repayment_result = combine_repayment_results(federal_part, nonfederal_part)
+        else:
+            repayment_result = simulate_rap_schedule(
+                principal_for_repayment, rate_for_repayment, major_name, 0,
+                roi_window_years=roi_window_years)
+        strategy_label = RAP_STRATEGY_LABEL
     elif financing and financing.get("nonforgivable_principal", 0) > 0:
         # Income-driven repayment writes off whatever is left at the end of the
         # term -- but ONLY on the student's own federal Direct loans. Parent
@@ -5110,9 +5202,13 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     existing_result = None
     if existing_debt and existing_debt > 0:
         existing_rate = existing_debt_rate if existing_debt_rate is not None else interest_rate
-        if repayment_strategy == "Standard 10-Year":
+        if repayment_strategy == STANDARD_STRATEGY_LABEL:
             existing_result = calculate_standard_repayment(
                 existing_debt, existing_rate, roi_window_years=roi_window_years)
+        elif repayment_strategy == RAP_STRATEGY_LABEL:
+            existing_result = simulate_rap_schedule(
+                existing_debt, existing_rate, major_name, 0,
+                roi_window_years=roi_window_years)
         else:
             existing_result = calculate_idr_repayment(
                 existing_debt, existing_rate, major_name, roi_window_years=roi_window_years)
@@ -5515,9 +5611,13 @@ def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_
     """
     if target_month > repayment_result["payoff_years"] * 12:
         return 0.0
-    if strategy == "Standard 10-Year":
-        return repayment_result["monthly_payment"]
     schedule = repayment_result["schedule"]
+    # Standard is flat, and so is anything whose schedule carries no per-month
+    # payment column. Testing for the column rather than for the strategy NAME
+    # is what lets a new income-driven plan be added without this silently
+    # reading a column that isn't there.
+    if strategy == STANDARD_STRATEGY_LABEL or "payment" not in schedule.columns:
+        return repayment_result.get("monthly_payment", 0.0)
     row = schedule[schedule["month"] == target_month]
     return row.iloc[0]["payment"] if not row.empty else 0.0
 
@@ -8197,22 +8297,25 @@ if loan_source_a == "personal":
     )
 else:
     gap_rate_a = st.session_state["gap_rate_a"]
-repayment_strategy_options = ["Standard 10-Year", "Income-Driven Repayment (IDR)"]
-shared_repayment_strategy = get_shared_default("strategy", "Standard 10-Year")
-default_repayment_strategy_index = (
-    repayment_strategy_options.index(shared_repayment_strategy)
-    if shared_repayment_strategy in repayment_strategy_options else 0
-)
+# The income-driven option depends on this scenario's start year, so the list
+# changes under the widget when the visitor moves that year. It therefore needs
+# a key and reconciliation rather than a bare index: with a key, a stored label
+# that is no longer in the options makes Streamlit RAISE (the same trap
+# reconcile_cc_mode exists for), and without one, changing the year would reset
+# an income-driven choice to Standard -- silently answering a different
+# question. resolve_shared_strategy maps income-driven to income-driven.
+repayment_strategy_options = repayment_strategy_options_for(start_year_a)
+shared_repayment_strategy = get_shared_default("strategy", STANDARD_STRATEGY_LABEL)
+st.session_state.setdefault(
+    "repayment_strategy_a",
+    resolve_shared_strategy(shared_repayment_strategy, repayment_strategy_options))
+st.session_state["repayment_strategy_a"] = resolve_shared_strategy(
+    st.session_state["repayment_strategy_a"], repayment_strategy_options)
 repayment_strategy = st.sidebar.selectbox(
-    "Repayment Strategy", repayment_strategy_options, index=default_repayment_strategy_index,
+    "Repayment Strategy", repayment_strategy_options,
+    key="repayment_strategy_a",
     on_change=lambda: mark_interaction("repayment_strategy_a"),
-    help="Standard 10-Year: a fixed payment every month for 10 years. "
-         "Income-Driven Repayment (IDR): your payment is based on your "
-         "income instead, and whatever's left is forgiven after 20 years -- "
-         "modelled on IBR, which is only open to loans originated BEFORE "
-         "July 1, 2026. For borrowing after that date the income-driven plan "
-         "is RAP (30 years, 1-10% of total income), under Advanced Analysis. "
-         "See Methodology.",
+    help=REPAYMENT_STRATEGY_HELP,
 )
 
 # How far out every comparison on this page looks. Was a fixed 10 years, and
@@ -9215,18 +9318,20 @@ if compare_mode:
             )
         else:
             gap_rate_b = st.session_state["gap_rate_b"]
-        shared_repayment_strategy_b = get_shared_default("strategy_b", "Standard 10-Year")
-        default_repayment_strategy_b_index = (
-            repayment_strategy_options.index(shared_repayment_strategy_b)
-            if shared_repayment_strategy_b in repayment_strategy_options else 0
-        )
+        # Scenario B's own start year decides its options -- it used to reuse
+        # Scenario A's list, so a B starting in 2025 was offered whatever plan
+        # A's year implied. Same reconcile-before-the-widget treatment as A.
+        repayment_strategy_options_b = repayment_strategy_options_for(start_year_b)
+        shared_repayment_strategy_b = get_shared_default("strategy_b", STANDARD_STRATEGY_LABEL)
+        st.session_state.setdefault(
+            "repayment_strategy_b",
+            resolve_shared_strategy(shared_repayment_strategy_b, repayment_strategy_options_b))
+        st.session_state["repayment_strategy_b"] = resolve_shared_strategy(
+            st.session_state["repayment_strategy_b"], repayment_strategy_options_b)
         repayment_strategy_b = st.selectbox(
-            "Repayment Strategy", repayment_strategy_options, index=default_repayment_strategy_b_index,
+            "Repayment Strategy", repayment_strategy_options_b,
             key="repayment_strategy_b", on_change=lambda: mark_interaction("repayment_strategy_b"),
-            help="Standard 10-Year: a fixed payment every month for 10 "
-                 "years. Income-Driven Repayment (IDR): your payment is "
-                 "based on your income instead, and whatever's left is "
-                 "forgiven after 20 years.",
+            help=REPAYMENT_STRATEGY_HELP,
         )
 
 
@@ -10319,7 +10424,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             fmt_money(roi_result["earnings_premium"]),
             delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
         )
-        render_forgiveness_note(repayment_result, compact=True)
+        render_forgiveness_note(repayment_result, scenario.get("strategy_label"), compact=True)
 
         # loan_amount/interest_rate/repayment_strategy are parameters rather
         # than globals because Scenario B has its own -- reading the globals
@@ -10903,7 +11008,7 @@ else:
 
     render_financing_note(scenario.get("financing"))
 
-    render_forgiveness_note(repayment_result)
+    render_forgiveness_note(repayment_result, strategy_label)
 
     st.plotly_chart(
         build_balance_chart(repayment_result["schedule"], strategy_label),
@@ -11678,10 +11783,23 @@ before July 1, 2014). For borrowing from July 1, 2026 the income-driven plan
 is the **Repayment Assistance Plan (RAP)**: 30 years rather than 20, **1–10%
 of total income** rather than 10% of income above an allowance, a $10/month
 minimum, all unpaid interest waived for the full term, and a $50/month
-principal match. RAP is modelled in this app under **Advanced Analysis →
-2026 Regulatory & Macro Forecasting**, and is the more realistic comparison
-for anyone starting now. **Parent PLUS is not eligible for RAP**, which is why
-it sits in the non-forgivable pool described above.
+principal match. **The app picks the plan from your start year**: choose the income-driven
+strategy with a start year of 2026 or later and you are modelling RAP; with an
+earlier start year, IBR. The strategy dropdown names whichever one applies, so
+the two are never silently swapped. In practice that means **RAP** — the start
+year list begins at the current year, because you cannot enrol in the past, so
+every scenario the app can build now falls after the July 1, 2026 cutoff. The
+IBR model is kept for older shared links and for reproducing the app's earlier
+figures, not because it is reachable from the sidebar. (RAP also still appears under **Advanced
+Analysis → 2026 Regulatory & Macro Forecasting**, which additionally models the
+Tiered Standard Plan.) **Parent PLUS is not eligible for RAP**, which is why it
+sits in the non-forgivable pool described above.
+
+One simplification: the plan follows the **start** year, while in reality each
+year's loans are judged by their own disbursement date, so a 2025 starter's
+later years would fall under RAP. OBBBA's interim exception keeps such a
+borrower on the old limits for up to three years, which is why the start year
+is a defensible proxy rather than an arbitrary one.
 
 **Forgiveness is taxed.** Since **January 1, 2026**, a balance discharged at
 the end of an income-driven plan is **taxed as ordinary income in the year it
