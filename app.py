@@ -3052,6 +3052,51 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "cc_state_a": cc_state_a,
         "cc_coa_a": str(cc_coa_per_year_a),
     }
+    # Returning-student mode. Read from session_state rather than added to this
+    # function's signature, the same way loan_mode/dependency are -- they have
+    # no Scenario B counterpart and no caller holds them as locals.
+    #
+    # These are not optional the way a slider position is: the mode decides what
+    # the whole page is COMPARING AGAINST (a debt-free 18-year-old, or the
+    # visitor's own current salary). A link that drops them doesn't recreate a
+    # slightly different scenario -- it silently answers a different question
+    # with the same school and major on screen. Short tokens, not the display
+    # labels, because the enrollment labels carry em dashes.
+    # Foregone earnings and the three Advanced Analysis toggles. Same class of
+    # field as the mode above and same reason to carry them: "count foregone
+    # earnings" decides whether every path is compared from age 18 or from
+    # graduation, and the Advanced toggles change the salaries and costs on
+    # screen. A link that drops them looks like the sender's scenario and is
+    # not. Found by check_share_coverage.py, not by anyone noticing.
+    params["foregone"] = "1" if st.session_state.get("count_foregone_earnings") else "0"
+    params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
+    params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
+    params["future"] = "1" if st.session_state.get("enable_future_proofing") else "0"
+    # In prestige mode the tier REPLACES the school, so ?school= holds a tier
+    # label that no school lookup can resolve -- the tier params are what make
+    # such a link reconstructable.
+    if st.session_state.get("enable_prestige_mode"):
+        if st.session_state.get("prestige_tier_a") is not None:
+            params["prestige_tier"] = st.session_state["prestige_tier_a"]
+        if compare_mode and st.session_state.get("prestige_tier_b") is not None:
+            params["prestige_tier_b"] = st.session_state["prestige_tier_b"]
+
+    _shared_returning = st.session_state.get("student_mode_radio") == STUDENT_MODE_RETURNING
+    params["smode"] = "returning" if _shared_returning else "first"
+    if _shared_returning:
+        params.update({
+            "age": str(st.session_state.get("current_age", 30)),
+            "cur_sal": str(st.session_state.get("current_salary", 0)),
+            "sal10": str(st.session_state.get("salary_no_degree_10y", 0)),
+            "debt": str(st.session_state.get("existing_debt", 0)),
+            "debt_rate": str(st.session_state.get("existing_debt_rate", DEFAULT_FEDERAL_RATE)),
+            "enroll": ("working"
+                       if st.session_state.get("returning_enrollment") == RETURNING_KEEP_WORKING
+                       else "fulltime"),
+        })
+        # Only present once a major with a BLS figure has been picked.
+        if "starting_salary_override" in st.session_state:
+            params["sso"] = str(st.session_state["starting_salary_override"])
     if compare_mode:
         params.update({
             "major_b": major_b,
@@ -7012,20 +7057,30 @@ STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
 RETURNING_STOP_WORK = "No — I'll study full-time"
 RETURNING_KEEP_WORKING = "Yes — evenings, online or part-time"
 RETURNING_ENROLLMENT_OPTIONS = [RETURNING_KEEP_WORKING, RETURNING_STOP_WORK]
-st.session_state.setdefault("student_mode_radio", STUDENT_MODE_FIRST)
+# A shared link carries the mode as a short token. Map it back through the
+# options list rather than trusting the URL: a hand-edited ?smode=xyz must fall
+# back to the default, not hand st.radio a value that isn't in its options --
+# which raises, for everyone on that link. Same reasoning as reconcile_cc_mode.
+st.session_state.setdefault(
+    "student_mode_radio",
+    STUDENT_MODE_RETURNING if get_shared_default("smode", "first") == "returning"
+    else STUDENT_MODE_FIRST)
 student_mode = st.session_state["student_mode_radio"]
 is_returning = student_mode == STUDENT_MODE_RETURNING
-st.session_state.setdefault("current_age", 30)
+st.session_state.setdefault("current_age", get_shared_int("age", 30))
 # Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
 # 4,950% ROI on the default San Francisco scenario, because $50k is below what
 # a high school graduate earns there -- so the app invented a spectacular
 # return for someone who had entered nothing. An unanswered question must look
 # unanswered.
-st.session_state.setdefault("current_salary", 0)
-st.session_state.setdefault("salary_no_degree_10y", 0)
-st.session_state.setdefault("existing_debt", 0)
-st.session_state.setdefault("existing_debt_rate", DEFAULT_FEDERAL_RATE)
-st.session_state.setdefault("returning_enrollment", RETURNING_KEEP_WORKING)
+st.session_state.setdefault("current_salary", get_shared_int("cur_sal", 0))
+st.session_state.setdefault("salary_no_degree_10y", get_shared_int("sal10", 0))
+st.session_state.setdefault("existing_debt", get_shared_int("debt", 0))
+st.session_state.setdefault("existing_debt_rate", get_shared_float("debt_rate", DEFAULT_FEDERAL_RATE))
+st.session_state.setdefault(
+    "returning_enrollment",
+    RETURNING_STOP_WORK if get_shared_default("enroll", "working") == "fulltime"
+    else RETURNING_KEEP_WORKING)
 
 
 # Global styling for every number_input in the sidebar (Scenario A and B
@@ -7088,9 +7143,13 @@ scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 # exists, the same pattern the Career section's controls use. See the
 # Methodology footer for what each module models and, just as importantly,
 # what it deliberately does NOT claim.
-st.session_state.setdefault("enable_prestige_mode", False)
-st.session_state.setdefault("enable_ai_mode", False)
-st.session_state.setdefault("enable_future_proofing", False)
+st.session_state.setdefault("enable_prestige_mode", get_shared_default("prestige", "0") == "1")
+st.session_state.setdefault("enable_ai_mode", get_shared_default("ai", "0") == "1")
+st.session_state.setdefault("enable_future_proofing", get_shared_default("future", "0") == "1")
+# Seeded here rather than at its checkbox, which renders far below several
+# blocks that already read this key before the widget exists. Its own default
+# is unchanged (off); this only lets a shared link carry it.
+st.session_state.setdefault("count_foregone_earnings", get_shared_default("foregone", "0") == "1")
 enable_prestige_mode = st.session_state["enable_prestige_mode"]
 enable_ai_mode = st.session_state["enable_ai_mode"]
 enable_future_proofing = st.session_state["enable_future_proofing"]
@@ -8026,7 +8085,14 @@ major = st.sidebar.selectbox(
 # through get_annual_salary_for_year.
 if is_returning and major in MAJOR_DATA:
     _bls_start = MAJOR_DATA[major].get("starting_salary", 0)
-    st.session_state.setdefault("starting_salary_override", int(_bls_start))
+    st.session_state.setdefault("starting_salary_override", get_shared_int("sso", int(_bls_start)))
+    # A shared link's ?sso= must survive the visit that opens it: seed the
+    # re-pin's memory with the link's own major so the first render counts as
+    # "no change". Without this the setdefault above stores the shared figure
+    # and the re-pin immediately overwrites it with the BLS median -- the same
+    # trap _city_school exists to close for ?city=.
+    if "sso" in st.query_params:
+        st.session_state.setdefault("_salary_override_major", major)
     # Re-pin when the major changes, or the previous occupation's figure rides
     # along silently -- the same stale-value trap the major dropdown's mode
     # re-pinning exists to prevent.
