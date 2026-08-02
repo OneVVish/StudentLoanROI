@@ -7806,14 +7806,21 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                    f"{fmt_money(loan_amount)}", styles["body"]),
         *financing_line,
         Spacer(1, 6),
-        _pdf_table(full_width=True, rows=[
-            ["Monthly Payment", "Payoff Timeline", "Total Interest Paid"],
-            [
-                fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
-                f"{repayment_result['payoff_years']:.1f} yrs",
-                fmt_money(repayment_result["total_interest"]),
-            ],
-        ]),
+        # A fourth column only when there is forgiveness -- same condition as
+        # the on-screen metric, so the report and the page cannot disagree
+        # about whether this scenario has any.
+        _pdf_table(full_width=True, rows=(
+            [["Monthly Payment", "Payoff Timeline", "Total Interest Paid", "Loan Forgiven"],
+             [fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+              f"{repayment_result['payoff_years']:.1f} yrs",
+              fmt_money(repayment_result["total_interest"]),
+              fmt_money(repayment_result["forgiven_amount"])]]
+            if (repayment_result.get("forgiven_amount", 0) or 0) > 0 else
+            [["Monthly Payment", "Payoff Timeline", "Total Interest Paid"],
+             [fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+              f"{repayment_result['payoff_years']:.1f} yrs",
+              fmt_money(repayment_result["total_interest"])]]
+        )),
         Spacer(1, 12),
         build_pdf_balance_chart(repayment_result["schedule"], scenario["strategy_label"]),
         # "Get Your Real Numbers" starts its own page (PageBreak lives in
@@ -7832,30 +7839,40 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
               for label, f in takehome_stages],
         ]),
     ]
-    # Charts describe the first stage only, exactly as on screen.
-    _first_label, _first = takehome_stages[0]
-    take_home, gross = _first["take_home"], _first["gross"]
-    monthly_payment = _first["monthly_payment"]
-    if gross > 0 and monthly_payment is not None:
-        # Both take-home charts side by side, so the pair fits on a single page
-        # -- stacked at full width they're each taller than half a page and the
-        # pair overflows, which forced a split.
+    # One row of charts per career stage, mirroring the on-screen columns. The
+    # two implementations share no code (see CLAUDE.md on the chart twins), so
+    # this has to be changed in step with render_takehome_block or the report
+    # silently shows a different stage than the page.
+    _drawable = [(label, figs) for label, figs in takehome_stages
+                 if figs["gross"] > 0 and figs["monthly_payment"] is not None]
+    if _drawable:
+        # Both charts for a stage side by side, so each stage's pair fits on a
+        # single page -- stacked at full width they're each taller than half a
+        # page and the pair overflows, which forced a split.
         _chart_w = (PDF_CONTENT_WIDTH - 18) / 2
         story += [
             Spacer(1, 12),
             Paragraph(_strip_emoji(
-                f"Charts below show {_first_label} — the stage where the payment is "
-                "largest relative to take-home pay."), styles["caption"]),
-            KeepTogether(Table(
-                [[build_pdf_takehome_pie_chart(take_home, max_width=_chart_w),
-                  build_pdf_takehome_vs_loan_chart(take_home["net_take_home"] / 12, monthly_payment,
-                                                    max_width=_chart_w)]],
-                colWidths=[PDF_CONTENT_WIDTH / 2, PDF_CONTENT_WIDTH / 2],
-                hAlign="CENTER",
-                style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
-                                  ("ALIGN", (0, 0), (-1, -1), "CENTER")]),
-            )),
+                "Each block below is one career stage. The loan payment is the same "
+                "dollar amount in both -- what changes is how much of your pay it takes."),
+                styles["caption"]),
         ]
+        for _label, _figs in _drawable:
+            _take_home = _figs["take_home"]
+            story += [
+                Spacer(1, 8),
+                Paragraph(_strip_emoji(_label), styles["section"]),
+                KeepTogether(Table(
+                    [[build_pdf_takehome_pie_chart(_take_home, max_width=_chart_w),
+                      build_pdf_takehome_vs_loan_chart(
+                          _take_home["net_take_home"] / 12, _figs["monthly_payment"],
+                          max_width=_chart_w)]],
+                    colWidths=[PDF_CONTENT_WIDTH / 2, PDF_CONTENT_WIDTH / 2],
+                    hAlign="CENTER",
+                    style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                      ("ALIGN", (0, 0), (-1, -1), "CENTER")]),
+                )),
+            ]
     story += [
         Spacer(1, 12),
         Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["section"]),
@@ -11186,22 +11203,39 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
             # tax rate. Later stages get the one-line form.
             _render_takehome_stage(figs, major_name, verbose=show_charts and i == 0)
 
-    # Charts describe the FIRST stage only. Four pies (two stages x two
-    # charts) crowd the page and the PDF alike, and year 1 is the stage worth
-    # drawing: it is where the payment takes its largest bite out of
-    # take-home pay. Year 10's split is stated numerically directly above.
-    first_label, first = results[0]
-    if show_charts and first["gross"] > 0:
-        st.caption(f"Charts below show **{first_label}** — the stage where the "
-                   "payment is largest relative to take-home pay.")
-        st.plotly_chart(build_takehome_pie_chart(first["take_home"]),
-                         use_container_width=True, config=PLOTLY_CHART_CONFIG)
-        st.plotly_chart(
-            build_takehome_vs_loan_chart(first["take_home"]["net_take_home"] / 12,
-                                          first["monthly_payment"]),
-            use_container_width=True, config=PLOTLY_CHART_CONFIG,
-            key=f"takehome_vs_loan_{major_name}_{stages[0][1]}",
+    # Every stage gets its own column of charts, so the shift between year 1
+    # and year 10 is a left-right comparison rather than something the reader
+    # has to hold in their head. It is the shift that carries the meaning: the
+    # payment is a large share of a starting salary and a much smaller one of a
+    # mid-career salary, and a single year-1 pie showed the worst moment as if
+    # it were the whole story.
+    #
+    # Columns only when this block owns its nesting level. Streamlit allows one
+    # level, and Compare Mode has already spent it on the A/B split -- it passes
+    # stage_layout="stacked" AND show_charts=False today, but the guard is on
+    # the layout rather than on show_charts so the two cannot drift into a
+    # render-time crash.
+    drawable = [(label, figs) for label, figs in results if figs["gross"] > 0]
+    if show_charts and drawable:
+        st.caption(
+            "Each column is one career stage. The loan payment is the same "
+            "dollar amount in both — what changes is how much of your pay it "
+            "takes, which is the comparison worth making."
         )
+        chart_cols = (st.columns(len(drawable)) if stage_layout == "columns"
+                      else [contextlib.nullcontext()] * len(drawable))
+        for (label, figs), container in zip(drawable, chart_cols):
+            with container:
+                panel_heading(label, level=3)
+                st.plotly_chart(build_takehome_pie_chart(figs["take_home"]),
+                                 use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                                 key=f"takehome_pie_{major_name}_{label}")
+                st.plotly_chart(
+                    build_takehome_vs_loan_chart(figs["take_home"]["net_take_home"] / 12,
+                                                  figs["monthly_payment"]),
+                    use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                    key=f"takehome_vs_loan_{major_name}_{label}",
+                )
 
     return {"stages": results}
 
@@ -11417,6 +11451,12 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         st.metric("Payoff Timeline", f"{shown['payoff_years']:.1f} yrs")
         render_payoff_age(scenario, current_age, program_years)
         st.metric("Total Interest Paid", fmt_money(shown["total_interest"]))
+        # Same gate as the single branch -- an asymmetry between the two is an
+        # H2 confound, not a cosmetic difference.
+        if (shown.get("forgiven_amount", 0) or 0) > 0:
+            st.metric("Loan Forgiven", fmt_money(shown["forgiven_amount"]),
+                      help="Balance written off at the end of the term. Taxable as "
+                           "income that year; that tax is not modelled here.")
         if scenario.get("existing_debt"):
             st.caption(
                 f"Includes {fmt_money(scenario['existing_debt'])} of student debt you "
@@ -12002,13 +12042,25 @@ else:
     # See the compare branch: combined_repayment includes any existing balance
     # and equals repayment_result when there is none.
     _shown = scenario.get("combined_repayment") or repayment_result
-    loan_metric_cols = st.columns(3)
+    # A fourth column only when there IS forgiveness. An always-present
+    # "Forgiven: $0" would read as a plan feature that failed rather than one
+    # that never applied -- and under Standard or Tiered Standard nothing is
+    # forgivable at all, so the metric would be meaningless there.
+    _forgiven = _shown.get("forgiven_amount", 0) or 0
+    loan_metric_cols = st.columns(4 if _forgiven > 0 else 3)
     loan_metric_cols[0].metric(
         "Monthly Payment",
         fmt_money(_shown["monthly_payment"]) if "monthly_payment" in _shown else "Varies (IDR)",
     )
     loan_metric_cols[1].metric("Payoff Timeline", f"{_shown['payoff_years']:.1f} yrs")
     loan_metric_cols[2].metric("Total Interest Paid", fmt_money(_shown["total_interest"]))
+    if _forgiven > 0:
+        loan_metric_cols[3].metric(
+            "Loan Forgiven", fmt_money(_forgiven),
+            help="Balance written off at the end of the plan's term. Taxable as "
+                 "ordinary income in the year it is discharged (since January 1, "
+                 "2026), and that tax is not included in any figure here.",
+        )
     render_payoff_age(scenario, st.session_state.get("current_age") if is_returning else None,
                        program_years_a)
     if scenario.get("existing_debt"):
