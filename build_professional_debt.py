@@ -52,6 +52,27 @@ import pandas as pd
 # models are all First Professional; a Master's-level path would need its own
 # entry here AND its own program length in app.py, never a silent default.
 FIRST_PROFESSIONAL = 7
+MASTERS = 5
+DOCTORAL = 6
+
+# Master's and doctoral rows are emitted alongside the three professional
+# programs, but keyed differently and for a different purpose.
+#
+# The professional block is three exact 4-digit CIP codes mapped to three
+# occupations, because app.py knows those occupations by name. Graduate study
+# spans the whole taxonomy instead -- 220 CIP fields publish a master's median
+# -- so there is no occupation to key on, and app.py has no occupation-to-CIP
+# crosswalk (it explicitly declines to build one: the SOC-CIP crosswalk's own
+# documentation calls itself conceptual rather than empirical).
+#
+# What app.py DOES have is MAJOR_TO_CIP_FAMILY, a hand-checked map from NY Fed
+# major to 2-DIGIT CIP family, used by the school search. So graduate rows are
+# aggregated to the 2-digit family, which is the granularity that map can
+# reach. 28 of its 29 families have master's data.
+#
+# Consequence worth stating: this is Major-mode only. Career mode has no
+# bridge and falls back to asking the visitor.
+GRADUATE_CREDENTIALS = {MASTERS: "master", DOCTORAL: "doctoral"}
 
 # 4-digit CIP -> the key app.py uses. CIPDESC is carried only to verify the
 # code still means what we think: these are stable, but a silent CIP
@@ -93,7 +114,8 @@ CONTROL_LABELS = {
 
 OUTPUT_COLUMNS = [
     "UNITID", "INSTNM", "CONTROL", "control_type",
-    "CIPCODE", "CREDLEV", "program_key", "debt_median", "debt_10yr_payment",
+    "CIPCODE", "CREDLEV", "credential", "program_key",
+    "debt_median", "debt_10yr_payment",
 ]
 
 
@@ -132,11 +154,38 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
                 f"describes it as {found}.\nRefusing to map it to {program_key!r}."
             )
         block["program_key"] = program_key
+        block["credential"] = "professional"
         rows.append(block)
 
+    # Graduate rows: every CIP field, aggregated to the 2-digit family so
+    # app.py's MAJOR_TO_CIP_FAMILY can reach them. One row per
+    # (school, family, credential), taking the MEDIAN of the 4-digit medians
+    # within the family -- a median of medians rather than a true pooled
+    # median, which the app must not present as more precise than it is.
+    for credlev, credential in GRADUATE_CREDENTIALS.items():
+        block = df[df["CREDLEV"] == credlev].copy()
+        if block.empty:
+            sys.exit(f"ERROR: no CREDLEV {credlev} ({credential}) rows in this file.")
+        block["debt_median"] = pd.to_numeric(block[DEBT_COLUMN], errors="coerce")
+        block["debt_10yr_payment"] = pd.to_numeric(block[PAYMENT_COLUMN], errors="coerce")
+        block = block[block["debt_median"].notna()]
+        block["CIPCODE"] = block["CIPCODE"].str[:2]
+        grouped = (block.groupby(["UNITID", "INSTNM", "CONTROL", "CIPCODE"], as_index=False)
+                        .agg(debt_median=("debt_median", "median"),
+                             debt_10yr_payment=("debt_10yr_payment", "median")))
+        grouped["CREDLEV"] = credlev
+        grouped["credential"] = credential
+        grouped["program_key"] = grouped["CIPCODE"]
+        rows.append(grouped)
+
     out = pd.concat(rows, ignore_index=True)
-    out["debt_median"] = pd.to_numeric(out[DEBT_COLUMN], errors="coerce")
-    out["debt_10yr_payment"] = pd.to_numeric(out[PAYMENT_COLUMN], errors="coerce")
+    # The professional blocks still carry the raw string columns; the graduate
+    # blocks already resolved theirs above. Only fill where absent.
+    if DEBT_COLUMN in out.columns:
+        out["debt_median"] = out["debt_median"].fillna(
+            pd.to_numeric(out[DEBT_COLUMN], errors="coerce"))
+        out["debt_10yr_payment"] = out["debt_10yr_payment"].fillna(
+            pd.to_numeric(out[PAYMENT_COLUMN], errors="coerce"))
 
     # Drop suppressed/missing here rather than in the app. A school with no
     # published figure must fall back to the national constant, and the
@@ -173,13 +222,20 @@ def main() -> None:
 
     out = build(raw)
 
-    print(f"\n  {'program':10s} {'schools':>8s} {'min':>10s} {'median':>10s} {'max':>10s}"
-          f" {'over $200k cap':>15s}")
-    for key, block in out.groupby("program_key"):
+    # The federal aggregate a figure is measured against differs by credential
+    # -- $100,000 for graduate study, $200,000 for professional -- so the
+    # "over the cap" column has to know which it is looking at, or it reports a
+    # master's median as comfortably inside a ceiling that does not apply to it.
+    caps = {"master": 100_000, "doctoral": 100_000, "professional": 200_000}
+    print(f"\n  {'credential':13s} {'rows':>6s} {'schools':>8s} {'min':>10s} "
+          f"{'median':>10s} {'max':>10s} {'over its cap':>13s}")
+    for credential, block in out.groupby("credential"):
         d = block["debt_median"]
-        over = (d > 200_000).mean() * 100
-        print(f"  {key:10s} {len(block):>8d} {d.min():>10,.0f} {d.median():>10,.0f} "
-              f"{d.max():>10,.0f} {over:>14.0f}%")
+        cap = caps[credential]
+        over = (d > cap).mean() * 100
+        print(f"  {credential:13s} {len(block):>6d} {block['UNITID'].nunique():>8d} "
+              f"{d.min():>10,.0f} {d.median():>10,.0f} {d.max():>10,.0f} "
+              f"{over:>11.0f}% (${cap:,})")
 
     out.to_csv(args.output, index=False)
     print(f"\nWrote {len(out):,} rows to {args.output}")
