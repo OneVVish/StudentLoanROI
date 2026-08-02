@@ -2153,6 +2153,41 @@ def get_prestige_adjusted_major_name(major_name: str, tier_label: str) -> str:
     return synthetic_name
 
 
+def apply_starting_salary_override(major_name: str, entered: float) -> None:
+    """Re-anchor a major's whole salary curve to a figure the visitor entered.
+
+    The BLS number is what EVERYONE in an occupation earns -- it is not what a
+    50-year-old entering it earns in year one. A career-changer typically starts
+    below it and may never reach it, and the app has no data for that, so it
+    lets the visitor say rather than guessing on their behalf.
+
+    Scales starting_salary AND median_salary by the same ratio, exactly as the
+    metro wage index and the prestige multiplier already do. Overriding only
+    the start would silently change the implied growth rate, because
+    get_major_growth_rate derives it from median/starting -- entering a lower
+    figure would make the model grow FASTER to the same median, which is the
+    opposite of what a late entrant should expect. Scaling both preserves the
+    curve's shape and moves only its level.
+
+    Builds a NEW dict rather than mutating. load_bls_careers is cached and its
+    inner dicts are shared references, so an in-place edit here would rewrite
+    one visitor's salary for everyone until the cache cleared.
+    """
+    base = MAJOR_DATA.get(major_name)
+    if not base or not entered or entered <= 0:
+        return
+    current = base.get("starting_salary") or 0
+    if current <= 0:
+        return
+    ratio = entered / current
+    MAJOR_DATA[major_name] = {
+        **base,
+        "starting_salary": entered,
+        "median_salary": base["median_salary"] * ratio,
+        "salary_overridden": True,
+    }
+
+
 def get_ai_exposure_for_major(major_name: str) -> dict:
     """AI_EXPOSURE_BY_SOC_GROUP entry for major_name's SOC major group, or a
     graceful "Unclassified" placeholder if this major/career isn't mapped to
@@ -7935,6 +7970,38 @@ major = st.sidebar.selectbox(
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
 )
+# Returning students only. Placed here because it needs the chosen major to
+# pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
+# apply_starting_salary_override rewrites the entry the whole model reads
+# through get_annual_salary_for_year.
+if is_returning and major in MAJOR_DATA:
+    _bls_start = MAJOR_DATA[major].get("starting_salary", 0)
+    st.session_state.setdefault("starting_salary_override", int(_bls_start))
+    # Re-pin when the major changes, or the previous occupation's figure rides
+    # along silently -- the same stale-value trap the major dropdown's mode
+    # re-pinning exists to prevent.
+    if st.session_state.get("_salary_override_major") != major:
+        st.session_state["_salary_override_major"] = major
+        st.session_state["starting_salary_override"] = int(_bls_start)
+    st.sidebar.number_input(
+        "Your expected starting salary ($/yr)",
+        min_value=0, max_value=1_000_000, step=1_000,
+        key="starting_salary_override",
+        on_change=lambda: mark_interaction("starting_salary_override"),
+        help="Pre-filled with the BLS figure for this occupation. Change it if "
+              "you expect to start somewhere else.",
+    )
+    st.sidebar.caption(
+        f"The {fmt_money(_bls_start)} pre-filled here is what **everyone** in this "
+        "occupation earns at entry level — not what someone entering it mid-career "
+        "earns in year one. Career-changers commonly start below it, and some never "
+        "reach the median. If you have a real offer or a local posting, that number "
+        "is better than this one.".replace("$", chr(92) + "$")
+    )
+    _entered = st.session_state.get("starting_salary_override")
+    if _entered and _entered != _bls_start:
+        apply_starting_salary_override(major, float(_entered))
+
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
 if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
     st.sidebar.caption((
