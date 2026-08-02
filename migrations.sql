@@ -1009,3 +1009,72 @@ alter table scenario_events
 --     what the picker shows and what a share link carries. It is NOT stable
 --     across Scorecard releases -- an institution can be renamed or merged --
 --     so join on it with care, and prefer professional_debt_a for arithmetic.
+
+
+-- ============================================================
+-- 2026-08-02 (later) -- graduate degree support
+-- ============================================================
+-- RUN BEFORE DEPLOYING. Unknown column => PostgREST rejects the ENTIRE row
+-- (PGRST204), on all four tables that spread build_scenario_context.
+
+alter table survey_responses
+  add column if not exists credential_a text,
+  add column if not exists credential_b text,
+  add column if not exists graduate_years_a integer,
+  add column if not exists graduate_years_b integer,
+  add column if not exists grad_school_a text,
+  add column if not exists graduate_debt_a numeric;
+
+alter table pdf_downloads
+  add column if not exists credential_a text,
+  add column if not exists credential_b text,
+  add column if not exists graduate_years_a integer,
+  add column if not exists graduate_years_b integer,
+  add column if not exists grad_school_a text,
+  add column if not exists graduate_debt_a numeric;
+
+alter table scenario_shares
+  add column if not exists credential_a text,
+  add column if not exists credential_b text,
+  add column if not exists graduate_years_a integer,
+  add column if not exists graduate_years_b integer,
+  add column if not exists grad_school_a text,
+  add column if not exists graduate_debt_a numeric;
+
+alter table scenario_events
+  add column if not exists credential_a text,
+  add column if not exists credential_b text,
+  add column if not exists graduate_years_a integer,
+  add column if not exists graduate_years_b integer,
+  add column if not exists grad_school_a text,
+  add column if not exists graduate_debt_a numeric;
+
+-- Reading these later:
+--
+--   * scenario_a_program_years CHANGED MEANING on 2026-08-02 and the change is
+--     invisible without credential_a. Before this date every occupation above
+--     an associate's resolved to 4. After it, the 113 of 825 occupations BLS
+--     enters with a master's or doctorate resolve to 6 or 9 -- so a 4 written
+--     before this date and a 4 written after mean different things for those
+--     careers, and 6 never appeared at all before it. Condition on
+--     credential_a, or on the date, before pooling program years, loan
+--     amounts, roi_pct or earnings_premium for any graduate-level occupation.
+--
+--   * credential_a IS NULL means Major mode with the radio left on Bachelor's,
+--     OR a Career-mode occupation whose BLS level is bachelor's-or-below.
+--     graduate_years_a distinguishes them only when it is non-NULL; a NULL in
+--     both means "no graduate study", which is the common case.
+--
+--   * graduate_years_a is ADDITIONAL years, not total. A master's is 2 here
+--     and 6 in scenario_a_program_years. Subtracting gives the undergraduate
+--     portion, which is what the undergraduate Direct limits were applied to.
+--
+--   * graduate_debt_a IS NULL far more often than not -- only about 20% of
+--     school x field cells publish a master's median and 6% a doctoral one, so
+--     NULL means "the visitor entered their own cost", not "no graduate debt".
+--     grad_school_a is NULL in exactly the same rows.
+--
+--   * credential_b in Major mode is COPIED from A: there is one credential
+--     radio, on the reasoning that a visitor comparing two majors is one
+--     person choosing one level. It is independently derived only in Career
+--     mode. Do not read a B/A difference in Major mode as a visitor choice.

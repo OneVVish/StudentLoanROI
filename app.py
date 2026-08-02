@@ -763,6 +763,41 @@ UNDEREMPLOYMENT_MAJOR_COUNT = 73
 UNDEREMPLOYMENT_SOURCE_URL = "https://www.newyorkfed.org/research/college-labor-market"
 
 
+def graduate_salary_disclosure(typical_education: str) -> str:
+    """What the salary on this page does and does not account for, when the
+    path includes graduate study.
+
+    The app has no way to model what a master's ADDS. `typical_education` is
+    the occupation's entry requirement, not the visitor's credential, and the
+    BLS median is for people already doing the job -- so the figure shown is
+    already "what someone with this degree earns", not a bachelor's salary the
+    degree then lifts. The failure mode to avoid is a visitor reading the
+    premium as the return ON the master's, when it is the return on the whole
+    path from high school.
+
+    Returns "" for undergraduate paths so the sentence never appears where it
+    would be noise.
+    """
+    if not is_graduate_education(typical_education):
+        return ""
+    extra = graduate_years_for_education(typical_education)
+    level = "master's" if typical_education == CREDENTIAL_MASTERS else "doctorate"
+    return (
+        f"BLS says this career is entered with a {level}, so the cost above "
+        f"includes {extra} more years of school on top of a bachelor's, and "
+        "the comparison runs from high school. The salary is what people "
+        f"already in this job earn — it is not a bachelor's salary that the "
+        f"{level} then raises, and the app cannot model what the degree adds "
+        "on its own."
+    )
+
+
+def render_graduate_salary_disclosure(typical_education: str) -> None:
+    text = graduate_salary_disclosure(typical_education)
+    if text:
+        st.caption(text)
+
+
 def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) -> str:
     """One sentence about underemployment, framed for whichever dataset is
     driving the page. Shared by the on-screen render and the PDF so the number
@@ -3329,6 +3364,26 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # regenerated from new Scorecard releases), and the figure alone cannot
         # say whether it was a school median or the national fallback.
         # NULL means this path attends no professional school at all.
+        # Credential and the graduate split. scenario_a_program_years already
+        # existed, but it is uninterpretable without these: 6 means "bachelor's
+        # plus a master's", not "a six-year bachelor's", and only credential
+        # says which.
+        #
+        # In Major mode Scenario B shares A's credential -- there is one radio,
+        # on the reasoning that a visitor comparing two majors is one person
+        # choosing one level. In Career mode each side derives its own from BLS.
+        "credential_a": _typical_education_a or None,
+        "credential_b": (resolve_typical_education(
+            "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b")
+            or st.session_state.get("credential_a")) if compare_mode else None,
+        "graduate_years_a": graduate_years_a or None,
+        "graduate_years_b": (graduate_years_b or None) if compare_mode else None,
+        # Which school's median was used as the loan, and the figure. NULL when
+        # the visitor entered their own cost instead -- which is the common
+        # case, since only ~20% of school x field cells publish one.
+        "grad_school_a": (st.session_state.get("grad_school_a")
+                          if graduate_debt_a else None),
+        "graduate_debt_a": graduate_debt_a or None,
         "prof_school_a": st.session_state.get("prof_school_a")
                           if professional_program_for(major) else None,
         "prof_school_b": st.session_state.get("prof_school_b")
@@ -5692,6 +5747,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # of bug the hs_wage_index threading fixed.
         "enrollment_years": enrollment_years,
         "working_years": working_years,
+        # Stamped for the same reason the two above are: the results page and
+        # the PDF both describe this scenario's schooling, and re-deriving the
+        # education level at each call site would let them disagree about
+        # whether graduate study is in play.
+        "typical_education": MAJOR_DATA.get(major_name, {}).get("typical_education") or "",
         # None when the age-aware baseline is off. Stamped for the same reason
         # the two above are: every re-derivation off this dict (the break-even,
         # the net-position chart, the PDF) must reuse the value the scenario
@@ -7360,7 +7420,8 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
                        interest_rate_pct, repayment_strategy_label,
                        city_name=None, start_year=None,
                        cc_info=None, loan_source: str = "personal",
-                       professional_school=None, professional_debt=None) -> list:
+                       professional_school=None, professional_debt=None,
+                       typical_education: str = None) -> list:
     rows = [
         ["Profession", major_name],
         ["School", school_name or "(not entered)"],
@@ -7370,6 +7431,12 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     # above is the undergraduate one. Naming only that would let a report show
     # UC Berkeley beside $99,160 of Harvard medical school debt with nothing
     # saying so.
+    _grad_extra = graduate_years_for_education(typical_education or "")
+    if _grad_extra:
+        _level = ("Master's" if (typical_education or "") == CREDENTIAL_MASTERS
+                  else "Doctorate")
+        rows.append(["Degree level",
+                     f"{_level} — {_grad_extra} years beyond a bachelor's"])
     _prof_program = professional_program_for(major_name)
     if _prof_program and professional_debt:
         _label = PROFESSIONAL_SCHOOL_LABEL[_prof_program]
@@ -7617,7 +7684,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                                interest_rate, repayment_strategy, city,
                                start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a,
                                professional_school=professional_school_a,
-                               professional_debt=professional_debt_a),
+                               professional_debt=professional_debt_a,
+                               typical_education=scenario.get("typical_education")),
             header=False, full_width=True,
         ),
         PageBreak(),
@@ -7824,7 +7892,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                interest_rate, repayment_strategy, city_name=city,
                                start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a,
                                professional_school=professional_school_a,
-                               professional_debt=professional_debt_a),
+                               professional_debt=professional_debt_a,
+                               typical_education=scenario_a.get("typical_education")),
             header=False, full_width=True,
         ),
         Spacer(1, 6),
@@ -9427,6 +9496,18 @@ elif program_years_a == 0:
         "tuition, no loan, and no years of foregone wages charged against it. "
         "The salary comparison below still applies."
     ).replace("$", r"\$"))
+elif is_graduate_education(typical_education_a):
+    # Graduate levels joined PROGRAM_YEARS_BY_EDUCATION when they were given
+    # real lengths, which dropped them into the sub-bachelor's branch below --
+    # telling a visitor that a Master's degree "is below a bachelor's degree".
+    # They need their own sentence, saying the opposite thing.
+    st.sidebar.caption((
+        f"ℹ️ The typical entry-level education for {major} (BLS: "
+        f"\"{typical_education_a}\") is ABOVE a bachelor's, so costs below cover "
+        f"{program_years_for_education(typical_education_a)} years -- a bachelor's "
+        f"plus {graduate_years_for_education(typical_education_a)} more -- and the "
+        "graduate loan limits apply."
+    ).replace("$", r"\$"))
 elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
     # Not a warning: the cost model matches the real program here, so this
     # says what it's charging rather than apologising for what it isn't.
@@ -9715,6 +9796,14 @@ if compare_mode:
                 f"ℹ️ BLS gives the typical entry-level education for {major_b} as "
                 f"\"{typical_education_b}\" -- no degree required, so no tuition, "
                 "loan or foregone wages are charged against it."
+            ).replace("$", r"\$"))
+        elif is_graduate_education(typical_education_b):
+            st.caption((
+                f"ℹ️ The typical entry-level education for {major_b} (BLS: "
+                f"\"{typical_education_b}\") is ABOVE a bachelor's, so costs cover "
+                f"{program_years_for_education(typical_education_b)} years -- a "
+                f"bachelor's plus "
+                f"{graduate_years_for_education(typical_education_b)} more."
             ).replace("$", r"\$"))
         elif typical_education_b in PROGRAM_YEARS_BY_EDUCATION:
             st.caption((
@@ -11217,6 +11306,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         render_wage_distribution(scenario["major"], compact=True, caption=False,
                                   row_slots=wage_row_slots)
         render_wage_geography_note(scenario["major"])
+        render_graduate_salary_disclosure(scenario.get("typical_education"))
 
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
@@ -11878,6 +11968,7 @@ else:
     # Which geography the salary above came from -- shared helper, called from
     # render_scenario_panel too so Compare Mode shows it as well.
     render_wage_geography_note(major)
+    render_graduate_salary_disclosure(scenario.get("typical_education"))
 
     ai_context = {}
     if enable_ai_mode:
@@ -12802,6 +12893,44 @@ school in the sidebar and these change**, often a lot: across the schools that
 publish a figure, **43% of medical and 78% of dental schools** sit above the
 $200,000 ceiling, so for many the private share is larger than the national
 average implies — and for some it is nothing at all.
+
+**Graduate degrees (master's and doctoral).** BLS publishes the education a
+career is normally *entered* with, and for **113 of the 825 occupations here**
+that is a master's or a doctorate — Statisticians, Economists, Epidemiologists,
+School Psychologists, Education Administrators and others. Those paths are
+modelled as a bachelor's **plus** the graduate degree: **6 years** for a
+master's, **9** for a doctorate. Everything follows from that — the tuition
+charged, the years of foregone earnings, and the age the debt-free high school
+graduate is compared from (24 and 27 rather than 22).
+
+The **loan limits differ too**, and by more than the length does. Graduate
+Direct Unsubsidized is **$20,500/year against a $100,000 aggregate** — one flat
+annual figure, not the $5,500/$6,500/$7,500 undergraduate ladder — at the
+graduate Direct rate of **8.07%**. And there is **no Parent PLUS**: it exists
+only for dependent undergraduates, and Grad PLUS, which used to fill that gap,
+was abolished by OBBBA. Anything above the graduate ceiling is private
+borrowing.
+
+In **Intended Major** mode there is no BLS education level to read (a major is
+not an occupation), so the sidebar asks. The doctoral default of 5 years is a
+placeholder — real programmes run 4 to 8 — and is editable.
+
+**What the app cannot tell you**, and this matters for reading the premium: it
+does not model what a graduate degree *adds*. The salary shown is what people
+already in that occupation earn, which is a figure that already includes their
+credential. So the earnings premium is the return on the whole path from high
+school, not the return on the master's by itself. Separating those would need
+salary data by credential *within* an occupation, which BLS does not publish.
+
+**Where a graduate cost figure comes from, when there is one.** There is no
+graduate cost of attendance in any federal dataset. What Scorecard does publish
+is median **debt at graduation** by school and field, so where you name a school
+and your field publishes a figure, that is offered as the loan — already net of
+scholarships and assistantships, and overridable. Only about **a fifth** of
+school-and-field combinations publish a master's median and **a sixteenth** a
+doctoral one, so most of the time you will be entering your own cost. Same
+caveats as the professional figures below: they include Grad PLUS, which no
+longer exists, and they are pooled across award years.
 
 **Where the school-specific figures come from.** College Scorecard publishes
 cumulative debt at graduation for each school × field of study × credential
