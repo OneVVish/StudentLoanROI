@@ -87,6 +87,8 @@ SHARE_EXEMPT = {
     "existing_forgivable": "existing-loan comparison; not a scenario field",
     "existing_chart_plan": "which plan's chart to view; a view control, not an input",
     "existing_pslf": "existing-loan comparison; not a scenario field",
+    "existing_prior_payments": "existing-loan comparison; not a scenario field, "
+                               "and a payment history is personal",
     # Display-only / derived.
     "loan_mode_unavailable_display": "read-only display of a forced value",
 }
