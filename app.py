@@ -3340,6 +3340,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     # screen. A link that drops them looks like the sender's scenario and is
     # not. Found by check_share_coverage.py, not by anyone noticing.
     params["foregone"] = "1" if st.session_state.get("count_foregone_earnings") else "0"
+    params["deps"] = str(st.session_state.get("rap_dependents", 0))
     params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
     params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
     params["future"] = "1" if st.session_state.get("enable_future_proofing") else "0"
@@ -5065,6 +5066,7 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               baseline_start_age: int = None,
                               federal_cap: float = None, gap_rate: float = None,
                               plus_cap: float = None,
+                              dependents: int = 0,
                               include_fees: bool = False,
                               baseline_salary_now: float = None,
                               baseline_salary_in_10y: float = None,
@@ -5126,20 +5128,21 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         strategy_label = "Standard 10-Year"
     elif repayment_strategy == RAP_STRATEGY_LABEL:
         # RAP forgives at 30 years, so it takes the same forgivable-pool split
-        # as IDR. dependents is 0 here: the main page has no dependants input
-        # (only the Advanced Analysis module does), and 0 is the conservative
-        # reading -- each dependant would lower the payment by $50/month.
+        # as IDR. `dependents` is a real parameter rather than a session_state
+        # read because find_breakeven_loan is @st.cache_data and calls this --
+        # a value read inside would not key the cache, so the break-even would
+        # go stale the moment the visitor changed it.
         if financing and financing.get("nonforgivable_principal", 0) > 0:
             federal_part = simulate_rap_schedule(
                 financing["forgivable_principal"], financing["forgivable_rate"],
-                major_name, 0, roi_window_years=roi_window_years)
+                major_name, dependents, roi_window_years=roi_window_years)
             nonfederal_part = calculate_standard_repayment(
                 financing["nonforgivable_principal"], financing["nonforgivable_rate"],
                 roi_window_years=roi_window_years)
             repayment_result = combine_repayment_results(federal_part, nonfederal_part)
         else:
             repayment_result = simulate_rap_schedule(
-                principal_for_repayment, rate_for_repayment, major_name, 0,
+                principal_for_repayment, rate_for_repayment, major_name, dependents,
                 roi_window_years=roi_window_years)
         strategy_label = RAP_STRATEGY_LABEL
     elif financing and financing.get("nonforgivable_principal", 0) > 0:
@@ -5207,7 +5210,7 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                 existing_debt, existing_rate, roi_window_years=roi_window_years)
         elif repayment_strategy == RAP_STRATEGY_LABEL:
             existing_result = simulate_rap_schedule(
-                existing_debt, existing_rate, major_name, 0,
+                existing_debt, existing_rate, major_name, dependents,
                 roi_window_years=roi_window_years)
         else:
             existing_result = calculate_idr_repayment(
@@ -5273,7 +5276,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          enrollment_years: int = 0,
                          working_years: int = 0,
                          baseline_start_age: int = None,
-                         federal_cap: float = None, plus_cap: float = None, gap_rate: float = None,
+                         federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
                          include_fees: bool = False,
                          baseline_salary_now: float = None,
                          baseline_salary_in_10y: float = None) -> dict:
@@ -5336,7 +5339,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             enrollment_years=enrollment_years,
             working_years=working_years,
             baseline_start_age=baseline_start_age,
-            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, include_fees=include_fees,
+            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, include_fees=include_fees,
             # The same baseline the ROI used. Without this the break-even would
             # be solved against the high-school-graduate curve while the premium
             # beside it used the visitor's own salary -- two numbers on one
@@ -5369,7 +5372,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        enrollment_years: int = 0,
                        working_years: int = 0,
                        baseline_start_age: int = None,
-                       federal_cap: float = None, plus_cap: float = None, gap_rate: float = None,
+                       federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
                        include_fees: bool = False,
                        baseline_salary_now: float = None,
                        baseline_salary_in_10y: float = None) -> dict:
@@ -5406,7 +5409,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   enrollment_years=enrollment_years,
                                   working_years=working_years,
                                   baseline_start_age=baseline_start_age,
-                                  federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate,
+                                  federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents,
                                   include_fees=include_fees,
                                   baseline_salary_now=baseline_salary_now,
                                   baseline_salary_in_10y=baseline_salary_in_10y)
@@ -7072,7 +7075,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                               loan_basis_a: str = "cost_based", reported_debt_a=None,
                                 roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None,
                                 loan_source_a: str = "personal",
-                                federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None,
+                                federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
                                 include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
@@ -7240,7 +7243,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
             **breakeven_kwargs())
     story += _pdf_breakeven_block(breakeven, styles)
     story += _pdf_wage_distribution_block(major, styles)
@@ -7296,7 +7299,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  cc_info_a=None, cc_info_b=None,
                                  loan_source_a: str = "personal",
                                  loan_source_b: str = "personal",
-                                 federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None,
+                                 federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
                                  federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None,
                                  include_fees: bool = False) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
@@ -7359,7 +7362,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_a["enrollment_years"],
                               working_years=scenario_a["working_years"],
                               baseline_start_age=scenario_a["baseline_start_age"],
-                              federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, include_fees=include_fees,
+                              federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario A"),
         PageBreak(),
@@ -7383,7 +7386,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               enrollment_years=scenario_b["enrollment_years"],
                               working_years=scenario_b["working_years"],
                               baseline_start_age=scenario_b["baseline_start_age"],
-                              federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, include_fees=include_fees,
+                              federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=dependents, include_fees=include_fees,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario B"),
         PageBreak(),
@@ -8317,6 +8320,30 @@ repayment_strategy = st.sidebar.selectbox(
     on_change=lambda: mark_interaction("repayment_strategy_a"),
     help=REPAYMENT_STRATEGY_HELP,
 )
+
+# Dependent children, for RAP only -- it reduces the monthly payment by $50 per
+# child. One figure for both scenarios, like Dependency status: it is a fact
+# about the borrower, not about which school they pick.
+#
+# Shown only when RAP is actually in play, because no other plan modelled here
+# uses it: the IBR-style IDR model has no dependants term, and Standard is flat.
+# Scenario B's strategy is read from session_state before its own widget
+# renders (the established before-the-widget pattern), so a comparison where
+# only B is on RAP still gets the control.
+st.session_state.setdefault("rap_dependents", get_shared_int("deps", 0))
+_rap_in_use = (repayment_strategy == RAP_STRATEGY_LABEL
+               or (st.session_state.get("compare_mode")
+                   and st.session_state.get("repayment_strategy_b") == RAP_STRATEGY_LABEL))
+if _rap_in_use:
+    rap_dependents = st.sidebar.number_input(
+        "Dependent children (both scenarios)", min_value=0, max_value=10, step=1,
+        key="rap_dependents", on_change=lambda: mark_interaction("rap_dependents"),
+        help="RAP lowers your monthly payment by $50 per dependent child. "
+             "Counted for RAP only -- no other plan here uses it. Leaving this "
+             "at 0 overstates the payment for anyone with children.",
+    )
+else:
+    rap_dependents = st.session_state["rap_dependents"]
 
 # How far out every comparison on this page looks. Was a fixed 10 years, and
 # that horizon quietly decided the answer for any career that trains before
@@ -10349,7 +10376,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
                            col_index: float, career_data_source_name: str,
                            hs_wage_index: float = 1.0,
-                           federal_cap: float = None, plus_cap: float = None, gap_rate: float = None,
+                           federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
                            loan_basis: str = None, program_years: int = None,
@@ -10437,7 +10464,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             personal_contribution=scenario["personal_contribution"],
             enrollment_years=scenario["enrollment_years"],
             baseline_start_age=scenario["baseline_start_age"],
-            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, include_fees=include_fees,
+            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, include_fees=include_fees,
             **breakeven_kwargs())
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
@@ -10711,7 +10738,7 @@ if compare_mode:
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                           federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                           federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
                                            **returning_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
@@ -10720,7 +10747,7 @@ if compare_mode:
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, include_fees=True,
+                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, include_fees=True,
                                            **returning_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
@@ -10736,7 +10763,7 @@ if compare_mode:
         loan_amount, interest_rate, repayment_strategy,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, include_fees=True,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_a, program_years=program_years_a,
         current_age=st.session_state.get("current_age") if is_returning else None,
@@ -10746,7 +10773,7 @@ if compare_mode:
         loan_amount_b, interest_rate_b, repayment_strategy_b,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, include_fees=True,
+        federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, include_fees=True,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_b, program_years=program_years_b,
         current_age=st.session_state.get("current_age") if is_returning else None,
@@ -10847,7 +10874,7 @@ if compare_mode:
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
         cc_info_b=_cc_info_for_pdf(cc_mode_b, cc_state_key_b, effective_cc_coa_per_year_b, cc_oop_b, cc_years_b),
         loan_source_a=loan_source_a, loan_source_b=loan_source_b,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents,
         federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, include_fees=True,
     )
     with top_actions_container:
@@ -10901,7 +10928,7 @@ else:
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
                                            **returning_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
@@ -11083,7 +11110,7 @@ else:
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, include_fees=True,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
             **breakeven_kwargs())
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
@@ -11157,7 +11184,7 @@ else:
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
         loan_source_a=loan_source_a,
         loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, include_fees=True,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, include_fees=True,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     )
     with top_actions_container:
@@ -11405,7 +11432,7 @@ Questions about the research? Contact **veervish11@gmail.com**.
                                                        enrollment_years=enrollment_years_a,
                                                        working_years=working_years_a,
                                                        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                                       federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                                       federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, include_fees=True,
                                                **returning_kwargs())
                 # major_b/loan_amount_b/etc. only exist as script variables when
                 # compare_mode is on (they're assigned inside that sidebar
@@ -11421,7 +11448,7 @@ Questions about the research? Contact **veervish11@gmail.com**.
                                                            enrollment_years=enrollment_years_b,
                                                            working_years=working_years_b,
                                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, include_fees=True,
+                                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, include_fees=True,
                                                **returning_kwargs())
                     compare_mode_kwargs = dict(
                         compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
