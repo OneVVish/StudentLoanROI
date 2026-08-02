@@ -2113,7 +2113,10 @@ NYFED_MAJOR_SOC_GROUP = {
 # IF13075. Figures below are administratively simplified, like this app's
 # existing IDR model -- see the Methodology footer for the same caveat.
 RAP_DEPENDENT_REDUCTION = 50  # $/month per dependent
-RAP_MIN_PAYMENT = 10  # $/month floor for AGI <= $10,000
+RAP_MIN_PAYMENT = 10  # $/month floor on the payment ITSELF, after the
+                      # dependent deduction -- not just the lowest AGI band.
+                      # studentaid.gov: "your monthly payment amount can never
+                      # be less than $10."
 RAP_MAX_TERM_YEARS = 30  # forgiveness after 360 on-time payments
 RAP_PRINCIPAL_MATCH_CAP = 50  # $/month government principal-match subsidy
 
@@ -4977,19 +4980,43 @@ def calculate_tiered_standard_term(principal: float) -> int:
 
 
 def calculate_rap_payment(agi: float, dependents: int = 0) -> dict:
-    """One month's Repayment Assistance Plan (RAP) payment: a flat $10/month
-    floor for AGI <= $10,000, otherwise 1% of AGI per $10,000 AGI band above
-    $10,000 (so $10k-20k -> 1%, $20k-30k -> 2%, ... $90k-100k -> 9%), capped
-    at 10% for AGI >= $100,000 -- then reduced by $50/month per dependent,
-    floored at $0."""
+    """One month's Repayment Assistance Plan (RAP) payment: 1% of AGI per
+    $10,000 AGI band above $10,000 (so $10,001-20,000 -> 1%, $20,001-30,000
+    -> 2%, ... $90,001-100,000 -> 9%), capped at 10% above $100,000 -- then
+    reduced by $50/month per dependent, and floored at $10/month.
+
+    THE $10 FLOOR IS THE WHOLE BOTTOM OF THE SCHEDULE, not a special case for
+    the lowest band. studentaid.gov's chart, footnote:
+
+        "You can subtract $50 from the monthly payment amount for each
+         dependent you claim on your federal income tax return, but your
+         monthly payment amount can never be less than $10."
+
+    One floor doing two jobs. It is why the published $0-$10,000 row reads a
+    flat $10.00 (1% of $10,000 is only $8.33/month), and it is what bounds the
+    dependent deduction. This floored the deduction at $0 instead, so a
+    borrower with any dependents and a low income was shown a $0 payment --
+    reported from the live app.
+
+    BOUNDARIES BELONG TO THE LOWER BAND. The published brackets are
+    $X,001-$Y,000, so $50,000 is the TOP of the 4% bracket, not the bottom of
+    the 5% one. `agi // 10000` put every exact multiple of $10,000 one band too
+    high -- $50,000 charged 5% ($208.33) against a published bracket maximum of
+    $166.67, a 25% overstatement on the roundest figure a visitor can type.
+    Subtracting 1 first is integer-exact and needs no ceil/float rounding.
+
+    Verified against every row and both edges of the published chart by
+    check_rap_payment_table.py.
+    """
     if agi <= 10000:
         base_payment = float(RAP_MIN_PAYMENT)
         applied_pct = None
     else:
-        band = min(int(agi // 10000), 10)
+        band = min(int((agi - 1) // 10000), 10)
         applied_pct = band / 100
         base_payment = agi * applied_pct / 12
-    payment = max(base_payment - dependents * RAP_DEPENDENT_REDUCTION, 0.0)
+    payment = max(base_payment - dependents * RAP_DEPENDENT_REDUCTION,
+                  float(RAP_MIN_PAYMENT))
     return {"monthly_payment": payment, "applied_pct": applied_pct, "base_payment": base_payment}
 
 
@@ -10590,8 +10617,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
         rows.append(("Repayment Assistance Plan (RAP)", rap,
                      f"Qualifies. Unpaid interest waived, remainder forgiven at "
                      f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
-                     "1-10% of total income. Unpaid interest waived. "
-                     "Remainder forgiven at 30 years."))
+                     f"1-10% of total income, minimum ${RAP_MIN_PAYMENT}/month. "
+                     "Unpaid interest waived. Remainder forgiven at 30 years."))
         idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
                                        starting_interest=starting_interest,
                                        max_term_years=idr_term)
@@ -13359,7 +13386,10 @@ the start-year list begins at the current year — those are OBBBA's two, and
 only those:
 
 - **Repayment Assistance Plan (RAP)**, the default. 1–10% of total income, all
-  unpaid interest waived, remainder forgiven at 30 years (and taxed).
+  unpaid interest waived, remainder forgiven at 30 years (and taxed). The
+  payment never falls below **$10/month**, including after the $50-per-dependent
+  reduction — so unlike IBR, RAP has no $0 payment. Below about $10,000 of
+  income the $10 floor *is* the payment.
 - **2026 Tiered Standard Plan.** A fixed payment over a term set by how much
   you owe. Forgives nothing, so nothing is taxed either.
 
