@@ -1055,6 +1055,40 @@ PARENT_PLUS_ANNUAL_LIMIT = 20000
 PARENT_PLUS_AGGREGATE_LIMIT = 65000   # per student, across BOTH parents combined
 # Loans first disbursed on or after this date take the new limits.
 PARENT_PLUS_LIMIT_EFFECTIVE_YEAR = 2026
+
+# PROFESSIONAL-degree borrowing, post-OBBBA. Every path in this app carrying
+# additional_training_debt is a professional degree -- MD, DDS/DMD, JD -- so
+# these are the limits that apply to medical, dental and law school debt.
+#
+# The structural change is that Direct PLUS for graduate and professional
+# borrowers is GONE. Before OBBBA a professional student borrowed $20,500/yr
+# unsubsidized and put everything above it on Grad PLUS at "COA minus aid",
+# which is why this app modelled that debt as gap financing -- correct then.
+# Now the unsubsidized limit is $50,000/yr up to a $200,000 aggregate and there
+# is no PLUS behind it, so that debt is a Direct Unsubsidized loan up to the
+# cap and private money beyond it.
+#
+# Note the aggregate covers graduate/professional study only -- undergraduate
+# borrowing does not count against it (the pre-OBBBA $138,500 did include
+# undergrad; the replacement does not).
+# [Source: studentaid.gov OBBBA definitions, "Professional students" annual and
+# aggregate tables, page updated 2026-07-06.]
+PROFESSIONAL_ANNUAL_UNSUB_LIMIT = 50000
+PROFESSIONAL_AGGREGATE_LIMIT = 200000
+# Direct Unsubsidized for graduate/professional borrowers, loans first disbursed
+# 2026-07-01 to 2027-06-30. A constant rather than a sidebar input: the
+# "Federal Direct rate" field sits in the undergraduate financing block and is
+# about the undergraduate loan, and silently reusing it here would price
+# medical school 1.5 points cheaper than the government does.
+# [Source: studentaid.gov/understand-aid/types/loans/interest-rates]
+PROFESSIONAL_DIRECT_RATE = 8.07
+# There is also a $257,500 lifetime maximum across a student's own subsidized,
+# unsubsidized and grad/professional PLUS borrowing. It is deliberately NOT
+# modelled: the component caps above already bind well below it on every path
+# this app has (the largest reachable federal total is $45,000 undergrad +
+# $200,000 professional = $245,000), so implementing it would add a branch that
+# can never fire. Parent PLUS is not counted toward it -- that is the parent's
+# loan, not the student's.
 # Loan origination (disbursement) fees, applied as a principal gross-up: the fee
 # is deducted at disbursement, so you repay slightly more than you receive.
 # Direct Sub/Unsub 1.057%, Direct PLUS 4.228% (loans disbursed 2024-25).
@@ -2108,9 +2142,22 @@ def financing_summary_text(financing: dict) -> str:
     else:
         gap_text = (f"{fmt_money(financing['gap_principal'])} gap financing "
                     f"(PLUS/private) @{fmt_pct(financing['gap_rate'])}")
+    # When professional debt is present the federal tranche spans TWO published
+    # rates (undergraduate ~6.5%, graduate/professional 8.07%). Reporting the
+    # combined figure "@6.5%" would put the undergraduate rate on $200,000 of
+    # medical school in the one line a reader checks the arithmetic against.
+    prof_fed = financing.get("professional_federal_principal", 0) or 0
+    if prof_fed > 0:
+        federal_text = (
+            f"{fmt_money(financing['undergrad_federal_principal'])} federal Direct "
+            f"@{fmt_pct(financing['federal_rate'])} + {fmt_money(prof_fed)} "
+            f"grad/professional Direct @{fmt_pct(financing['professional_rate'])}"
+        )
+    else:
+        federal_text = (f"{fmt_money(financing['federal_principal'])} federal Direct "
+                        f"@{fmt_pct(financing['federal_rate'])}")
     return (
-        f"Financed as {fmt_money(financing['federal_principal'])} federal Direct "
-        f"@{fmt_pct(financing['federal_rate'])} + {gap_text}{fee_note} "
+        f"Financed as {federal_text} + {gap_text}{fee_note} "
         f"→ {fmt_pct(financing['blended_rate'])} blended"
     )
 
@@ -4594,6 +4641,28 @@ def parent_plus_cap(schedule: list, dependency: str, start_year: int = None) -> 
     return min(total, PARENT_PLUS_AGGREGATE_LIMIT)
 
 
+def professional_debt_cap(major_name: str) -> float:
+    """How much of a major's `additional_training_debt` can be borrowed from
+    the federal government, post-OBBBA: $50,000 per year of professional school
+    (its `unpaid_training_years`), bounded by the $200,000 aggregate.
+
+    Zero-length or absent training means no professional tranche, and the
+    caller falls back to treating the whole loan as undergraduate.
+
+    Which programs count as "professional" is currently unsettled -- a
+    2026-06-24 court order preliminarily stayed part of ED's professional-degree
+    definition -- but the three groups this app models (physicians, dentists,
+    lawyers) are the uncontested core of it. Anything at the margin of that
+    definition would need its own entry here, not a silent default.
+    """
+    entry = MAJOR_DATA.get(major_name, {})
+    debt = entry.get("additional_training_debt", 0)
+    if not debt:
+        return 0.0
+    years = entry.get("unpaid_training_years", 0)
+    return min(years * PROFESSIONAL_ANNUAL_UNSUB_LIMIT, PROFESSIONAL_AGGREGATE_LIMIT)
+
+
 def simplified_debt_scale(program_years: int, predominant_degree=None,
                            dependency: str = "dependent") -> float:
     """How much of a school's institution-wide median completer debt a
@@ -4673,17 +4742,20 @@ def loan_amount_label(loan_basis: str, program_years: int) -> str:
 def split_loan_financing(effective_principal: float, federal_cap: float,
                           federal_rate: float, gap_rate: float,
                           include_fees: bool = True,
-                          plus_cap: float = None) -> dict:
+                          plus_cap: float = None,
+                          professional_principal: float = 0.0,
+                          professional_cap: float = None,
+                          professional_rate: float = None) -> dict:
     """Split a loan into a federal Direct tranche (up to federal_cap) and a
     higher-rate gap tranche (PLUS/private) for whatever's above the cap, then
     reduce them to a single fee-adjusted principal + principal-weighted blended
     rate to feed the existing repayment engine (Option A).
 
-    Splitting on effective_principal (undergrad loan + any professional-school
-    debt) means med/law debt above the undergrad cap lands in the gap tranche --
-    a reasonable proxy for its real Grad PLUS pricing, better than the old flat
-    single rate. Fees are a disbursement gross-up: you repay a bit more than you
-    receive. Returns the tranche figures plus what the engine should use.
+    Professional-school debt (`professional_principal`) is capped and priced
+    separately -- see professional_debt_cap. It used to ride in the gap tranche
+    as a Grad PLUS proxy, which was right until OBBBA abolished Grad PLUS.
+    Fees are a disbursement gross-up: you repay a bit more than you receive.
+    Returns the tranche figures plus what the engine should use.
 
     `plus_cap` splits that gap tranche again, into the part a parent can
     actually borrow from the government (Direct PLUS, now capped -- see
@@ -4696,16 +4768,48 @@ def split_loan_financing(effective_principal: float, federal_cap: float,
     Simplified mode and analyze_model.py get, and it is the pre-OBBBA behaviour
     unchanged.
     """
-    federal_principal = min(max(effective_principal, 0.0), max(federal_cap, 0.0))
-    gap_principal = max(effective_principal - federal_principal, 0.0)
+    # Undergraduate and professional debt are separate pools with separate
+    # ceilings, and must be capped separately rather than against one pooled
+    # limit. Pooling lets unused undergraduate headroom absorb professional
+    # debt that has its own, already-exhausted cap: a $10,000 undergrad loan
+    # plus $205,000 of medical school would report all $215,000 as federal,
+    # hiding the $5,000 that is not federally borrowable at all.
+    # professional_cap=None means "no professional handling" -- the whole loan
+    # is treated as undergraduate, which is the pre-OBBBA behaviour exactly
+    # (that debt rode in the gap tranche as a Grad PLUS proxy). Simplified mode
+    # and analyze_model.py take this path.
+    professional = (min(max(professional_principal, 0.0), max(effective_principal, 0.0))
+                    if professional_cap is not None else 0.0)
+    undergraduate = max(effective_principal, 0.0) - professional
+
+    ug_federal = min(undergraduate, max(federal_cap, 0.0))
+    ug_rest = undergraduate - ug_federal
     if plus_cap is None:
-        plus_principal, private_principal = gap_principal, 0.0
+        plus_principal, ug_private = ug_rest, 0.0
     else:
-        plus_principal = min(gap_principal, max(plus_cap, 0.0))
-        private_principal = gap_principal - plus_principal
+        plus_principal = min(ug_rest, max(plus_cap, 0.0))
+        ug_private = ug_rest - plus_principal
+
+    # Parent PLUS is for dependent UNDERGRADUATES, so it can never cover
+    # professional debt -- and with Grad PLUS abolished there is no federal
+    # loan behind this tranche at all once the unsubsidized cap is reached.
+    prof_federal = min(professional, max(professional_cap or 0.0, 0.0))
+    prof_private = professional - prof_federal
+
+    federal_principal = ug_federal + prof_federal
+    private_principal = ug_private + prof_private
+    gap_principal = plus_principal + private_principal
     fed_fee = ORIGINATION_FEE["federal"] if include_fees else 0.0
     gap_fee = ORIGINATION_FEE["gap"] if include_fees else 0.0
-    federal_financed = federal_principal * (1 + fed_fee)
+    # Graduate/professional Direct Unsubsidized is its own published rate, well
+    # above the undergraduate one (8.07% vs 6.52% for 2026-27). Pricing medical
+    # school at the undergraduate rate would make it look ~1.5 points cheaper
+    # than it is, which is exactly the direction this app must not err in. Same
+    # 1.057% origination fee -- that is a Direct Sub/Unsub fee at any level.
+    prof_rate = professional_rate if professional_rate is not None else federal_rate
+    ug_federal_financed = ug_federal * (1 + fed_fee)
+    prof_federal_financed = prof_federal * (1 + fed_fee)
+    federal_financed = ug_federal_financed + prof_federal_financed
     # The 4.228% origination fee is a Direct PLUS fee, so it applies to the PLUS
     # portion only. Private lenders overwhelmingly charge no origination fee --
     # grossing private money up by a federal fee would invent a cost. Note this
@@ -4721,11 +4825,16 @@ def split_loan_financing(effective_principal: float, federal_cap: float,
     # private tranche -- stated in the disclosure rather than silently absorbed,
     # since understating cost is this app's own worst failure mode.
     if financed_principal > 0:
-        blended_rate = (federal_financed * federal_rate + gap_financed * gap_rate) / financed_principal
+        blended_rate = (ug_federal_financed * federal_rate
+                        + prof_federal_financed * prof_rate
+                        + gap_financed * gap_rate) / financed_principal
     else:
         blended_rate = federal_rate
     return {
         "federal_principal": federal_principal,
+        "undergrad_federal_principal": ug_federal,
+        "professional_federal_principal": prof_federal,
+        "professional_rate": prof_rate,
         "gap_principal": gap_principal,
         "plus_principal": plus_principal,
         "private_principal": private_principal,
@@ -4791,7 +4900,14 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     if federal_cap is not None and gap_rate is not None:
         financing = split_loan_financing(
             effective_principal, federal_cap, interest_rate, gap_rate, include_fees,
-            plus_cap=plus_cap)
+            plus_cap=plus_cap,
+            # Derived here rather than threaded through every caller: this
+            # function already knows the major, and get_effective_principal
+            # above folded that debt into the principal a line earlier.
+            professional_principal=MAJOR_DATA.get(major_name, {}).get(
+                "additional_training_debt", 0),
+            professional_cap=professional_debt_cap(major_name),
+            professional_rate=PROFESSIONAL_DIRECT_RATE)
         principal_for_repayment = financing["financed_principal"]
         rate_for_repayment = financing["blended_rate"]
     else:
@@ -11570,11 +11686,11 @@ tranche (at your **Federal Direct rate**) and a **gap tranche** (at your **Gap
 financing rate**), grosses each up for its fee, and repays the combined balance
 at the principal-weighted **blended** rate — the breakdown is shown under the
 loan metrics. The **Dependency status** toggle sets the cap; professional-school
-debt (medicine/law) falls into the gap tranche, a reasonable stand-in for its
-real Grad PLUS pricing. Interest rates reset every July 1: for loans first
-disbursed in 2025–26 the undergraduate Direct rate is 6.39% and Grad PLUS is
-8.94% — the app defaults to 6.5% and 8.5% as round placeholders, so enter your
-own. Loan limits, rates, and fees: U.S. Department of Education / Federal
+debt (medicine, dentistry, law) is handled separately — see below. Interest
+rates reset every July 1: for loans first disbursed in **2026–27** the
+undergraduate Direct rate is **6.52%**, graduate/professional Direct
+Unsubsidized is **8.07%**, and Direct PLUS is **9.07%**. The app defaults to
+6.5% and 8.5% as round placeholders, so enter your own. Loan limits, rates, and fees: U.S. Department of Education / Federal
 Student Aid ([studentaid.gov/understand-aid/types/loans/interest-rates](https://studentaid.gov/understand-aid/types/loans/interest-rates)
 and [.../subsidized-unsubsidized](https://studentaid.gov/understand-aid/types/loans/subsidized-unsubsidized)).
 
@@ -11597,6 +11713,39 @@ who had already taken a Direct Loan — it can only loosen the cap, and it can't
 apply to someone deciding where to enrol now.
 [Source: studentaid.gov, OBBBA – Important Definitions, "PLUS loans for parents"
 annual and aggregate tables](https://studentaid.gov/announcements-events/big-updates/definitions).
+
+**Professional school: no more Grad PLUS (OBBBA, July 1, 2026).** Medical,
+dental and law school debt used to be borrowed as $20,500/year unsubsidized
+with everything above that on **Grad PLUS** at *cost of attendance minus other
+aid* — no ceiling — which is why this app modelled it as gap financing. Direct
+PLUS for graduate and professional borrowers **no longer exists**. The
+unsubsidized limit rose to **$50,000/year** with a **$200,000 aggregate** for
+professional study, and there is nothing federal behind it. So that debt is now
+split at its own cap, at the published graduate/professional Direct rate
+(8.07%), with the remainder private:
+
+- **Medicine** — $205,000 of median medical school debt against 4 years ×
+  $50,000, capped at the $200,000 aggregate: **$5,000 private**.
+- **Dentistry** — $293,900 against the same $200,000 ceiling: **$93,900
+  private**, the largest federal shortfall of any path here.
+- **Law** — $130,000 against 3 years × $50,000 = $150,000: **fits entirely**,
+  nothing private.
+
+The aggregate covers graduate and professional study only — undergraduate
+borrowing does not count against it, though the pre-OBBBA $138,500 limit it
+replaced did. Graduate (non-professional) study has its own lower limits
+($20,500/year, $100,000 aggregate); no path in this app carries graduate debt
+that isn't professional, so those don't apply to anything shown here. There is
+also a **$257,500 lifetime maximum** on a student's own borrowing, which the
+caps above already keep every path in this app well below.
+[Source: studentaid.gov, OBBBA – Important Definitions, "Professional students"
+tables](https://studentaid.gov/announcements-events/big-updates/definitions).
+
+*Worth knowing:* which programs count as "professional" is unsettled — a
+**June 24, 2026** court order preliminarily stayed part of the Department of
+Education's professional-degree definition, so some programs move in and out of
+that category for the duration. Medicine, dentistry and law are the
+uncontested core of it and are what this app models.
 
 *A simplification worth knowing:* both non-federal tranches are priced at your
 single **Gap financing rate**. Real private loans are credit-priced and
