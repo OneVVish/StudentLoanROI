@@ -869,3 +869,44 @@ alter table scenario_events
 --     denominator is not.
 --   * payoff_age is NULL outside returning mode, because current_age is only
 --     asked there.
+
+
+-- ============================================================
+-- 2026-08-01 -- repayment_strategy gains a third value (no DDL required)
+-- ============================================================
+-- No ALTER TABLE: repayment_strategy is already text. What changed is its
+-- DOMAIN, and pooling across the change is what will go wrong silently.
+--
+-- Before today the column held exactly two values:
+--     'Standard 10-Year'
+--     'Income-Driven Repayment (IDR)'
+-- It can now also hold:
+--     'Repayment Assistance Plan (RAP)'
+--
+-- Why: IBR -- which is what the app's IDR model is shaped like -- is closed to
+-- loans originated on or after 2026-07-01. From then the income-driven plan is
+-- RAP. The app now picks the income-driven option from the scenario's start
+-- year, so a start year >= 2026 offers RAP and an earlier one offers IDR.
+-- (Source: TICAS, "Comparing Income-Driven Repayment Plans", 2025-09-16.)
+--
+-- Reading these later:
+--
+--   * 'Income-Driven Repayment (IDR)' rows written BEFORE 2026-08-01 include
+--     sessions whose start_year was 2026 or later -- i.e. borrowers who were
+--     shown a plan they could not actually have chosen. After this date, an
+--     IDR row implies start_year < 2026. The two eras are not the same
+--     population and must not be pooled as "chose income-driven" without
+--     conditioning on scenario_a_start_year.
+--
+--   * Any comparison of payoff_years, total_interest or forgiven amounts
+--     across 2026-08-01 is also affected by the two model changes shipped just
+--     before this one, both of which move income-driven figures a long way:
+--       - non-federal debt (Parent PLUS + private) is no longer forgiven, and
+--       - the Parent PLUS and professional-degree caps now bound how much of a
+--         loan is federal at all.
+--     Treat income-driven rows from before 2026-08-01 as a separate model.
+--
+--   * RAP and IDR forgive on DIFFERENT terms -- 30 years vs 20 -- so a
+--     forgiven amount is only interpretable alongside the strategy that
+--     produced it. RAP's interest waiver also means many scenarios that
+--     forgave a large balance under IDR now forgive nothing at all.
