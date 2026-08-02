@@ -4751,6 +4751,21 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
 
 # ---- 2e. Financial Math: Income-Driven Repayment --------------------------
 
+def _close_schedule_at_forgiveness(schedule_rows: list, max_months: int) -> None:
+    """Mark the end of a forgiven loan without duplicating a month.
+
+    The balance goes to zero because the remainder was written off. If the loop
+    already emitted this month, that row is updated in place; appending a
+    second row for the same month made _merge_balance_schedules -- which
+    dedupes keep="last" -- throw away the real final payment.
+    """
+    if schedule_rows and schedule_rows[-1]["month"] == max_months:
+        schedule_rows[-1]["balance"] = 0.0
+        return
+    schedule_rows.append({"month": max_months, "year": max_months / 12,
+                          "balance": 0.0, "payment": 0.0})
+
+
 def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              major_name: str,
                              living_adjustment: float = IDR_LIVING_ADJUSTMENT,
@@ -4781,6 +4796,13 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         payment = discretionary_monthly * payment_rate
 
         interest = balance * monthly_rate
+        # Cap the payment at what is actually owed. The balance already floored
+        # at zero, but the full monthly payment was still being recorded, so the
+        # month the loan clears charged a whole payment when only part of one
+        # was due -- overstating what the borrower hands over, by up to a full
+        # payment on every loan. Caught by check_repayment_invariants.py, which
+        # is exactly the identity it exists to enforce.
+        payment = min(payment, balance + interest)
         balance = max(balance + interest - payment, 0.0)
 
         total_interest += interest
@@ -4795,7 +4817,7 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         # remaining principal is forgiven under the IDR plan.
         forgiven_amount = balance
         balance = 0.0
-        schedule_rows.append({"month": max_months, "year": max_months / 12, "balance": 0.0, "payment": 0.0})
+        _close_schedule_at_forgiveness(schedule_rows, max_months)
 
     schedule_df = pd.DataFrame(schedule_rows)
 
@@ -4857,6 +4879,12 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
     forgiven_amount = 0.0
     total_interest = 0.0
     waived_interest = 0.0
+    # Principal the GOVERNMENT paid down, not the borrower: RAP tops the
+    # reduction up to $50/month when their own payment does less. Tracked so
+    # the money-in/money-out identity closes -- without it, payments plus
+    # forgiveness fall short of principal plus interest by exactly this, and an
+    # invariant check cannot tell that from a real accounting bug.
+    government_match = 0.0
     schedule_rows = []
     max_months = max_term_years * 12
 
@@ -4865,6 +4893,10 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
         agi = get_annual_salary_for_year(major_name, year_index)
         payment = calculate_rap_payment(agi, dependents)["monthly_payment"]
         interest = balance * monthly_rate
+        # Same final-month cap as the IDR simulator -- see the note there.
+        # Applied BEFORE the interest split below so the waived figure cannot
+        # be computed against a payment the borrower never made.
+        payment = min(payment, balance + interest)
         # RAP waives the interest a payment does NOT cover. Interest the
         # payment DOES cover is paid by the borrower and is a real cost -- so
         # the split is min/max, not "all of it is free". Reporting the whole
@@ -4875,7 +4907,9 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
         waived_interest += max(interest - payment, 0.0)
         principal_reduction = payment - interest
         if principal_reduction < RAP_PRINCIPAL_MATCH_CAP:
-            principal_reduction = min(balance, RAP_PRINCIPAL_MATCH_CAP)
+            topped_up = min(balance, RAP_PRINCIPAL_MATCH_CAP)
+            government_match += max(topped_up - max(principal_reduction, 0.0), 0.0)
+            principal_reduction = topped_up
         balance = max(balance - principal_reduction, 0.0)
         if month <= roi_window_years * 12:
             total_paid_in_roi_window += payment
@@ -4891,8 +4925,13 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
     else:
         forgiven_amount = balance
         balance = 0.0
-        schedule_rows.append({"month": max_months, "year": max_months / 12,
-                              "balance": 0.0, "payment": 0.0})
+        # Zero the LAST row rather than appending another one for the same
+        # month. Appending duplicated month max_months, and _merge_balance_
+        # schedules dedupes with keep="last" -- so the real final payment was
+        # silently replaced by the closing row's 0.00 whenever a combined
+        # schedule was built. Worth $150 on the case that surfaced it, and
+        # invisible in every figure except the accounting identity.
+        _close_schedule_at_forgiveness(schedule_rows, max_months)
 
     schedule_df = pd.DataFrame(schedule_rows)
     return {
@@ -4906,6 +4945,7 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
         # which is the point: it is a figure about this scenario, not a
         # property of the plan.
         "waived_interest": waived_interest,
+        "government_match": government_match,
         "payoff_years": schedule_df["month"].iloc[-1] / 12,
         "schedule": schedule_df,
         "total_paid_in_roi_window": total_paid_in_roi_window,
