@@ -1274,6 +1274,26 @@ def program_years_for_education(typical_education: str) -> int:
     return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
 
 
+def program_years_for_context(typical_education: str, returning: bool = False) -> int:
+    """Years of enrollment to charge, for THIS visitor rather than for the
+    path in the abstract.
+
+    A first-time student pursuing a master's-level career needs the bachelor's
+    too, so the figure is 4 + 2. A RETURNING student going back for a master's
+    already holds the bachelor's -- they attend and pay for the graduate years
+    only. Charging them the full 6 bills them for a degree they have, which is
+    what this app did the moment graduate lengths were introduced.
+
+    A returning student pursuing a BACHELOR'S is the ordinary undergraduate
+    case and keeps the full length: they do not have that degree yet.
+    """
+    total = program_years_for_education(typical_education)
+    if not returning:
+        return total
+    graduate = graduate_years_for_education(typical_education)
+    return graduate if graduate else total
+
+
 def graduate_years_for_education(typical_education: str) -> int:
     """Of the total above, how many years are GRADUATE study. Zero for every
     undergraduate path. The loan model needs the split because the two halves
@@ -5164,6 +5184,21 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
     return sum(row["loan_amount"] for row in schedule)
 
 
+def undergraduate_schedule(schedule: list, graduate_years: int) -> list:
+    """The undergraduate rows of a loan schedule.
+
+    Graduate years are the LAST `graduate_years` entries -- you do the
+    bachelor's first. federal_direct_cap indexes its annual limits by position
+    in this list as class standing, so handing it the whole schedule counted
+    graduate years as 1st- and 2nd-year undergraduate ones: a returning
+    master's student picked up $12,000 of undergraduate capacity they cannot
+    borrow, on top of the correct $41,000 graduate figure.
+    """
+    if graduate_years <= 0:
+        return schedule
+    return schedule[:max(len(schedule) - graduate_years, 0)]
+
+
 def graduate_direct_cap(graduate_years: int) -> float:
     """Total Direct Unsubsidized a GRADUATE student can borrow for their own
     graduate study: $20,500 a year against a $100,000 aggregate.
@@ -8298,7 +8333,7 @@ prestige_tier_b = None
 
 
 def resolve_program_years(selection_key: str, fallback: str,
-                           share_param: str = None) -> int:
+                           share_param: str = None, returning: bool = False) -> int:
     """Enrollment length for whichever occupation this scenario currently has
     selected, resolved from session_state before the Career section builds
     MAJOR_DATA.
@@ -8325,7 +8360,7 @@ def resolve_program_years(selection_key: str, fallback: str,
         # the visitor selected in the credential radio (Bachelor's by default,
         # which reproduces the old behaviour exactly).
         education = st.session_state.get("credential_a", CREDENTIAL_BACHELORS)
-    return program_years_for_education(education)
+    return program_years_for_context(education, returning)
 
 
 def resolve_typical_education(selection_key: str, fallback: str,
@@ -8365,11 +8400,28 @@ def resolve_typical_education(selection_key: str, fallback: str,
 # Scenario B's own selection is made above its financing block, so it could read
 # it directly -- it goes through the same helper anyway so both scenarios can't
 # drift apart on how a program length is decided.
-program_years_a = resolve_program_years(
-    "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER], share_param="major")
+# In returning mode the visitor's own credential wins over the occupation's
+# BLS entry level: someone going back for an MBA to move into a bachelor's-level
+# job is describing their SCHOOLING, and BLS describes the JOB. In first-time
+# mode the BLS level is the better answer and the radio is not shown.
+# Reads the link directly when session_state has nothing: the credential radio
+# is seeded in the Career section, ~800 lines below this, so on the first render
+# of a shared link ?cred= has not landed yet -- the same trap ?mode= and
+# ?major= hit above. Without this a returning master's link was priced as a
+# four-year bachelor's for one render.
+_education_source_a = (
+    (st.session_state.get("credential_a")
+     or get_shared_default("cred", CREDENTIAL_BACHELORS))
+    if is_returning else None)
+if _education_source_a not in CREDENTIAL_OPTIONS:
+    _education_source_a = CREDENTIAL_BACHELORS if is_returning else None
+program_years_a = (program_years_for_context(_education_source_a, True)
+                   if _education_source_a else resolve_program_years(
+                       "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER],
+                       share_param="major"))
 # How many of those years are GRADUATE study. Drives the loan limits, hides the
 # community-college path, and shifts the high-school baseline's start age.
-_typical_education_a = (resolve_typical_education(
+_typical_education_a = (_education_source_a or resolve_typical_education(
     "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER], share_param="major")
     or st.session_state.get("credential_a", CREDENTIAL_BACHELORS))
 graduate_years_a = graduate_years_for_education(_typical_education_a)
@@ -8772,7 +8824,12 @@ cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college
 # Unsubsidized capacity. They are different schedules against different
 # aggregates, so they are computed apart and added rather than run through one
 # table -- see graduate_direct_cap.
-federal_cap_a = (federal_direct_cap(_schedule_a, loan_dependency)
+# When the whole programme IS the graduate study -- a returning student going
+# back for a master's -- there are no undergraduate years in the schedule, so
+# federal_direct_cap contributes nothing and the graduate cap is the whole
+# capacity. The addition still holds; it is just 0 + graduate.
+federal_cap_a = (federal_direct_cap(
+                     undergraduate_schedule(_schedule_a, graduate_years_a), loan_dependency)
                  + graduate_direct_cap(graduate_years_a)) if loan_source_a == "personal" else None
 # How much of the remainder a PARENT can still borrow federally. Paired with
 # federal_cap_a everywhere it travels -- omitting it silently restores the
@@ -9361,7 +9418,9 @@ major = st.sidebar.selectbox(
 # The credential radio. Career mode derives it from BLS typical_education and
 # needs no input; Major mode has no education field, so it must ask. Rendered
 # BEFORE the professional picker so the two can't both claim the same scenario.
-if dataset_mode != DATASET_MODE_CAREER and not enable_prestige_mode:
+# Shown in Major mode (no BLS level exists to derive from) and in returning
+# mode (the visitor's schooling is not the occupation's entry requirement).
+if (dataset_mode != DATASET_MODE_CAREER or is_returning) and not enable_prestige_mode:
     st.session_state.setdefault(
         "credential_a", get_shared_default("cred", CREDENTIAL_BACHELORS))
     if st.session_state["credential_a"] not in CREDENTIAL_OPTIONS:
@@ -9370,7 +9429,14 @@ if dataset_mode != DATASET_MODE_CAREER and not enable_prestige_mode:
         "What are you studying for?", CREDENTIAL_OPTIONS,
         format_func=lambda c: CREDENTIAL_LABELS[c],
         key="credential_a", on_change=lambda: mark_interaction("credential_a"),
-        help="A master's is modelled as 2 years on top of a bachelor's, a "
+        help="What YOU are going back to study -- which need not match the "
+             "entry requirement of the job you're aiming at. Going back for a "
+             "master's charges the 2 graduate years only, at graduate loan "
+             "limits, because you already hold the bachelor's. Doctorate "
+             "defaults to 5 years, a placeholder: real programmes run 4 to 8. "
+             "See Methodology."
+             if is_returning else
+             "A master's is modelled as 2 years on top of a bachelor's, a "
              "doctorate as 5 -- so the cost, the foregone earnings and the "
              "loan limits all change. The doctoral figure is a placeholder: "
              "real programmes run 4 to 8 years. See Methodology.",
@@ -10035,7 +10101,8 @@ if compare_mode:
             cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b, finance_cc_years=False)
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
         cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
-        federal_cap_b = (federal_direct_cap(_schedule_b, loan_dependency)
+        federal_cap_b = (federal_direct_cap(
+                             undergraduate_schedule(_schedule_b, graduate_years_b), loan_dependency)
                          + graduate_direct_cap(graduate_years_b)
                          if loan_source_b == "personal" else None)
         plus_cap_b = (parent_plus_cap(_schedule_b, loan_dependency, start_year_b,
