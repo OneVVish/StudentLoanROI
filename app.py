@@ -10857,7 +10857,13 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "switching. Going the other way, RAP payments count toward "
                 "IBR/ICR/PAYE only in months where the RAP payment was at least "
                 "the 10-year Standard payment, which for most income-driven "
-                "borrowers is never. Source: studentaid.gov."
+                "borrowers is never.  \n"
+                "**And the way back is closing.** ICR and PAYE terminate on "
+                "July 1, 2028, leaving IBR as the only plan RAP credit could "
+                "return to — and IBR is itself shut to loans originated on or "
+                "after July 1, 2026. Sources: studentaid.gov guidance on "
+                "changing IDR plans; TICAS, *Upcoming Changes to Income-Driven "
+                "Repayment Plans*."
             )
 
         # A chart for whichever plan the visitor wants to look at. Without one,
@@ -13546,7 +13552,14 @@ extends the repayment period to RAP's 30 years. In the other direction, RAP
 payments count toward IBR/ICR/PAYE only in months where the RAP payment was at
 least the 10-year Standard payment; for most income-driven borrowers that never
 happens, which the page states in the terms of the visitor's own figures.
-Source: studentaid.gov guidance on changing IDR plans.
+
+That return route is also time-limited: **ICR and PAYE terminate on July 1,
+2028**, after which IBR is the only plan RAP credit could count toward — and
+IBR is closed to loans originated on or after July 1, 2026, so a borrower whose
+loans start after that date has RAP as their only income-driven option and no
+plan to switch back to at all. Sources: studentaid.gov guidance on changing IDR
+plans; TICAS, *Upcoming Changes to Income-Driven Repayment Plans*
+(ticas.org).
 
 **Standard 10-Year and IBR-style IDR are not offered**, because a loan
 originated on or after July 1, 2026 cannot be repaid under either. They are
