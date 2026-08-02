@@ -973,6 +973,18 @@ alter table scenario_shares
   add column if not exists professional_debt_a numeric,
   add column if not exists professional_debt_b numeric;
 
+-- scenario_events too. It is easy to miss because it builds its OWN narrow
+-- dict (timestamp/session_id/traffic_source/experiment_arm/event_seq) -- but
+-- its call sites pass {**build_scenario_context(...)} and it spreads that, so
+-- it receives every scenario column the other three do. Missing it here would
+-- drop the per-rerun path data, which is the one table that records a visitor
+-- SWITCHING school rather than where they landed.
+alter table scenario_events
+  add column if not exists prof_school_a text,
+  add column if not exists prof_school_b text,
+  add column if not exists professional_debt_a numeric,
+  add column if not exists professional_debt_b numeric;
+
 -- Reading these later:
 --
 --   * professional_debt_a's MEANING CHANGED on 2026-08-02. Before it, medical,
