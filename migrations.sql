@@ -807,3 +807,65 @@ alter table scenario_events
 --     traffic after this date. Separate them by timestamp.
 --   * instrument_version stays 'v1'. No question text changed; bumping it
 --     would falsely signal the instrument itself differs.
+
+-- ============================================================================
+-- 2026-08-01  Returning-student mode -- RUN BEFORE DEPLOYING THE CODE
+-- ============================================================================
+-- Without these, a returning-student session is indistinguishable from a
+-- first-time one: the premium and roi_pct are there, but nothing records that
+-- they were measured against the visitor's own salary rather than a debt-free
+-- high school graduate. Same interpretability gap as city/wage_geography_level,
+-- in a new place.
+--
+-- Six columns, four tables. PostgREST rejects the WHOLE ROW on an unknown
+-- column, so a forgotten table silently drops every event from a
+-- returning-student session and reads as "nobody used the feature".
+
+alter table survey_responses
+  add column if not exists student_mode text,
+  add column if not exists current_age integer,
+  add column if not exists baseline_salary_now numeric,
+  add column if not exists baseline_salary_in_10y numeric,
+  add column if not exists existing_debt numeric,
+  add column if not exists payoff_age numeric;
+
+alter table pdf_downloads
+  add column if not exists student_mode text,
+  add column if not exists current_age integer,
+  add column if not exists baseline_salary_now numeric,
+  add column if not exists baseline_salary_in_10y numeric,
+  add column if not exists existing_debt numeric,
+  add column if not exists payoff_age numeric;
+
+alter table scenario_shares
+  add column if not exists student_mode text,
+  add column if not exists current_age integer,
+  add column if not exists baseline_salary_now numeric,
+  add column if not exists baseline_salary_in_10y numeric,
+  add column if not exists existing_debt numeric,
+  add column if not exists payoff_age numeric;
+
+alter table scenario_events
+  add column if not exists student_mode text,
+  add column if not exists current_age integer,
+  add column if not exists baseline_salary_now numeric,
+  add column if not exists baseline_salary_in_10y numeric,
+  add column if not exists existing_debt numeric,
+  add column if not exists payoff_age numeric;
+
+-- Reading these later:
+--
+--   * student_mode is the one that changes what every OTHER column means.
+--     'Going back to school' rows have an earnings_premium measured against
+--     baseline_salary_now, not against a high school graduate -- the two are
+--     not comparable and must never be pooled without conditioning on it.
+--   * baseline_salary_* are NULL even in returning mode until the visitor
+--     enters both. The app deliberately keeps the old baseline until then, so
+--     NULL there means "still measured against a high school graduate", not
+--     "missing data".
+--   * existing_debt is EXCLUDED from scenario_a_loan_amount and from the ROI
+--     by design. It raises payoff_age and the monthly payment only. Adding the
+--     two together to get "total debt" is correct; adding it into the ROI
+--     denominator is not.
+--   * payoff_age is NULL outside returning mode, because current_age is only
+--     asked there.

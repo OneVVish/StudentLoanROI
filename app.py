@@ -9520,6 +9520,45 @@ def render_cc_path_note(cc_mode: str) -> None:
         )
 
 
+def payoff_age_for(scenario: dict, current_age, program_years: int):
+    """The age at which the LAST loan clears, or None when it cannot be said.
+
+    "10.0 yrs" is not the question someone going back at 49 is asking; "repaid
+    at 61" is. The article this was built for is entirely about debt outliving
+    the ability to choose when to stop working, and the app already held every
+    term needed to answer it.
+
+    current_age + program_years + payoff, because repayment starts after the
+    programme ends, not today. Uses combined_repayment, so an existing balance
+    pushes the date out -- that balance is exactly what keeps the article's
+    subjects working.
+
+    None outside returning mode: current_age is only asked there, and inventing
+    an age for an 18-year-old would be asserting something never entered.
+    """
+    if not current_age:
+        return None
+    repayment = scenario.get("combined_repayment") or scenario["repayment_result"]
+    return float(current_age) + float(program_years or 0) + repayment["payoff_years"]
+
+
+def render_payoff_age(scenario: dict, current_age, program_years: int,
+                       retirement_age: int = 67) -> None:
+    """Caption under the payoff metric. Shared by both 5c branches -- rendering
+    it in one and not the other is an H2 confound, not a cosmetic gap."""
+    age = payoff_age_for(scenario, current_age, program_years)
+    if age is None:
+        return
+    if age >= retirement_age:
+        st.warning(
+            f"You'd be **{age:.0f}** when this is repaid — past the "
+            f"{retirement_age} most people plan to retire at. The debt outlasts "
+            "the working years you were counting on."
+        )
+    else:
+        st.caption(f"You'd be **{age:.0f}** when this is fully repaid.")
+
+
 def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: int,
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
                            col_index: float, career_data_source_name: str,
@@ -9527,7 +9566,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            federal_cap: float = None, gap_rate: float = None,
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
-                           loan_basis: str = None, program_years: int = None):
+                           loan_basis: str = None, program_years: int = None,
+                           current_age: int = None):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -9574,12 +9614,24 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # has no time dimension) and for the 430 occupations needing no degree.
         if loan_basis is not None:
             st.metric(loan_amount_label(loan_basis, program_years), fmt_money(loan_amount))
+        # combined_repayment, not repayment_result: what the visitor pays and
+        # when they are free includes any existing balance. It EQUALS
+        # repayment_result when there is none, so this needs no conditional.
+        shown = scenario.get("combined_repayment") or repayment_result
         st.metric(
             "Monthly Payment",
-            fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+            fmt_money(shown["monthly_payment"]) if "monthly_payment" in shown else "Varies (IDR)",
         )
-        st.metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
-        st.metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
+        st.metric("Payoff Timeline", f"{shown['payoff_years']:.1f} yrs")
+        render_payoff_age(scenario, current_age, program_years)
+        st.metric("Total Interest Paid", fmt_money(shown["total_interest"]))
+        if scenario.get("existing_debt"):
+            st.caption(
+                f"Includes {fmt_money(scenario['existing_debt'])} of student debt you "
+                "already owe. That is in the payment and the payoff date, but not "
+                "charged against this degree — you'd be repaying it either way."
+                .replace("$", chr(92) + "$")
+            )
         render_financing_note(scenario.get("financing"))
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
@@ -9888,6 +9940,7 @@ if compare_mode:
         federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_a, program_years=program_years_a,
+        current_age=st.session_state.get("current_age") if is_returning else None,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -9897,6 +9950,7 @@ if compare_mode:
         federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_b, program_years=program_years_b,
+        current_age=st.session_state.get("current_age") if is_returning else None,
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -10134,13 +10188,24 @@ else:
                 "but every calculation below uses your overridden total instead."
             ).replace("$", r"\$"))
 
+    # See the compare branch: combined_repayment includes any existing balance
+    # and equals repayment_result when there is none.
+    _shown = scenario.get("combined_repayment") or repayment_result
     loan_metric_cols = st.columns(3)
     loan_metric_cols[0].metric(
         "Monthly Payment",
-        fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+        fmt_money(_shown["monthly_payment"]) if "monthly_payment" in _shown else "Varies (IDR)",
     )
-    loan_metric_cols[1].metric("Payoff Timeline", f"{repayment_result['payoff_years']:.1f} yrs")
-    loan_metric_cols[2].metric("Total Interest Paid", fmt_money(repayment_result["total_interest"]))
+    loan_metric_cols[1].metric("Payoff Timeline", f"{_shown['payoff_years']:.1f} yrs")
+    loan_metric_cols[2].metric("Total Interest Paid", fmt_money(_shown["total_interest"]))
+    render_payoff_age(scenario, st.session_state.get("current_age") if is_returning else None,
+                       program_years_a)
+    if scenario.get("existing_debt"):
+        st.caption(
+            f"Includes {fmt_money(scenario['existing_debt'])} of student debt you already "
+            "owe. That is in the payment and the payoff date, but not charged against "
+            "this degree — you'd be repaying it either way.".replace("$", chr(92) + "$")
+        )
 
     render_financing_note(scenario.get("financing"))
 
