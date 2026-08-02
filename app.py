@@ -763,6 +763,41 @@ UNDEREMPLOYMENT_MAJOR_COUNT = 73
 UNDEREMPLOYMENT_SOURCE_URL = "https://www.newyorkfed.org/research/college-labor-market"
 
 
+def graduate_salary_disclosure(typical_education: str) -> str:
+    """What the salary on this page does and does not account for, when the
+    path includes graduate study.
+
+    The app has no way to model what a master's ADDS. `typical_education` is
+    the occupation's entry requirement, not the visitor's credential, and the
+    BLS median is for people already doing the job -- so the figure shown is
+    already "what someone with this degree earns", not a bachelor's salary the
+    degree then lifts. The failure mode to avoid is a visitor reading the
+    premium as the return ON the master's, when it is the return on the whole
+    path from high school.
+
+    Returns "" for undergraduate paths so the sentence never appears where it
+    would be noise.
+    """
+    if not is_graduate_education(typical_education):
+        return ""
+    extra = graduate_years_for_education(typical_education)
+    level = "master's" if typical_education == CREDENTIAL_MASTERS else "doctorate"
+    return (
+        f"BLS says this career is entered with a {level}, so the cost above "
+        f"includes {extra} more years of school on top of a bachelor's, and "
+        "the comparison runs from high school. The salary is what people "
+        f"already in this job earn — it is not a bachelor's salary that the "
+        f"{level} then raises, and the app cannot model what the degree adds "
+        "on its own."
+    )
+
+
+def render_graduate_salary_disclosure(typical_education: str) -> None:
+    text = graduate_salary_disclosure(typical_education)
+    if text:
+        st.caption(text)
+
+
 def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) -> str:
     """One sentence about underemployment, framed for whichever dataset is
     driving the page. Shared by the on-screen render and the PDF so the number
@@ -1092,6 +1127,11 @@ PARENT_PLUS_LIMIT_EFFECTIVE_YEAR = 2026
 # undergrad; the replacement does not).
 # [Source: studentaid.gov OBBBA definitions, "Professional students" annual and
 # aggregate tables, page updated 2026-07-06.]
+# Graduate (non-professional) borrowing, post-OBBBA. Lower on both counts than
+# the professional limits below, and the aggregate covers graduate study only --
+# undergraduate borrowing does not count against it.
+GRADUATE_ANNUAL_UNSUB_LIMIT = 20500
+GRADUATE_AGGREGATE_LIMIT = 100000
 PROFESSIONAL_ANNUAL_UNSUB_LIMIT = 50000
 PROFESSIONAL_AGGREGATE_LIMIT = 200000
 # Direct Unsubsidized for graduate/professional borrowers, loans first disbursed
@@ -1156,20 +1196,74 @@ UNDERGRAD_YEARS = 4
 # first spans a six-week certificate and an eighteen-month program; the second
 # has no defined end at all. A guess there would be indistinguishable from data
 # -- see MISMODELLED_EDUCATION_LEVELS.
+# Graduate levels are ADDITIONAL years on top of a bachelor's, not a total.
+# A master's is 2 years after 4; a doctorate 5 after 4. Keeping them here as
+# the additional figure and adding UNDERGRAD_YEARS in program_years_for_education
+# is what lets baseline_start_age_for and the loan schedule agree about when
+# the person actually starts earning.
+#
+# 5 years for a doctorate is a placeholder, not a finding -- real programmes run
+# 4 to 8. It is editable wherever it is shown, and the caption says so.
+GRADUATE_ADDITIONAL_YEARS = {
+    "Master's degree": 2,
+    "Doctoral or professional degree": 5,
+}
+
 PROGRAM_YEARS_BY_EDUCATION = {
     "Associate's degree": 2,
     "High school diploma or equivalent": 0,
     "No formal educational credential": 0,
+    **{level: UNDERGRAD_YEARS + extra
+       for level, extra in GRADUATE_ADDITIONAL_YEARS.items()},
 }
 
-# The sub-baccalaureate levels this app still models with the wrong program
-# length -- i.e. everything it hasn't been taught a real length for. This is
-# what gates the "we're charging you four years you don't need" disclosure and
-# the break-even suppression, so teaching the app a new length above
-# automatically stops treating that level as broken.
+# The levels this app still models with the wrong program length -- i.e.
+# everything it hasn't been taught a real length for. This gates the "we're
+# charging you four years you don't need" disclosure and the break-even
+# suppression, so teaching the app a new length above automatically stops
+# treating that level as broken.
+#
+# It used to be SUB_BACHELORS_EDUCATION_LEVELS minus the known lengths, which
+# made it structurally incapable of ever flagging a GRADUATE level: 113 of the
+# 825 occupations in the careers file are master's or doctoral, every one was
+# charged four undergraduate years, and the one mechanism for saying so could
+# not reach them. Now it is every level the app has an opinion about, minus the
+# ones with a real length -- which is the question the name was always asking.
+ALL_EDUCATION_LEVELS = SUB_BACHELORS_EDUCATION_LEVELS | set(GRADUATE_ADDITIONAL_YEARS)
 MISMODELLED_EDUCATION_LEVELS = (
-    SUB_BACHELORS_EDUCATION_LEVELS - set(PROGRAM_YEARS_BY_EDUCATION)
+    ALL_EDUCATION_LEVELS - set(PROGRAM_YEARS_BY_EDUCATION)
 )
+
+# Which credential an occupation's BLS entry-education implies, for the loan
+# limits. Graduate borrowing has its own annual and aggregate caps and its own
+# Direct rate, and no Parent PLUS at all.
+GRADUATE_EDUCATION_LEVELS = set(GRADUATE_ADDITIONAL_YEARS)
+
+# What the visitor says they are studying, where the app cannot derive it.
+# Career mode reads BLS's typical_education and needs no input; Major mode has
+# no education field at all (a major is not an occupation), so it must ask.
+# The values map onto the same GRADUATE_ADDITIONAL_YEARS above so both routes
+# produce identical program lengths.
+CREDENTIAL_BACHELORS = "Bachelor's degree"
+CREDENTIAL_MASTERS = "Master's degree"
+CREDENTIAL_DOCTORAL = "Doctoral or professional degree"
+CREDENTIAL_OPTIONS = [CREDENTIAL_BACHELORS, CREDENTIAL_MASTERS, CREDENTIAL_DOCTORAL]
+CREDENTIAL_LABELS = {
+    CREDENTIAL_BACHELORS: "Bachelor's",
+    CREDENTIAL_MASTERS: "Master's",
+    CREDENTIAL_DOCTORAL: "Doctorate",
+}
+# The credential key used in data/graduate_debt_clean.csv.
+CREDENTIAL_DATA_KEY = {
+    CREDENTIAL_MASTERS: "master",
+    CREDENTIAL_DOCTORAL: "doctoral",
+}
+
+
+def is_graduate_education(typical_education: str) -> bool:
+    """True when this occupation is entered with a master's or doctorate, so
+    the graduate loan limits apply rather than the undergraduate ones."""
+    return (typical_education or "") in GRADUATE_EDUCATION_LEVELS
 
 
 def program_years_for_education(typical_education: str) -> int:
@@ -1178,6 +1272,14 @@ def program_years_for_education(typical_education: str) -> int:
     anything without a specific length, which is every bachelor's-and-above
     occupation and every major."""
     return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
+
+
+def graduate_years_for_education(typical_education: str) -> int:
+    """Of the total above, how many years are GRADUATE study. Zero for every
+    undergraduate path. The loan model needs the split because the two halves
+    have different annual limits, different aggregate caps and different rates
+    -- and because Parent PLUS exists for one and not the other."""
+    return GRADUATE_ADDITIONAL_YEARS.get(typical_education or "", 0)
 
 
 def program_years_for_major(major_name: str) -> int:
@@ -3262,6 +3364,26 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # regenerated from new Scorecard releases), and the figure alone cannot
         # say whether it was a school median or the national fallback.
         # NULL means this path attends no professional school at all.
+        # Credential and the graduate split. scenario_a_program_years already
+        # existed, but it is uninterpretable without these: 6 means "bachelor's
+        # plus a master's", not "a six-year bachelor's", and only credential
+        # says which.
+        #
+        # In Major mode Scenario B shares A's credential -- there is one radio,
+        # on the reasoning that a visitor comparing two majors is one person
+        # choosing one level. In Career mode each side derives its own from BLS.
+        "credential_a": _typical_education_a or None,
+        "credential_b": (resolve_typical_education(
+            "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b")
+            or st.session_state.get("credential_a")) if compare_mode else None,
+        "graduate_years_a": graduate_years_a or None,
+        "graduate_years_b": (graduate_years_b or None) if compare_mode else None,
+        # Which school's median was used as the loan, and the figure. NULL when
+        # the visitor entered their own cost instead -- which is the common
+        # case, since only ~20% of school x field cells publish one.
+        "grad_school_a": (st.session_state.get("grad_school_a")
+                          if graduate_debt_a else None),
+        "graduate_debt_a": graduate_debt_a or None,
         "prof_school_a": st.session_state.get("prof_school_a")
                           if professional_program_for(major) else None,
         "prof_school_b": st.session_state.get("prof_school_b")
@@ -3419,6 +3541,13 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     # Professional school. Only meaningful for the paths that attend one, so
     # emitted only when set -- a link for Software Developers carrying an empty
     # medical-school param would be noise.
+    # Credential and graduate school. The credential decides the program
+    # length and the loan limits, so a link that drops it answers a different
+    # question -- emitted whenever it is not the default.
+    if st.session_state.get("credential_a", CREDENTIAL_BACHELORS) != CREDENTIAL_BACHELORS:
+        params["cred"] = st.session_state["credential_a"]
+    if st.session_state.get("grad_school_a", GRADUATE_SCHOOL_NATIONAL) != GRADUATE_SCHOOL_NATIONAL:
+        params["grad_school"] = st.session_state["grad_school_a"]
     if st.session_state.get("prof_school_a", PROFESSIONAL_SCHOOL_NATIONAL) != PROFESSIONAL_SCHOOL_NATIONAL:
         params["prof_school"] = st.session_state["prof_school_a"]
     if compare_mode and st.session_state.get(
@@ -3811,10 +3940,11 @@ def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
 # dataset's current (small sample) coverage.
 
 COA_DATASET_PATH = "data/college_coa_clean.csv"
-PROFESSIONAL_DEBT_PATH = "data/professional_debt_clean.csv"
+PROFESSIONAL_DEBT_PATH = "data/graduate_debt_clean.csv"
 # Label for the picker's first option -- the national fallback, named rather
 # than left blank so "no school chosen" cannot be mistaken for "no debt".
 PROFESSIONAL_SCHOOL_NATIONAL = "National average (no specific school)"
+GRADUATE_SCHOOL_NATIONAL = "I'll enter my own cost"
 
 
 @st.cache_data(show_spinner=False)
@@ -3848,11 +3978,54 @@ def load_professional_debt() -> pd.DataFrame:
     this file, which is the point.
     """
     try:
-        return pd.read_csv(PROFESSIONAL_DEBT_PATH)
+        # program_key must stay a string: for graduate rows it IS the 2-digit
+        # CIP family ("01", "11"), and reading it as a number drops the leading
+        # zero and stops matching MAJOR_TO_CIP_FAMILY.
+        return pd.read_csv(PROFESSIONAL_DEBT_PATH,
+                           dtype={"CIPCODE": str, "program_key": str})
     except (FileNotFoundError, pd.errors.EmptyDataError):
         return pd.DataFrame(columns=["UNITID", "INSTNM", "CONTROL", "control_type",
-                                     "CIPCODE", "CREDLEV", "program_key",
-                                     "debt_median", "debt_10yr_payment"])
+                                     "CIPCODE", "CREDLEV", "credential",
+                                     "program_key", "debt_median", "debt_10yr_payment"])
+
+
+def graduate_schools_for(cip_family: str, credential: str) -> list:
+    """Schools publishing a median for this CIP family at this credential.
+
+    Separate from professional_schools_for because the two are keyed
+    differently: a professional program is one of three named occupations,
+    while a graduate one is a 2-digit CIP family reached through
+    MAJOR_TO_CIP_FAMILY. Same file, same columns, different question.
+    """
+    if not cip_family or not credential:
+        return []
+    df = load_professional_debt()
+    if df.empty or "credential" not in df.columns:
+        return []
+    match = df[(df["credential"] == credential) & (df["program_key"] == cip_family)]
+    return sorted(match["INSTNM"].dropna().unique())
+
+
+def graduate_debt_for(cip_family: str, credential: str, school_name: str):
+    """That school's median graduate debt for this field, or None.
+
+    None means "no published figure", which must fall back to asking the
+    visitor -- never to zero. Only 20% of school x field cells publish a
+    master's median and 6% a doctoral one, so the absent case is the common
+    one and has to be a first-class path rather than an edge.
+    """
+    if not (cip_family and credential and school_name):
+        return None
+    df = load_professional_debt()
+    if df.empty or "credential" not in df.columns:
+        return None
+    match = df[(df["credential"] == credential)
+               & (df["program_key"] == cip_family)
+               & (df["INSTNM"] == school_name)]
+    if match.empty:
+        return None
+    value = pd.to_numeric(match.iloc[0]["debt_median"], errors="coerce")
+    return float(value) if pd.notna(value) and value > 0 else None
 
 
 PROFESSIONAL_SCHOOL_LABEL = {
@@ -3860,6 +4033,39 @@ PROFESSIONAL_SCHOOL_LABEL = {
     "law": "Law school",
     "dentistry": "Dental school",
 }
+
+
+def render_graduate_debt_caption(debt, credential_key, school_name, container=None) -> None:
+    """What the graduate figure is, and what it is NOT.
+
+    The number is median debt at graduation, not a price: it is already net of
+    scholarships, assistantships and family money. Saying so matters because
+    the visitor is about to see it used as a loan, and because they can
+    override it with a real cost -- which is a different quantity measuring a
+    different thing.
+    """
+    if container is None:
+        container = st
+    if not school_name or school_name == GRADUATE_SCHOOL_NATIONAL:
+        container.caption(
+            "No school selected, so the cost below is whatever you enter. "
+            "No federal dataset publishes graduate cost of attendance."
+        )
+        return
+    if not debt:
+        container.caption(
+            f"{school_name} publishes no figure for this field at this level, "
+            "so the cost below is whatever you enter."
+        )
+        return
+    cap = GRADUATE_AGGREGATE_LIMIT
+    text = (f"{fmt_money(debt)} median debt at graduation for this field at "
+            f"{school_name} — what graduates actually borrowed, so already net "
+            "of scholarships and assistantships. Not a sticker price.")
+    if debt > cap:
+        text += (f" {fmt_money(debt - cap)} of it is above the {fmt_money(cap)} "
+                 "federal graduate ceiling and would be private borrowing.")
+    container.caption(text.replace("$", chr(92) + "$"))
 
 
 def professional_debt_caption(major_name: str, school_name: str, debt: float) -> str:
@@ -3909,6 +4115,11 @@ def professional_schools_for(program_key: str) -> list:
     df = load_professional_debt()
     if df.empty:
         return []
+    # Filter on credential as well: the same file now holds graduate rows whose
+    # program_key is a 2-digit CIP family, and without this a professional
+    # lookup could match one.
+    if "credential" in df.columns:
+        df = df[df["credential"] == "professional"]
     return sorted(df[df["program_key"] == program_key]["INSTNM"].dropna().unique())
 
 
@@ -3947,6 +4158,8 @@ def resolve_professional_debt(major_name: str, school_name: str = None) -> float
     df = load_professional_debt()
     if df.empty:
         return national
+    if "credential" in df.columns:
+        df = df[df["credential"] == "professional"]
     match = df[(df["program_key"] == program_key) & (df["INSTNM"] == school_name)]
     if match.empty:
         return national
@@ -4951,6 +5164,21 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
     return sum(row["loan_amount"] for row in schedule)
 
 
+def graduate_direct_cap(graduate_years: int) -> float:
+    """Total Direct Unsubsidized a GRADUATE student can borrow for their own
+    graduate study: $20,500 a year against a $100,000 aggregate.
+
+    Separate from federal_direct_cap because that function indexes the
+    undergraduate schedule by class standing (1st year $5,500, 2nd $6,500 ...),
+    a dimension graduate borrowing does not have -- it is one flat annual
+    figure. Feeding graduate years through the undergraduate table gave a
+    master's student $12,000 of federal capacity instead of $41,000 and pushed
+    the difference into the private tranche.
+    """
+    return min(max(graduate_years, 0) * GRADUATE_ANNUAL_UNSUB_LIMIT,
+               GRADUATE_AGGREGATE_LIMIT)
+
+
 def federal_direct_cap(schedule: list, dependency: str) -> float:
     """Total federal Direct (sub+unsub) a student can borrow across the financed
     years of `schedule` (the per-year list from compute_loan_schedule_by_year).
@@ -4966,7 +5194,8 @@ def federal_direct_cap(schedule: list, dependency: str) -> float:
     return min(total, FEDERAL_DIRECT_AGGREGATE_CAP.get(dependency, FEDERAL_DIRECT_AGGREGATE_CAP["dependent"]))
 
 
-def parent_plus_cap(schedule: list, dependency: str, start_year: int = None) -> float:
+def parent_plus_cap(schedule: list, dependency: str, start_year: int = None,
+                     graduate_years: int = 0) -> float:
     """Total Direct PLUS a PARENT can borrow across the financed years of
     `schedule`, post-OBBBA. Mirrors federal_direct_cap: only "university" rows
     count, each at the annual limit, bounded by the aggregate.
@@ -4986,7 +5215,14 @@ def parent_plus_cap(schedule: list, dependency: str, start_year: int = None) -> 
     cap, it requires facts the app never asks for, and it cannot apply to the
     prospective students this app is for.
     """
-    if dependency != "dependent":
+    if dependency != "dependent" or graduate_years > 0:
+        # Parent PLUS is for a DEPENDENT UNDERGRADUATE. A graduate student is
+        # independent for federal aid by definition, so no parent borrows on
+        # their behalf and Grad PLUS -- the loan that used to fill this role --
+        # was abolished by OBBBA. This used to be gated on the dependency radio
+        # alone, which is an undergraduate question, so a master's student who
+        # left it on "dependent" was handed up to $65,000 of a loan that cannot
+        # exist.
         return 0.0
     total = 0.0
     for row in schedule:
@@ -5105,6 +5341,11 @@ def loan_amount_label(loan_basis: str, program_years: int) -> str:
         return f"Estimated Loan Amount ({program_years}-year program)"
     if loan_basis == "reported":
         return "Total Loan Amount (school-reported)"
+    if loan_basis == "graduate_reported":
+        # Like "reported", this figure has no time dimension -- it is debt at
+        # graduation for this field at this school, so naming a year count over
+        # it would assert something Scorecard does not measure.
+        return "Total Loan Amount (graduate, school-reported)"
     return f"Total Loan Amount (all {program_years} years)"
 
 
@@ -5506,6 +5747,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # of bug the hs_wage_index threading fixed.
         "enrollment_years": enrollment_years,
         "working_years": working_years,
+        # Stamped for the same reason the two above are: the results page and
+        # the PDF both describe this scenario's schooling, and re-deriving the
+        # education level at each call site would let them disagree about
+        # whether graduate study is in play.
+        "typical_education": MAJOR_DATA.get(major_name, {}).get("typical_education") or "",
         # None when the age-aware baseline is off. Stamped for the same reason
         # the two above are: every re-derivation off this dict (the break-even,
         # the net-position chart, the PDF) must reuse the value the scenario
@@ -7174,7 +7420,8 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
                        interest_rate_pct, repayment_strategy_label,
                        city_name=None, start_year=None,
                        cc_info=None, loan_source: str = "personal",
-                       professional_school=None, professional_debt=None) -> list:
+                       professional_school=None, professional_debt=None,
+                       typical_education: str = None) -> list:
     rows = [
         ["Profession", major_name],
         ["School", school_name or "(not entered)"],
@@ -7184,6 +7431,12 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     # above is the undergraduate one. Naming only that would let a report show
     # UC Berkeley beside $99,160 of Harvard medical school debt with nothing
     # saying so.
+    _grad_extra = graduate_years_for_education(typical_education or "")
+    if _grad_extra:
+        _level = ("Master's" if (typical_education or "") == CREDENTIAL_MASTERS
+                  else "Doctorate")
+        rows.append(["Degree level",
+                     f"{_level} — {_grad_extra} years beyond a bachelor's"])
     _prof_program = professional_program_for(major_name)
     if _prof_program and professional_debt:
         _label = PROFESSIONAL_SCHOOL_LABEL[_prof_program]
@@ -7431,7 +7684,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                                interest_rate, repayment_strategy, city,
                                start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a,
                                professional_school=professional_school_a,
-                               professional_debt=professional_debt_a),
+                               professional_debt=professional_debt_a,
+                               typical_education=scenario.get("typical_education")),
             header=False, full_width=True,
         ),
         PageBreak(),
@@ -7638,7 +7892,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                interest_rate, repayment_strategy, city_name=city,
                                start_year=start_year_a, cc_info=cc_info_a, loan_source=loan_source_a,
                                professional_school=professional_school_a,
-                               professional_debt=professional_debt_a),
+                               professional_debt=professional_debt_a,
+                               typical_education=scenario_a.get("typical_education")),
             header=False, full_width=True,
         ),
         Spacer(1, 6),
@@ -8042,7 +8297,8 @@ prestige_tier_a = None
 prestige_tier_b = None
 
 
-def resolve_program_years(selection_key: str, fallback: str) -> int:
+def resolve_program_years(selection_key: str, fallback: str,
+                           share_param: str = None) -> int:
     """Enrollment length for whichever occupation this scenario currently has
     selected, resolved from session_state before the Career section builds
     MAJOR_DATA.
@@ -8063,18 +8319,77 @@ def resolve_program_years(selection_key: str, fallback: str) -> int:
     an unrecognised or not-yet-chosen selection falls through to
     UNDERGRAD_YEARS -- so anything this can't resolve keeps the old behaviour.
     """
-    if st.session_state.get("dataset_mode_radio") != DATASET_MODE_CAREER:
-        return UNDERGRAD_YEARS
-    selection = st.session_state.get(selection_key) or fallback
+    education = resolve_typical_education(selection_key, fallback, share_param)
+    if not education:
+        # Major mode: no BLS education level exists, so fall back to whatever
+        # the visitor selected in the credential radio (Bachelor's by default,
+        # which reproduces the old behaviour exactly).
+        education = st.session_state.get("credential_a", CREDENTIAL_BACHELORS)
+    return program_years_for_education(education)
+
+
+def resolve_typical_education(selection_key: str, fallback: str,
+                               share_param: str = None) -> str:
+    """The BLS entry-education for the current selection, resolved before the
+    Career section builds MAJOR_DATA. Empty string outside Career mode, where a
+    major is not an occupation and carries no education level -- everything
+    downstream then keeps the undergraduate defaults."""
+    # dataset_mode_radio is seeded ~700 lines below this, so on the first render
+    # of a shared link it does not exist yet and every ?mode=Career link was
+    # read as Major mode for one pass -- which returned "" and priced a
+    # two-year or six-year programme as four undergraduate years. Read the
+    # link's own value when session_state has nothing, exactly as the selection
+    # below does.
+    mode = st.session_state.get("dataset_mode_radio") or get_shared_default(
+        "mode", DATASET_MODE_MAJOR)
+    if mode != DATASET_MODE_CAREER:
+        # Major mode -- see resolve_program_years. Returning "" rather than a
+        # credential keeps this function honest about what BLS says; the caller
+        # decides whether to substitute the visitor's own answer.
+        return ""
+    # On the FIRST render of a shared link, session_state has no selection yet
+    # -- the Career section seeds major_select_a hundreds of lines below this,
+    # while the financing block above needs the length now. Falling straight to
+    # `fallback` meant a ?major= link was priced as the DEFAULT occupation for
+    # one render: a link to Dental Hygienists showed four years instead of two,
+    # and every one of the 113 graduate-level occupations showed four instead
+    # of six or nine. Reading the link's own value closes that.
+    selection = st.session_state.get(selection_key)
+    if not selection and share_param:
+        selection = get_shared_default(share_param, None)
+    selection = selection or fallback
     careers = load_bls_careers(CAREERS_CSV_PATH_NATIONAL)
-    return program_years_for_education(careers.get(selection, {}).get("typical_education"))
+    return careers.get(selection, {}).get("typical_education") or ""
 
 
 # Scenario B's own selection is made above its financing block, so it could read
 # it directly -- it goes through the same helper anyway so both scenarios can't
 # drift apart on how a program length is decided.
-program_years_a = resolve_program_years("major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER])
-program_years_b = resolve_program_years("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER])
+program_years_a = resolve_program_years(
+    "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER], share_param="major")
+# How many of those years are GRADUATE study. Drives the loan limits, hides the
+# community-college path, and shifts the high-school baseline's start age.
+_typical_education_a = (resolve_typical_education(
+    "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER], share_param="major")
+    or st.session_state.get("credential_a", CREDENTIAL_BACHELORS))
+graduate_years_a = graduate_years_for_education(_typical_education_a)
+# The school's own median graduate debt, resolved HERE rather than at its
+# widget: the loan basis below runs before the Career section, the same reason
+# resolve_program_years reads ahead. The widget further down only renders the
+# control and the caption; this is the value the model uses.
+_credential_key_early_a = CREDENTIAL_DATA_KEY.get(_typical_education_a)
+_cip_family_early_a = (MAJOR_TO_CIP_FAMILY.get(
+                           st.session_state.get("major_select_a")
+                           or get_shared_default("major", None))
+                       if st.session_state.get("dataset_mode_radio") == DATASET_MODE_MAJOR
+                       else None)
+graduate_debt_a = (graduate_debt_for(_cip_family_early_a, _credential_key_early_a,
+                                      st.session_state.get("grad_school_a"))
+                   if _credential_key_early_a and _cip_family_early_a else None)
+program_years_b = resolve_program_years(
+    "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b")
+graduate_years_b = graduate_years_for_education(resolve_typical_education(
+    "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b"))
 
 st.sidebar.subheader("💰 Financing")
 
@@ -8334,7 +8649,13 @@ st.session_state.setdefault(
 # so the selector is hidden rather than shown with nonsense options
 # (cc_path_options(0) would offer "the entire 0-year degree"). Forced to "none"
 # so every downstream cc_* derivation stays defined and zero.
-if program_years_a == 0:
+#
+# A GRADUATE path is hidden for a harder reason than nonsense copy. No community
+# college awards a master's, and the clamp below is written for undergraduate
+# lengths: at program_years 2 it gave cc_years=2 and university_years=0, pricing
+# an entire master's at community-college tuition and financing $0 of it. The
+# gate used to be `== 0` alone, so a graduate length walked straight into that.
+if program_years_a == 0 or graduate_years_a > 0:
     st.session_state["cc_mode_a"] = "none"
     cc_mode_a = "none"
 else:
@@ -8367,7 +8688,11 @@ is_parttime_a = cc_mode_a == "parttime"
 # Clamped to the program length: a 2-year program done at a community college
 # is entirely community college, not 2 years of CC plus a negative number of
 # university years.
-cc_years_a = min(COMMUNITY_COLLEGE_YEARS, program_years_a) if cc_transfer_a else 0
+# Clamp against the UNDERGRADUATE portion only. Graduate years are never
+# transferable from a community college, so they must not be eligible to be
+# clamped away even if a graduate path ever reaches here.
+cc_years_a = (min(COMMUNITY_COLLEGE_YEARS, program_years_a - graduate_years_a)
+              if cc_transfer_a else 0)
 university_years_a = max(program_years_a - cc_years_a, 0)
 if cc_transfer_a:
     # Default CC state: the selected 4-year school's state (you transfer within
@@ -8443,11 +8768,17 @@ cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college
 # Federal Direct cap for the cap-and-gap split -- summed annual limits over the
 # financed years. Only meaningful in Detailed (Simplified's median debt is
 # already federal-only); None there so compute_scenario_results skips the split.
-federal_cap_a = federal_direct_cap(_schedule_a, loan_dependency) if loan_source_a == "personal" else None
+# Undergraduate Direct plus, for a graduate path, the separate graduate Direct
+# Unsubsidized capacity. They are different schedules against different
+# aggregates, so they are computed apart and added rather than run through one
+# table -- see graduate_direct_cap.
+federal_cap_a = (federal_direct_cap(_schedule_a, loan_dependency)
+                 + graduate_direct_cap(graduate_years_a)) if loan_source_a == "personal" else None
 # How much of the remainder a PARENT can still borrow federally. Paired with
 # federal_cap_a everywhere it travels -- omitting it silently restores the
 # pre-OBBBA "gap financing is unlimited" model for that one code path.
-plus_cap_a = (parent_plus_cap(_schedule_a, loan_dependency, start_year_a)
+plus_cap_a = (parent_plus_cap(_schedule_a, loan_dependency, start_year_a,
+                              graduate_years=graduate_years_a)
               if loan_source_a == "personal" else None)
 # Foregone-earnings option (widget rendered further down; read from state, per
 # this file's established before-the-widget pattern). enrollment_years extends
@@ -8551,6 +8882,20 @@ if program_years_a == 0:
     # equivalent, made explicit rather than left to the median.
     default_loan_a = 0
     loan_basis_a = "no_program"
+elif graduate_debt_a:
+    # A published graduate median for this school and field. Used as the LOAN,
+    # not as a Cost of Attendance: Scorecard measures debt at graduation, which
+    # is already net of scholarships, assistantships and family money. Dividing
+    # it into a per-year "cost" would claim something it does not measure, and
+    # grants would then be subtracted from it a second time. This is the same
+    # treatment Simplified mode gives the school-reported median, and it is
+    # overridable in the Total Loan Amount field like any other basis.
+    #
+    # Note it does NOT go through simplified_debt_scale: that scales an
+    # institution-wide undergraduate median by a ratio of undergraduate Direct
+    # limits, which has nothing to say about graduate borrowing.
+    default_loan_a = int(round(graduate_debt_a))
+    loan_basis_a = "graduate_reported"
 elif loan_source_a == "college":
     simplified_scale_a = simplified_debt_scale(
         program_years_a, predominant_degree_a, loan_dependency)
@@ -9013,6 +9358,54 @@ major = st.sidebar.selectbox(
 #
 # Hidden in prestige mode: that mode replaces the school with a tier label and
 # skips the Scorecard lookup entirely, so there is no school to name.
+# The credential radio. Career mode derives it from BLS typical_education and
+# needs no input; Major mode has no education field, so it must ask. Rendered
+# BEFORE the professional picker so the two can't both claim the same scenario.
+if dataset_mode != DATASET_MODE_CAREER and not enable_prestige_mode:
+    st.session_state.setdefault(
+        "credential_a", get_shared_default("cred", CREDENTIAL_BACHELORS))
+    if st.session_state["credential_a"] not in CREDENTIAL_OPTIONS:
+        st.session_state["credential_a"] = CREDENTIAL_BACHELORS
+    st.sidebar.radio(
+        "What are you studying for?", CREDENTIAL_OPTIONS,
+        format_func=lambda c: CREDENTIAL_LABELS[c],
+        key="credential_a", on_change=lambda: mark_interaction("credential_a"),
+        help="A master's is modelled as 2 years on top of a bachelor's, a "
+             "doctorate as 5 -- so the cost, the foregone earnings and the "
+             "loan limits all change. The doctoral figure is a placeholder: "
+             "real programmes run 4 to 8 years. See Methodology.",
+    )
+
+# Graduate school debt, where the visitor named a school and a field that
+# publishes one. Only reachable in Major mode: the lookup is keyed on
+# MAJOR_TO_CIP_FAMILY, and app.py has no occupation-to-CIP crosswalk for Career
+# mode (it deliberately declines to build one).
+_credential_key_a = CREDENTIAL_DATA_KEY.get(_typical_education_a)
+_cip_family_a = MAJOR_TO_CIP_FAMILY.get(major) if dataset_mode == DATASET_MODE_MAJOR else None
+if _credential_key_a and _cip_family_a and not enable_prestige_mode:
+    _grad_options_a = [GRADUATE_SCHOOL_NATIONAL] + graduate_schools_for(
+        _cip_family_a, _credential_key_a)
+    st.session_state.setdefault("grad_school_a",
+                                get_shared_default("grad_school", GRADUATE_SCHOOL_NATIONAL))
+    st.session_state.setdefault("_grad_key_a", (_cip_family_a, _credential_key_a))
+    if (st.session_state["_grad_key_a"] != (_cip_family_a, _credential_key_a)
+            or st.session_state["grad_school_a"] not in _grad_options_a):
+        st.session_state["grad_school_a"] = GRADUATE_SCHOOL_NATIONAL
+    st.session_state["_grad_key_a"] = (_cip_family_a, _credential_key_a)
+    if len(_grad_options_a) > 1:
+        st.sidebar.selectbox(
+            "Graduate school", _grad_options_a,
+            key="grad_school_a", on_change=lambda: mark_interaction("grad_school_a"),
+            help="Median debt this school's graduates in your field leave with "
+                 "(College Scorecard). Only about a fifth of school-and-field "
+                 "combinations publish a figure, so many schools are absent -- "
+                 "leave this on the default and enter your own cost instead.",
+        )
+        # graduate_debt_a was resolved before the financing block; re-reading
+        # it here would let the two disagree after a mid-rerun change.
+        render_graduate_debt_caption(graduate_debt_a, _credential_key_a,
+                                      st.session_state["grad_school_a"], st.sidebar)
+
 _program_key_a = None if enable_prestige_mode else professional_program_for(major)
 professional_debt_a = None
 if _program_key_a:
@@ -9102,6 +9495,18 @@ elif program_years_a == 0:
         f"\"{typical_education_a}\" -- no degree required. So there's no "
         "tuition, no loan, and no years of foregone wages charged against it. "
         "The salary comparison below still applies."
+    ).replace("$", r"\$"))
+elif is_graduate_education(typical_education_a):
+    # Graduate levels joined PROGRAM_YEARS_BY_EDUCATION when they were given
+    # real lengths, which dropped them into the sub-bachelor's branch below --
+    # telling a visitor that a Master's degree "is below a bachelor's degree".
+    # They need their own sentence, saying the opposite thing.
+    st.sidebar.caption((
+        f"ℹ️ The typical entry-level education for {major} (BLS: "
+        f"\"{typical_education_a}\") is ABOVE a bachelor's, so costs below cover "
+        f"{program_years_for_education(typical_education_a)} years -- a bachelor's "
+        f"plus {graduate_years_for_education(typical_education_a)} more -- and the "
+        "graduate loan limits apply."
     ).replace("$", r"\$"))
 elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
     # Not a warning: the cost model matches the real program here, so this
@@ -9392,6 +9797,14 @@ if compare_mode:
                 f"\"{typical_education_b}\" -- no degree required, so no tuition, "
                 "loan or foregone wages are charged against it."
             ).replace("$", r"\$"))
+        elif is_graduate_education(typical_education_b):
+            st.caption((
+                f"ℹ️ The typical entry-level education for {major_b} (BLS: "
+                f"\"{typical_education_b}\") is ABOVE a bachelor's, so costs cover "
+                f"{program_years_for_education(typical_education_b)} years -- a "
+                f"bachelor's plus "
+                f"{graduate_years_for_education(typical_education_b)} more."
+            ).replace("$", r"\$"))
         elif typical_education_b in PROGRAM_YEARS_BY_EDUCATION:
             st.caption((
                 f"ℹ️ The typical entry-level education for {major_b} (BLS: "
@@ -9538,8 +9951,9 @@ if compare_mode:
         _legacy_cc_b = get_shared_default("cc_b", "0") == "1"
         st.session_state.setdefault(
             "cc_mode_b", get_shared_default("cc_mode_b", "fulltime" if _legacy_cc_b else "none"))
-        # Hidden at zero program years -- see Scenario A for why.
-        if program_years_b == 0:
+        # Hidden at zero program years, and for graduate paths -- see Scenario A
+        # for why the second one matters (the clamp zeroes the loan).
+        if program_years_b == 0 or graduate_years_b > 0:
             st.session_state["cc_mode_b"] = "none"
             cc_mode_b = "none"
         else:
@@ -9566,7 +9980,8 @@ if compare_mode:
             )
         cc_transfer_b = cc_mode_b != "none"
         is_parttime_b = cc_mode_b == "parttime"
-        cc_years_b = min(COMMUNITY_COLLEGE_YEARS, program_years_b) if cc_transfer_b else 0
+        cc_years_b = (min(COMMUNITY_COLLEGE_YEARS, program_years_b - graduate_years_b)
+                      if cc_transfer_b else 0)
         university_years_b = max(program_years_b - cc_years_b, 0)
         if cc_transfer_b:
             _school_state_b = coa_match_b.get("STABBR") if coa_match_b is not None else None
@@ -9621,8 +10036,10 @@ if compare_mode:
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
         cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
         federal_cap_b = (federal_direct_cap(_schedule_b, loan_dependency)
+                         + graduate_direct_cap(graduate_years_b)
                          if loan_source_b == "personal" else None)
-        plus_cap_b = (parent_plus_cap(_schedule_b, loan_dependency, start_year_b)
+        plus_cap_b = (parent_plus_cap(_schedule_b, loan_dependency, start_year_b,
+                                      graduate_years=graduate_years_b)
                       if loan_source_b == "personal" else None)
         _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
         enrollment_years_b = (cc_years_b + university_years_b) if _foregone_on_b else 0
@@ -10889,6 +11306,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         render_wage_distribution(scenario["major"], compact=True, caption=False,
                                   row_slots=wage_row_slots)
         render_wage_geography_note(scenario["major"])
+        render_graduate_salary_disclosure(scenario.get("typical_education"))
 
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
@@ -11550,6 +11968,7 @@ else:
     # Which geography the salary above came from -- shared helper, called from
     # render_scenario_panel too so Compare Mode shows it as well.
     render_wage_geography_note(major)
+    render_graduate_salary_disclosure(scenario.get("typical_education"))
 
     ai_context = {}
     if enable_ai_mode:
@@ -12474,6 +12893,44 @@ school in the sidebar and these change**, often a lot: across the schools that
 publish a figure, **43% of medical and 78% of dental schools** sit above the
 $200,000 ceiling, so for many the private share is larger than the national
 average implies — and for some it is nothing at all.
+
+**Graduate degrees (master's and doctoral).** BLS publishes the education a
+career is normally *entered* with, and for **113 of the 825 occupations here**
+that is a master's or a doctorate — Statisticians, Economists, Epidemiologists,
+School Psychologists, Education Administrators and others. Those paths are
+modelled as a bachelor's **plus** the graduate degree: **6 years** for a
+master's, **9** for a doctorate. Everything follows from that — the tuition
+charged, the years of foregone earnings, and the age the debt-free high school
+graduate is compared from (24 and 27 rather than 22).
+
+The **loan limits differ too**, and by more than the length does. Graduate
+Direct Unsubsidized is **$20,500/year against a $100,000 aggregate** — one flat
+annual figure, not the $5,500/$6,500/$7,500 undergraduate ladder — at the
+graduate Direct rate of **8.07%**. And there is **no Parent PLUS**: it exists
+only for dependent undergraduates, and Grad PLUS, which used to fill that gap,
+was abolished by OBBBA. Anything above the graduate ceiling is private
+borrowing.
+
+In **Intended Major** mode there is no BLS education level to read (a major is
+not an occupation), so the sidebar asks. The doctoral default of 5 years is a
+placeholder — real programmes run 4 to 8 — and is editable.
+
+**What the app cannot tell you**, and this matters for reading the premium: it
+does not model what a graduate degree *adds*. The salary shown is what people
+already in that occupation earn, which is a figure that already includes their
+credential. So the earnings premium is the return on the whole path from high
+school, not the return on the master's by itself. Separating those would need
+salary data by credential *within* an occupation, which BLS does not publish.
+
+**Where a graduate cost figure comes from, when there is one.** There is no
+graduate cost of attendance in any federal dataset. What Scorecard does publish
+is median **debt at graduation** by school and field, so where you name a school
+and your field publishes a figure, that is offered as the loan — already net of
+scholarships and assistantships, and overridable. Only about **a fifth** of
+school-and-field combinations publish a master's median and **a sixteenth** a
+doctoral one, so most of the time you will be entering your own cost. Same
+caveats as the professional figures below: they include Grad PLUS, which no
+longer exists, and they are pooled across award years.
 
 **Where the school-specific figures come from.** College Scorecard publishes
 cumulative debt at graduation for each school × field of study × credential
