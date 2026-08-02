@@ -1078,3 +1078,92 @@ alter table scenario_events
 --     radio, on the reasoning that a visitor comparing two majors is one
 --     person choosing one level. It is independently derived only in Career
 --     mode. Do not read a B/A difference in Major mode as a visitor choice.
+
+
+-- =====================================================================
+-- 2026-08-02  usage_logs.action gains "pageview_repayment"
+-- =====================================================================
+-- NO DDL REQUIRED. usage_logs.action is free text and already carries
+-- several shapes ("interaction:<field>", "horizon_changed:<n>",
+-- "school_search_run:..."). Nothing to paste into the SQL editor. This
+-- section exists because the DATA changed meaning even though the SCHEMA
+-- did not -- which is the harder kind to notice later.
+--
+-- What changed: the standalone repayment page (?tool=repayment) used to
+-- log a plain "pageview", identical to a calculator visit. From this date
+-- it logs "pageview_repayment" instead.
+--
+-- Reading this later:
+--
+--   * "pageview" NARROWED on 2026-08-02. Before this date it meant "any
+--     landing, either page". After it, "calculator landing only". A
+--     query filtering on action = 'pageview' therefore counts repayment
+--     visits before the date and drops them after -- so an unconditioned
+--     time series shows calculator traffic FALLING at exactly the point
+--     the split shipped, and the drop is entirely definitional. Any
+--     comparison spanning this date must either use both actions or
+--     restrict to one side of it.
+--
+--   * Total traffic = both actions. Use:
+--         action in ('pageview', 'pageview_repayment')
+--     app.py exposes this as PAGEVIEW_ACTIONS; the admin panel's
+--     Pageviews metric and the traffic-by-source table both use it.
+--
+--   * The SURVEY RATE deliberately does NOT. The survey is rendered by
+--     the calculator's section 5e and the repayment page never shows it,
+--     so its denominator is "pageview" alone. Folding repayment visits
+--     in would divide by people who were never asked and report a
+--     falling response rate as though they had declined. See
+--     analyze_survey.py, which prints the repayment count separately for
+--     this reason.
+--
+--   * There is no way to recover the split retroactively. Repayment
+--     visits before this date are indistinguishable from calculator
+--     visits in usage_logs -- no column, in that table, records which
+--     page was rendered. If a pre-split repayment count is needed, the
+--     only proxy is a session_id join against the existing-loan
+--     interaction rows, which undercounts: it finds only the sessions
+--     that touched a control, not those that landed and left.
+
+
+-- =====================================================================
+-- 2026-08-02  timestamp was UTC for EVERY row written before this date
+-- =====================================================================
+-- NO DDL REQUIRED. Recorded because it changes how an existing column
+-- must be read, which no schema diff will ever show you.
+--
+-- All five tables stamp `timestamp` with now_local() -- the visitor's own
+-- local time, by design, so a timestamp means something to the person who
+-- generated it. The timezone behind that came from a JS round-trip:
+-- detect the zone, write it into the URL with history.replaceState, click
+-- a hidden button to force a rerun that would pick the new param up.
+--
+-- It never worked. replaceState changes the browser's address bar without
+-- telling the server, and Streamlit sends the query params the frontend
+-- captured at PAGE LOAD -- so the rerun read exactly what it read before.
+-- The address bar showed the right value the entire time, which is why it
+-- survived two rounds of fixing. From this date the zone comes from
+-- st.context.timezone, which arrives with the initial connection.
+--
+-- Reading this later:
+--
+--   * Every `timestamp` written BEFORE 2026-08-02 is UTC, whatever zone
+--     the visitor was in. Not "usually UTC" -- always, since the
+--     mechanism could not succeed. Rows at +00:00 are not a cluster of
+--     UK/Iceland traffic.
+--
+--   * Any time-of-day analysis that crosses this date is comparing UTC
+--     against local. "Do people use this in the evening?" is the obvious
+--     casualty: a US visitor at 8pm local was stamped 03:00 the next day,
+--     so pre-fix rows push evening usage into the small hours AND onto
+--     the following calendar date. Day-boundary buckets are affected too,
+--     not just hour-of-day.
+--
+--   * Not recoverable. No column records the visitor's zone, so a
+--     pre-fix UTC timestamp cannot be converted back. Restrict
+--     time-of-day work to rows from this date onward.
+--
+--   * Ordering is unaffected -- UTC is monotonic. The existing guidance
+--     to order scenario_events by event_seq rather than timestamp still
+--     holds, for the separate reason that post-fix timestamps come from
+--     the visitor's clock and can tie or move backwards.

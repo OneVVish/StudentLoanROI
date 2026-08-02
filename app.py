@@ -2113,7 +2113,10 @@ NYFED_MAJOR_SOC_GROUP = {
 # IF13075. Figures below are administratively simplified, like this app's
 # existing IDR model -- see the Methodology footer for the same caveat.
 RAP_DEPENDENT_REDUCTION = 50  # $/month per dependent
-RAP_MIN_PAYMENT = 10  # $/month floor for AGI <= $10,000
+RAP_MIN_PAYMENT = 10  # $/month floor on the payment ITSELF, after the
+                      # dependent deduction -- not just the lowest AGI band.
+                      # studentaid.gov: "your monthly payment amount can never
+                      # be less than $10."
 RAP_MAX_TERM_YEARS = 30  # forgiveness after 360 on-time payments
 RAP_PRINCIPAL_MATCH_CAP = 50  # $/month government principal-match subsidy
 
@@ -3130,6 +3133,23 @@ def get_traffic_source() -> str:
     return st.session_state["traffic_source"]
 
 
+# Every action that represents one visit landing. Split so calculator and
+# repayment-page traffic can be told apart -- but anything asking "how many
+# people came at all" must use BOTH, or it silently undercounts the moment the
+# repayment link is shared.
+PAGEVIEW_ACTIONS = ("pageview", "pageview_repayment")
+
+
+def repayment_page_requested() -> bool:
+    """Whether this visit asked for the standalone repayment tool.
+
+    Reads the query param directly so it can be called before the session latch
+    exists -- the pageview logger runs long before section 5. The latch below
+    is seeded FROM this, so the two cannot disagree about which page a visit was.
+    """
+    return get_shared_default("tool", "") == "repayment"
+
+
 def mark_interaction(field: str):
     """Log each control a visitor touches, ONCE PER FIELD per session.
 
@@ -3947,10 +3967,43 @@ def apply_shared_flag(param_name: str, state_key: str) -> None:
 
 def get_user_timezone() -> str:
     """The visitor's browser-detected IANA timezone (e.g. "America/Denver"),
-    set via the hidden "Set Timezone" trigger + JS near the top of section 3.
-    Falls back to UTC before that round-trip completes, or if a browser ever
-    supplies something zoneinfo doesn't recognize."""
-    return get_shared_default("tz", "UTC")
+    from st.context.timezone. Falls back to UTC if a browser ever supplies
+    something zoneinfo doesn't recognize.
+
+    LATCHED into session_state on first sight, like test_mode, admin_revealed
+    and get_traffic_source. "Share Scenario" calls st.query_params.from_dict,
+    which REPLACES the whole query string -- and build_share_params does not
+    emit tz (it is a browser fact, not a scenario field), so a live re-read
+    would return "UTC" for every timestamp written after a share. The JS does
+    re-add the param on a later rerun, but that is a race this function should
+    not depend on winning twice.
+
+    st.context.timezone is the PRIMARY source and needs no round-trip -- the
+    frontend sends it with the initial connection, so it is populated on the
+    very first render, before anything is drawn or logged.
+
+    The ?tz= param is a fallback, kept because it still arrives on old links.
+    It cannot be the primary source: the JS that sets it uses
+    history.replaceState, which changes the browser's URL without telling the
+    SERVER, so st.query_params never saw the value on the visit that detected
+    it. Proven by isolation -- a real page load carrying ?tz=America/Los_Angeles
+    produced a "01:14 PM PDT" PDF footer, while a fresh visit whose URL the JS
+    had just rewritten to the identical string produced "08:13 PM UTC" from the
+    same code path. The URL looked right in the address bar the whole time,
+    which is why this survived so long.
+
+    Reads the param directly rather than through get_shared_default so an
+    empty ?tz= cannot overwrite a good latched value with "".
+    """
+    try:
+        detected = getattr(st.context, "timezone", None) or st.query_params.get("tz", "")
+        if detected:
+            st.session_state["_user_timezone"] = detected
+        return st.session_state.get("_user_timezone", "UTC")
+    except Exception:
+        # No Streamlit runtime (analyze_model.py execs this section). UTC is
+        # the right answer there -- there is no visitor to be local to.
+        return "UTC"
 
 
 def now_local() -> datetime:
@@ -4927,19 +4980,43 @@ def calculate_tiered_standard_term(principal: float) -> int:
 
 
 def calculate_rap_payment(agi: float, dependents: int = 0) -> dict:
-    """One month's Repayment Assistance Plan (RAP) payment: a flat $10/month
-    floor for AGI <= $10,000, otherwise 1% of AGI per $10,000 AGI band above
-    $10,000 (so $10k-20k -> 1%, $20k-30k -> 2%, ... $90k-100k -> 9%), capped
-    at 10% for AGI >= $100,000 -- then reduced by $50/month per dependent,
-    floored at $0."""
+    """One month's Repayment Assistance Plan (RAP) payment: 1% of AGI per
+    $10,000 AGI band above $10,000 (so $10,001-20,000 -> 1%, $20,001-30,000
+    -> 2%, ... $90,001-100,000 -> 9%), capped at 10% above $100,000 -- then
+    reduced by $50/month per dependent, and floored at $10/month.
+
+    THE $10 FLOOR IS THE WHOLE BOTTOM OF THE SCHEDULE, not a special case for
+    the lowest band. studentaid.gov's chart, footnote:
+
+        "You can subtract $50 from the monthly payment amount for each
+         dependent you claim on your federal income tax return, but your
+         monthly payment amount can never be less than $10."
+
+    One floor doing two jobs. It is why the published $0-$10,000 row reads a
+    flat $10.00 (1% of $10,000 is only $8.33/month), and it is what bounds the
+    dependent deduction. This floored the deduction at $0 instead, so a
+    borrower with any dependents and a low income was shown a $0 payment --
+    reported from the live app.
+
+    BOUNDARIES BELONG TO THE LOWER BAND. The published brackets are
+    $X,001-$Y,000, so $50,000 is the TOP of the 4% bracket, not the bottom of
+    the 5% one. `agi // 10000` put every exact multiple of $10,000 one band too
+    high -- $50,000 charged 5% ($208.33) against a published bracket maximum of
+    $166.67, a 25% overstatement on the roundest figure a visitor can type.
+    Subtracting 1 first is integer-exact and needs no ceil/float rounding.
+
+    Verified against every row and both edges of the published chart by
+    check_rap_payment_table.py.
+    """
     if agi <= 10000:
         base_payment = float(RAP_MIN_PAYMENT)
         applied_pct = None
     else:
-        band = min(int(agi // 10000), 10)
+        band = min(int((agi - 1) // 10000), 10)
         applied_pct = band / 100
         base_payment = agi * applied_pct / 12
-    payment = max(base_payment - dependents * RAP_DEPENDENT_REDUCTION, 0.0)
+    payment = max(base_payment - dependents * RAP_DEPENDENT_REDUCTION,
+                  float(RAP_MIN_PAYMENT))
     return {"monthly_payment": payment, "applied_pct": applied_pct, "base_payment": base_payment}
 
 
@@ -8306,57 +8383,33 @@ FIND_APP_FRAME_JS = """
 """
 
 
-# Detects the visitor's browser timezone (IANA name, e.g. "America/Los_Angeles")
-# via get_user_timezone()/now_local() below, so logged timestamps and the PDF
-# footer reflect the visitor's local time instead of the server's clock
-# (UTC on Streamlit Cloud). Same hidden-button pattern as the admin-reveal
-# trigger further down: a real (invisible) Streamlit button is the only way
-# to get a rerun that picks up the newly-set query param, since changing the
-# URL via JS alone doesn't notify the running Python session. The script
-# re-checks on every rerun but only clicks the button when the detected
-# timezone doesn't match what's already in the URL, so this settles after
-# one extra rerun and never loops. The very first "pageview" log below still
-# can't benefit -- there's no timezone to read until this round-trip
-# completes -- so it's the one timestamp that may land in UTC regardless.
-# Targets the frame the Streamlit APP runs in -- NOT window.top. That
-# distinction was got backwards once already, and the note it replaced claimed
-# the opposite: on Community Cloud the app is itself wrapped, so the layers are
-# component < app frame (/~/+/) < wrapper page (/), and window.top is the
-# WRAPPER. Streamlit reads its query params from the app frame, so writing tz
-# to the wrapper put it somewhere Python never looks -- which is precisely why
-# every production timestamp and every PDF footer read UTC regardless of the
-# visitor's clock. Measured on the deployed app: the wrapper's URL carried tz
-# and the app frame's did not, across 12/12 production rows stamped +00:00.
+# The visitor's timezone comes from st.context.timezone (see
+# get_user_timezone in section 2). There is no JS round-trip here any more.
 #
-# window.top IS right for the admin panel's keydown listener further down --
-# keystrokes land on the outermost page. The rule is not "always top", it is
-# "top for browser events, the app frame for anything Streamlit itself reads".
-with st.container(key="tz_trigger_wrap"):
-    st.button("Set Timezone", key="tz_trigger")
-st.markdown(
-    "<style>div.st-key-tz_trigger_wrap { display: none !important; }</style>",
-    unsafe_allow_html=True,
-)
-components.html(
-    f"""
-    <script>
-    (function() {{
-        {FIND_APP_FRAME_JS}
-        const appWin = findAppFrame("Set Timezone");
-        if (!appWin) return;   // button not rendered yet; a later rerun retries
-        const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        const params = new URLSearchParams(appWin.location.search);
-        if (params.get("tz") !== detected) {{
-            params.set("tz", detected);
-            appWin.history.replaceState(
-                null, "", appWin.location.pathname + "?" + params.toString());
-            clickAppButton("Set Timezone");
-        }}
-    }})();
-    </script>
-    """,
-    height=0,
-)
+# There used to be: a hidden "Set Timezone" button, plus a component script that
+# detected the zone, wrote it to the URL with history.replaceState, and clicked
+# the button to force a rerun that would "pick up the newly-set query param".
+# It never worked. replaceState changes the browser's address bar WITHOUT
+# telling the server, and Streamlit sends the frontend's query params as
+# captured at page load -- so the rerun the click produced read exactly the
+# same params as before it. The URL looked right the whole time, which is why
+# this survived two rounds of fixing.
+#
+# Proven by isolation before removing it: a real page load carrying
+# ?tz=America/Los_Angeles produced a "01:14 PM PDT" PDF footer, while a fresh
+# visit whose URL that script had just rewritten to the byte-identical string
+# produced "08:13 PM UTC" from the same code path. The earlier fix in this spot
+# -- targeting the app frame rather than window.top -- was diagnosing the wrong
+# layer of a mechanism that could not work at any layer.
+#
+# st.context.timezone arrives with the initial connection, so it is populated
+# on the FIRST render. That also fixes the caveat the old note conceded but
+# could not solve: the pageview logged below no longer has to land in UTC.
+# ?tz= is still read as a fallback for links that carry it.
+#
+# FIND_APP_FRAME_JS above is still used -- the admin-reveal keydown listener
+# needs it. The frame-climbing rule it encodes remains correct; it was the
+# replaceState half that was doomed.
 
 # Log exactly one "pageview" per browser session. This check runs before any
 # widgets are drawn, so later reruns triggered by moving a slider or opening
@@ -8401,7 +8454,17 @@ if "pageview_logged" not in st.session_state:
     # this order, which is why it never doubled -- the contrast is what
     # identified the bug.
     st.session_state.pageview_logged = True
-    log_usage_event("pageview")
+    # A distinct action for the standalone repayment page. Without it those
+    # visits land in the same "pageview" bucket as the calculator's, and the
+    # two are different populations answering different questions -- pooling
+    # them would quietly inflate calculator traffic the moment the repayment
+    # link is shared anywhere.
+    #
+    # Reads the query param rather than the latch below, because the latch is
+    # set hundreds of lines later and this fires first. Safe: a pageview
+    # describes the visit as it ARRIVED, which is exactly what the param says
+    # on the first render, and pageview_logged stops any rerun re-entering.
+    log_usage_event("pageview_repayment" if repayment_page_requested() else "pageview")
 
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
@@ -10554,8 +10617,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
         rows.append(("Repayment Assistance Plan (RAP)", rap,
                      f"Qualifies. Unpaid interest waived, remainder forgiven at "
                      f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
-                     "1-10% of total income. Unpaid interest waived. "
-                     "Remainder forgiven at 30 years."))
+                     f"1-10% of total income, minimum ${RAP_MIN_PAYMENT}/month. "
+                     "Unpaid interest waived. Remainder forgiven at 30 years."))
         idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
                                        starting_interest=starting_interest,
                                        max_term_years=idr_term)
@@ -10742,7 +10805,7 @@ def render_rap_subsidy_answer(rows: list) -> None:
 # Latched like test_mode: Share Scenario replaces the whole query string, so a
 # live re-read would drop the visitor back into the calculator mid-session.
 if "repayment_only" not in st.session_state:
-    st.session_state.repayment_only = get_shared_default("tool", "") == "repayment"
+    st.session_state.repayment_only = repayment_page_requested()
 repayment_only = st.session_state.repayment_only
 
 if repayment_only:
@@ -10941,8 +11004,13 @@ if admin_enabled:
     # the interaction: events -- which now reads as if it meant interactions in
     # the specific sense those events introduced. Split, and both named for
     # what they actually count.
-    _pageviews = usage_df[usage_df["action"] == "pageview"] if (
+    # BOTH pageview actions: this metric answers "how many visits", and a
+    # repayment-page visit is a visit. The split is reported separately below
+    # rather than by quietly dropping one of them here.
+    _pageviews = usage_df[usage_df["action"].isin(PAGEVIEW_ACTIONS)] if (
         not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
+    _repay_views = int((usage_df["action"] == "pageview_repayment").sum()) if (
+        not usage_df.empty and "action" in usage_df.columns) else 0
     _visits = (int(_pageviews["session_id"].dropna().nunique())
                if "session_id" in _pageviews.columns else 0)
 
@@ -10957,7 +11025,12 @@ if admin_enabled:
     col4.metric("PDF Downloads", len(pdf_downloads_df))
     col5.metric("Scenario Shares", len(scenario_shares_df))
     st.caption(
-        "**Pageviews** counts `pageview` rows; **unique visits** de-duplicates "
+        "**Pageviews** counts both landing actions -- `pageview` (the calculator) "
+        f"and `pageview_repayment` (the standalone `?tool=repayment` page, "
+        f"{_repay_views} of them). They are logged separately because they are "
+        "different populations asking different questions, but a visit is a visit, "
+        "so this total counts both. "
+        "**Unique visits** de-duplicates "
         "them by session. They diverge for two reasons, neither of them traffic: "
         "rows written before `session_id` existed cannot be de-duplicated at all "
         f"({int(usage_df['session_id'].isna().sum()) if not usage_df.empty and 'session_id' in usage_df.columns else 0} "
@@ -11003,7 +11076,8 @@ if admin_enabled:
         _src["Source"] = (_src["traffic_source"].astype("object")
                            .where(_src["traffic_source"].notna(), "(organic)")
                            .replace("", "(organic)"))
-        _pv_only = _src[_src["action"] == "pageview"] if "action" in _src.columns else _src.iloc[0:0]
+        _pv_only = (_src[_src["action"].isin(PAGEVIEW_ACTIONS)]
+                if "action" in _src.columns else _src.iloc[0:0])
         _by_src = pd.DataFrame({
             "Pageviews": _pv_only.groupby("Source").size(),
             "Unique visits": (_pv_only.groupby("Source")["session_id"].nunique()
@@ -13312,7 +13386,10 @@ the start-year list begins at the current year — those are OBBBA's two, and
 only those:
 
 - **Repayment Assistance Plan (RAP)**, the default. 1–10% of total income, all
-  unpaid interest waived, remainder forgiven at 30 years (and taxed).
+  unpaid interest waived, remainder forgiven at 30 years (and taxed). The
+  payment never falls below **$10/month**, including after the $50-per-dependent
+  reduction — so unlike IBR, RAP has no $0 payment. Below about $10,000 of
+  income the $10 floor *is* the payment.
 - **2026 Tiered Standard Plan.** A fixed payment over a term set by how much
   you owe. Forgives nothing, so nothing is taxed either.
 

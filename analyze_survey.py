@@ -729,7 +729,12 @@ def analyze_interactions(usage_df: pd.DataFrame):
         print("  (no usage_logs yet)")
         return
     acts = usage_df[usage_df["action"].astype(str).str.startswith("interaction:")]
-    sessions = set(usage_df.loc[usage_df["action"] == "pageview", "session_id"].dropna())
+    # Both landing actions: the standalone repayment page logs
+    # "pageview_repayment", and a session that never touched the calculator is
+    # still a session. Filtering on the bare string would silently shrink the
+    # denominator every control's uptake is measured against.
+    _landings = usage_df["action"].isin(("pageview", "pageview_repayment"))
+    sessions = set(usage_df.loc[_landings, "session_id"].dropna())
     if acts.empty:
         print(f"  0 of {len(sessions)} sessions touched any control")
         print("  (or these rows predate the interaction: events)")
@@ -791,10 +796,21 @@ def main():
     print_section("OVERVIEW")
     print(f"Total survey responses: {len(df)}")
     if not usage_df.empty:
+        # Calculator pageviews ONLY -- deliberately not the repayment page.
+        # The survey is rendered by the calculator's section 5e and the
+        # standalone ?tool=repayment page never shows it, so folding those
+        # visits in would divide by a population that was never asked and
+        # report a falling response rate as if people had declined.
         pageviews = (usage_df["action"] == "pageview").sum()
+        repay_views = (usage_df["action"] == "pageview_repayment").sum()
         if pageviews:
-            print(f"Total pageviews logged: {pageviews}")
-            print(f"Survey response rate: {len(df) / pageviews * 100:.1f}% of pageviews")
+            print(f"Total calculator pageviews logged: {pageviews}")
+            print(f"Survey response rate: {len(df) / pageviews * 100:.1f}% of "
+                  f"calculator pageviews (the survey is not shown on the "
+                  f"repayment page)")
+        if repay_views:
+            print(f"Standalone repayment-page views: {repay_views} "
+                  f"(no survey shown; excluded from the rate above)")
     print("\nBy respondent role:")
     print(df["respondent_role"].value_counts().to_string())
     print("\nBy expected HS graduation year:")
