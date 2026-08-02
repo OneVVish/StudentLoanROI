@@ -1087,6 +1087,24 @@ STANDARD_TERM_YEARS = 10
 # fixed payment available, and leaving it out would make the comparison look
 # like RAP is the only way to a manageable monthly figure.
 EXTENDED_STANDARD_TERM_YEARS = 25
+
+# Public Service Loan Forgiveness: 120 qualifying monthly payments -- ten years,
+# and they need not be consecutive -- while working full time for a government
+# or qualifying not-for-profit employer.
+#
+# Which plans COUNT is the part that decides everything else. Every
+# income-driven plan qualifies (RAP, IBR, ICR, PAYE) and so does the 10-year
+# Standard plan. The Tiered Standard Plan does NOT, and neither does Extended
+# -- studentaid.gov says so explicitly, and says Tiered Standard does not even
+# count toward TEPSLF.
+#
+# The 10-year Standard plan is a trap worth naming rather than modelling away:
+# it qualifies, but it also retires the loan in exactly 120 payments, so there
+# is nothing left to forgive. Someone counting on PSLF has to be on an
+# income-driven plan for it to be worth anything.
+# [Source: studentaid.gov/manage-loans/forgiveness-cancellation/public-service]
+PSLF_QUALIFYING_PAYMENTS = 120
+PSLF_QUALIFYING_YEARS = PSLF_QUALIFYING_PAYMENTS // 12
 ROI_WINDOW_YEARS = 10
 
 # Federal Direct (Subsidized + Unsubsidized) borrowing limits. These cap how
@@ -10871,7 +10889,8 @@ def search_was_adjusted() -> bool:
 
 def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
                                  dependents: int = 0, forgivable: bool = True,
-                                 starting_interest: float = 0.0) -> list:
+                                 starting_interest: float = 0.0,
+                                 pslf: bool = False) -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -10884,25 +10903,42 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     IBR at all. Returning the rows anyway with a note would invite a borrower
     to compare against plans they cannot join.
     """
+    # Under PSLF the income-driven plans stop at 120 payments instead of running
+    # their full 20- or 30-year term. That is the entire mechanism: same payment,
+    # same accrual, the balance is simply written off ten years in.
+    idr_term = PSLF_QUALIFYING_YEARS if pslf else IDR_MAX_TERM_YEARS
+    rap_term = PSLF_QUALIFYING_YEARS if pslf else RAP_MAX_TERM_YEARS
+
     rows = []
     std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
-    rows.append(("Standard (10-year)", std, "Fixed payment. No forgiveness."))
+    rows.append(("Standard (10-year)", std,
+                 "Qualifies for PSLF — but it also clears the loan in exactly 120 "
+                 "payments, so there is nothing left to forgive."
+                 if pslf else "Fixed payment. No forgiveness."))
     ext = calculate_standard_repayment(balance, rate, EXTENDED_STANDARD_TERM_YEARS)
     rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", ext,
+                 "Does NOT qualify for PSLF." if pslf else
                  "Fixed payment stretched out. No forgiveness, more interest."))
     tiered_term = calculate_tiered_standard_term(balance)
     tiered = calculate_standard_repayment(balance, rate, tiered_term)
     rows.append((f"2026 Tiered Standard ({tiered_term}-year)", tiered,
+                 "Does NOT qualify for PSLF, or even for TEPSLF." if pslf else
                  "Fixed payment over a term set by your balance."))
     if forgivable:
         rap = simulate_rap_schedule(balance, rate, None, dependents,
-                                     annual_income=annual_income)
+                                     annual_income=annual_income,
+                                     max_term_years=rap_term)
         rows.append(("Repayment Assistance Plan (RAP)", rap,
+                     f"Qualifies. Unpaid interest waived, remainder forgiven at "
+                     f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
                      "1-10% of total income. Unpaid interest waived. "
                      "Remainder forgiven at 30 years."))
         idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
-                                       starting_interest=starting_interest)
+                                       starting_interest=starting_interest,
+                                       max_term_years=idr_term)
         rows.append(("IBR-style income-driven", idr,
+                     f"Qualifies. Remainder forgiven at {PSLF_QUALIFYING_PAYMENTS} "
+                     "payments." if pslf else
                      "10% of income above a $22,000 allowance. Forgiven at 20 years. "
                      "Closed to loans originated on or after July 1, 2026."))
     return rows
@@ -10949,12 +10985,26 @@ def render_existing_loan_comparison() -> None:
                  "eligible for RAP or IBR, and private loans are outside the "
                  "federal system entirely, so the income-driven rows are hidden.")
 
+        pslf = st.checkbox(
+            "I work full-time for a government or 501(c)(3) employer (PSLF)",
+            key="existing_pslf", disabled=not forgivable,
+            help="Public Service Loan Forgiveness writes off whatever is left after "
+                 f"{PSLF_QUALIFYING_PAYMENTS} qualifying monthly payments -- ten years, "
+                 "and they need not be consecutive. Only Direct Loans qualify, so this "
+                 "is unavailable for Parent PLUS and private loans.")
+        if not forgivable:
+            st.caption(
+                "PSLF is unavailable here: it covers Direct Loans only. Parent PLUS "
+                "for parents — and any consolidation containing one — cannot qualify."
+            )
+
         if not balance or not rate:
             st.info("Enter a balance and a rate to compare plans.")
             return
 
         rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable,
-                                            starting_interest=accrued)
+                                            starting_interest=accrued,
+                                            pslf=pslf and forgivable)
         st.dataframe(pd.DataFrame([{
             "Plan": label,
             "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
@@ -10989,6 +11039,19 @@ def render_existing_loan_comparison() -> None:
                 "less than the same balance would as principal — interest is charged on "
                 "principal only, and unpaid interest does not compound while it sits "
                 "there.".replace("$", chr(92) + "$")
+            )
+
+        if pslf and forgivable:
+            st.success(
+                f"**PSLF changes which plan wins.** The income-driven rows above now "
+                f"forgive at {PSLF_QUALIFYING_PAYMENTS} payments instead of 20 or 30 "
+                "years, so the plan with the LOWEST payment usually costs least overall "
+                "— the opposite of the answer without PSLF. Standard 10-Year qualifies "
+                "but retires the loan in exactly 120 payments, leaving nothing to "
+                "forgive; Extended and Tiered Standard do not qualify at all.\n\n"
+                "Unlike an income-driven discharge, studentaid.gov attaches its "
+                "\"you may owe income tax on the forgiven amount\" warning to IDR "
+                "forgiveness and not to PSLF."
             )
 
         render_rap_subsidy_answer(rows)
