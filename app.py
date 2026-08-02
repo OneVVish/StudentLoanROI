@@ -1905,12 +1905,79 @@ RAP_MIN_PAYMENT = 10  # $/month floor for AGI <= $10,000
 RAP_MAX_TERM_YEARS = 30  # forgiveness after 360 on-time payments
 RAP_PRINCIPAL_MATCH_CAP = 50  # $/month government principal-match subsidy
 
+# Who is going to school. The app has always modelled one person -- an
+# 18-year-old starting a first degree, measured against a debt-free high school
+# graduate -- and that is now the minority case. Returning mode measures the
+# visitor against their own current salary instead.
+#
+# These sit in section 1, not beside their radio in section 4, because
+# counterfactual_vocab() below names the baseline in prose and has to know
+# which one is in play -- and section 2 is the half analyze_model.py execs.
+STUDENT_MODE_FIRST = "Straight from high school"
+STUDENT_MODE_RETURNING = "Going back to school"
+STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
+RETURNING_STOP_WORK = "No — I'll study full-time"
+RETURNING_KEEP_WORKING = "Yes — evenings, online or part-time"
+RETURNING_ENROLLMENT_OPTIONS = [RETURNING_KEEP_WORKING, RETURNING_STOP_WORK]
+
 
 # ============================================================
 # 2. HELPER FUNCTIONS
 # ============================================================
 
 # ---- 2a. Formatting -----------------------------------------------------
+
+# What the ROI figures are measured AGAINST, in words. The model already swaps
+# the baseline when returning mode is on (calculate_roi's baseline_curve), but
+# every sentence describing it was written when there was only one baseline, so
+# a 49-year-old on $200k was told she "earns less than a debt-free high school
+# graduate" -- correct arithmetic under a label naming the wrong person.
+#
+# One dict, read by the on-screen page, the PDF and the break-even verdicts
+# alike, for the same reason the chart builders share their data: three sets of
+# hand-written strings drift, and the drift is invisible because each one reads
+# fine on its own.
+_COUNTERFACTUAL_FIRST = {
+    "baseline_noun": "a debt-free high school graduate",
+    "metric_label": "High School Grad",
+    "legend_label": "High School Graduate",
+    "no_loan_suffix": " (No Loan)",
+    "window_phrase": "your first {years} years after high school",
+    "instead_of": "skipping college and working right away",
+    "instead_of_short": "skipping college",
+    "head_start": "the high school graduate was working while you were enrolled",
+}
+_COUNTERFACTUAL_RETURNING = {
+    # Not "debt-free": a returning student's existing loans are owed on either
+    # path, so the baseline carries them too and they cancel out of the
+    # premium. Saying "debt-free" here would describe a person who doesn't
+    # exist in this comparison.
+    "baseline_noun": "staying in your current job",
+    "metric_label": "Staying Put",
+    "legend_label": "Your Current Path",
+    # "No NEW loan" -- the existing debt is in both paths, so the distinction
+    # this suffix draws is about the degree's loan, not about being debt-free.
+    "no_loan_suffix": " (No New Loan)",
+    "window_phrase": "the next {years} years",
+    "instead_of": "staying where you are",
+    "instead_of_short": "staying where you are",
+    "head_start": "your current job kept paying while you were enrolled",
+}
+
+
+def counterfactual_vocab() -> dict:
+    """The words for whichever baseline this session is being measured against.
+
+    Reads session_state defensively: analyze_model.py execs sections 1-2
+    outside a Streamlit runtime, and it models first-time students only, so the
+    high-school vocabulary is the correct fallback there rather than an error.
+    """
+    try:
+        returning = st.session_state.get("student_mode_radio") == STUDENT_MODE_RETURNING
+    except Exception:
+        returning = False
+    return _COUNTERFACTUAL_RETURNING if returning else _COUNTERFACTUAL_FIRST
+
 
 def fmt_money(value):
     return f"${value:,.0f}"
@@ -4167,9 +4234,12 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    baseline_curve=None) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
-    in that window, minus any personal_contribution) compared against a
-    debt-free high school graduate's cumulative earnings over the same
-    window. `total_investment` is the ROI%
+    in that window, minus any personal_contribution) compared against the
+    baseline's cumulative earnings over the same window -- a debt-free high
+    school graduate by default, or, when `baseline_curve` is supplied, the
+    visitor's own salary had they not gone back to school. Everything the
+    page SAYS about that baseline comes from counterfactual_vocab(), which
+    has to be kept on the same side of this switch. `total_investment` is the ROI%
     denominator -- not just the loan principal: it's effective_principal
     (loan slider + any additional training debt, see get_effective_principal)
     plus any personal_contribution the caller adds on top (money put toward
@@ -4833,6 +4903,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     real program and is shown. The levels still charged four wrong years are
     the ones with no defensible standard length -- those stay suppressed.
     """
+    _cf = counterfactual_vocab()
     typical_education = MAJOR_DATA.get(major_name, {}).get("typical_education", "")
     # Two different reasons to stay silent, both ending in the same place.
     # MISMODELLED: we're charging a length we don't believe, so the number
@@ -4870,8 +4941,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         return {
             "headline": "No — not at any loan amount",
             "detail": (
-                f"Over {years} years, this path earns less than a debt-free high school "
-                f"graduate does — even with no loan at all. Borrowing less doesn't change "
+                f"Over {years} years, this path earns less than {_cf['baseline_noun']} "
+                f"does — even with no loan at all. Borrowing less doesn't change "
                 f"that; only a longer horizon or a different path would."
             ),
             "status": "never", "breakeven_loan": None, "headroom": None,
@@ -4881,7 +4952,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         return {
             "headline": "Yes — at any realistic loan amount",
             "detail": (
-                f"Over {years} years this path stays ahead of a debt-free high school graduate "
+                f"Over {years} years this path stays ahead of {_cf['baseline_noun']} "
                 f"even past {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven "
                 f"Repayment that's usually because the payment is capped by your income rather "
                 f"than your balance — the debt outlives this window rather than disappearing."
@@ -4923,15 +4994,15 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         if multiple is not None and multiple >= 2:
             headline = f"Yes — comfortably worth your {fmt_money(loan_amount)} loan"
             detail = (
-                f"For {major_name}, this comes out well ahead of a debt-free high school "
-                f"graduate over {years} years — it earns back more than the loan costs you. "
+                f"For {major_name}, this comes out well ahead of {_cf['baseline_noun']} "
+                f"over {years} years — it earns back more than the loan costs you. "
                 f"It would take {fmt_money(breakeven)} of loans, about {multiple:.0f}× what "
                 f"you're borrowing, before that stopped being true."
             )
         elif multiple is not None and multiple >= 1.5:
             headline = f"Yes — worth your {fmt_money(loan_amount)} loan"
             detail = (
-                f"For {major_name}, this comes out ahead of a debt-free high school graduate "
+                f"For {major_name}, this comes out ahead of {_cf['baseline_noun']} "
                 f"over {years} years — it earns back more than the loan costs you. It would take "
                 f"{fmt_money(breakeven)} of loans, about half again what you're borrowing, before "
                 f"that stopped being true."
@@ -4939,7 +5010,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         else:
             headline = f"Yes, but only just — worth your {fmt_money(loan_amount)} loan"
             detail = (
-                f"For {major_name}, this comes out ahead of a debt-free high school graduate "
+                f"For {major_name}, this comes out ahead of {_cf['baseline_noun']} "
                 f"over {years} years, but the margin is thin: it stops being worth it at "
                 f"{fmt_money(breakeven)} of loans, and you're already at {fmt_money(loan_amount)}."
             )
@@ -4952,7 +5023,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         # a student in this case can actually act on.
         headline = f"No — not at {fmt_money(loan_amount)}"
         detail = (
-            f"For {major_name}, this falls behind a debt-free high school graduate over "
+            f"For {major_name}, this falls behind {_cf['baseline_noun']} over "
             f"{years} years. To come out ahead, total loans would need to stay under "
             f"{fmt_money(breakeven)} — you're {fmt_money(abs(headroom))} above that ceiling. "
             f"A longer horizon, a cheaper school, or Income-Driven Repayment can each move the line."
@@ -5178,12 +5249,16 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
         series[label] = [p["major"] for p in points]
         baselines[label] = [p["hs"] for p in points]
 
+    # The legend names the baseline too, and it is the one place a returning
+    # student sees it plotted rather than described -- so it comes from the
+    # same vocabulary as the prose, not from a literal.
+    baseline_name = counterfactual_vocab()["legend_label"]
     labels = list(baselines)
     if len(labels) > 1 and baselines[labels[0]] != baselines[labels[1]]:
         for label in labels:
-            series[f"High School Graduate ({label} timeline)"] = baselines[label]
+            series[f"{baseline_name} ({label} timeline)"] = baselines[label]
     else:
-        series["High School Graduate"] = baselines[labels[0]]
+        series[baseline_name] = baselines[labels[0]]
 
     rows = []
     for label, values in series.items():
@@ -5245,8 +5320,8 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         fig.add_annotation(
             x=0, y=1.10, xref="paper", yref="paper", showarrow=False,
             xanchor="left", font=dict(size=11, color="#666666"),
-            text=(f"Baseline starts {baseline_head_start_years} years ahead — the high school "
-                  f"graduate was working while you were enrolled."),
+            text=(f"Baseline starts {baseline_head_start_years} years ahead — "
+                  f"{counterfactual_vocab()['head_start']}."),
         )
     fig.update_xaxes(dtick=1 if roi_window_years <= 15 else 5)
     return fig
@@ -6516,6 +6591,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
     Take-Home (+ take-home charts), and the Financial Position section (+ ROI
     chart)."""
     styles = _pdf_styles()
+    _cf = counterfactual_vocab()
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
 
@@ -6563,8 +6639,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             styles["cover_sub"],
         ),
         Paragraph(
-            f"Modelled over {roi_window_years} years after high school, against a debt-free "
-            f"high school graduate. All figures adjusted for cost of living in {xml_escape(city)}.",
+            f"Modelled over {_cf['window_phrase'].format(years=roi_window_years)}, against "
+            f"{_cf['baseline_noun']}. All figures adjusted for cost of living in {xml_escape(city)}.",
             styles["cover_sub"],
         ),
         Spacer(1, 8),
@@ -6644,7 +6720,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         Spacer(1, 12),
         Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["section"]),
         _pdf_table([
-            [f"High School Grad — {roi_window_years}-Yr Net Position",
+            [f"{_cf['metric_label']} — {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
              f"{major} — {roi_window_years}-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
             [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
              fmt_money(roi_result["earnings_premium"])],
@@ -6652,7 +6728,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         Paragraph(
             f"<b>Earnings Premium</b> is the bottom line: how much more (or less) money you would "
             f"have after {roi_window_years} years by going into {major} (after paying off the loan) "
-            f"instead of skipping college and working as a debt-free high school graduate. It is the "
+            f"instead of {_cf['instead_of']}. It is the "
             f"difference between the two Net Position figures, both adjusted for the cost of living in "
             f"{city} -- that is what 'COL-Adjusted' means.",
             styles["caption"]),
@@ -6746,6 +6822,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     already takes each scenario's other inputs as A/B pairs for exactly this
     reason."""
     styles = _pdf_styles()
+    _cf = counterfactual_vocab()
     story = [
         # Same cover treatment as the single-scenario report -- see the
         # comment there. The disclaimer isn't repeated in the body because
@@ -6757,8 +6834,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             styles["cover_sub"],
         ),
         Paragraph(
-            f"Two paths compared over {roi_window_years} years after high school, each against a "
-            f"debt-free high school graduate. All figures adjusted for cost of living in {xml_escape(city)}.",
+            f"Two paths compared over {_cf['window_phrase'].format(years=roi_window_years)}, each "
+            f"against {_cf['baseline_noun']}. All figures adjusted for cost of living in {xml_escape(city)}.",
             styles["cover_sub"],
         ),
         Spacer(1, 8),
@@ -6767,7 +6844,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         Paragraph(
             f"<b>Earnings Premium</b> (shown for each scenario below) is the bottom line: how much "
             f"more (or less) money you would have after {roi_window_years} years by taking that path "
-            f"instead of skipping college and working as a debt-free high school graduate — with both "
+            f"instead of {_cf['instead_of']} — with both "
             f"sides adjusted for the cost of living in {city} ('COL-Adjusted').",
             styles["caption"]),
         Spacer(1, 6),
@@ -7050,13 +7127,10 @@ st.sidebar.header("🎓 Your Profile")
 # meaningless; her alternative was her existing job at her existing salary.
 #
 # Read from session_state before the widget renders, the same pattern
-# dataset_mode uses, because the Financing block above needs it.
-STUDENT_MODE_FIRST = "Straight from high school"
-STUDENT_MODE_RETURNING = "Going back to school"
-STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
-RETURNING_STOP_WORK = "No — I'll study full-time"
-RETURNING_KEEP_WORKING = "Yes — evenings, online or part-time"
-RETURNING_ENROLLMENT_OPTIONS = [RETURNING_KEEP_WORKING, RETURNING_STOP_WORK]
+# dataset_mode uses, because the Financing block above needs it. The mode's
+# own constants live in section 1 -- section 2's counterfactual_vocab() needs
+# them, and section 2 is what analyze_model.py execs.
+#
 # A shared link carries the mode as a short token. Map it back through the
 # options list rather than trusting the URL: a hand-edited ?smode=xyz must fall
 # back to the default, not hand st.radio a value that isn't in its options --
@@ -8243,12 +8317,15 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
         "Count foregone earnings during enrollment", key="count_foregone_earnings", on_change=lambda: mark_interaction("count_foregone_earnings"),
         help=f"Charge the ~{UNDERGRAD_YEARS} years of wages a student gives up "
              "while enrolled full-time -- usually the single largest real cost "
-             "of a degree, bigger than tuition -- against the degree. The "
-             "debt-free high school graduate is credited with those "
-             "head-start years of income, so every path is compared from age "
-             "18 rather than from "
-             "graduation. This lowers each degree's earnings premium and "
-             "break-even. Off by default. See Methodology.",
+             "of a degree, bigger than tuition -- against the degree. "
+             + ("Your current salary is credited for those years, so the "
+                "comparison starts today rather than at graduation. "
+                if is_returning else
+                "The debt-free high school graduate is credited with those "
+                "head-start years of income, so every path is compared from "
+                "age 18 rather than from graduation. ")
+             + "This lowers each degree's earnings premium and "
+               "break-even. Off by default. See Methodology.",
     )
 
 # The in-enrollment opportunity cost is now applied PER SCENARIO (its
@@ -10433,16 +10510,18 @@ else:
 
     # ---- 5e. Financial Position (horizon per the sidebar's ROI Horizon) -----
 
+    _cf = counterfactual_vocab()
+    _cf_window = _cf["window_phrase"].format(years=roi_horizon_years)
     st.subheader(f"📊 {roi_horizon_years}-Year Financial Position")
     st.caption((
-        f"This compares two paths over your first {roi_horizon_years} years after high school: going into "
-        f"**{major}** (paying off the loan above along the way) vs. skipping college and "
-        f"working right away as a high school graduate who takes on **no loan of their own**. "
+        f"This compares two paths over {_cf_window}: going into "
+        f"**{major}** (paying off the loan above along the way) vs. {_cf['instead_of']} "
+        f"and taking on **no loan for this degree**. "
         f"Both numbers are adjusted for the cost of living in **{city}** -- that's what "
         f"**\"COL-Adjusted\"** means -- so it's a fair, apples-to-apples comparison of real "
         f"spending power, not just which raw number is bigger. **Earnings Premium** is simply "
         f"the difference between the two: how much more (or less) you'd have after "
-        f"{roi_horizon_years} years by choosing {major} instead of skipping college."
+        f"{roi_horizon_years} years by choosing {major} instead of {_cf['instead_of_short']}."
     ).replace("$", r"\$"))
 
     investment_caption = get_total_investment_caption(scenario)
@@ -10451,15 +10530,16 @@ else:
 
     position_cols = st.columns(3)
     position_cols[0].metric(
-        f"High School Grad — {roi_horizon_years}-Yr Net Position (No Loan)", fmt_money(roi_result["hs_net_position"]),
+        f"{_cf['metric_label']} — {roi_horizon_years}-Yr Net Position{_cf['no_loan_suffix']}",
+        fmt_money(roi_result["hs_net_position"]),
     )
     position_cols[1].metric(f"{major} — {roi_horizon_years}-Yr Net Position", fmt_money(roi_result["major_net_position"]))
     position_cols[2].metric(
         "Earnings Premium (COL-Adjusted)",
         fmt_money(roi_result["earnings_premium"]),
         delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
-        help="How much more money you'd have after 10 years by going into this "
-             "career instead of skipping college and working right away -- "
+        help=f"How much more money you'd have after {roi_horizon_years} years by going into "
+             f"this career instead of {_cf['instead_of']} -- "
              "bigger is better. \"COL-Adjusted\" means we've factored in how "
              "expensive it is to live in your chosen city, so this is a fair "
              "comparison no matter where you live.",
@@ -11099,7 +11179,14 @@ for that metro. There's no equivalent for Intended Major mode: a major isn't
 an occupation, and the wage data behind it has no percentiles, so the chart
 simply doesn't appear there.
 
-**What if you skip college? The high school graduate baseline.** Every major
+**What if you skip college? The high school graduate baseline.** This section
+describes the *Straight from high school* mode. In *Going back to school* the
+baseline is not this figure at all — it's the two salaries you enter yourself
+(now, and in ten years without the degree), interpolated between, because
+someone returning at 49 was never choosing against a teenager. Everything
+below applies to the first-time path.
+
+Every major
 is compared against what a high school graduate earns, anchored to $51,688/year
 — real median pay for full-time workers 25 and older who only finished high
 school (based on $994/week in the second quarter of 2026, annualized). That
@@ -11194,7 +11281,8 @@ verdict and hides the shape entirely. Every point is the same calculation as
 the headline number with the window shortened to that year, so the last point
 on the chart is exactly the figure above it, by construction rather than by
 coincidence. With *Count foregone earnings* on, the baseline starts several
-years ahead — the high school graduate was working while you were enrolled —
+years ahead — whoever you are being compared against was earning while you
+were enrolled, whether that is the high school graduate or the job you left —
 and the chart says so above the plot, because that head start otherwise looks
 like the degree simply being behind.
 
