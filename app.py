@@ -4246,7 +4246,8 @@ def resolve_professional_debt(major_name: str, school_name: str = None) -> float
 def search_schools_by_budget(cip_family: str, credential: str,
                               max_coa_per_year: float, home_state: str = None,
                               states: tuple = None, control_types: tuple = None,
-                              limit: int = 50) -> pd.DataFrame:
+                              limit: int = 50,
+                              min_coa_per_year: float = 0.0) -> pd.DataFrame:
     """Schools that teach `cip_family` at `credential` for at most
     `max_coa_per_year`, cheapest first. The inverse of the app's normal
     question: not "what does the school I named cost" but "what could I attend
@@ -4310,8 +4311,16 @@ def search_schools_by_budget(cip_family: str, credential: str,
     # this keeps that true rather than relying on it.
     teaches = coa_df[program_column].fillna("").str.contains(
         rf"(?:^|\|){re.escape(str(cip_family))}(?:\||$)", regex=True)
+    # A FLOOR as well as a ceiling. The ceiling alone answers "what can I
+    # afford"; the floor answers "what does this cost", which is the question
+    # someone asks when the cheap end is not what they are shopping for. It also
+    # unsticks the result cap: results are the cheapest `limit` matches, so
+    # without a floor an expensive school can be invisible however high the
+    # ceiling goes -- 751 schools teach engineering and the 50 cheapest are all
+    # under $24,602.
     affordable = (coa_df["coa_per_year"].notna()
-                  & (coa_df["coa_per_year"] <= max_coa_per_year))
+                  & (coa_df["coa_per_year"] <= max_coa_per_year)
+                  & (coa_df["coa_per_year"] >= min_coa_per_year))
     open_now = coa_df["CURROPER"].fillna(1) != 0
 
     matches = coa_df[teaches & affordable & open_now]
@@ -11155,13 +11164,27 @@ def render_school_search() -> None:
         row_two.selectbox("Level", list(CREDENTIAL_LEVELS), key="search_credential",
                            on_change=lambda: mark_interaction("search_credential"))
 
-        budget = st.slider(
-            "Most I could pay per year (tuition, housing, everything)",
-            min_value=2_000, max_value=80_000,
-            value=int(st.session_state.get("coa_per_year_a", 25_000)), step=1_000,
-            format="$%d", key="search_budget",
-            on_change=lambda: mark_interaction("search_budget"),
+        # A range, not a ceiling. The old control only asked "most I could pay",
+        # which cannot express "what does this actually cost" -- and because
+        # results are the cheapest `limit` matches, an expensive school stayed
+        # invisible however high the ceiling went. Raising the FLOOR is what
+        # surfaces them.
+        #
+        # New key: search_budget holds an int in any session already open, and
+        # handing a range slider a stored int raises at render time.
+        _seed_high = int(st.session_state.get("coa_per_year_a", 25_000))
+        min_coa, max_coa = st.slider(
+            "School Cost of Attendance (COA) — tuition, housing, everything",
+            min_value=0, max_value=100_000,
+            value=(0, min(max(_seed_high, 1_000), 100_000)), step=1_000,
+            format="$%d", key="search_coa_range",
+            on_change=lambda: mark_interaction("search_coa_range"),
+            help="The whole yearly cost, not just tuition. Drag the LEFT handle "
+                 "up to hide the cheapest schools — results are the cheapest "
+                 "matches, so raising the floor is how you surface pricier ones "
+                 "rather than raising the ceiling.",
         )
+        budget = max_coa
         all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
         home_col, states_col = st.columns([2, 3])
 
@@ -11221,7 +11244,7 @@ def render_school_search() -> None:
         credential = st.session_state.get("search_credential", "Bachelor's degree")
         results = search_schools_by_budget(
             family, credential, budget, home_state,
-            states=tuple(states) or None, limit=25)
+            states=tuple(states) or None, limit=25, min_coa_per_year=min_coa)
 
         # Only once the visitor has actually adjusted something -- see
         # search_was_adjusted. The results above still render either way; this
