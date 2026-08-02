@@ -4828,7 +4828,14 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         discretionary_monthly = max((current_salary / 12) - (living_adjustment / 12), 0.0)
         payment = discretionary_monthly * payment_rate
 
-        interest = balance * monthly_rate
+        # Interest accrues on PRINCIPAL, not on principal plus already-accrued
+        # interest. Unpaid federal interest does not capitalise while it sits
+        # there -- that is the whole reason a servicer shows the two apart, and
+        # the reason a borrower coming off SAVE cares which pool their balance
+        # is in. Charging it on the total compounded interest onto interest and
+        # made the starting_interest input change nothing at all: it moved
+        # dollars between two pools that were taxed identically.
+        interest = principal_balance * monthly_rate
         # Cap the payment at what is actually owed. The balance already floored
         # at zero, but the full monthly payment was still being recorded, so the
         # month the loan clears charged a whole payment when only part of one
@@ -10963,6 +10970,26 @@ def render_existing_loan_comparison() -> None:
                                 ("$0" if "RAP" in label else "—")),
             "What it is": note,
         } for label, r, note in rows]), hide_index=True, use_container_width=True)
+
+        # A chart for whichever plan the visitor wants to look at. Without one,
+        # the principal/unpaid-interest split had nowhere to appear -- which is
+        # how an input that fed only that split came to look like it did
+        # nothing.
+        plan_labels = [label for label, _, _ in rows]
+        chosen = st.selectbox("Show the balance over time for", plan_labels,
+                               key="existing_chart_plan")
+        chosen_result = next(r for label, r, _ in rows if label == chosen)
+        st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
+                         use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                         key="existing_balance_chart")
+        if accrued > 0 and not balance_split_is_informative(chosen_result["schedule"]):
+            st.caption(
+                f"This plan clears your {fmt_money(accrued)} of unpaid interest early, "
+                "so the chart shows a single balance from then on. It still costs you "
+                "less than the same balance would as principal — interest is charged on "
+                "principal only, and unpaid interest does not compound while it sits "
+                "there.".replace("$", chr(92) + "$")
+            )
 
         render_rap_subsidy_answer(rows)
         st.caption(
