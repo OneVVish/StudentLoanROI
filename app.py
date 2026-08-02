@@ -10505,15 +10505,264 @@ if compare_mode:
         )
 
 
+# ---- 2m. Repayment comparison for an EXISTING balance ------------------
+# Defined here rather than beside the other section-5 renderers because
+# ?tool=repayment serves this on its own and has to call it before the
+# calculator renders. Pure helpers -- no scenario, no module globals.
+
+def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
+                                 dependents: int = 0, forgivable: bool = True,
+                                 starting_interest: float = 0.0,
+                                 pslf: bool = False) -> list:
+    """Every repayment plan a borrower with an EXISTING balance could be on.
+
+    Pure computation, no Streamlit, so it can be tested directly -- and it
+    reuses the same four simulators the prospective side uses rather than
+    growing a second amortisation. The only reason it needs new code at all is
+    that those simulators derived income from a major; income_for_year now lets
+    them take a salary instead.
+
+    `forgivable` is False for Parent PLUS, which is not eligible for RAP or
+    IBR at all. Returning the rows anyway with a note would invite a borrower
+    to compare against plans they cannot join.
+    """
+    # Under PSLF the income-driven plans stop at 120 payments instead of running
+    # their full 20- or 30-year term. That is the entire mechanism: same payment,
+    # same accrual, the balance is simply written off ten years in.
+    idr_term = PSLF_QUALIFYING_YEARS if pslf else IDR_MAX_TERM_YEARS
+    rap_term = PSLF_QUALIFYING_YEARS if pslf else RAP_MAX_TERM_YEARS
+
+    rows = []
+    std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
+    rows.append(("Standard (10-year)", std,
+                 "Qualifies for PSLF — but it also clears the loan in exactly 120 "
+                 "payments, so there is nothing left to forgive."
+                 if pslf else "Fixed payment. No forgiveness."))
+    ext = calculate_standard_repayment(balance, rate, EXTENDED_STANDARD_TERM_YEARS)
+    rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", ext,
+                 "Does NOT qualify for PSLF." if pslf else
+                 "Fixed payment stretched out. No forgiveness, more interest."))
+    tiered_term = calculate_tiered_standard_term(balance)
+    tiered = calculate_standard_repayment(balance, rate, tiered_term)
+    rows.append((f"2026 Tiered Standard ({tiered_term}-year)", tiered,
+                 "Does NOT qualify for PSLF, or even for TEPSLF." if pslf else
+                 "Fixed payment over a term set by your balance."))
+    if forgivable:
+        rap = simulate_rap_schedule(balance, rate, None, dependents,
+                                     annual_income=annual_income,
+                                     max_term_years=rap_term)
+        rows.append(("Repayment Assistance Plan (RAP)", rap,
+                     f"Qualifies. Unpaid interest waived, remainder forgiven at "
+                     f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
+                     "1-10% of total income. Unpaid interest waived. "
+                     "Remainder forgiven at 30 years."))
+        idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
+                                       starting_interest=starting_interest,
+                                       max_term_years=idr_term)
+        rows.append(("IBR-style income-driven", idr,
+                     f"Qualifies. Remainder forgiven at {PSLF_QUALIFYING_PAYMENTS} "
+                     "payments." if pslf else
+                     "10% of income above a $22,000 allowance. Forgiven at 20 years. "
+                     "Closed to loans originated on or after July 1, 2026."))
+    return rows
+
+
+def render_existing_loan_comparison(always_open: bool = False) -> None:
+    """Plan comparison for someone already in repayment.
+
+    A different question from the rest of the app, which asks whether a degree
+    is worth borrowing for. This one takes the borrowing as given and asks what
+    to do about it -- so it lives in its own expander, takes its own inputs and
+    shares none of the scenario machinery.
+    """
+    # Open by default on its own page: a visitor who followed a link TO this
+    # tool should not have to click to reach it.
+    with st.expander("💸 Already have loans? Compare repayment plans",
+                     expanded=always_open):
+        st.caption(
+            "For a balance you already owe. Everything else on this page is "
+            "about whether to borrow in the first place — this is about what "
+            "to do once you have."
+        )
+        c1, c2, c3 = st.columns(3)
+        balance = c1.number_input("Current balance ($)", min_value=0, max_value=2_000_000,
+                                   step=1_000, key="existing_balance")
+        rate = c2.number_input("Interest rate (%)", min_value=0.0, max_value=20.0,
+                                step=0.1, key="existing_rate")
+        income = c3.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
+                                  step=1_000, key="existing_income",
+                                  help="Adjusted gross income. The income-driven plans "
+                                       "size their payment from it; the fixed plans ignore it.")
+        c4, c5, c6 = st.columns(3)
+        deps = c4.number_input("Dependent children", min_value=0, max_value=10, step=1,
+                                key="existing_dependents",
+                                help="RAP lowers the payment by $50/month each.")
+        accrued = c5.number_input(
+            "of which unpaid interest ($)", min_value=0, max_value=2_000_000, step=1_000,
+            key="existing_accrued_interest",
+            help="If your servicer shows principal and accrued interest separately "
+                 "-- common after a period on SAVE, where interest never "
+                 "capitalised -- put the interest part here. It changes how "
+                 "payments are applied and is shown separately on the balance chart. "
+                 "Leave at 0 if you only know one number.")
+        forgivable = c6.checkbox(
+            "These are my own federal Direct loans", value=True, key="existing_forgivable",
+            help="Untick for Parent PLUS or private loans. Parent PLUS is not "
+                 "eligible for RAP or IBR, and private loans are outside the "
+                 "federal system entirely, so the income-driven rows are hidden.")
+
+        pslf = st.checkbox(
+            "I work full-time for a government or 501(c)(3) employer (PSLF)",
+            key="existing_pslf", disabled=not forgivable,
+            help="Public Service Loan Forgiveness writes off whatever is left after "
+                 f"{PSLF_QUALIFYING_PAYMENTS} qualifying monthly payments -- ten years, "
+                 "and they need not be consecutive. Only Direct Loans qualify, so this "
+                 "is unavailable for Parent PLUS and private loans.")
+        if not forgivable:
+            st.caption(
+                "PSLF is unavailable here: it covers Direct Loans only. Parent PLUS "
+                "for parents — and any consolidation containing one — cannot qualify."
+            )
+
+        if not balance or not rate:
+            st.info("Enter a balance and a rate to compare plans.")
+            return
+
+        # Counted here, not when the expander renders. Reaching this line means
+        # a balance AND a rate were entered and a comparison is on screen --
+        # opening an expander to look is not "using the module", and counting
+        # that would make the figure meaningless.
+        mark_interaction("module_repayment_comparison")
+        rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable,
+                                            starting_interest=accrued,
+                                            pslf=pslf and forgivable)
+        st.dataframe(pd.DataFrame([{
+            "Plan": label,
+            "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
+                        else fmt_money(first_payment_of(r))),
+            "Payoff": f"{r['payoff_years']:.1f} yrs",
+            "Total interest": fmt_money(r["total_interest"]),
+            "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
+            # Only RAP has a subsidy, so every other row is an em dash rather
+            # than $0 -- "$0" would read as a subsidy that failed rather than a
+            # plan that has none.
+            "Interest waived": (fmt_money(r["waived_interest"])
+                                if r.get("waived_interest") else
+                                ("$0" if "RAP" in label else "—")),
+            "What it is": note,
+        } for label, r, note in rows]), hide_index=True, use_container_width=True)
+
+        # A chart for whichever plan the visitor wants to look at. Without one,
+        # the principal/unpaid-interest split had nowhere to appear -- which is
+        # how an input that fed only that split came to look like it did
+        # nothing.
+        plan_labels = [label for label, _, _ in rows]
+        chosen = st.selectbox("Show the balance over time for", plan_labels,
+                               key="existing_chart_plan")
+        chosen_result = next(r for label, r, _ in rows if label == chosen)
+        st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
+                         use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                         key="existing_balance_chart")
+        if accrued > 0 and not balance_split_is_informative(chosen_result["schedule"]):
+            st.caption(
+                f"This plan clears your {fmt_money(accrued)} of unpaid interest early, "
+                "so the chart shows a single balance from then on. It still costs you "
+                "less than the same balance would as principal — interest is charged on "
+                "principal only, and unpaid interest does not compound while it sits "
+                "there.".replace("$", chr(92) + "$")
+            )
+
+        if pslf and forgivable:
+            st.success(
+                f"**PSLF changes which plan wins.** The income-driven rows above now "
+                f"forgive at {PSLF_QUALIFYING_PAYMENTS} payments instead of 20 or 30 "
+                "years, so the plan with the LOWEST payment usually costs least overall "
+                "— the opposite of the answer without PSLF. Standard 10-Year qualifies "
+                "but retires the loan in exactly 120 payments, leaving nothing to "
+                "forgive; Extended and Tiered Standard do not qualify at all.\n\n"
+                "Unlike an income-driven discharge, studentaid.gov attaches its "
+                "\"you may owe income tax on the forgiven amount\" warning to IDR "
+                "forgiveness and not to PSLF."
+            )
+
+        render_rap_subsidy_answer(rows)
+        st.caption(
+            "Simplified models of the real plans, not your servicer's figures — payments "
+            "here come from this app's own formulas and your actual bill will differ. "
+            "Forgiven balances are taxable as ordinary income in the year they are "
+            "discharged, and that tax is **not** included above. Extra payments are not "
+            "modelled: paying more than the minimum shortens every row, and under RAP it "
+            "also forfeits the subsidy in any month the extra covers the interest."
+        )
+
+
+def first_payment_of(result: dict) -> float:
+    """Month-1 payment for a plan whose payment moves with income."""
+    schedule = result.get("schedule")
+    if schedule is None or "payment" not in schedule.columns or schedule.empty:
+        return 0.0
+    return float(schedule["payment"].iloc[0])
+
+
+def render_rap_subsidy_answer(rows: list) -> None:
+    """What RAP's interest subsidy is actually worth to THIS borrower.
+
+    The headline question for anyone weighing RAP, and one the plan's own
+    description answers misleadingly: "unpaid interest is waived" sounds like a
+    benefit to everyone, when a borrower whose payment covers the interest gets
+    nothing. Stating the figure is the only way to tell those apart.
+    """
+    rap = next((r for label, r, _ in rows if "RAP" in label), None)
+    if rap is None:
+        return
+    waived = rap.get("waived_interest", 0) or 0
+    if waived > 0:
+        st.success(
+            f"**RAP's interest subsidy is worth {fmt_money(waived)} to you.** That is "
+            "interest your payment doesn't cover, which RAP writes off instead of "
+            "letting it accrue.".replace("$", chr(92) + "$")
+        )
+    else:
+        st.info(
+            "**RAP's interest subsidy is worth nothing to you.** It only waives interest "
+            "your payment fails to cover, and at this income your payment covers all of "
+            "it. RAP may still win on the monthly figure — but not for that reason."
+        )
+
+
 # ============================================================
 # 5. MAIN PAGE
 # ============================================================
 
-st.title("🎓 Student Loan Payoff & Major ROI Calculator")
-st.caption(
-    "**Free · anonymous · no sign-up** — an educational estimate, not financial "
-    "advice. Salary and cost figures are illustrative."
-)
+# ?tool=repayment serves the repayment-plan comparison on its own, as a
+# shareable link that is not the college calculator. They answer different
+# questions -- whether to borrow, versus what to do about a balance you already
+# have -- and someone sent the second should not have to scroll past the first.
+#
+# Latched like test_mode: Share Scenario replaces the whole query string, so a
+# live re-read would drop the visitor back into the calculator mid-session.
+if "repayment_only" not in st.session_state:
+    st.session_state.repayment_only = get_shared_default("tool", "") == "repayment"
+repayment_only = st.session_state.repayment_only
+
+if repayment_only:
+    # The sidebar still executes -- it defines names section 5 reads -- but it
+    # describes a scenario this page is not about, so it is hidden rather than
+    # shown empty. Cheaper and far less invasive than making 2,000 lines of
+    # module-level sidebar code conditional.
+    st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>",
+                unsafe_allow_html=True)
+    st.title("💸 Compare Student Loan Repayment Plans")
+    st.caption(
+        "**Free · anonymous · no sign-up** — an educational estimate, not financial "
+        "advice. For a balance you already owe."
+    )
+else:
+    st.title("🎓 Student Loan Payoff & Major ROI Calculator")
+    st.caption(
+        "**Free · anonymous · no sign-up** — an educational estimate, not financial "
+        "advice. Salary and cost figures are illustrative."
+    )
 if st.session_state.get("test_mode"):
     st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
 
@@ -10526,7 +10775,22 @@ if st.session_state.get("test_mode"):
 # up. Putting the one-time question first costs the banner nothing -- it is
 # still the next thing on screen -- and is the whole of what "more prominent"
 # means here. It is NOT a gate; everything below renders regardless.
-render_presurvey()
+# The research instrument belongs to the college-decision flow. A visitor on
+# the repayment page was never recruited for it and is answering a different
+# question, so showing it would put unrelated answers in the paired sample.
+if not repayment_only:
+    render_presurvey()
+
+# Everything below this point is the college calculator. On ?tool=repayment we
+# render the repayment comparison instead and stop -- the sidebar is already
+# hidden above, so the page is that tool and nothing else.
+if repayment_only:
+    render_existing_loan_comparison(always_open=True)
+    st.caption(
+        "Looking at whether a degree is worth borrowing for instead? "
+        "[Open the full calculator](./)."
+    )
+    st.stop()
 
 st.info(
     "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
@@ -10896,216 +11160,6 @@ def search_was_adjusted() -> bool:
                 & set(SEARCH_CONTROL_KEYS))
 
 
-def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
-                                 dependents: int = 0, forgivable: bool = True,
-                                 starting_interest: float = 0.0,
-                                 pslf: bool = False) -> list:
-    """Every repayment plan a borrower with an EXISTING balance could be on.
-
-    Pure computation, no Streamlit, so it can be tested directly -- and it
-    reuses the same four simulators the prospective side uses rather than
-    growing a second amortisation. The only reason it needs new code at all is
-    that those simulators derived income from a major; income_for_year now lets
-    them take a salary instead.
-
-    `forgivable` is False for Parent PLUS, which is not eligible for RAP or
-    IBR at all. Returning the rows anyway with a note would invite a borrower
-    to compare against plans they cannot join.
-    """
-    # Under PSLF the income-driven plans stop at 120 payments instead of running
-    # their full 20- or 30-year term. That is the entire mechanism: same payment,
-    # same accrual, the balance is simply written off ten years in.
-    idr_term = PSLF_QUALIFYING_YEARS if pslf else IDR_MAX_TERM_YEARS
-    rap_term = PSLF_QUALIFYING_YEARS if pslf else RAP_MAX_TERM_YEARS
-
-    rows = []
-    std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
-    rows.append(("Standard (10-year)", std,
-                 "Qualifies for PSLF — but it also clears the loan in exactly 120 "
-                 "payments, so there is nothing left to forgive."
-                 if pslf else "Fixed payment. No forgiveness."))
-    ext = calculate_standard_repayment(balance, rate, EXTENDED_STANDARD_TERM_YEARS)
-    rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", ext,
-                 "Does NOT qualify for PSLF." if pslf else
-                 "Fixed payment stretched out. No forgiveness, more interest."))
-    tiered_term = calculate_tiered_standard_term(balance)
-    tiered = calculate_standard_repayment(balance, rate, tiered_term)
-    rows.append((f"2026 Tiered Standard ({tiered_term}-year)", tiered,
-                 "Does NOT qualify for PSLF, or even for TEPSLF." if pslf else
-                 "Fixed payment over a term set by your balance."))
-    if forgivable:
-        rap = simulate_rap_schedule(balance, rate, None, dependents,
-                                     annual_income=annual_income,
-                                     max_term_years=rap_term)
-        rows.append(("Repayment Assistance Plan (RAP)", rap,
-                     f"Qualifies. Unpaid interest waived, remainder forgiven at "
-                     f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
-                     "1-10% of total income. Unpaid interest waived. "
-                     "Remainder forgiven at 30 years."))
-        idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
-                                       starting_interest=starting_interest,
-                                       max_term_years=idr_term)
-        rows.append(("IBR-style income-driven", idr,
-                     f"Qualifies. Remainder forgiven at {PSLF_QUALIFYING_PAYMENTS} "
-                     "payments." if pslf else
-                     "10% of income above a $22,000 allowance. Forgiven at 20 years. "
-                     "Closed to loans originated on or after July 1, 2026."))
-    return rows
-
-
-def render_existing_loan_comparison() -> None:
-    """Plan comparison for someone already in repayment.
-
-    A different question from the rest of the app, which asks whether a degree
-    is worth borrowing for. This one takes the borrowing as given and asks what
-    to do about it -- so it lives in its own expander, takes its own inputs and
-    shares none of the scenario machinery.
-    """
-    with st.expander("💸 Already have loans? Compare repayment plans", expanded=False):
-        st.caption(
-            "For a balance you already owe. Everything else on this page is "
-            "about whether to borrow in the first place — this is about what "
-            "to do once you have."
-        )
-        c1, c2, c3 = st.columns(3)
-        balance = c1.number_input("Current balance ($)", min_value=0, max_value=2_000_000,
-                                   step=1_000, key="existing_balance")
-        rate = c2.number_input("Interest rate (%)", min_value=0.0, max_value=20.0,
-                                step=0.1, key="existing_rate")
-        income = c3.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
-                                  step=1_000, key="existing_income",
-                                  help="Adjusted gross income. The income-driven plans "
-                                       "size their payment from it; the fixed plans ignore it.")
-        c4, c5, c6 = st.columns(3)
-        deps = c4.number_input("Dependent children", min_value=0, max_value=10, step=1,
-                                key="existing_dependents",
-                                help="RAP lowers the payment by $50/month each.")
-        accrued = c5.number_input(
-            "of which unpaid interest ($)", min_value=0, max_value=2_000_000, step=1_000,
-            key="existing_accrued_interest",
-            help="If your servicer shows principal and accrued interest separately "
-                 "-- common after a period on SAVE, where interest never "
-                 "capitalised -- put the interest part here. It changes how "
-                 "payments are applied and is shown separately on the balance chart. "
-                 "Leave at 0 if you only know one number.")
-        forgivable = c6.checkbox(
-            "These are my own federal Direct loans", value=True, key="existing_forgivable",
-            help="Untick for Parent PLUS or private loans. Parent PLUS is not "
-                 "eligible for RAP or IBR, and private loans are outside the "
-                 "federal system entirely, so the income-driven rows are hidden.")
-
-        pslf = st.checkbox(
-            "I work full-time for a government or 501(c)(3) employer (PSLF)",
-            key="existing_pslf", disabled=not forgivable,
-            help="Public Service Loan Forgiveness writes off whatever is left after "
-                 f"{PSLF_QUALIFYING_PAYMENTS} qualifying monthly payments -- ten years, "
-                 "and they need not be consecutive. Only Direct Loans qualify, so this "
-                 "is unavailable for Parent PLUS and private loans.")
-        if not forgivable:
-            st.caption(
-                "PSLF is unavailable here: it covers Direct Loans only. Parent PLUS "
-                "for parents — and any consolidation containing one — cannot qualify."
-            )
-
-        if not balance or not rate:
-            st.info("Enter a balance and a rate to compare plans.")
-            return
-
-        rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable,
-                                            starting_interest=accrued,
-                                            pslf=pslf and forgivable)
-        st.dataframe(pd.DataFrame([{
-            "Plan": label,
-            "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
-                        else fmt_money(first_payment_of(r))),
-            "Payoff": f"{r['payoff_years']:.1f} yrs",
-            "Total interest": fmt_money(r["total_interest"]),
-            "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
-            # Only RAP has a subsidy, so every other row is an em dash rather
-            # than $0 -- "$0" would read as a subsidy that failed rather than a
-            # plan that has none.
-            "Interest waived": (fmt_money(r["waived_interest"])
-                                if r.get("waived_interest") else
-                                ("$0" if "RAP" in label else "—")),
-            "What it is": note,
-        } for label, r, note in rows]), hide_index=True, use_container_width=True)
-
-        # A chart for whichever plan the visitor wants to look at. Without one,
-        # the principal/unpaid-interest split had nowhere to appear -- which is
-        # how an input that fed only that split came to look like it did
-        # nothing.
-        plan_labels = [label for label, _, _ in rows]
-        chosen = st.selectbox("Show the balance over time for", plan_labels,
-                               key="existing_chart_plan")
-        chosen_result = next(r for label, r, _ in rows if label == chosen)
-        st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
-                         use_container_width=True, config=PLOTLY_CHART_CONFIG,
-                         key="existing_balance_chart")
-        if accrued > 0 and not balance_split_is_informative(chosen_result["schedule"]):
-            st.caption(
-                f"This plan clears your {fmt_money(accrued)} of unpaid interest early, "
-                "so the chart shows a single balance from then on. It still costs you "
-                "less than the same balance would as principal — interest is charged on "
-                "principal only, and unpaid interest does not compound while it sits "
-                "there.".replace("$", chr(92) + "$")
-            )
-
-        if pslf and forgivable:
-            st.success(
-                f"**PSLF changes which plan wins.** The income-driven rows above now "
-                f"forgive at {PSLF_QUALIFYING_PAYMENTS} payments instead of 20 or 30 "
-                "years, so the plan with the LOWEST payment usually costs least overall "
-                "— the opposite of the answer without PSLF. Standard 10-Year qualifies "
-                "but retires the loan in exactly 120 payments, leaving nothing to "
-                "forgive; Extended and Tiered Standard do not qualify at all.\n\n"
-                "Unlike an income-driven discharge, studentaid.gov attaches its "
-                "\"you may owe income tax on the forgiven amount\" warning to IDR "
-                "forgiveness and not to PSLF."
-            )
-
-        render_rap_subsidy_answer(rows)
-        st.caption(
-            "Simplified models of the real plans, not your servicer's figures — payments "
-            "here come from this app's own formulas and your actual bill will differ. "
-            "Forgiven balances are taxable as ordinary income in the year they are "
-            "discharged, and that tax is **not** included above. Extra payments are not "
-            "modelled: paying more than the minimum shortens every row, and under RAP it "
-            "also forfeits the subsidy in any month the extra covers the interest."
-        )
-
-
-def first_payment_of(result: dict) -> float:
-    """Month-1 payment for a plan whose payment moves with income."""
-    schedule = result.get("schedule")
-    if schedule is None or "payment" not in schedule.columns or schedule.empty:
-        return 0.0
-    return float(schedule["payment"].iloc[0])
-
-
-def render_rap_subsidy_answer(rows: list) -> None:
-    """What RAP's interest subsidy is actually worth to THIS borrower.
-
-    The headline question for anyone weighing RAP, and one the plan's own
-    description answers misleadingly: "unpaid interest is waived" sounds like a
-    benefit to everyone, when a borrower whose payment covers the interest gets
-    nothing. Stating the figure is the only way to tell those apart.
-    """
-    rap = next((r for label, r, _ in rows if "RAP" in label), None)
-    if rap is None:
-        return
-    waived = rap.get("waived_interest", 0) or 0
-    if waived > 0:
-        st.success(
-            f"**RAP's interest subsidy is worth {fmt_money(waived)} to you.** That is "
-            "interest your payment doesn't cover, which RAP writes off instead of "
-            "letting it accrue.".replace("$", chr(92) + "$")
-        )
-    else:
-        st.info(
-            "**RAP's interest subsidy is worth nothing to you.** It only waives interest "
-            "your payment fails to cover, and at this income your payment covers all of "
-            "it. RAP may still win on the monthly figure — but not for that reason."
-        )
 
 
 def render_school_search() -> None:
@@ -11249,7 +11303,12 @@ def render_school_search() -> None:
         # Only once the visitor has actually adjusted something -- see
         # search_was_adjusted. The results above still render either way; this
         # gates the LOG, not the feature.
+        # Same criterion the search log already uses: a visitor who only opened
+        # the expander has not used it. search_was_adjusted() is the existing
+        # answer to "did they actually touch a control", so reuse it rather than
+        # invent a second definition that could drift from it.
         if search_was_adjusted():
+            mark_interaction("module_school_search")
             _log_school_search(family, budget, states, len(results), home_state,
                                 level=CREDENTIAL_LEVELS.get(credential, (None,))[0])
 
