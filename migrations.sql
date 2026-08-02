@@ -910,3 +910,37 @@ alter table scenario_events
 --     forgiven amount is only interpretable alongside the strategy that
 --     produced it. RAP's interest waiver also means many scenarios that
 --     forgave a large balance under IDR now forgive nothing at all.
+
+
+-- ============================================================
+-- 2026-08-01 (later the same day) -- repayment_strategy's DEFAULT changes
+-- ============================================================
+-- Still no DDL. This is the second domain change to repayment_strategy today
+-- and the more disruptive of the two for analysis, because it moves the
+-- DEFAULT rather than just adding a value.
+--
+-- The dropdown for a 2026+ start year -- i.e. every scenario the app can now
+-- build -- is:
+--     'Repayment Assistance Plan (RAP)'      <- DEFAULT (was Standard 10-Year)
+--     '2026 Tiered Standard Plan'            <- new value
+-- with these two added only when the visitor ticks "Compare against pre-2026
+-- repayment plans" under Advanced Analysis:
+--     'Standard 10-Year'
+--     'Income-Driven Repayment (IDR)'
+--
+-- Reading these later:
+--
+--   * The strategy distribution is NOT comparable across this change. Before
+--     it, 'Standard 10-Year' was what a visitor got by not touching the
+--     control; after it, that value means someone deliberately enabled the
+--     legacy plans AND then chose one. A drop in Standard-10-Year rows is the
+--     default moving, not behaviour changing.
+--
+--   * Symmetrically, RAP rows after this change are mostly untouched defaults,
+--     where RAP rows from earlier today were deliberate selections. If the
+--     paper treats "chose an income-driven plan" as a behavioural signal, that
+--     signal exists only in rows written before this change.
+--
+--   * enable_legacy_plans is not currently logged. If the distinction above
+--     matters, it needs a column on all four tables before it can be
+--     recovered -- it cannot be reconstructed after the fact.
