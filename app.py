@@ -3614,8 +3614,9 @@ def maybe_log_scenario_event(context: dict) -> bool:
     script on every widget interaction, so this is called on each pass and
     dedupes against the last signature stored in session_state.
 
-    The signature is deliberately only the major/school selections (A and B),
-    not the whole scenario: those are the choices "switching" refers to, and
+    The signature is deliberately only the major/school selections (A and B,
+    undergraduate and professional), not the whole scenario: those are the
+    choices "switching" refers to, and
     keying on every field would insert a row per loan-slider tick -- adding
     network latency to a drag and drowning the switches in noise. The
     tradeoff is real: pure financing exploration (same major, different loan
@@ -3641,9 +3642,19 @@ def maybe_log_scenario_event(context: dict) -> bool:
     # for the reason the financing fields are not: it is a discrete selectbox,
     # so it cannot fire per-tick the way a slider drag would. That distinction,
     # not "how important is the field", is what governs what belongs here.
+    # The professional school joins for the same reason city did, and by the
+    # same test: it is a discrete selectbox, so it cannot fire per-tick. It
+    # earns its place more than most -- it changes the largest single number in
+    # a medical or dental scenario (medicine's median debt ranges $47,503 to
+    # $330,479 across schools), and comparing two of them is precisely the
+    # switch this table exists to catch. Without it, a visitor moving from a
+    # private medical school to a state one changed their whole loan and left
+    # no row at all: same major, same undergraduate school, so the signature
+    # never moved.
     signature = (
         context.get("scenario_a_major"), context.get("scenario_a_school_name"),
         context.get("scenario_b_major"), context.get("scenario_b_school_name"),
+        context.get("prof_school_a"), context.get("prof_school_b"),
         context.get("city"),
     )
     if st.session_state.get("last_scenario_signature") == signature:
