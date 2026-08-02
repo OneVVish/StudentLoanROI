@@ -9166,6 +9166,29 @@ def returning_kwargs() -> dict:
     return kwargs
 
 
+def _sync_foregone_to_enrollment() -> None:
+    """Turn foregone earnings on when the visitor says they'll stop working.
+
+    "I'll stop working" and "count the salary I give up" are the same
+    statement, so having one set and the other clear is a contradiction the app
+    used to only WARN about -- leaving the biggest cost of going back out of
+    every figure unless the visitor found a checkbox in another section.
+
+    Fires on the radio's CHANGE, not on every rerun, and that distinction is
+    the whole design. Re-asserting it each pass would make the checkbox
+    unusable: untick it and it springs back next rerun. This way it is a
+    default that follows the choice, and unticking it afterwards sticks -- at
+    which point the existing warning reappears and says what is missing. The
+    same reasoning apply_shared_flag uses for a link's flags.
+
+    Deliberately one-directional. Choosing to keep working does NOT switch
+    foregone earnings off: a part-time student still gives up some earnings,
+    and the CC part-time path uses the same option for the same reason.
+    """
+    if st.session_state.get("returning_enrollment") == RETURNING_STOP_WORK:
+        st.session_state["count_foregone_earnings"] = True
+
+
 def returning_baseline_ready() -> bool:
     """Both salary answers present. Until then the comparison stays on the
     high-school-graduate baseline and the page says so, rather than silently
@@ -9312,7 +9335,8 @@ if is_returning:
     st.sidebar.radio(
         "While you study, will you keep working?",
         RETURNING_ENROLLMENT_OPTIONS, key="returning_enrollment",
-        on_change=lambda: mark_interaction("returning_enrollment"),
+        on_change=lambda: (mark_interaction("returning_enrollment"),
+                           _sync_foregone_to_enrollment()),
         help="Stopping work means giving up your salary for the length of the "
               "programme, which is usually the largest single cost of going "
               "back -- larger than tuition.",
