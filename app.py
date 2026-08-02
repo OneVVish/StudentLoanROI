@@ -1551,7 +1551,12 @@ ROLES_WITHOUT_BORROWING = {"Counselor"}
 # construction -- asking them to attest reads as an accusation and collects
 # nothing.
 RESEARCH_MIN_AGE = 18
-ROLES_REQUIRING_AGE_ATTESTATION = {"Student"}
+# Every role, not just Student. The consent says "You must be 18 or over" with
+# no qualification, and enforcing it for one role made the check narrower than
+# the promise -- an under-18 selecting "Other" submitted with no age check at
+# all. Kept as a set rather than collapsed to a boolean because the pre-survey
+# still asks role FIRST and can react to it, where the exit form cannot.
+ROLES_REQUIRING_AGE_ATTESTATION = set(PRESURVEY_ROLE_OPTIONS)
 
 # Lower-case codes for the log line, so a reworded option label cannot
 # silently change what a stored value means.
@@ -10390,176 +10395,210 @@ Questions about the research? Contact **veervish11@gmail.com**.
 *By submitting, you agree to take part. You must be {RESEARCH_MIN_AGE} or over.*
 """
         )
-    with st.form("survey_form", clear_on_submit=True):
-        # Asked here only if the pre block did not already get it. Asking the
-        # same person their role twice in one session is not just redundant --
-        # the two answers can disagree, and nothing in the schema says which
-        # one the scenario columns were recorded under.
-        #
-        # index=None so an ignored dropdown stays distinguishable from an
-        # answer. The old version defaulted to "Parent", which meant a row
-        # could not tell a parent from someone who never touched the control
-        # -- the answer-vs-absence failure major_explicitly_selected exists to
-        # prevent for the major, and it silently inflated one category.
-        _pre_role = st.session_state.get("presurvey_role")
-        if _pre_role:
-            st.caption(f"Answering as: **{_pre_role}** (from the questions at the top)")
-            respondent_role = _pre_role
-            # Already attested at the top, or this block would not render.
-            form_age_ok = True
-        else:
-            respondent_role = st.selectbox(
-                "I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
-                placeholder="Select one")
-            # Shown unconditionally rather than only for Students: inside an
-            # st.form nothing reruns until submit, so the checkbox cannot
-            # appear in response to the role choice the way it does at the top
-            # of the page. Asking everyone is the cost of that constraint --
-            # it is only ENFORCED for the roles that need it, below.
-            form_age_ok = st.checkbox(f"I am {RESEARCH_MIN_AGE} or older")
-        # index=None for the same answer-vs-absence reason as the role above.
-        # "Already graduated" is new and is not padding: the 18+ floor means a
-        # participating student has often finished high school already, and
-        # without it they must either pick a false year or leave the default.
-        hs_graduation_year = st.selectbox(
-            "Expected High School Graduation Year",
-            ["Already graduated", "2026", "2027", "2028", "2029", "2030", "Not applicable"],
-            index=None, placeholder="Select one",
+    # The age gate sits OUTSIDE the form, so it can react. Inside an st.form
+    # nothing reruns until submit, which is why the in-form checkbox could only
+    # ever refuse a submission after every question had been answered -- and
+    # render_presurvey's own comment rejects exactly that: "an ineligible
+    # visitor is never asked a research question at all -- collecting the
+    # answers and discarding them afterwards would still be collecting them."
+    # That held while the pre-survey ran first. With the pre-survey off by
+    # default it stopped holding, and this restores it.
+    #
+    # Skipped when the pre block already attested, so a recruited visitor is
+    # not asked twice.
+    _pre_attested = bool(st.session_state.get("presurvey_role")
+                          and st.session_state.get("presurvey_age_ok"))
+    if not _pre_attested:
+        gate_ok = st.checkbox(
+            f"I am {RESEARCH_MIN_AGE} or older",
+            key="survey_age_gate",
+            help="These questions are research, and taking part is limited to "
+                  f"people {RESEARCH_MIN_AGE} and over. The calculator above is "
+                  "unaffected either way.",
         )
-
-        # ---- The post half of the paired measurement -------------------------
-        # Above perception_change deliberately. That item asks whether the tool
-        # CHANGED anything, which is the most leading question on the page; a
-        # respondent who answers it first has been told what the researcher is
-        # looking for, and the paired items are the better measures. Let the
-        # legacy item absorb the priming rather than spread it.
-        #
-        # Wording is present-tense state ("...now"), never "did this change
-        # your mind?". We difference the two answers ourselves; asking the
-        # respondent to report the change invites them to supply one.
-        st.markdown("---")
-        post_schools = st.radio(POSTSURVEY_SCHOOLS_QUESTION,
-                                 list(PRESURVEY_SCHOOLS_OPTIONS),
-                                 index=None, horizontal=True)
-
-        # A counsellor is not answering about their own borrowing, so the
-        # question is not put to them -- matching the pre block. Only
-        # suppressible when the role is already known: inside a form nothing
-        # reruns, so if the role is being chosen right here the question has to
-        # render, and an answer from a counsellor is dropped at submit instead.
-        _post_borrowing_applies = _pre_role not in ROLES_WITHOUT_BORROWING
-        if _post_borrowing_applies:
-            post_borrowing = st.radio(POSTSURVEY_BORROWING_QUESTION,
-                                       list(PRESURVEY_BORROWING_OPTIONS),
-                                       index=None, format_func=escape_money_markdown)
-        else:
-            post_borrowing = None
-        st.markdown("---")
-
-        perception_change = st.radio(
-            "Did this tool change how you view your target major or university choice?",
-            ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
-        )
-        feedback_text = st.text_area("How did this data influence your thinking? (optional)")
-        submitted = st.form_submit_button("Submit Feedback")
-
-        # Enforced at submit because a form cannot react before it. Checked
-        # BEFORE compute_scenario_results and before any write: an ineligible
-        # submission must not be assembled and then discarded, since the
-        # discarding is the only thing standing between it and Supabase.
-        if submitted and respondent_role in ROLES_REQUIRING_AGE_ATTESTATION \
-                and not form_age_ok:
-            st.warning(
-                f"This survey is for people {RESEARCH_MIN_AGE} and over, so this "
-                "response wasn't recorded. Everything else on the page is "
-                "unaffected — the calculator is yours to use."
+        if not gate_ok:
+            st.caption(
+                f"The questions appear once you confirm you're {RESEARCH_MIN_AGE} "
+                "or over. **Nothing else on this page changes** — the calculator "
+                "is yours to use regardless."
             )
-            log_usage_event("survey_blocked_minor")
-            submitted = False
+    # Gated on the attestation above, so an ineligible visitor is never ASKED
+    # a research question -- not asked and then refused. render_presurvey made
+    # exactly this point ("collecting the answers and discarding them
+    # afterwards would still be collecting them"), and it held only while the
+    # pre-survey ran first. With the pre-survey off by default it stopped
+    # holding, and this restores it.
+    if _pre_attested or st.session_state.get("survey_age_gate"):
+        with st.form("survey_form", clear_on_submit=True):
+            # Asked here only if the pre block did not already get it. Asking the
+            # same person their role twice in one session is not just redundant --
+            # the two answers can disagree, and nothing in the schema says which
+            # one the scenario columns were recorded under.
+            #
+            # index=None so an ignored dropdown stays distinguishable from an
+            # answer. The old version defaulted to "Parent", which meant a row
+            # could not tell a parent from someone who never touched the control
+            # -- the answer-vs-absence failure major_explicitly_selected exists to
+            # prevent for the major, and it silently inflated one category.
+            _pre_role = st.session_state.get("presurvey_role")
+            if _pre_role:
+                st.caption(f"Answering as: **{_pre_role}** (from the questions at the top)")
+                respondent_role = _pre_role
+                # Already attested at the top, or this block would not render.
+                form_age_ok = True
+            else:
+                respondent_role = st.selectbox(
+                    "I am a...", PRESURVEY_ROLE_OPTIONS, index=None,
+                    placeholder="Select one")
+                # Shown unconditionally rather than only for Students: inside an
+                # st.form nothing reruns until submit, so the checkbox cannot
+                # appear in response to the role choice the way it does at the top
+                # of the page. Asking everyone is the cost of that constraint --
+                # it is only ENFORCED for the roles that need it, below.
+                form_age_ok = st.checkbox(f"I am {RESEARCH_MIN_AGE} or older")
+            # index=None for the same answer-vs-absence reason as the role above.
+            # "Already graduated" is new and is not padding: the 18+ floor means a
+            # participating student has often finished high school already, and
+            # without it they must either pick a false year or leave the default.
+            hs_graduation_year = st.selectbox(
+                "Expected High School Graduation Year",
+                ["Already graduated", "2026", "2027", "2028", "2029", "2030", "Not applicable"],
+                index=None, placeholder="Select one",
+            )
 
-        if submitted:
-            # Dropped rather than stored when the role turns out not to take
-            # the question. Only reachable when the role was chosen inside the
-            # form, where the widget could not be hidden reactively -- storing
-            # it anyway would put a counsellor's borrowing answer in the same
-            # column as a student's, which is the noise the exclusion exists
-            # to prevent.
-            if respondent_role in ROLES_WITHOUT_BORROWING:
+            # ---- The post half of the paired measurement -------------------------
+            # Above perception_change deliberately. That item asks whether the tool
+            # CHANGED anything, which is the most leading question on the page; a
+            # respondent who answers it first has been told what the researcher is
+            # looking for, and the paired items are the better measures. Let the
+            # legacy item absorb the priming rather than spread it.
+            #
+            # Wording is present-tense state ("...now"), never "did this change
+            # your mind?". We difference the two answers ourselves; asking the
+            # respondent to report the change invites them to supply one.
+            st.markdown("---")
+            post_schools = st.radio(POSTSURVEY_SCHOOLS_QUESTION,
+                                     list(PRESURVEY_SCHOOLS_OPTIONS),
+                                     index=None, horizontal=True)
+
+            # A counsellor is not answering about their own borrowing, so the
+            # question is not put to them -- matching the pre block. Only
+            # suppressible when the role is already known: inside a form nothing
+            # reruns, so if the role is being chosen right here the question has to
+            # render, and an answer from a counsellor is dropped at submit instead.
+            _post_borrowing_applies = _pre_role not in ROLES_WITHOUT_BORROWING
+            if _post_borrowing_applies:
+                post_borrowing = st.radio(POSTSURVEY_BORROWING_QUESTION,
+                                           list(PRESURVEY_BORROWING_OPTIONS),
+                                           index=None, format_func=escape_money_markdown)
+            else:
                 post_borrowing = None
+            st.markdown("---")
 
-            # Coded once, so every consumer sees the same vocabulary as the
-            # pre answers. "n_a" is not "skip": never asked and
-            # asked-then-declined are different facts.
-            postsurvey_codes = build_instrument_context(
-                post_schools, post_borrowing, respondent_role)
+            perception_change = st.radio(
+                "Did this tool change how you view your target major or university choice?",
+                ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
+            )
+            feedback_text = st.text_area("How did this data influence your thinking? (optional)")
+            submitted = st.form_submit_button("Submit Feedback")
 
-            # Recomputed fresh (cheap, pure functions, no API calls) rather
-            # than reused from st.session_state, so the survey reflects
-            # exact click-time state.
-            scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                                   personal_contribution, city_info["col_index"],
-                                                   roi_window_years=roi_horizon_years,
-                                                   hs_wage_index=get_metro_wage_index(city),
-                                                   enrollment_years=enrollment_years_a,
-                                                   working_years=working_years_a,
-                                                   baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
-                                                   federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
-                                           **returning_kwargs())
-            # major_b/loan_amount_b/etc. only exist as script variables when
-            # compare_mode is on (they're assigned inside that sidebar
-            # expander) -- referencing them outside an "if compare_mode:"
-            # guard would raise NameError, so Scenario B's args are only
-            # ever built when there's a Scenario B to build them from.
-            compare_mode_kwargs = {}
-            if compare_mode:
-                scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
-                                                       personal_contribution_b, city_info["col_index"],
+            # Enforced at submit because a form cannot react before it. Checked
+            # BEFORE compute_scenario_results and before any write: an ineligible
+            # submission must not be assembled and then discarded, since the
+            # discarding is the only thing standing between it and Supabase.
+            if submitted and respondent_role in ROLES_REQUIRING_AGE_ATTESTATION \
+                    and not form_age_ok:
+                st.warning(
+                    f"This survey is for people {RESEARCH_MIN_AGE} and over, so this "
+                    "response wasn't recorded. Everything else on the page is "
+                    "unaffected — the calculator is yours to use."
+                )
+                log_usage_event("survey_blocked_minor")
+                submitted = False
+
+            if submitted:
+                # Dropped rather than stored when the role turns out not to take
+                # the question. Only reachable when the role was chosen inside the
+                # form, where the widget could not be hidden reactively -- storing
+                # it anyway would put a counsellor's borrowing answer in the same
+                # column as a student's, which is the noise the exclusion exists
+                # to prevent.
+                if respondent_role in ROLES_WITHOUT_BORROWING:
+                    post_borrowing = None
+
+                # Coded once, so every consumer sees the same vocabulary as the
+                # pre answers. "n_a" is not "skip": never asked and
+                # asked-then-declined are different facts.
+                postsurvey_codes = build_instrument_context(
+                    post_schools, post_borrowing, respondent_role)
+
+                # Recomputed fresh (cheap, pure functions, no API calls) rather
+                # than reused from st.session_state, so the survey reflects
+                # exact click-time state.
+                scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
+                                                       personal_contribution, city_info["col_index"],
                                                        roi_window_years=roi_horizon_years,
                                                        hs_wage_index=get_metro_wage_index(city),
-                                                       enrollment_years=enrollment_years_b,
-                                                       working_years=working_years_b,
-                                                       baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
-                                                       federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
-                                           **returning_kwargs())
-                compare_mode_kwargs = dict(
-                    compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
-                    interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
-                    personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
-                    inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
-                    scenario_b=scenario_b, start_year_b=start_year_b,
-                )
-            context = {
-                **build_scenario_context(
-                    major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
-                    school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
-                    roi_horizon_years=roi_horizon_years,
-                    start_year_a=start_year_a, **compare_mode_kwargs,
-                ),
-                **module_context,
-            }
+                                                       enrollment_years=enrollment_years_a,
+                                                       working_years=working_years_a,
+                                                       baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
+                                                       federal_cap=federal_cap_a, gap_rate=gap_rate_a, include_fees=True,
+                                               **returning_kwargs())
+                # major_b/loan_amount_b/etc. only exist as script variables when
+                # compare_mode is on (they're assigned inside that sidebar
+                # expander) -- referencing them outside an "if compare_mode:"
+                # guard would raise NameError, so Scenario B's args are only
+                # ever built when there's a Scenario B to build them from.
+                compare_mode_kwargs = {}
+                if compare_mode:
+                    scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
+                                                           personal_contribution_b, city_info["col_index"],
+                                                           roi_window_years=roi_horizon_years,
+                                                           hs_wage_index=get_metro_wage_index(city),
+                                                           enrollment_years=enrollment_years_b,
+                                                           working_years=working_years_b,
+                                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
+                                                           federal_cap=federal_cap_b, gap_rate=gap_rate_b, include_fees=True,
+                                               **returning_kwargs())
+                    compare_mode_kwargs = dict(
+                        compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
+                        interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
+                        personal_contribution_b=personal_contribution_b, school_name_b=school_name_b,
+                        inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
+                        scenario_b=scenario_b, start_year_b=start_year_b,
+                    )
+                context = {
+                    **build_scenario_context(
+                        major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
+                        school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
+                        roi_horizon_years=roi_horizon_years,
+                        start_year_a=start_year_a, **compare_mode_kwargs,
+                    ),
+                    **module_context,
+                }
 
-            # Logged to usage_logs as well as (eventually) the survey row.
-            # Same reasoning as the pre answers: this channel needs no
-            # migration, so the paired measurement starts producing data
-            # immediately, and a survey insert that fails silently -- every
-            # writer here catches and returns False -- does not take the
-            # answers with it. The survey-row copy arrives with the migration
-            # and is what makes the pair atomic on one row.
-            log_usage_event(
-                "postsurvey_answered"
-                f":considering={postsurvey_codes['post_schools_considered']}"
-                f":borrow={postsurvey_codes['post_borrow_willingness']}"
-                f":pre={'1' if st.session_state.get('presurvey_answered') else '0'}"
-                f":v={PRESURVEY_INSTRUMENT_VERSION}")
+                # Logged to usage_logs as well as (eventually) the survey row.
+                # Same reasoning as the pre answers: this channel needs no
+                # migration, so the paired measurement starts producing data
+                # immediately, and a survey insert that fails silently -- every
+                # writer here catches and returns False -- does not take the
+                # answers with it. The survey-row copy arrives with the migration
+                # and is what makes the pair atomic on one row.
+                log_usage_event(
+                    "postsurvey_answered"
+                    f":considering={postsurvey_codes['post_schools_considered']}"
+                    f":borrow={postsurvey_codes['post_borrow_willingness']}"
+                    f":pre={'1' if st.session_state.get('presurvey_answered') else '0'}"
+                    f":v={PRESURVEY_INSTRUMENT_VERSION}")
 
-            saved = save_survey_response(respondent_role, hs_graduation_year,
-                                          perception_change, feedback_text, context,
-                                          instrument=postsurvey_codes)
-            if saved:
-                st.session_state.survey_submitted = True
-                st.rerun()
-            else:
-                st.error("Something went wrong saving your response -- please try again.")
+                saved = save_survey_response(respondent_role, hs_graduation_year,
+                                              perception_change, feedback_text, context,
+                                              instrument=postsurvey_codes)
+                if saved:
+                    st.session_state.survey_submitted = True
+                    st.rerun()
+                else:
+                    st.error("Something went wrong saving your response -- please try again.")
 elif st.session_state.survey_submitted:
     # Only for someone who actually submitted. This was a bare `else`, which
     # after the eligibility condition was added to the `if` above began
