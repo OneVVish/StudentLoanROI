@@ -99,6 +99,8 @@ PARAM_EXEMPT = {
     "admin": "admin reveal; deliberately not propagated by a share link",
     "src": "traffic source; a share link must not inherit the sharer's source",
     "research": "survey-enable flag; deliberately excluded from share links",
+    "tool": "page-mode flag (?tool=repayment); a shared SCENARIO must not drag "
+            "the recipient onto a different tool",
     "cc_a": "legacy boolean, superseded by cc_mode_a; read for old links only",
     "cc_b": "legacy boolean, superseded by cc_mode_b; read for old links only",
 }
