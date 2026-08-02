@@ -3710,6 +3710,36 @@ def get_shared_float(param_name: str, fallback: float) -> float:
         return fallback
 
 
+def apply_shared_flag(param_name: str, state_key: str) -> None:
+    """Apply a shared link's boolean flag, on a fresh visit AND on a same-tab
+    URL change.
+
+    `st.session_state.setdefault(key, get_shared_default(...))` -- the pattern
+    every other shared field uses -- silently fails for these. Streamlit reads
+    query params client-side, so pasting a new URL into an open tab reruns the
+    script without creating a new session: the key already exists, setdefault
+    is a no-op, and the link's value never lands. Verified in production, where
+    ?legacy=1 gave all four repayment plans in a fresh tab and only two in a
+    reused one.
+
+    Re-applying on every rerun would be worse -- the checkbox would spring back
+    the instant the visitor unticked it, since the URL still says 1. So this
+    fires only when the param's value CHANGES from what was last applied,
+    which is exactly once per navigation. After that the widget owns the key.
+
+    Only for booleans that also have a checkbox. A field with no widget cannot
+    be fought over and does not need this.
+    """
+    raw = st.query_params.get(param_name)
+    if raw is None:
+        return
+    seen_key = f"_shared_flag_{param_name}"
+    if st.session_state.get(seen_key) == raw:
+        return
+    st.session_state[seen_key] = raw
+    st.session_state[state_key] = raw == "1"
+
+
 def get_user_timezone() -> str:
     """The visitor's browser-detected IANA timezone (e.g. "America/Denver"),
     set via the hidden "Set Timezone" trigger + JS near the top of section 3.
@@ -7976,18 +8006,35 @@ scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
 # exists, the same pattern the Career section's controls use. See the
 # Methodology footer for what each module models and, just as importantly,
 # what it deliberately does NOT claim.
-# Adds the pre-2026 plans back to the Repayment Strategy dropdown. Read here,
-# with the other Advanced Analysis flags, because the strategy widget builds
-# its option list further down and needs to know.
-st.session_state.setdefault("enable_legacy_plans", get_shared_default("legacy", "0") == "1")
+# Each of these is a boolean carried in a shared link. `setdefault` alone is
+# NOT enough for them: Streamlit reads query params client-side, so editing a
+# URL in an already-open tab reruns the script WITHOUT starting a new session.
+# The key is then already present, setdefault does nothing, and the link's flag
+# is silently ignored -- which is how a link with ?legacy=1 opened in an
+# existing tab showed only the two 2026 plans while the same link in a fresh
+# tab showed all four.
+#
+# apply_shared_flag re-applies the param whenever its VALUE changes, which
+# covers both a fresh session and a same-tab navigation, while still letting a
+# visitor's own toggling win afterwards -- a plain "URL always wins" would
+# re-tick the box on the next rerun and make the checkbox unusable.
+# Written out one per line rather than looped: check_share_coverage.py reads
+# these statically, and a loop hides the param/key pairing from it -- which is
+# a fair signal that the loop was too clever for a wiring the guard exists to
+# police.
+st.session_state.setdefault("enable_legacy_plans", False)
+apply_shared_flag("legacy", "enable_legacy_plans")
 enable_legacy_plans = st.session_state["enable_legacy_plans"]
-st.session_state.setdefault("enable_prestige_mode", get_shared_default("prestige", "0") == "1")
-st.session_state.setdefault("enable_ai_mode", get_shared_default("ai", "0") == "1")
-st.session_state.setdefault("enable_future_proofing", get_shared_default("future", "0") == "1")
+st.session_state.setdefault("enable_prestige_mode", False)
+apply_shared_flag("prestige", "enable_prestige_mode")
+st.session_state.setdefault("enable_ai_mode", False)
+apply_shared_flag("ai", "enable_ai_mode")
+st.session_state.setdefault("enable_future_proofing", False)
+apply_shared_flag("future", "enable_future_proofing")
 # Seeded here rather than at its checkbox, which renders far below several
-# blocks that already read this key before the widget exists. Its own default
-# is unchanged (off); this only lets a shared link carry it.
-st.session_state.setdefault("count_foregone_earnings", get_shared_default("foregone", "0") == "1")
+# blocks that already read this key before the widget exists.
+st.session_state.setdefault("count_foregone_earnings", False)
+apply_shared_flag("foregone", "count_foregone_earnings")
 enable_prestige_mode = st.session_state["enable_prestige_mode"]
 enable_ai_mode = st.session_state["enable_ai_mode"]
 enable_future_proofing = st.session_state["enable_future_proofing"]
