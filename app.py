@@ -2416,6 +2416,18 @@ def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
     would be worse than naming the liability. [Source: TICAS, "Comparing
     Income-Driven Repayment Plans", 2025-09-16.]
     """
+    # RAP's interest subsidy, where it actually did something. Worth showing
+    # precisely because it is NOT a property of the plan: a borrower whose
+    # payment covers the interest has none of it waived, and telling them the
+    # plan waives interest would be misleading. This is what it was worth to
+    # THEM.
+    waived = repayment_result.get("waived_interest", 0) or 0
+    if waived > 0:
+        st.caption(
+            f"RAP waived {fmt_money(waived)} of interest your payments didn't "
+            "cover — that is the plan's subsidy, and it is already reflected in "
+            "the interest figure above.".replace("$", chr(92) + "$")
+        )
     forgiven = repayment_result.get("forgiven_amount", 0) or 0
     if forgiven <= 0:
         return
@@ -4843,6 +4855,8 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
     balance = principal
     total_paid_in_roi_window = 0.0
     forgiven_amount = 0.0
+    total_interest = 0.0
+    waived_interest = 0.0
     schedule_rows = []
     max_months = max_term_years * 12
 
@@ -4851,6 +4865,14 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
         agi = get_annual_salary_for_year(major_name, year_index)
         payment = calculate_rap_payment(agi, dependents)["monthly_payment"]
         interest = balance * monthly_rate
+        # RAP waives the interest a payment does NOT cover. Interest the
+        # payment DOES cover is paid by the borrower and is a real cost -- so
+        # the split is min/max, not "all of it is free". Reporting the whole
+        # accrual as waived was wrong in the direction that flatters the plan,
+        # and wrong by the largest amount for borrowers whose payment always
+        # exceeds the interest: they have nothing waived at all.
+        total_interest += min(payment, interest)
+        waived_interest += max(interest - payment, 0.0)
         principal_reduction = payment - interest
         if principal_reduction < RAP_PRINCIPAL_MATCH_CAP:
             principal_reduction = min(balance, RAP_PRINCIPAL_MATCH_CAP)
@@ -4874,7 +4896,16 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
     schedule_df = pd.DataFrame(schedule_rows)
     return {
-        "total_interest": 0.0,  # waived under RAP's real interest-subsidy provision
+        # Interest the borrower actually paid. NOT zero: RAP's subsidy covers
+        # only the shortfall between the payment and the accrual. A borrower
+        # earning enough that the payment always exceeds the interest has none
+        # of it waived and pays every dollar -- $165,109 on a $190,000 loan in
+        # the case that surfaced this.
+        "total_interest": total_interest,
+        # What the subsidy was actually worth. Zero for that same borrower,
+        # which is the point: it is a figure about this scenario, not a
+        # property of the plan.
+        "waived_interest": waived_interest,
         "payoff_years": schedule_df["month"].iloc[-1] / 12,
         "schedule": schedule_df,
         "total_paid_in_roi_window": total_paid_in_roi_window,
@@ -11557,14 +11588,19 @@ def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest
             {"Plan": "RAP (Year-1 income)",
              "Monthly Payment": fmt_money(rap_pay["monthly_payment"]),
              "Payoff / Forgiveness": f"{rap_res['payoff_years']:.1f} yrs",
-             "Interest Paid": "$0 (waived)",
+             # Was hardcoded "$0 (waived)", which is the same error the
+             # simulator carried: RAP waives only the interest a payment does
+             # not cover, so a borrower whose payment exceeds the accrual pays
+             # all of it. Read the computed figure like every other row does.
+             "Interest Paid": fmt_money(rap_res["total_interest"]),
              "Forgiven (30 yr)": fmt_money(rap_res["forgiven_amount"]),
              f"{roi_window_years}-Yr Premium": fmt_money(rap_roi["earnings_premium"])},
         ]))
         st.caption(
-            "Under **RAP**, payments track your income, unpaid interest is waived, and the "
-            "government matches up to $50/month toward principal — so the balance never grows "
-            "and anything left is forgiven after 30 years. **Tiered Standard** is a fixed "
+            "Under **RAP**, payments track your income, **unpaid** interest is waived — the "
+            "part your payment doesn't cover, which is nothing if you earn enough to cover it "
+            "— and the government matches up to $50/month toward principal, so the balance "
+            "never grows and anything left is forgiven after 30 years. **Tiered Standard** is a fixed "
             "payment over a term set by your balance. Premium is the COL-adjusted "
             f"{roi_window_years}-year earnings premium under each plan."
         )
