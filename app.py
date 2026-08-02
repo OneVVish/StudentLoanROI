@@ -1092,6 +1092,11 @@ PARENT_PLUS_LIMIT_EFFECTIVE_YEAR = 2026
 # undergrad; the replacement does not).
 # [Source: studentaid.gov OBBBA definitions, "Professional students" annual and
 # aggregate tables, page updated 2026-07-06.]
+# Graduate (non-professional) borrowing, post-OBBBA. Lower on both counts than
+# the professional limits below, and the aggregate covers graduate study only --
+# undergraduate borrowing does not count against it.
+GRADUATE_ANNUAL_UNSUB_LIMIT = 20500
+GRADUATE_AGGREGATE_LIMIT = 100000
 PROFESSIONAL_ANNUAL_UNSUB_LIMIT = 50000
 PROFESSIONAL_AGGREGATE_LIMIT = 200000
 # Direct Unsubsidized for graduate/professional borrowers, loans first disbursed
@@ -1156,20 +1161,54 @@ UNDERGRAD_YEARS = 4
 # first spans a six-week certificate and an eighteen-month program; the second
 # has no defined end at all. A guess there would be indistinguishable from data
 # -- see MISMODELLED_EDUCATION_LEVELS.
+# Graduate levels are ADDITIONAL years on top of a bachelor's, not a total.
+# A master's is 2 years after 4; a doctorate 5 after 4. Keeping them here as
+# the additional figure and adding UNDERGRAD_YEARS in program_years_for_education
+# is what lets baseline_start_age_for and the loan schedule agree about when
+# the person actually starts earning.
+#
+# 5 years for a doctorate is a placeholder, not a finding -- real programmes run
+# 4 to 8. It is editable wherever it is shown, and the caption says so.
+GRADUATE_ADDITIONAL_YEARS = {
+    "Master's degree": 2,
+    "Doctoral or professional degree": 5,
+}
+
 PROGRAM_YEARS_BY_EDUCATION = {
     "Associate's degree": 2,
     "High school diploma or equivalent": 0,
     "No formal educational credential": 0,
+    **{level: UNDERGRAD_YEARS + extra
+       for level, extra in GRADUATE_ADDITIONAL_YEARS.items()},
 }
 
-# The sub-baccalaureate levels this app still models with the wrong program
-# length -- i.e. everything it hasn't been taught a real length for. This is
-# what gates the "we're charging you four years you don't need" disclosure and
-# the break-even suppression, so teaching the app a new length above
-# automatically stops treating that level as broken.
+# The levels this app still models with the wrong program length -- i.e.
+# everything it hasn't been taught a real length for. This gates the "we're
+# charging you four years you don't need" disclosure and the break-even
+# suppression, so teaching the app a new length above automatically stops
+# treating that level as broken.
+#
+# It used to be SUB_BACHELORS_EDUCATION_LEVELS minus the known lengths, which
+# made it structurally incapable of ever flagging a GRADUATE level: 113 of the
+# 825 occupations in the careers file are master's or doctoral, every one was
+# charged four undergraduate years, and the one mechanism for saying so could
+# not reach them. Now it is every level the app has an opinion about, minus the
+# ones with a real length -- which is the question the name was always asking.
+ALL_EDUCATION_LEVELS = SUB_BACHELORS_EDUCATION_LEVELS | set(GRADUATE_ADDITIONAL_YEARS)
 MISMODELLED_EDUCATION_LEVELS = (
-    SUB_BACHELORS_EDUCATION_LEVELS - set(PROGRAM_YEARS_BY_EDUCATION)
+    ALL_EDUCATION_LEVELS - set(PROGRAM_YEARS_BY_EDUCATION)
 )
+
+# Which credential an occupation's BLS entry-education implies, for the loan
+# limits. Graduate borrowing has its own annual and aggregate caps and its own
+# Direct rate, and no Parent PLUS at all.
+GRADUATE_EDUCATION_LEVELS = set(GRADUATE_ADDITIONAL_YEARS)
+
+
+def is_graduate_education(typical_education: str) -> bool:
+    """True when this occupation is entered with a master's or doctorate, so
+    the graduate loan limits apply rather than the undergraduate ones."""
+    return (typical_education or "") in GRADUATE_EDUCATION_LEVELS
 
 
 def program_years_for_education(typical_education: str) -> int:
@@ -1178,6 +1217,14 @@ def program_years_for_education(typical_education: str) -> int:
     anything without a specific length, which is every bachelor's-and-above
     occupation and every major."""
     return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
+
+
+def graduate_years_for_education(typical_education: str) -> int:
+    """Of the total above, how many years are GRADUATE study. Zero for every
+    undergraduate path. The loan model needs the split because the two halves
+    have different annual limits, different aggregate caps and different rates
+    -- and because Parent PLUS exists for one and not the other."""
+    return GRADUATE_ADDITIONAL_YEARS.get(typical_education or "", 0)
 
 
 def program_years_for_major(major_name: str) -> int:
@@ -4951,6 +4998,21 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
     return sum(row["loan_amount"] for row in schedule)
 
 
+def graduate_direct_cap(graduate_years: int) -> float:
+    """Total Direct Unsubsidized a GRADUATE student can borrow for their own
+    graduate study: $20,500 a year against a $100,000 aggregate.
+
+    Separate from federal_direct_cap because that function indexes the
+    undergraduate schedule by class standing (1st year $5,500, 2nd $6,500 ...),
+    a dimension graduate borrowing does not have -- it is one flat annual
+    figure. Feeding graduate years through the undergraduate table gave a
+    master's student $12,000 of federal capacity instead of $41,000 and pushed
+    the difference into the private tranche.
+    """
+    return min(max(graduate_years, 0) * GRADUATE_ANNUAL_UNSUB_LIMIT,
+               GRADUATE_AGGREGATE_LIMIT)
+
+
 def federal_direct_cap(schedule: list, dependency: str) -> float:
     """Total federal Direct (sub+unsub) a student can borrow across the financed
     years of `schedule` (the per-year list from compute_loan_schedule_by_year).
@@ -4966,7 +5028,8 @@ def federal_direct_cap(schedule: list, dependency: str) -> float:
     return min(total, FEDERAL_DIRECT_AGGREGATE_CAP.get(dependency, FEDERAL_DIRECT_AGGREGATE_CAP["dependent"]))
 
 
-def parent_plus_cap(schedule: list, dependency: str, start_year: int = None) -> float:
+def parent_plus_cap(schedule: list, dependency: str, start_year: int = None,
+                     graduate_years: int = 0) -> float:
     """Total Direct PLUS a PARENT can borrow across the financed years of
     `schedule`, post-OBBBA. Mirrors federal_direct_cap: only "university" rows
     count, each at the annual limit, bounded by the aggregate.
@@ -4986,7 +5049,14 @@ def parent_plus_cap(schedule: list, dependency: str, start_year: int = None) -> 
     cap, it requires facts the app never asks for, and it cannot apply to the
     prospective students this app is for.
     """
-    if dependency != "dependent":
+    if dependency != "dependent" or graduate_years > 0:
+        # Parent PLUS is for a DEPENDENT UNDERGRADUATE. A graduate student is
+        # independent for federal aid by definition, so no parent borrows on
+        # their behalf and Grad PLUS -- the loan that used to fill this role --
+        # was abolished by OBBBA. This used to be gated on the dependency radio
+        # alone, which is an undergraduate question, so a master's student who
+        # left it on "dependent" was handed up to $65,000 of a loan that cannot
+        # exist.
         return 0.0
     total = 0.0
     for row in schedule:
@@ -8063,18 +8133,33 @@ def resolve_program_years(selection_key: str, fallback: str) -> int:
     an unrecognised or not-yet-chosen selection falls through to
     UNDERGRAD_YEARS -- so anything this can't resolve keeps the old behaviour.
     """
+    return program_years_for_education(resolve_typical_education(selection_key, fallback))
+
+
+def resolve_typical_education(selection_key: str, fallback: str) -> str:
+    """The BLS entry-education for the current selection, resolved before the
+    Career section builds MAJOR_DATA. Empty string outside Career mode, where a
+    major is not an occupation and carries no education level -- everything
+    downstream then keeps the undergraduate defaults."""
     if st.session_state.get("dataset_mode_radio") != DATASET_MODE_CAREER:
-        return UNDERGRAD_YEARS
+        return ""
     selection = st.session_state.get(selection_key) or fallback
     careers = load_bls_careers(CAREERS_CSV_PATH_NATIONAL)
-    return program_years_for_education(careers.get(selection, {}).get("typical_education"))
+    return careers.get(selection, {}).get("typical_education") or ""
 
 
 # Scenario B's own selection is made above its financing block, so it could read
 # it directly -- it goes through the same helper anyway so both scenarios can't
 # drift apart on how a program length is decided.
 program_years_a = resolve_program_years("major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER])
+# How many of those years are GRADUATE study. Drives the loan limits, hides the
+# community-college path, and shifts the high-school baseline's start age.
+_typical_education_a = resolve_typical_education(
+    "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER])
+graduate_years_a = graduate_years_for_education(_typical_education_a)
 program_years_b = resolve_program_years("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER])
+graduate_years_b = graduate_years_for_education(
+    resolve_typical_education("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER]))
 
 st.sidebar.subheader("💰 Financing")
 
@@ -8334,7 +8419,13 @@ st.session_state.setdefault(
 # so the selector is hidden rather than shown with nonsense options
 # (cc_path_options(0) would offer "the entire 0-year degree"). Forced to "none"
 # so every downstream cc_* derivation stays defined and zero.
-if program_years_a == 0:
+#
+# A GRADUATE path is hidden for a harder reason than nonsense copy. No community
+# college awards a master's, and the clamp below is written for undergraduate
+# lengths: at program_years 2 it gave cc_years=2 and university_years=0, pricing
+# an entire master's at community-college tuition and financing $0 of it. The
+# gate used to be `== 0` alone, so a graduate length walked straight into that.
+if program_years_a == 0 or graduate_years_a > 0:
     st.session_state["cc_mode_a"] = "none"
     cc_mode_a = "none"
 else:
@@ -8367,7 +8458,11 @@ is_parttime_a = cc_mode_a == "parttime"
 # Clamped to the program length: a 2-year program done at a community college
 # is entirely community college, not 2 years of CC plus a negative number of
 # university years.
-cc_years_a = min(COMMUNITY_COLLEGE_YEARS, program_years_a) if cc_transfer_a else 0
+# Clamp against the UNDERGRADUATE portion only. Graduate years are never
+# transferable from a community college, so they must not be eligible to be
+# clamped away even if a graduate path ever reaches here.
+cc_years_a = (min(COMMUNITY_COLLEGE_YEARS, program_years_a - graduate_years_a)
+              if cc_transfer_a else 0)
 university_years_a = max(program_years_a - cc_years_a, 0)
 if cc_transfer_a:
     # Default CC state: the selected 4-year school's state (you transfer within
@@ -8443,11 +8538,17 @@ cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college
 # Federal Direct cap for the cap-and-gap split -- summed annual limits over the
 # financed years. Only meaningful in Detailed (Simplified's median debt is
 # already federal-only); None there so compute_scenario_results skips the split.
-federal_cap_a = federal_direct_cap(_schedule_a, loan_dependency) if loan_source_a == "personal" else None
+# Undergraduate Direct plus, for a graduate path, the separate graduate Direct
+# Unsubsidized capacity. They are different schedules against different
+# aggregates, so they are computed apart and added rather than run through one
+# table -- see graduate_direct_cap.
+federal_cap_a = (federal_direct_cap(_schedule_a, loan_dependency)
+                 + graduate_direct_cap(graduate_years_a)) if loan_source_a == "personal" else None
 # How much of the remainder a PARENT can still borrow federally. Paired with
 # federal_cap_a everywhere it travels -- omitting it silently restores the
 # pre-OBBBA "gap financing is unlimited" model for that one code path.
-plus_cap_a = (parent_plus_cap(_schedule_a, loan_dependency, start_year_a)
+plus_cap_a = (parent_plus_cap(_schedule_a, loan_dependency, start_year_a,
+                              graduate_years=graduate_years_a)
               if loan_source_a == "personal" else None)
 # Foregone-earnings option (widget rendered further down; read from state, per
 # this file's established before-the-widget pattern). enrollment_years extends
@@ -9538,8 +9639,9 @@ if compare_mode:
         _legacy_cc_b = get_shared_default("cc_b", "0") == "1"
         st.session_state.setdefault(
             "cc_mode_b", get_shared_default("cc_mode_b", "fulltime" if _legacy_cc_b else "none"))
-        # Hidden at zero program years -- see Scenario A for why.
-        if program_years_b == 0:
+        # Hidden at zero program years, and for graduate paths -- see Scenario A
+        # for why the second one matters (the clamp zeroes the loan).
+        if program_years_b == 0 or graduate_years_b > 0:
             st.session_state["cc_mode_b"] = "none"
             cc_mode_b = "none"
         else:
@@ -9566,7 +9668,8 @@ if compare_mode:
             )
         cc_transfer_b = cc_mode_b != "none"
         is_parttime_b = cc_mode_b == "parttime"
-        cc_years_b = min(COMMUNITY_COLLEGE_YEARS, program_years_b) if cc_transfer_b else 0
+        cc_years_b = (min(COMMUNITY_COLLEGE_YEARS, program_years_b - graduate_years_b)
+                      if cc_transfer_b else 0)
         university_years_b = max(program_years_b - cc_years_b, 0)
         if cc_transfer_b:
             _school_state_b = coa_match_b.get("STABBR") if coa_match_b is not None else None
@@ -9621,8 +9724,10 @@ if compare_mode:
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
         cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
         federal_cap_b = (federal_direct_cap(_schedule_b, loan_dependency)
+                         + graduate_direct_cap(graduate_years_b)
                          if loan_source_b == "personal" else None)
-        plus_cap_b = (parent_plus_cap(_schedule_b, loan_dependency, start_year_b)
+        plus_cap_b = (parent_plus_cap(_schedule_b, loan_dependency, start_year_b,
+                                      graduate_years=graduate_years_b)
                       if loan_source_b == "personal" else None)
         _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
         enrollment_years_b = (cc_years_b + university_years_b) if _foregone_on_b else 0
