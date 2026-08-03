@@ -5104,7 +5104,8 @@ def estimate_coa_inflation_rate(school_name: str, api_key: str, control_type) ->
 
 def calculate_standard_repayment(principal: float, annual_rate_pct: float,
                                   term_years: int = STANDARD_TERM_YEARS,
-                                  roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
+                                  roi_window_years: int = ROI_WINDOW_YEARS,
+                                  monthly_payment_override: float = None) -> dict:
     """
     Fixed-payment amortization: the classic loan formula where a constant
     monthly payment is split between interest (on the remaining balance)
@@ -5115,6 +5116,20 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
     Standard plan's real 10-year term), while roi_window_years is how far
     the ROI comparison looks, which the visitor now chooses. Only
     total_paid_in_roi_window depends on the latter.
+
+    `monthly_payment_override` models a borrower who PAYS MORE than the
+    term-derived payment (the repayment tool's "what you actually pay"
+    input). An override at or below the required payment is ignored -- the
+    required payment is a floor the lender enforces, so a lower figure is
+    not a plan, and callers caption that case rather than erroring. With an
+    active override the loan no longer lands on $0 exactly at a month
+    boundary, so this path caps the final payment at what is owed (the same
+    final-month lesson the IDR simulators encode), computes the totals from
+    the per-month payments, and emits a `payment` column -- every consumer
+    (payment_series, get_monthly_payment_for_stage,
+    _merge_balance_schedules) already prefers the column when present. The
+    no-override path is left byte-for-byte alone: analyze_model.py and every
+    existing caller depend on its exact arithmetic.
     """
     # Nothing borrowed, nothing to repay. Without this the loop below still
     # runs one month and reports a 0.1-year payoff on a $0 loan -- previously a
@@ -5137,6 +5152,37 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
         monthly_payment = principal / n_months
     else:
         monthly_payment = principal * monthly_rate / (1 - (1 + monthly_rate) ** -n_months)
+
+    if monthly_payment_override and monthly_payment_override > monthly_payment:
+        # The overridden loan does not land on $0 at a month boundary, so the
+        # simple close-out arithmetic below (total = flat x months) would
+        # charge a whole payment for the final partial month. This branch
+        # tracks the real per-month payments instead and emits them.
+        monthly_payment = float(monthly_payment_override)
+        balance = principal
+        total_interest = 0.0
+        total_paid_in_window = 0.0
+        schedule_rows = []
+        for month in range(1, n_months + 1):
+            interest = balance * monthly_rate
+            payment = min(monthly_payment, balance + interest)
+            balance = max(balance + interest - payment, 0.0)
+            total_interest += interest
+            if month <= roi_window_years * 12:
+                total_paid_in_window += payment
+            schedule_rows.append({"month": month, "year": month / 12,
+                                  "balance": balance, "payment": payment})
+            if balance <= 0:
+                break
+        schedule_df = pd.DataFrame(schedule_rows)
+        return {
+            "monthly_payment": monthly_payment,
+            "total_interest": total_interest,
+            "payoff_years": schedule_df["month"].iloc[-1] / 12,
+            "schedule": schedule_df,
+            "total_paid_in_roi_window": total_paid_in_window,
+            "forgiven_amount": 0.0,
+        }
 
     balance = principal
     total_interest = 0.0
@@ -8695,7 +8741,9 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   chart_label: str = None,
                                   private_balance: float = 0.0,
                                   private_rate: float = 0.0,
-                                  private_term: int = PRIVATE_TERM_YEARS) -> bytes:
+                                  private_term: int = PRIVATE_TERM_YEARS,
+                                  private_actual_payment: float = 0.0,
+                                  age: int = 0) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -8732,6 +8780,11 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         inputs.append(["Private / non-federal balance", fmt_money(private_balance)])
         inputs.append(["Private interest rate",
                        f"{private_rate:.2f}% over {int(private_term)} years"])
+        if private_actual_payment:
+            inputs.append(["What you actually pay on it",
+                           f"{fmt_money(private_actual_payment)}/month"])
+    if age:
+        inputs.append(["Your age", str(int(age))])
     inputs.append(["Loan type", "Own federal Direct loans" if forgivable
                                 else "Parent PLUS or private -- not IDR-eligible"])
     if pslf:
@@ -8783,6 +8836,24 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         story.append(Paragraph("Private / non-federal loan -- the same under "
                                "every plan above", styles["section"]))
         story.append(plan_table([private_row]))
+        # Same aggressive-pace caption the screen shows, from the same
+        # precomputed required_pace pair (chart-twin rule).
+        _pace = private_row[1].get("required_pace")
+        if _pace is not None:
+            if private_actual_payment > _pace["monthly_payment"] + 0.005:
+                _saved = _pace["total_interest"] - private_row[1]["total_interest"]
+                story.append(Paragraph(
+                    f"At {fmt_money(private_actual_payment)}/mo instead of the "
+                    f"required {fmt_money(_pace['monthly_payment'])}, this clears "
+                    f"in {private_row[1]['payoff_years']:.1f} years instead of "
+                    f"{_pace['payoff_years']:.1f} -- saving {fmt_money(_saved)} "
+                    "in interest.", styles["caption"]))
+            else:
+                story.append(Paragraph(
+                    f"The {fmt_money(private_actual_payment)}/mo entered is at or "
+                    f"below the required payment of "
+                    f"{fmt_money(_pace['monthly_payment'])}, so the rows use the "
+                    "required payment.", styles["caption"]))
         story.append(Spacer(1, 8))
         story.append(Paragraph("Combined -- what you actually pay",
                                styles["section"]))
@@ -8813,6 +8884,17 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         # not fit under the tables, and a chart orphaned from its caption -- or
         # split across the fold -- is worse than one page further on.
         story.append(PageBreak())
+        # Same debt-free-age line the screen renders beside its chart
+        # selector, for the same chosen row (chart-twin rule).
+        if age:
+            _end_age = age + chosen["payoff_years"]
+            story.append(Paragraph(
+                f"On {chart_label}, you would be ~{_end_age:.0f} when this ends "
+                "(paid off, or the remainder discharged)"
+                + (" -- past the 67 most people plan to retire at."
+                   if _end_age >= 67 else "."),
+                styles["caption"]))
+            story.append(Spacer(1, 6))
         story.append(build_pdf_balance_chart(chosen["schedule"], chart_label))
         story.append(Paragraph(f"Balance over time under {chart_label}.",
                                styles["caption"]))
@@ -11399,6 +11481,8 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_private_rate", "rpr", float),
     ("existing_private_term", "rpt", int),
     ("existing_has_private", "rhp", int),
+    ("existing_private_actual", "rpa", int),
+    ("existing_age", "rage", int),
 )
 
 
@@ -11469,7 +11553,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                                  prior_payments: int = 0,
                                  private_balance: float = 0.0,
                                  private_rate: float = 0.0,
-                                 private_term_years: int = PRIVATE_TERM_YEARS) -> list:
+                                 private_term_years: int = PRIVATE_TERM_YEARS,
+                                 private_actual_payment: float = 0.0) -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -11508,9 +11593,28 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     # "forgiven" on a $193,033 loan because private money rode along inside the
     # forgivable balance. Keeping it in a separate result makes that impossible
     # by construction rather than by care.
-    private_result = (calculate_standard_repayment(private_balance, private_rate,
-                                                   private_term_years)
+    # `private_actual_payment` is what the borrower actually sends each month
+    # when that is MORE than the term's required payment -- the OP-shaped case
+    # this tool kept silent about. The override is private-tranche only: this
+    # loan is plain amortisation with no subsidy or forgiveness arithmetic to
+    # interact with, so paying more is honest math, whereas extra on the
+    # income-driven federal side changes waiver and discharge behaviour and is
+    # deliberately not modelled here.
+    private_result = (calculate_standard_repayment(
+                          private_balance, private_rate, private_term_years,
+                          monthly_payment_override=private_actual_payment or None)
                       if private_balance > 0 else None)
+    if private_result is not None and private_actual_payment:
+        # The required-pace figures, attached to the row like `countback` is:
+        # computed HERE so the renderer and the PDF read one precomputed pair
+        # instead of re-running a simulator each on their own basis.
+        _required = calculate_standard_repayment(private_balance, private_rate,
+                                                 private_term_years)
+        private_result["required_pace"] = {
+            "monthly_payment": _required["monthly_payment"],
+            "payoff_years": _required["payoff_years"],
+            "total_interest": _required["total_interest"],
+        }
 
     def with_private(federal_result: dict) -> dict:
         combined = combine_repayment_results(federal_result, private_result)
@@ -11590,7 +11694,9 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        prior_payments, forgivable, pslf, chart_label,
                        enabled: bool, private_balance: float = 0.0,
                        private_rate: float = 0.0,
-                       private_term: int = PRIVATE_TERM_YEARS) -> None:
+                       private_term: int = PRIVATE_TERM_YEARS,
+                       private_actual: float = 0.0,
+                       age: int = 0) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
     Only on the standalone page (`enabled`). Inside the calculator this module
@@ -11615,7 +11721,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
             rows, balance, rate, income, deps, accrued, prior_payments,
             forgivable, pslf, chart_label=chart_label,
             private_balance=private_balance, private_rate=private_rate,
-            private_term=private_term),
+            private_term=private_term,
+            private_actual_payment=private_actual, age=age),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -11730,6 +11837,14 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "capitalised -- put the interest part here. It changes how "
                  "payments are applied and is shown separately on the balance chart. "
                  "Leave at 0 if you only know one number.")
+        # 0 means "not answered", the same convention every optional number in
+        # this form uses. Asked because "payoff 16.8 yrs" and "you'd be 43"
+        # land very differently, and only the visitor knows which one decides.
+        age = c4.number_input(
+            "Your age (optional)", min_value=0, max_value=80, step=1,
+            key="existing_age",
+            help="Only used to say how old you'd be when each plan ends. "
+                 "Leave at 0 to skip.")
         forgivable = c6.checkbox(
             "These are my own federal Direct loans", value=True, key="existing_forgivable",
             help="Untick for Parent PLUS or private loans. Parent PLUS is not "
@@ -11803,6 +11918,18 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                      "here, not a rule. A longer term lowers the payment and "
                      "raises the total interest, and unlike the federal rows "
                      "nothing about it changes with your income.")
+            # Private tranche only, deliberately: this loan is plain
+            # amortisation, so paying more is honest arithmetic. Extra on the
+            # income-driven federal side changes RAP's waiver and the
+            # forgiveness clocks and is not modelled -- see the disclaimer at
+            # the bottom of the module.
+            private_actual = pc2.number_input(
+                "What you actually pay on it per month ($) — optional",
+                min_value=0, max_value=50_000, step=25,
+                key="existing_private_actual",
+                help="If you pay more than the required payment, put the real "
+                     "monthly figure here and the private loan is modelled at "
+                     "that pace. Leave at 0 for the required payment.")
         else:
             # HIDING AN INPUT MUST ALSO NEUTRALISE IT. Streamlit keeps a
             # widget's value in session_state after it stops being rendered, so
@@ -11814,6 +11941,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # cleared, so re-ticking restores what they typed.
             private_balance, private_rate = 0.0, 0.0
             private_term = PRIVATE_TERM_YEARS
+            private_actual = 0.0
 
 
         if not balance or not rate:
@@ -11850,7 +11978,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             prior_payments=prior_payments,
                                             private_balance=private_balance,
                                             private_rate=private_rate,
-                                            private_term_years=private_term)
+                                            private_term_years=private_term,
+                                            private_actual_payment=private_actual)
         plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
         private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
 
@@ -11873,6 +12002,29 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                         "plan above")
             st.dataframe(_repayment_table([private_row]),
                          hide_index=True, use_container_width=True)
+            # What the aggressive pace is worth, from the required_pace pair
+            # compare_existing_loan_plans precomputed -- read, never recompute,
+            # for the same reason the countback verdict is read (the renderer
+            # cannot pick the wrong basis for a number it never derives).
+            _pace = private_row[1].get("required_pace")
+            if _pace is not None:
+                if private_actual > _pace["monthly_payment"] + 0.005:
+                    _saved = _pace["total_interest"] - private_row[1]["total_interest"]
+                    st.caption((
+                        f"At **{fmt_money_md(private_actual)}/mo** instead of the "
+                        f"required {fmt_money_md(_pace['monthly_payment'])}, this "
+                        f"clears in **{private_row[1]['payoff_years']:.1f} years** "
+                        f"instead of {_pace['payoff_years']:.1f} — saving "
+                        f"{fmt_money_md(_saved)} in interest."
+                    ))
+                else:
+                    st.caption((
+                        f"The {fmt_money_md(private_actual)}/mo you entered is at "
+                        f"or below the required payment of "
+                        f"{fmt_money_md(_pace['monthly_payment'])}, so the rows "
+                        "use the required payment — a lender does not accept "
+                        "less as a plan."
+                    ))
 
             st.markdown("**Combined** — what you actually pay")
             st.dataframe(_repayment_table(plan_rows),
@@ -11986,12 +12138,27 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         chosen = st.selectbox("Show the charts for", plan_labels,
                                key="existing_chart_plan")
         chosen_result = next(r for label, r, _ in rows if label == chosen)
+        # "Payoff 16.8 yrs" is a number; "you'd be 43" is a decision aid --
+        # the same reasoning as render_payoff_age on the calculator side,
+        # including its retirement-age warning threshold. For the selected
+        # row only: a per-row column would be clipped in the dataframe, the
+        # lesson the count-back warning already carries.
+        if age:
+            _end_age = age + chosen_result["payoff_years"]
+            _end_phrase = (f"On **{chosen}**, you'd be **~{_end_age:.0f}** when "
+                           "this ends (paid off, or the remainder discharged).")
+            if _end_age >= 67:
+                st.warning(_end_phrase + " That is past the 67 most people "
+                           "plan to retire at.")
+            else:
+                st.caption(_end_phrase)
         _repayment_actions(rows, balance, rate, income, deps, accrued,
                            prior_payments, forgivable, pslf and forgivable,
                            chosen, enabled=always_open,
                            private_balance=private_balance,
                            private_rate=private_rate,
-                           private_term=private_term)
+                           private_term=private_term,
+                           private_actual=private_actual, age=age)
         st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
                          use_container_width=True, config=PLOTLY_CHART_CONFIG,
                          key="existing_balance_chart")

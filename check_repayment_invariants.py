@@ -137,6 +137,23 @@ def main() -> int:
     checked += 1
     problems += check("combined RAP federal + private", 190_000.0, combined)
 
+    # The payment-override path (the repayment tool's "what you actually pay"
+    # input) closes its books with a per-month capped final payment -- a
+    # SEPARATE code path from the term-derived close-out, so it gets its own
+    # cases. The below-required override must be ignored (identical books to
+    # the plain call), and the zero-rate case exercises the loop with no
+    # interest to hide behind.
+    for principal, rate, override in ((68_900.0, 6.0, 1_600.0),
+                                      (68_900.0, 6.0, 10_000.0),
+                                      (50_000.0, 9.07, 500.0),
+                                      (5_000.0, 0.0, 300.0)):
+        result = ns["calculate_standard_repayment"](
+            principal, rate, 9, monthly_payment_override=override)
+        checked += 1
+        problems += check(
+            f"Standard override ${override:,.0f}/mo on ${principal:,.0f} @ {rate}%",
+            principal, result, rate)
+
     if problems:
         print(f"repayment invariants: {len(problems)} violation(s) across {checked} cases\n")
         print("\n\n".join(problems))
