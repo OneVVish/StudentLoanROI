@@ -8273,7 +8273,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   forgivable: bool, pslf: bool,
                                   chart_label: str = None,
                                   private_balance: float = 0.0,
-                                  private_rate: float = 0.0) -> bytes:
+                                  private_rate: float = 0.0,
+                                  private_term: int = PRIVATE_TERM_YEARS) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -8309,7 +8310,7 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     if private_balance:
         inputs.append(["Private / non-federal balance", fmt_money(private_balance)])
         inputs.append(["Private interest rate",
-                       f"{private_rate:.2f}% over {PRIVATE_TERM_YEARS} years"])
+                       f"{private_rate:.2f}% over {int(private_term)} years"])
     inputs.append(["Loan type", "Own federal Direct loans" if forgivable
                                 else "Parent PLUS or private -- not IDR-eligible"])
     if pslf:
@@ -8372,7 +8373,7 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         "$10/month. Source: studentaid.gov OBBBA definitions.",
     ) + ((
         "Every row is your TOTAL bill: the federal plan plus the private "
-        f"balance amortised separately over {PRIVATE_TERM_YEARS} years. No plan "
+        f"balance amortised separately over {int(private_term)} years. No plan "
         "forgives private debt or lowers its payment for your income, so the "
         "private part is identical in every row -- what differs between rows is "
         "only the federal half.",
@@ -10870,6 +10871,7 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_pslf", "rpslf", int),
     ("existing_private_balance", "rpb", int),
     ("existing_private_rate", "rpr", float),
+    ("existing_private_term", "rpt", int),
 )
 
 
@@ -10904,6 +10906,10 @@ def seed_repayment_from_share() -> None:
             st.session_state.setdefault(key, get_shared_int(param, 0))
         else:
             st.session_state.setdefault(key, get_shared_float(param, 0.0))
+    # A term of 0 is below the widget's min_value and Streamlit raises on it.
+    # An absent ?rpt= means "not shared", not "zero years".
+    if not st.session_state.get("existing_private_term"):
+        st.session_state["existing_private_term"] = PRIVATE_TERM_YEARS
     # The two checkboxes are stored as 0/1 and must reach the widget as bools,
     # or Streamlit renders an int into a checkbox and the value is lost.
     for key in ("existing_forgivable", "existing_pslf"):
@@ -11024,7 +11030,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
 def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        prior_payments, forgivable, pslf, chart_label,
                        enabled: bool, private_balance: float = 0.0,
-                       private_rate: float = 0.0) -> None:
+                       private_rate: float = 0.0,
+                       private_term: int = PRIVATE_TERM_YEARS) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
     Only on the standalone page (`enabled`). Inside the calculator this module
@@ -11048,7 +11055,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         data=generate_pdf_repayment_report(
             rows, balance, rate, income, deps, accrued, prior_payments,
             forgivable, pslf, chart_label=chart_label,
-            private_balance=private_balance, private_rate=private_rate),
+            private_balance=private_balance, private_rate=private_rate,
+            private_term=private_term),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -11161,9 +11169,17 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             "Private interest rate (%)", min_value=0.0, max_value=30.0, step=0.1,
             key="existing_private_rate", disabled=not private_balance,
             help="Private rates are credit-priced and usually higher than "
-                 f"federal. Amortised over {PRIVATE_TERM_YEARS} years, the common "
-                 "private term -- an assumption of this app, not a published "
-                 "rule.")
+                 "federal.")
+        # min_value=1: a zero-year term divides by zero in the amortisation, and
+        # there is no sensible reading of "repaid over no years".
+        private_term = pc1.number_input(
+            "Private repayment term (years)", min_value=1, max_value=30, step=1,
+            key="existing_private_term", disabled=not private_balance,
+            help="From your loan agreement. Private terms commonly run 5-20 "
+                 f"years; {PRIVATE_TERM_YEARS} is only the starting value here, "
+                 "not a rule. A longer term lowers the payment and raises the "
+                 "total interest, and unlike the federal rows nothing about it "
+                 "changes with your income.")
 
         prior_payments = st.number_input(
             "Qualifying payments already made (months)", min_value=0, max_value=480,
@@ -11209,7 +11225,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             pslf=pslf and forgivable,
                                             prior_payments=prior_payments,
                                             private_balance=private_balance,
-                                            private_rate=private_rate)
+                                            private_rate=private_rate,
+                                            private_term_years=private_term)
         st.dataframe(pd.DataFrame([{
             "Plan": label,
             "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
@@ -11287,7 +11304,15 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
 
         if forgivable:
             st.caption(
-                f"**Payoff is time from today**, not from when you first borrowed"
+                ("" if not private_balance else
+                 f"**Each row is your total bill** — the federal plan plus the "
+                 f"{fmt_money_md(private_balance)} private balance over "
+                 f"{int(private_term)} years. No plan forgives private debt or "
+                 f"lowers its payment for your income, so the private part is "
+                 f"the same in every row. **Payoff is when the LAST loan clears**, "
+                 f"which is why a row can outlast the federal term in its own "
+                 f"name.  \n")
+                + f"**Payoff is time from today**, not from when you first borrowed"
                 + (f" — the {prior_payments} payments you have already made are "
                    "subtracted from the income-driven rows." if prior_payments else ".")
                 + "  \n**Switching plans is not symmetric.** Payments you made "
@@ -11318,7 +11343,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            prior_payments, forgivable, pslf and forgivable,
                            chosen, enabled=always_open,
                            private_balance=private_balance,
-                           private_rate=private_rate)
+                           private_rate=private_rate,
+                           private_term=private_term)
         st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
                          use_container_width=True, config=PLOTLY_CHART_CONFIG,
                          key="existing_balance_chart")
