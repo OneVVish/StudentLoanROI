@@ -2400,6 +2400,34 @@ def fmt_pct(value):
     return f"{value:.1f}%"
 
 
+def fmt_roi_delta(roi_pct) -> str:
+    """The ROI figure shown beside the earnings premium, sized to be believed.
+
+    ROI% is the premium over the total investment, and Simplified mode can
+    make the denominator tiny: Berkeley's $13,000 median debt under a CS
+    premium reads "4049.3% ROI" -- arithmetically true and rhetorically
+    absurd, the kind of figure that makes an honest page read as marketing.
+    Past 10x the percentage stops communicating, so this switches to the
+    multiple ("40x return"), which stays legible at any size; below that the
+    familiar percent stands. The underlying roi_pct is unchanged everywhere
+    it is LOGGED -- this is display only, and both result branches call this
+    one helper so the arms cannot drift.
+
+    Symmetric on purpose: a small denominator inflates a LOSS the same way
+    ("-1167.0% ROI" on a journalist scenario), so the threshold is on the
+    magnitude and the sign rides through -- "-12x return", which st.metric
+    still colours red off the leading minus.
+
+    Returns None for a None roi_pct (a zero-investment path has no ratio to
+    show), matching st.metric's delta=None convention.
+    """
+    if roi_pct is None:
+        return None
+    if abs(roi_pct) >= 1000:
+        return f"{roi_pct / 100:,.0f}x return"
+    return fmt_pct(roi_pct) + " ROI"
+
+
 # Colour for the panel headings that say WHICH scenario or career stage a
 # block of numbers belongs to (Compare Mode's "A: ..." / "B: ...", and the
 # career stages in Real-World Take-Home). Plain bold body text left those
@@ -3531,8 +3559,17 @@ def report_write_failure(what: str, error: Exception) -> None:
     Goes to the server console, which is the Streamlit Cloud log -- never to
     the page. A visitor should not be shown a PostgREST error, and the app's
     own error text stays as it is.
+
+    Truncated, for two reasons that both bite during an outage: this now
+    fires on every failed pageview insert, so an unreachable database must
+    not flood the log -- and some client exceptions echo request payloads,
+    which for survey_responses can include free-text feedback. 300 chars
+    keeps the PostgREST code and message, which is the diagnostic part.
     """
-    print(f"[supabase] {what} failed: {type(error).__name__}: {error}", file=sys.stderr)
+    detail = f"{type(error).__name__}: {error}"
+    if len(detail) > 300:
+        detail = detail[:300] + "…"
+    print(f"[supabase] {what} failed: {detail}", file=sys.stderr)
 
 
 def json_safe_row(row: dict) -> dict:
@@ -6361,35 +6398,37 @@ def compute_scenario_results(major_name: str, loan_amount: float,
     # same new loan taken and repaid together, whereas an existing balance is
     # partly repaid and carries its own rate, so blending would misstate both
     # the payment and the payoff date.
+    # How an existing balance combines depends on the PLAN'S SHAPE, so the
+    # dispatch below branches on exactly that. Standard and Tiered amortise
+    # each loan on its own schedule, so two separately-simulated results
+    # genuinely add. An income-driven payment does NOT add: RAP and IDR size
+    # ONE payment from income alone and that payment covers every federal
+    # loan the borrower has, so simulating the new loan and the existing
+    # balance separately and summing charged the statutory payment TWICE --
+    # $500/month against a published $250 on a $60k+$30k pair at $60k AGI --
+    # and reported a payoff roughly twice as fast as reality.
+    # check_combined_repayment.py guards both directions.
     existing_result = None
-    if existing_debt and existing_debt > 0:
+    if not (existing_debt and existing_debt > 0):
+        # combine() with None returns a copy, so the no-debt path stays the
+        # one every first-time student takes, untouched by any of this.
+        combined_repayment = combine_repayment_results(repayment_result, None)
+    elif repayment_strategy in (STANDARD_STRATEGY_LABEL,
+                                TIERED_STANDARD_STRATEGY_LABEL):
         existing_rate = existing_debt_rate if existing_debt_rate is not None else interest_rate
-        if repayment_strategy == TIERED_STANDARD_STRATEGY_LABEL:
-            existing_result = calculate_standard_repayment(
-                existing_debt, existing_rate,
-                calculate_tiered_standard_term(existing_debt),
-                roi_window_years=roi_window_years)
-        elif repayment_strategy == STANDARD_STRATEGY_LABEL:
-            existing_result = calculate_standard_repayment(
-                existing_debt, existing_rate, roi_window_years=roi_window_years)
-
-    # Same combiner as the forgivable/non-forgivable split above -- it also
-    # takes the LATER payoff, which is what returning-student mode reports, and
-    # merges the schedules so the balance chart shows the whole debt rather
-    # than only the new loan.
-    #
-    # Fixed-payment plans only. Standard and Tiered amortise each loan on its
-    # own schedule, so two separately-simulated results genuinely add. An
-    # income-driven payment does NOT add: RAP and IDR size ONE payment from
-    # income alone and that payment covers every federal loan the borrower has,
-    # so simulating the new loan and the existing balance separately and
-    # summing charged the statutory payment TWICE -- $500/month against a
-    # published $250 on a $60k+$30k pair at $60k AGI -- and reported a payoff
-    # roughly twice as fast as reality. For those plans the two balances are
-    # instead simulated as one pool below.
-    if existing_result is not None or not (existing_debt and existing_debt > 0):
+        existing_result = calculate_standard_repayment(
+            existing_debt, existing_rate,
+            (calculate_tiered_standard_term(existing_debt)
+             if repayment_strategy == TIERED_STANDARD_STRATEGY_LABEL
+             else STANDARD_TERM_YEARS),
+            roi_window_years=roi_window_years)
+        # Same combiner as the forgivable/non-forgivable split above -- it
+        # also takes the LATER payoff, which is what returning-student mode
+        # reports, and merges the schedules so the balance chart shows the
+        # whole debt rather than only the new loan.
         combined_repayment = combine_repayment_results(repayment_result, existing_result)
     else:
+        existing_rate = existing_debt_rate if existing_debt_rate is not None else interest_rate
         # RAP / IDR with an existing balance: one income-driven simulation over
         # new-forgivable + existing, at their principal-weighted rate. The
         # blend is honest here for the same reason split_loan_financing's is --
@@ -6820,9 +6859,8 @@ def get_loan_to_income_risk_tier(loan_to_takehome_pct: float, effective_tax_rate
 
 def get_monthly_payment_for_stage(repayment_result: dict, target_month: int) -> float:
     """The loan payment at a given career-stage snapshot. If the loan is
-    already paid off or forgiven by target_month, the payment is $0 for
-    either strategy -- Standard's constant monthly_payment is only valid
-    while the loan is still active.
+    already paid off or forgiven by target_month, the payment is $0 --
+    a flat monthly_payment is only valid while the loan is still active.
 
     Strictly greater-than, not >=, and the boundary is not academic: it is
     the default view. A Standard 10-Year loan's final payment falls in month
@@ -8893,6 +8931,9 @@ def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
     contrast arm was missing a section the single arm's carries, the same
     one-branch-only gap the on-screen parity fix chased.
     """
+    # BOTH lists or nothing: rendering one scenario's take-home in a
+    # comparison report would be its own arm asymmetry, worse than omitting
+    # the section. The current caller always passes both together.
     if not takehome_stages_a or not takehome_stages_b:
         return []
     flowables = [
@@ -13130,11 +13171,23 @@ def takehome_figures(scenario: dict, major_name: str, stage_key: int, city: dict
         scenario.get("combined_repayment") or scenario["repayment_result"],
         (stage_key + 1) * 12)
     disposable_nominal = take_home["net_take_home"] / 12 - monthly_payment
+    _shown = scenario.get("combined_repayment") or scenario["repayment_result"]
+    _payoff_months = float(_shown.get("payoff_years", 0.0)) * 12
     return {
         "gross": gross, "take_home": take_home, "monthly_payment": monthly_payment,
         "disposable_nominal": disposable_nominal,
         "disposable_col_adjusted": adjust_for_cost_of_living(
             disposable_nominal, city["col_index"]),
+        # A real loan retired inside the FIRST year. The stage payment reads
+        # the end of the year (month 12 for Year 1 -- see
+        # get_monthly_payment_for_stage's boundary note), so a loan repaid in
+        # e.g. six months shows a $0 payment and a 0.0% ratio for Year 1 with
+        # nothing saying the early months carried one. The flag lets the
+        # renderer say so instead of leaving the $0 to read as "no loan".
+        # Year 1 only: by mid-career a retired loan's $0 is the expected
+        # story, not a surprise.
+        "loan_retired_before_snapshot": (
+            stage_key == 0 and monthly_payment == 0 and 0 < _payoff_months <= 12),
     }
 
 
@@ -13299,6 +13352,12 @@ def _render_takehome_stage(figs: dict, major_name: str, verbose: bool = True) ->
             "Monthly loan payment as a share of monthly take-home pay. Under "
             f"{fmt_pct(risk['manageable_threshold'])} is considered manageable."
         )
+    if figs.get("loan_retired_before_snapshot"):
+        st.caption(
+            "The $0 here means the loan is already repaid **within the first "
+            "year** — this snapshot is taken at month 12. The early months do "
+            "carry the payment shown in the Loan Information section above."
+        )
 
 
 def render_cc_path_note(cc_mode: str) -> None:
@@ -13403,6 +13462,21 @@ def render_loan_basis_disclosure(loan_basis: str, loan_source: str,
             "Direct PLUS and private borrowing aren't included either way, so a student "
             "who needed those owes more. Switch to Detailed mode to model your own cost, "
             "aid, and gap financing instead."
+        ).replace("$", r"\$"))
+    elif loan_basis == "graduate_reported":
+        # Its own branch, not the generic college caption below: that sentence
+        # describes an institution-wide undergraduate median blending every
+        # credential length, and this figure is neither -- it is per-school,
+        # per-field, graduate-level borrowing from the Scorecard
+        # field-of-study file.
+        st.caption((
+            f"This uses **{fmt_money(default_loan)}** -- the median federal debt "
+            f"graduates of {school_name}'s programs in this field leave with "
+            "(College Scorecard field-of-study data). It counts **loans taken at "
+            "the graduate level only** -- undergraduate borrowing is separate -- "
+            "and the cohorts it measures could still borrow Grad PLUS, which "
+            "OBBBA abolished, so matching it today can require private money. "
+            "Override the amount in the sidebar to model your own offer."
         ).replace("$", r"\$"))
     elif loan_source == "college":
         st.caption((
@@ -13518,7 +13592,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
             fmt_money(roi_result["earnings_premium"]),
-            delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
+            delta=fmt_roi_delta(roi_result["roi_pct"]),
             # Same explanation the single branch's premium metric carries --
             # "COL-Adjusted" must not be jargon in one arm and explained in
             # the other.
@@ -13872,7 +13946,7 @@ else:
     # below stays branch-local. The loan is the college-reported figure in
     # the Simplified cases, not a per-year cost buildup, so a year-by-year
     # COA->loan table would contradict the total there.
-    if (loan_basis_a in ("no_program", "reported_scaled")
+    if (loan_basis_a in ("no_program", "reported_scaled", "graduate_reported")
             or loan_source_a == "college"):
         render_loan_basis_disclosure(loan_basis_a, loan_source_a, default_loan_a,
                                      reported_debt_a, school_name_a,
@@ -13981,7 +14055,7 @@ else:
     position_cols[2].metric(
         "Earnings Premium (COL-Adjusted)",
         fmt_money(roi_result["earnings_premium"]),
-        delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
+        delta=fmt_roi_delta(roi_result["roi_pct"]),
         help=f"How much more money you'd have after {roi_horizon_years} years by going into "
              f"this career instead of {_cf['instead_of']} -- "
              "bigger is better. \"COL-Adjusted\" means we've factored in how "

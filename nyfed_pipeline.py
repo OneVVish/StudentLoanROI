@@ -116,12 +116,19 @@ def load_nyfed(xlsx_path: str) -> pd.DataFrame:
     # not enough: a reordered workbook (same six columns, different order)
     # would silently swap e.g. unemployment into the underemployment field.
     # Check each published header contains the keyword its position claims.
-    _expected_keywords = ["major", "unemployment", "underemployment",
-                          "early", "mid", "graduate"]
+    # Column 1's keyword needs an exclusion: "underemployment" CONTAINS
+    # "unemployment", so a 1<->2 swap would pass column 1's check on the
+    # substring alone. (Column 2's check still catches that swap, but each
+    # column should fail on its own evidence rather than lean on a
+    # neighbour's.)
+    _expected = [("major", None), ("unemployment", "underemployment"),
+                 ("underemployment", None), ("early", None), ("mid", None),
+                 ("graduate", None)]
     _mismatched = [
         f"col {i} ({str(header)!r}) does not look like {keyword!r}"
-        for i, (header, keyword) in enumerate(zip(raw.columns, _expected_keywords))
+        for i, (header, (keyword, excluded)) in enumerate(zip(raw.columns, _expected))
         if keyword not in str(header).strip().lower()
+        or (excluded and excluded in str(header).strip().lower())
     ]
     if _mismatched:
         sys.exit("Column order/labels in the workbook no longer match RAW_COLUMNS:\n  "
