@@ -3601,8 +3601,12 @@ def log_usage_event(action: str):
             ),
             ttl=0,
         )
-    except Exception:
-        pass
+    except Exception as error:
+        # Reported, not swallowed silently: a forgotten migration rejects the
+        # WHOLE row (PGRST204) and an unreported one is indistinguishable from
+        # a day with no traffic. Reporting goes to the server console only, so
+        # this still can't take the page down.
+        report_write_failure("usage_logs insert", error)
 
 
 def save_survey_response(respondent_role: str, hs_graduation_year: str,
@@ -3643,10 +3647,13 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             # The paired pre/post measurement. Survey-only, so it is a named
             # argument like the four above rather than a member of context --
             # context is spread into four tables, and these columns exist on
-            # one. Placed before **context so a context key added later cannot
-            # silently overwrite a measurement.
-            **(instrument or {}),
+            # one. Spread AFTER **context because in a dict literal the LAST
+            # spread wins: this order is what stops a context key added later
+            # from silently overwriting a measurement. (It used to be spread
+            # first, under a comment claiming the opposite of Python's
+            # semantics -- latent only because no key collided.)
             **context,
+            **(instrument or {}),
         }
         execute_query(
             conn.table("survey_responses").insert([json_safe_row(row)], count="None"),
@@ -4094,7 +4101,8 @@ def save_pdf_download(context: dict) -> bool:
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("pdf_downloads insert", error)
         return False
 
 
@@ -4117,7 +4125,8 @@ def save_scenario_share(context: dict) -> bool:
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("scenario_shares insert", error)
         return False
 
 
@@ -4202,7 +4211,8 @@ def maybe_log_scenario_event(context: dict) -> bool:
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("scenario_events insert", error)
         return False
 
 
@@ -5189,6 +5199,21 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
     month (negative amortization); any balance still outstanding after
     `max_term_years` is forgiven.
     """
+    # Nothing borrowed, nothing to repay -- the same guard the Standard
+    # simulator has, for the same reason: without it the loop still emits one
+    # month and reports a 0.1-year payoff on a $0 loan. The Standard guard's
+    # comment calls that the resting state for the 430 no-degree occupations;
+    # income-driven plans reach it the same way once selected for one.
+    if principal <= 0:
+        return {
+            "total_interest": 0.0,
+            "payoff_years": 0.0,
+            "schedule": pd.DataFrame([{"month": 0, "year": 0.0, "balance": 0.0,
+                                       "payment": 0.0}]),
+            "total_paid_in_roi_window": 0.0,
+            "forgiven_amount": 0.0,
+        }
+
     monthly_rate = annual_rate_pct / 100 / 12
     # `principal` is the whole balance owed; starting_interest says how much of
     # it is already-accrued unpaid interest rather than borrowed money. Default
@@ -5337,6 +5362,22 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
     at least $50 that month -- so the balance never grows from unpaid
     interest. Any balance remaining after max_term_years (30 real years /
     360 payments) is forgiven."""
+    # Same zero-principal guard as the other two simulators -- and RAP is the
+    # DEFAULT strategy for 2026+ starts, so a no-degree occupation (loan
+    # forced to 0) rests on this path and showed "Payoff Timeline 0.1 yrs"
+    # without it.
+    if principal <= 0:
+        return {
+            "total_interest": 0.0,
+            "waived_interest": 0.0,
+            "government_match": 0.0,
+            "payoff_years": 0.0,
+            "schedule": pd.DataFrame([{"month": 0, "year": 0.0, "balance": 0.0,
+                                       "payment": 0.0}]),
+            "total_paid_in_roi_window": 0.0,
+            "forgiven_amount": 0.0,
+        }
+
     monthly_rate = annual_rate_pct / 100 / 12
     balance = principal
     total_paid_in_roi_window = 0.0
@@ -14645,10 +14686,8 @@ still modelled — tick **Compare against pre-2026 repayment plans** under
 Advanced Analysis to add them back — but as a comparison against the old rules,
 not as choices. A shared link naming a superseded plan is mapped to the plan
 that replaced it (Standard 10-Year → Tiered Standard, IDR → RAP) rather than
-being dropped to whatever happens to be first. (RAP also still appears under **Advanced
-Analysis → 2026 Regulatory & Macro Forecasting**, which additionally models the
-Tiered Standard Plan.) **Parent PLUS is not eligible for RAP**, which is why it
-sits in the non-forgivable pool described above.
+being dropped to whatever happens to be first. **Parent PLUS is not eligible
+for RAP**, which is why it sits in the non-forgivable pool described above.
 
 One simplification: the plan follows the **start** year, while in reality each
 year's loans are judged by their own disbursement date, so a 2025 starter's
@@ -15178,9 +15217,14 @@ no email, no IP address and no account. Each visit gets a random ID that is
 thrown away when you close the tab, so two visits can't be linked to each
 other or to you.
 
-**Advanced Analysis Settings (optional, off by default).** Five extra
+**Advanced Analysis Settings (optional, off by default).** Four extra
 modules live in a sidebar expander. Each one is opt-in, and the calculator
-behaves exactly as described above when all five are left off.
+behaves exactly as described above when all four are left off.
+
+- **Compare against pre-2026 repayment plans.** Adds Standard 10-Year and
+  IBR-style IDR back into the Repayment Strategy list, as a comparison
+  against the old rules — see the repayment-plans section above for why
+  they are not offered as choices for a 2026+ start.
 
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
   fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard

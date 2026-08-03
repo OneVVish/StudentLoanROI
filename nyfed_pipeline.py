@@ -112,6 +112,21 @@ def load_nyfed(xlsx_path: str) -> pd.DataFrame:
     if raw.shape[1] != len(RAW_COLUMNS):
         sys.exit(f"Expected {len(RAW_COLUMNS)} columns in {SHEET_NAME!r}, found {raw.shape[1]}. "
                  "The workbook's layout has changed; re-check RAW_COLUMNS before trusting output.")
+    # The rename below is POSITIONAL, so a column count that still matches is
+    # not enough: a reordered workbook (same six columns, different order)
+    # would silently swap e.g. unemployment into the underemployment field.
+    # Check each published header contains the keyword its position claims.
+    _expected_keywords = ["major", "unemployment", "underemployment",
+                          "early", "mid", "graduate"]
+    _mismatched = [
+        f"col {i} ({str(header)!r}) does not look like {keyword!r}"
+        for i, (header, keyword) in enumerate(zip(raw.columns, _expected_keywords))
+        if keyword not in str(header).strip().lower()
+    ]
+    if _mismatched:
+        sys.exit("Column order/labels in the workbook no longer match RAW_COLUMNS:\n  "
+                 + "\n  ".join(_mismatched)
+                 + "\nRe-check RAW_COLUMNS against the sheet before trusting output.")
     raw.columns = RAW_COLUMNS
     return raw.dropna(subset=["major"])
 
