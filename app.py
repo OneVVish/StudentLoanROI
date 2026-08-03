@@ -24,7 +24,7 @@ import math
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xml_escape
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
@@ -3195,6 +3195,16 @@ NAV_CALCULATOR = "calculator"
 NAV_ORIGINS = frozenset({NAV_CALCULATOR}) | frozenset(STANDALONE_TOOLS)
 
 
+# The zone every daily/weekly traffic figure is bucketed in.
+#
+# NOT UTC, and that is the whole point. Timestamps are correct absolute
+# instants -- now_local().isoformat() always carries an offset -- but bucketing
+# them by UTC calendar date puts a Pacific visitor at 20:00 on the FOLLOWING
+# day's count. For a US audience that misfiles roughly every evening session.
+# Reporting in one named zone makes "a day" mean something a reader can check.
+TRAFFIC_REPORT_TZ = "America/Los_Angeles"
+
+
 # Every action that represents one visit landing. Anything asking "how many
 # people came at all" must use ALL of them, or it silently undercounts the
 # moment a tool link is shared. Derived, so a new tool cannot be added to the
@@ -3260,6 +3270,121 @@ def pageview_action() -> str:
     """The landing action for this visit."""
     tool = requested_tool()
     return STANDALONE_TOOLS[tool]["action"] if tool else "pageview"
+
+
+def landing_page_key(action: str) -> str:
+    """The page a landing action refers to, or "" if it is not a landing."""
+    if action == "pageview":
+        return NAV_CALCULATOR
+    for key, tool in STANDALONE_TOOLS.items():
+        if action == tool["action"]:
+            return key
+    return ""
+
+
+def traffic_report_dates(usage_df, tz: str = TRAFFIC_REPORT_TZ):
+    """usage_logs rows -> the reporting-zone calendar date of each row.
+
+    `utc=True` is load-bearing, not defensive: offsets vary row to row (every
+    row before 2026-08-02 is +00:00, every row after carries the visitor's real
+    zone), and without it pandas returns an object column of per-row-local
+    Timestamps whose .dt accessor then silently yields LOCAL dates -- a
+    different day per visitor, which is not a bucket at all.
+
+    Converting to one named zone afterwards is what stops the other failure:
+    .dt.date straight off UTC files a 20:00 Pacific visit under the next day.
+    """
+    parsed = pd.to_datetime(usage_df["timestamp"], utc=True, errors="coerce")
+    return parsed.dt.tz_convert(tz).dt.date
+
+
+def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None) -> dict:
+    """Everything the daily digest and the admin trend panels both report.
+
+    Pure -- frames in, frames out, no Streamlit -- so the scheduled digest and
+    the dashboard run the SAME arithmetic. Two implementations of "yesterday's
+    landings" would drift, and the one place that would surface is a number in
+    an email disagreeing with the number on screen. Same reasoning as the
+    chart twins in CLAUDE.md, applied before the divergence exists.
+
+    `asof` makes a run reproducible and lets a missed day be recovered; it
+    defaults to today in the reporting zone.
+    """
+    pages = [NAV_CALCULATOR] + list(STANDALONE_TOOLS)
+    empty = pd.DataFrame(columns=pages + ["total"])
+    if usage_df is None or usage_df.empty or "action" not in usage_df.columns:
+        return {"tz": tz, "asof": asof, "daily": empty, "windows": {},
+                "cold": [], "by_src": pd.DataFrame(columns=["Source", "Landings"]),
+                "best_day": None}
+
+    df = usage_df.copy()
+    df["_date"] = traffic_report_dates(df, tz)
+    df["_page"] = df["action"].astype(str).map(landing_page_key)
+    landings = df[(df["_page"] != "") & df["_date"].notna()]
+
+    if asof is None:
+        asof = pd.Timestamp.now(tz=tz).date()
+
+    # Zero-fill: a day with no visits is a fact, and value_counts() omits it --
+    # so a gap would read as missing data rather than as a quiet day, which is
+    # the one signal a trend view exists to show.
+    daily = empty
+    if not landings.empty:
+        counts = (landings.groupby(["_date", "_page"]).size()
+                          .unstack(fill_value=0).reindex(columns=pages, fill_value=0))
+        full = pd.date_range(min(counts.index), asof, freq="D").date
+        daily = counts.reindex(full, fill_value=0)
+        daily["total"] = daily[pages].sum(axis=1)
+
+    def window(end, days: int) -> dict:
+        """Inclusive `days`-long window ending on `end`, as {page: count}.
+
+        Plain datetime.date arithmetic throughout -- daily's index is
+        datetime.date objects, and mixing pd.Timedelta into the comparison
+        produces a bool/date operand clash rather than a wrong answer.
+        """
+        if daily.empty:
+            return {p: 0 for p in pages + ["total"]}
+        start = end - timedelta(days=days - 1)
+        mask = [(start <= d <= end) for d in daily.index]
+        rows = daily[mask]
+        return {c: int(rows[c].sum()) for c in daily.columns}
+
+    y = asof - timedelta(days=1)
+    windows = {
+        "yesterday": window(y, 1),
+        "prior_day": window(y - timedelta(days=1), 1),
+        "last7": window(y, 7),
+        "prior7": window(y - timedelta(days=7), 7),
+    }
+
+    # Cold vs internal, per tool. Page navigations only -- an in-page handoff
+    # produces no landing, so subtracting it can drive cold negative.
+    navs = df[df["action"].astype(str).str.startswith("nav:")]
+    parsed_navs = (navs["action"].str.extract(
+        r"^nav:from=(?P<f>[^:]+):to=(?P<t>[^:]+)(?P<inpage>:inpage=1)?$")
+        if not navs.empty else pd.DataFrame(columns=["f", "t", "inpage"]))
+    page_navs = parsed_navs[parsed_navs["inpage"].isna()] if not parsed_navs.empty \
+        else parsed_navs
+    cold = []
+    for key, tool in STANDALONE_TOOLS.items():
+        landed = int((df["action"] == tool["action"]).sum())
+        internal = int((page_navs["t"] == key).sum()) if not page_navs.empty else 0
+        cold.append({"Tool": tool["label"], "Landings": landed,
+                     "Internal": internal, "Cold": max(landed - internal, 0)})
+
+    by_src = pd.DataFrame(columns=["Source", "Landings"])
+    if not landings.empty and "traffic_source" in landings.columns:
+        src = landings["traffic_source"].fillna("(organic)").replace("", "(organic)")
+        by_src = (src.value_counts().reset_index())
+        by_src.columns = ["Source", "Landings"]
+
+    best = None
+    if not daily.empty and daily["total"].max() > 0:
+        best = (daily["total"].idxmax(), int(daily["total"].max()))
+
+    return {"tz": tz, "asof": asof, "daily": daily, "windows": windows,
+            "cold": cold, "by_src": by_src, "best_day": best}
 
 
 def current_page_key() -> str:
@@ -12389,16 +12514,56 @@ if admin_enabled:
     st.divider()
 
     # (a) App interactions over time
-    st.markdown("#### 📈 App interactions over time")
+    # Trends, from the SAME function the scheduled digest calls -- see
+    # traffic_windows. Two implementations of "yesterday's landings" would
+    # drift, and the place it would surface is a digest disagreeing with this
+    # panel, with no way to tell which is right.
+    _tw = traffic_windows(usage_df)
+    st.markdown(f"#### 📈 Landings per day — calendar days in {_tw['tz']}")
+    if _tw["daily"].empty:
+        st.caption("No landings yet.")
+    else:
+        _chart = _tw["daily"].drop(columns=["total"])
+        _chart.index = pd.to_datetime(list(_chart.index))
+        st.bar_chart(_chart)
+        _w = _tw["windows"]
+        _t1, _t2, _t3 = st.columns(3)
+        _t1.metric("Yesterday", _w["yesterday"]["total"],
+                   delta=_w["yesterday"]["total"] - _w["prior_day"]["total"])
+        _t2.metric("Last 7 days", _w["last7"]["total"],
+                   delta=_w["last7"]["total"] - _w["prior7"]["total"])
+        if _tw["best_day"]:
+            _d, _n = _tw["best_day"]
+            _t3.metric("Best day", _n, delta=f"{_d:%a %d %b}", delta_color="off")
+        st.caption(
+            f"Days are calendar days in **{_tw['tz']}**, not UTC: timestamps are "
+            "correct instants, but bucketing them by UTC date files a 20:00 "
+            "Pacific visit under the next day. Days with no visits are shown as "
+            "zero rather than omitted — a gap would read as missing data rather "
+            "than as a quiet day."
+        )
+
+    # Every row of every kind, kept as its own chart rather than relabelled:
+    # it answers a different question (how much did people DO) and it is what
+    # this panel has always shown. It is not a traffic measure -- nav: events
+    # alone added roughly one row per internal navigation.
+    st.markdown("#### 🧮 Logged events per day — every row, not just landings")
     _daily = _admin_parse_dates(usage_df).dropna() if (
         not usage_df.empty and "timestamp" in usage_df.columns) else pd.Series([], dtype=object)
     if _daily.empty:
         st.caption("No data yet.")
     else:
         by_day = _daily.value_counts().sort_index()
-        chart_df = pd.DataFrame({"Interactions": by_day.values},
+        chart_df = pd.DataFrame({"Logged events": by_day.values},
                                 index=pd.to_datetime(list(by_day.index)))
         st.bar_chart(chart_df)
+        st.caption(
+            "Counts interactions, navigations and survey events as well as "
+            "landings, so it moves when the app gains a new event type — it "
+            "stepped up when cross-page `nav:` events were added on 2026-08-03. "
+            "Use the landings chart above for traffic. This one is still bucketed "
+            "by **UTC** date."
+        )
 
     # (b) App interactions by traffic source (?src= tag)
     st.markdown("#### 🔗 Traffic by source")
