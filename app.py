@@ -8262,6 +8262,113 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
     return buffer.getvalue()
 
 
+def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
+                                  annual_income: float, dependents: int,
+                                  accrued: float, prior_payments: int,
+                                  forgivable: bool, pslf: bool,
+                                  chart_label: str = None) -> bytes:
+    """PDF of the repayment-plan comparison -- the standalone tool's report.
+
+    Deliberately NOT routed through generate_pdf_report_single. That builder is
+    organised around a scenario: a major, a school, a counterfactual, an ROI
+    window. This tool has none of those -- it takes the borrowing as given and
+    asks what to do about it -- so reusing it would mean threading a dozen
+    None-shaped arguments through and suppressing most of the sections.
+
+    It DOES share every primitive (_pdf_styles, _pdf_table, the header/footer,
+    build_pdf_balance_chart), so the two reports stay visually one product. The
+    chart-twin rule in CLAUDE.md applies here as it does everywhere: this
+    mirrors what render_existing_loan_comparison shows on screen, and a change
+    to one needs the same change in the other.
+    """
+    styles = _pdf_styles()
+    story = [Paragraph("Student Loan Repayment Plan Comparison", styles["cover_title"])]
+    story.append(Paragraph(
+        "For a balance already owed. An educational estimate from this app's own "
+        "formulas -- not your servicer's figures, and not financial advice.",
+        styles["body"]))
+    story.append(Spacer(1, 10))
+
+    inputs = [["Your figures", ""],
+              ["Current balance", fmt_money(balance)],
+              ["Interest rate", f"{rate:.2f}%"],
+              ["Annual income", fmt_money(annual_income)],
+              ["Dependent children", str(int(dependents))]]
+    if accrued:
+        inputs.append(["of which unpaid interest", fmt_money(accrued)])
+    if prior_payments:
+        inputs.append(["Qualifying payments already made",
+                       f"{int(prior_payments)} months"])
+    inputs.append(["Loan type", "Own federal Direct loans" if forgivable
+                                else "Parent PLUS or private -- not IDR-eligible"])
+    if pslf:
+        inputs.append(["PSLF employment", f"Yes -- forgiveness at "
+                                          f"{PSLF_QUALIFYING_PAYMENTS} payments"])
+    story.append(_pdf_table(inputs, header=True))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("Plan comparison", styles["section"]))
+    table = [["Plan", "Monthly", "Payoff", "Total interest", "Forgiven", "Interest waived"]]
+    for label, r, _note in rows:
+        monthly = (r["monthly_payment"] if "monthly_payment" in r
+                   else first_payment_of(r))
+        table.append([
+            label,
+            fmt_money(monthly),
+            f"{r['payoff_years']:.1f} yrs",
+            fmt_money(r["total_interest"]),
+            fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "--",
+            fmt_money(r.get("waived_interest")) if r.get("waived_interest")
+            else ("$0" if "RAP" in label else "--"),
+        ])
+    story.append(_pdf_table(table, header=True, full_width=True))
+    story.append(Spacer(1, 6))
+    if prior_payments:
+        story.append(Paragraph(
+            f"Payoff is time from today. The {int(prior_payments)} qualifying "
+            f"payments already made are subtracted from the income-driven rows.",
+            styles["caption"]))
+    story.append(Paragraph(
+        "Payments under an income-driven plan count toward discharge under RAP, "
+        "but moving to RAP extends the repayment period to RAP's 30 years. Going "
+        "the other way, RAP payments count toward IBR/ICR/PAYE only in months "
+        "where the RAP payment was at least the 10-year Standard payment. ICR and "
+        "PAYE terminate on July 1, 2028, and IBR is closed to loans originated on "
+        "or after July 1, 2026.", styles["caption"]))
+    story.append(Spacer(1, 12))
+
+    # One chart, for whichever plan the visitor was looking at on screen --
+    # passing the label keeps the PDF showing what they chose rather than a
+    # default they never selected.
+    chosen = next((r for label, r, _ in rows if label == chart_label), None)
+    if chosen is None and rows:
+        chart_label, chosen = rows[0][0], rows[0][1]
+    if chosen is not None and not chosen["schedule"].empty:
+        story.append(build_pdf_balance_chart(chosen["schedule"], chart_label))
+        story.append(Paragraph(f"Balance over time under {chart_label}.",
+                               styles["caption"]))
+        story.append(Spacer(1, 10))
+
+    story.append(Paragraph("What this does and does not include", styles["section"]))
+    for line in (
+        "Simplified models of the real plans. Your servicer's figures will differ.",
+        "Forgiven balances are taxable as ordinary income in the year they are "
+        "discharged. That tax is NOT included above.",
+        "Extra payments are not modelled. Paying more than the minimum shortens "
+        "every row, and under RAP it also forfeits the interest subsidy in any "
+        "month the extra covers the interest.",
+        "RAP's payment is 1-10% of income minus $50 per dependent, floored at "
+        "$10/month. Source: studentaid.gov OBBBA definitions.",
+    ):
+        story.append(Paragraph(f"- {line}", styles["caption"]))
+
+    buffer = io.BytesIO()
+    SimpleDocTemplate(buffer, pagesize=letter).build(
+        story, onFirstPage=_draw_pdf_header_footer, onLaterPages=_draw_pdf_header_footer,
+    )
+    return buffer.getvalue()
+
+
 def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int) -> Table:
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
@@ -10719,6 +10826,68 @@ def rap_months_counting_back(rap_result: dict, standard_monthly: float) -> dict:
             "share": counting / total if total else 0.0}
 
 
+# The repayment tool's inputs, as (session_state key, query param, caster).
+# Short param names because these ride in a URL people paste into chats.
+#
+# These were SHARE_EXEMPT until now, on the reasoning that a balance and an
+# income are the most identifying numbers a visitor can type. That reasoning
+# has not changed and is not wrong -- what changed is that a repayment
+# comparison is worth sharing (with a parent, a partner, a forum thread), and
+# refusing to build it does not stop anyone; it just makes them screenshot it.
+# So the numbers ride, and the button says plainly that they do, at the moment
+# of pressing it. They are still NOT in build_share_params: a calculator share
+# must never pick these up, or someone sharing a major would silently publish a
+# balance they typed into a different tool.
+REPAYMENT_SHARE_FIELDS = (
+    ("existing_balance", "rb", int),
+    ("existing_rate", "rr", float),
+    ("existing_income", "ri", int),
+    ("existing_dependents", "rd", int),
+    ("existing_accrued_interest", "rui", int),
+    ("existing_prior_payments", "rp", int),
+    ("existing_forgivable", "rf", int),
+    ("existing_pslf", "rpslf", int),
+)
+
+
+def build_repayment_share_params() -> dict:
+    """Every repayment-tool input as query params, for its Share button.
+
+    Emits only what has been set: a link from a half-filled form should not
+    pin the other fields to zero for the recipient.
+    """
+    params = {"tool": "repayment"}
+    for key, param, cast in REPAYMENT_SHARE_FIELDS:
+        value = st.session_state.get(key)
+        if value in (None, "", False, 0):
+            continue
+        params[param] = str(int(value) if cast is int else value)
+    return params
+
+
+def seed_repayment_from_share() -> None:
+    """URL -> session_state for the repayment inputs, before their widgets.
+
+    Same URL -> getter -> setdefault pipeline the sidebar uses. Runs from
+    render_existing_loan_comparison rather than at module level because the
+    widgets it seeds live inside that function -- Streamlit raises if a key is
+    assigned once its widget exists.
+    """
+    for key, param, cast in REPAYMENT_SHARE_FIELDS:
+        raw = get_shared_default(param, "")
+        if raw == "":
+            continue
+        if cast is int:
+            st.session_state.setdefault(key, get_shared_int(param, 0))
+        else:
+            st.session_state.setdefault(key, get_shared_float(param, 0.0))
+    # The two checkboxes are stored as 0/1 and must reach the widget as bools,
+    # or Streamlit renders an int into a checkbox and the value is lost.
+    for key in ("existing_forgivable", "existing_pslf"):
+        if key in st.session_state:
+            st.session_state[key] = bool(st.session_state[key])
+
+
 def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
                                  dependents: int = 0, forgivable: bool = True,
                                  starting_interest: float = 0.0,
@@ -10797,6 +10966,66 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     return rows
 
 
+def _repayment_actions(rows, balance, rate, income, deps, accrued,
+                       prior_payments, forgivable, pslf, chart_label,
+                       enabled: bool) -> None:
+    """Download-PDF and Share buttons for the repayment tool.
+
+    Only on the standalone page (`enabled`). Inside the calculator this module
+    is one expander among many and the page already has its own PDF and Share
+    buttons pinned at the top -- two of each, meaning different things, is
+    worse than one.
+
+    Neither writes to survey_responses/pdf_downloads/scenario_shares. Those
+    tables are shaped around a SCENARIO -- major, school, ROI -- and this tool
+    has none, so every column would be NULL and the row would say nothing
+    except that it happened. usage_logs takes a free-text action instead, the
+    same idiom school_search_run already uses, which also means no migration
+    and therefore no chance of the PGRST204 whole-row drop.
+    """
+    if not enabled:
+        return
+    pdf_col, share_col = st.columns(2)
+
+    pdf_col.download_button(
+        "📄 Download PDF Report",
+        data=generate_pdf_repayment_report(
+            rows, balance, rate, income, deps, accrued, prior_payments,
+            forgivable, pslf, chart_label=chart_label),
+        file_name="repayment_plan_comparison.pdf", mime="application/pdf",
+        use_container_width=True, key="repayment_pdf",
+        on_click=lambda: log_usage_event(
+            f"repayment_pdf:balance={int(balance)}:rate={rate}"
+            f":income={int(income)}:deps={int(deps)}:prior={int(prior_payments)}"
+            f":pslf={int(bool(pslf))}:forgivable={int(bool(forgivable))}"),
+    )
+
+    if share_col.button("🔗 Share This Comparison", use_container_width=True,
+                        key="repayment_share"):
+        # session_query_params carries test, exactly as the calculator's share
+        # does. src stays out for the same reason it does there: the recipient
+        # did not arrive through the sharer's recruitment channel.
+        st.query_params.from_dict({**session_query_params(),
+                                   **build_repayment_share_params()})
+        log_usage_event(
+            f"repayment_share:balance={int(balance)}:rate={rate}"
+            f":income={int(income)}:deps={int(deps)}:prior={int(prior_payments)}"
+            f":pslf={int(bool(pslf))}:forgivable={int(bool(forgivable))}")
+        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+        st.success("Link copied to your clipboard.")
+        # Said at the moment of sharing, not in a help tooltip nobody opens.
+        # These were deliberately kept OUT of share links until now precisely
+        # because a balance and an income are the most identifying things a
+        # visitor types here; the feature exists anyway, so the warning has to
+        # be where the decision is.
+        st.warning(
+            "**That link contains the numbers you entered** — your balance, "
+            "interest rate, income, dependants and payment count. Anyone you "
+            "send it to, and anyone they forward it to, can read them. Send it "
+            "the way you would send a screenshot of this page."
+        )
+
+
 def render_existing_loan_comparison(always_open: bool = False) -> None:
     """Plan comparison for someone already in repayment.
 
@@ -10805,6 +11034,11 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
     to do about it -- so it lives in its own expander, takes its own inputs and
     shares none of the scenario machinery.
     """
+    # URL -> session_state, before any of these widgets exist. Only on the
+    # standalone page: inside the calculator the same keys would be seeded from
+    # a link that was never about repayment.
+    if always_open:
+        seed_repayment_from_share()
     # Open by default on its own page: a visitor who followed a link TO this
     # tool should not have to click to reach it.
     with st.expander("💸 Already have loans? Compare repayment plans",
@@ -11001,6 +11235,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         chosen = st.selectbox("Show the balance over time for", plan_labels,
                                key="existing_chart_plan")
         chosen_result = next(r for label, r, _ in rows if label == chosen)
+        _repayment_actions(rows, balance, rate, income, deps, accrued,
+                           prior_payments, forgivable, pslf and forgivable,
+                           chosen, enabled=always_open)
         st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
                          use_container_width=True, config=PLOTLY_CHART_CONFIG,
                          key="existing_balance_chart")
