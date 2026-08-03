@@ -2118,6 +2118,11 @@ NYFED_MAJOR_SOC_GROUP = {
 # term; it is an assumption, not a published rule, and the page says so.
 PRIVATE_TERM_YEARS = 10
 
+# The label that marks the private tranche's own row in the comparison. Every
+# consumer that wants only the federal PLANS filters it out by this constant --
+# never by position, which changes whenever a plan is added.
+PRIVATE_ROW_LABEL = "Private / non-federal loan"
+
 RAP_DEPENDENT_REDUCTION = 50  # $/month per dependent
 RAP_MIN_PAYMENT = 10  # $/month floor on the payment ITSELF, after the
                       # dependent deduction -- not just the lowest AGI band.
@@ -8319,21 +8324,46 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     story.append(_pdf_table(inputs, header=True))
     story.append(Spacer(1, 12))
 
-    story.append(Paragraph("Plan comparison", styles["section"]))
-    table = [["Plan", "Monthly", "Payoff", "Total interest", "Forgiven", "Interest waived"]]
-    for label, r, _note in rows:
-        monthly = (r["monthly_payment"] if "monthly_payment" in r
-                   else first_payment_of(r))
-        table.append([
-            label,
-            fmt_money(monthly),
-            f"{r['payoff_years']:.1f} yrs",
-            fmt_money(r["total_interest"]),
-            fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "--",
-            fmt_money(r.get("waived_interest")) if r.get("waived_interest")
-            else ("$0" if "RAP" in label else "--"),
-        ])
-    story.append(_pdf_table(table, header=True, full_width=True))
+    def plan_table(subset, federal_only=False):
+        table = [["Plan", "Monthly", "Payoff", "Total interest", "Forgiven",
+                  "Interest waived"]]
+        for label, r, _note in subset:
+            if federal_only:
+                r = r.get("federal_only", r)
+            monthly = (r["monthly_payment"] if "monthly_payment" in r
+                       else first_payment_of(r))
+            table.append([
+                label,
+                fmt_money(monthly),
+                f"{r['payoff_years']:.1f} yrs",
+                fmt_money(r["total_interest"]),
+                fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "--",
+                fmt_money(r.get("waived_interest")) if r.get("waived_interest")
+                else ("$0" if "RAP" in label else "--"),
+            ])
+        return _pdf_table(table, header=True, full_width=True)
+
+    plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
+    private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
+
+    # Same three views as the screen, in the same order -- see the chart-twin
+    # rule in CLAUDE.md. A PDF that showed only the combined total while the
+    # page showed the split would be the drift this codebase keeps paying for.
+    if private_row is None:
+        story.append(Paragraph("Plan comparison", styles["section"]))
+        story.append(plan_table(plan_rows))
+    else:
+        story.append(Paragraph("Federal plans -- this is the choice you're making",
+                               styles["section"]))
+        story.append(plan_table(plan_rows, federal_only=True))
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("Private / non-federal loan -- the same under "
+                               "every plan above", styles["section"]))
+        story.append(plan_table([private_row]))
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("Combined -- what you actually pay",
+                               styles["section"]))
+        story.append(plan_table(plan_rows))
     story.append(Spacer(1, 6))
     if prior_payments:
         story.append(Paragraph(
@@ -10987,7 +11017,13 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                       if private_balance > 0 else None)
 
     def with_private(federal_result: dict) -> dict:
-        return combine_repayment_results(federal_result, private_result)
+        combined = combine_repayment_results(federal_result, private_result)
+        # Carried so the renderer and the PDF can show the federal half on its
+        # own without re-running any simulator. Recomputing there would be a
+        # second implementation of the same numbers, which is the drift trap
+        # the chart twins already document.
+        combined["federal_only"] = federal_result
+        return combined
 
     rows = []
     std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
@@ -11043,6 +11079,14 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                      "payments." if pslf else
                      "10% of income above a $22,000 allowance. Forgiven at 20 years. "
                      "Closed to loans originated on or after July 1, 2026."))
+    # The private tranche is one loan, identical under every plan, so it is
+    # returned once rather than as a row per plan -- which is also the
+    # clearest statement of the fact that no federal plan touches it.
+    if private_result is not None:
+        rows.append((PRIVATE_ROW_LABEL, private_result,
+                     f"Repaid in full over {private_term_years} years. Not "
+                     "federal: no plan forgives it, and nothing about it "
+                     "changes with your income or your plan."))
     return rows
 
 
@@ -11108,6 +11152,33 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
             "send it to, and anyone they forward it to, can read them. Send it "
             "the way you would send a screenshot of this page."
         )
+
+
+def _repayment_table(rows: list, federal_only: bool = False) -> pd.DataFrame:
+    """One comparison table. `federal_only` reads each row's pre-combination
+    result instead of the combined one, so the federal and combined views are
+    the SAME numbers filtered, never two calculations that could disagree.
+    """
+    out = []
+    for label, r, note in rows:
+        if federal_only:
+            r = r.get("federal_only", r)
+        out.append({
+            "Plan": label,
+            "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
+                        else fmt_money(first_payment_of(r))),
+            "Payoff": f"{r['payoff_years']:.1f} yrs",
+            "Total interest": fmt_money(r["total_interest"]),
+            "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
+            # Only RAP has a subsidy, so every other row is an em dash rather
+            # than $0 -- "$0" would read as a subsidy that failed rather than a
+            # plan that has none.
+            "Interest waived": (fmt_money(r["waived_interest"])
+                                if r.get("waived_interest") else
+                                ("$0" if "RAP" in label else "—")),
+            "What it is": note,
+        })
+    return pd.DataFrame(out)
 
 
 def render_existing_loan_comparison(always_open: bool = False) -> None:
@@ -11279,21 +11350,32 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             private_balance=private_balance,
                                             private_rate=private_rate,
                                             private_term_years=private_term)
-        st.dataframe(pd.DataFrame([{
-            "Plan": label,
-            "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
-                        else fmt_money(first_payment_of(r))),
-            "Payoff": f"{r['payoff_years']:.1f} yrs",
-            "Total interest": fmt_money(r["total_interest"]),
-            "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
-            # Only RAP has a subsidy, so every other row is an em dash rather
-            # than $0 -- "$0" would read as a subsidy that failed rather than a
-            # plan that has none.
-            "Interest waived": (fmt_money(r["waived_interest"])
-                                if r.get("waived_interest") else
-                                ("$0" if "RAP" in label else "—")),
-            "What it is": note,
-        } for label, r, note in rows]), hide_index=True, use_container_width=True)
+        plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
+        private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
+
+        if private_row is None:
+            # No private tranche: one table, and no headings to imply a split
+            # that does not exist.
+            st.dataframe(_repayment_table(plan_rows),
+                         hide_index=True, use_container_width=True)
+        else:
+            # Three views of the same numbers. Federal first because it is what
+            # the page is actually comparing; private second because it is one
+            # unchanging loan; combined last because it is the bill, and reading
+            # it before the two halves makes the halves look like a breakdown of
+            # a decision rather than the decision itself.
+            st.markdown("**Federal plans** — this is the choice you're making")
+            st.dataframe(_repayment_table(plan_rows, federal_only=True),
+                         hide_index=True, use_container_width=True)
+
+            st.markdown("**Private / non-federal loan** — the same under every "
+                        "plan above")
+            st.dataframe(_repayment_table([private_row]),
+                         hide_index=True, use_container_width=True)
+
+            st.markdown("**Combined** — what you actually pay")
+            st.dataframe(_repayment_table(plan_rows),
+                         hide_index=True, use_container_width=True)
 
         # The one-way door, given its own block because it is the single most
         # decision-relevant fact on this page and it inverts against intuition:
