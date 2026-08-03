@@ -26,6 +26,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import certifi
@@ -3195,6 +3196,42 @@ def requested_tool() -> str:
     """
     return get_shared_default("tool", "") if \
         get_shared_default("tool", "") in STANDALONE_TOOLS else ""
+
+
+def internal_tool_url(tool: str = "") -> str:
+    """A link from one page of this app to another, carrying the params that
+    describe THIS VISIT. Pass "" for the calculator.
+
+    These links are real navigations, not reruns: the browser loads a new page,
+    Streamlit starts a NEW SESSION, and every session_state latch resets. So
+    anything that survives a share only because it is latched -- test_mode,
+    traffic_source -- is simply gone on the other side unless the href carries
+    it. That is invisible in both directions: the tool page looks fine, and the
+    rows it writes look like untagged production traffic.
+
+    Carries two things:
+
+    - **test**, because losing it is the contamination on record in
+      migrations.sql. A developer on ?test=1 who clicks through to another tool
+      would otherwise be writing live rows to the production Supabase, and
+      nothing would mark them.
+    - **src**, because the visitor's recruitment channel is a fact about the
+      VISIT and they are still in it. This is the opposite call from
+      session_query_params, which deliberately withholds src from share links --
+      and the two are consistent: a share hands the URL to a DIFFERENT person,
+      where inheriting the sharer's channel would be fabricated attribution. A
+      cross-link is the same person walking between rooms.
+
+    admin and research stay out, as they do everywhere else: both fail safe
+    when dropped.
+    """
+    params = dict(session_query_params())
+    src = get_traffic_source()
+    if src:
+        params["src"] = src
+    if tool:
+        params["tool"] = tool
+    return "./?" + urlencode(params) if params else "./"
 
 
 def pageview_action() -> str:
@@ -11398,7 +11435,15 @@ def render_school_search(always_open: bool = False) -> None:
             # not release them.
             if st.session_state.get("active_tool") == "schools":
                 st.session_state.active_tool = ""
-                st.query_params.from_dict(session_query_params())
+                # Same params the cross-links carry. This one is a rerun, so
+                # the latches would survive anyway -- but it REWRITES the URL,
+                # and a visitor who reloads or bookmarks what they land on must
+                # not silently lose their test flag or their src tag.
+                _handoff = dict(session_query_params())
+                _src = get_traffic_source()
+                if _src:
+                    _handoff["src"] = _src
+                st.query_params.from_dict(_handoff)
                 st.rerun()
             st.rerun()
 
@@ -11445,11 +11490,11 @@ elif active_tool == "schools":
 if active_tool:
     st.caption(
         "Looking at whether a degree is worth borrowing for instead? "
-        "[Open the full calculator](./)."
+        f"[Open the full calculator]({internal_tool_url()})."
     )
     # The other tools, so each standalone page is a way IN to the rest rather
     # than a dead end. Only ever the ones this page is not.
-    _others = [f"[{t['label']}](./?tool={key})"
+    _others = [f"[{t['label']}]({internal_tool_url(key)})"
                for key, t in STANDALONE_TOOLS.items() if key != active_tool]
     if _others:
         st.caption("Other tools: " + " · ".join(_others))
