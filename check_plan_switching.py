@@ -225,6 +225,24 @@ def main() -> int:
             f"payment against the FEDERAL 10-year Standard payment; private "
             f"money belongs on neither side.")
 
+    # Multi-loan federal: splitting one balance into two notes must not move
+    # the count-back threshold -- it is the SUM of the per-loan 10-year
+    # Standard payments, and at one shared rate that sum equals the single
+    # loan's payment to the cent. A pooled-threshold implementation that
+    # amortised the total at a wrongly-derived rate would drift here.
+    split_rows = compare(0, 0, low, 0, True, 0.0, False, 0,
+                         federal_loans=[{"balance": BAL * 0.6, "rate": RATE},
+                                        {"balance": BAL * 0.4, "rate": RATE}])
+    _, split_rap, _ = row(split_rows, "RAP")
+    checked += 1
+    split_threshold = split_rap.get("countback", {}).get("threshold", 0.0)
+    if abs(split_threshold - threshold) > 0.51:
+        problems.append(
+            f"  splitting the ${BAL:,.0f} federal balance into two notes at the "
+            f"same rate moved the count-back threshold from ${threshold:,.2f} "
+            f"to ${split_threshold:,.2f}. The threshold is the sum of per-loan "
+            f"10-year Standard payments and must not move.")
+
     # It must still show up in what the borrower PAYS, or it has been dropped
     # rather than separated.
     checked += 1

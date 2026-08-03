@@ -8743,7 +8743,9 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   private_rate: float = 0.0,
                                   private_term: int = PRIVATE_TERM_YEARS,
                                   private_actual_payment: float = 0.0,
-                                  age: int = 0) -> bytes:
+                                  age: int = 0,
+                                  federal_loans: list = None,
+                                  private_loans: list = None) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -8757,7 +8759,19 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     chart-twin rule in CLAUDE.md applies here as it does everywhere: this
     mirrors what render_existing_loan_comparison shows on screen, and a change
     to one needs the same change in the other.
+
+    `federal_loans`/`private_loans` mirror compare_existing_loan_plans': lists
+    of row dicts, superseding the scalar params (kept as the one-loan
+    fallback so pre-grid callers keep working).
     """
+    fed_list = sanitize_loan_rows(
+        federal_loans if federal_loans is not None
+        else [{"balance": balance, "rate": rate}])
+    priv_list = sanitize_loan_rows(
+        private_loans if private_loans is not None
+        else [{"balance": private_balance, "rate": private_rate,
+               "term": private_term, "actual": private_actual_payment}],
+        private=True)
     styles = _pdf_styles()
     story = [Paragraph("Student Loan Repayment Plan Comparison", styles["cover_title"])]
     story.append(Paragraph(
@@ -8766,23 +8780,31 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         styles["body"]))
     story.append(Spacer(1, 10))
 
-    inputs = [["Your figures", ""],
-              ["Current balance", fmt_money(balance)],
-              ["Interest rate", f"{rate:.2f}%"],
-              ["Annual income", fmt_money(annual_income)],
-              ["Dependent children", str(int(dependents))]]
+    inputs = [["Your figures", ""]]
+    # One row per loan, same as the grids on screen; a single loan keeps the
+    # historical wording so old reports and new one-loan reports read alike.
+    if len(fed_list) == 1:
+        inputs.append(["Current balance", fmt_money(fed_list[0]["balance"])])
+        inputs.append(["Interest rate", f"{fed_list[0]['rate']:.2f}%"])
+    else:
+        for i, loan in enumerate(fed_list, 1):
+            inputs.append([f"Federal loan {i}",
+                           f"{fmt_money(loan['balance'])} at {loan['rate']:.2f}%"])
+    inputs.append(["Annual income", fmt_money(annual_income)])
+    inputs.append(["Dependent children", str(int(dependents))])
     if accrued:
         inputs.append(["of which unpaid interest", fmt_money(accrued)])
     if prior_payments:
         inputs.append(["Qualifying payments already made",
                        f"{int(prior_payments)} months"])
-    if private_balance:
-        inputs.append(["Private / non-federal balance", fmt_money(private_balance)])
-        inputs.append(["Private interest rate",
-                       f"{private_rate:.2f}% over {int(private_term)} years"])
-        if private_actual_payment:
-            inputs.append(["What you actually pay on it",
-                           f"{fmt_money(private_actual_payment)}/month"])
+    for i, loan in enumerate(priv_list, 1):
+        _label = ("Private / non-federal balance" if len(priv_list) == 1
+                  else f"Private loan {i}")
+        inputs.append([_label,
+                       f"{fmt_money(loan['balance'])} at {loan['rate']:.2f}% "
+                       f"over {int(loan['term'])} years"
+                       + (f", paying {fmt_money(loan['actual'])}/month"
+                          if loan.get("actual") else "")])
     if age:
         inputs.append(["Your age", str(int(age))])
     inputs.append(["Loan type", "Own federal Direct loans" if forgivable
@@ -8833,24 +8855,41 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                styles["section"]))
         story.append(plan_table(plan_rows, federal_only=True))
         story.append(Spacer(1, 8))
-        story.append(Paragraph("Private / non-federal loan -- the same under "
-                               "every plan above", styles["section"]))
+        story.append(Paragraph("Private / non-federal loan"
+                               + ("s" if len(priv_list) > 1 else "")
+                               + " -- the same under every plan above",
+                               styles["section"]))
         story.append(plan_table([private_row]))
+        # With several private loans, the combined row above cannot say which
+        # loan is which -- a per-loan breakdown mirrors the grid on screen.
+        _per = private_row[1].get("per_loan") or []
+        if len(_per) > 1:
+            _detail = [["Loan", "Balance", "Rate", "Term", "Monthly", "Payoff"]]
+            for i, loan in enumerate(_per, 1):
+                _detail.append([
+                    f"Private loan {i}", fmt_money(loan["balance"]),
+                    f"{loan['rate']:.2f}%", f"{int(loan['term'])} yrs",
+                    fmt_money(loan["monthly_payment"]),
+                    f"{loan['payoff_years']:.1f} yrs"])
+            story.append(Spacer(1, 4))
+            story.append(_pdf_table(_detail, header=True, full_width=True))
         # Same aggressive-pace caption the screen shows, from the same
-        # precomputed required_pace pair (chart-twin rule).
+        # precomputed required_pace pair (chart-twin rule): combined actual
+        # pace against combined required pace.
         _pace = private_row[1].get("required_pace")
         if _pace is not None:
-            if private_actual_payment > _pace["monthly_payment"] + 0.005:
+            _actual_monthly = private_row[1]["monthly_payment"]
+            if _actual_monthly > _pace["monthly_payment"] + 0.005:
                 _saved = _pace["total_interest"] - private_row[1]["total_interest"]
                 story.append(Paragraph(
-                    f"At {fmt_money(private_actual_payment)}/mo instead of the "
+                    f"At {fmt_money(_actual_monthly)}/mo instead of the "
                     f"required {fmt_money(_pace['monthly_payment'])}, this clears "
                     f"in {private_row[1]['payoff_years']:.1f} years instead of "
                     f"{_pace['payoff_years']:.1f} -- saving {fmt_money(_saved)} "
                     "in interest.", styles["caption"]))
             else:
                 story.append(Paragraph(
-                    f"The {fmt_money(private_actual_payment)}/mo entered is at or "
+                    "The actual payment entered is at or "
                     f"below the required payment of "
                     f"{fmt_money(_pace['monthly_payment'])}, so the rows use the "
                     "required payment.", styles["caption"]))
@@ -11469,20 +11508,28 @@ def rap_months_counting_back(rap_result: dict, standard_monthly: float) -> dict:
 # must never pick these up, or someone sharing a major would silently publish a
 # balance they typed into a different tool.
 REPAYMENT_SHARE_FIELDS = (
-    ("existing_balance", "rb", int),
-    ("existing_rate", "rr", float),
     ("existing_income", "ri", int),
     ("existing_dependents", "rd", int),
     ("existing_accrued_interest", "rui", int),
     ("existing_prior_payments", "rp", int),
     ("existing_forgivable", "rf", int),
     ("existing_pslf", "rpslf", int),
-    ("existing_private_balance", "rpb", int),
-    ("existing_private_rate", "rpr", float),
-    ("existing_private_term", "rpt", int),
     ("existing_has_private", "rhp", int),
-    ("existing_private_actual", "rpa", int),
     ("existing_age", "rage", int),
+)
+
+# The two loan GRIDS. One session key (a list of row dicts backing a
+# st.data_editor) feeds several params -- a column each -- so the 1:1 table
+# above cannot express them. The params keep their historical names and become
+# comma-joined, index-aligned lists: `rb=46300,22600&rr=6.05,3.4` is two
+# federal loans. An old link's single value parses as a one-loan list, so
+# every link minted before the grids existed still reproduces its comparison.
+REPAYMENT_LOAN_LIST_PARAMS = (
+    ("existing_federal_loans",
+     (("balance", "rb", int), ("rate", "rr", float))),
+    ("existing_private_loans",
+     (("balance", "rpb", int), ("rate", "rpr", float),
+      ("term", "rpt", int), ("actual", "rpa", int))),
 )
 
 
@@ -11490,7 +11537,10 @@ def build_repayment_share_params() -> dict:
     """Every repayment-tool input as query params, for its Share button.
 
     Emits only what has been set: a link from a half-filled form should not
-    pin the other fields to zero for the recipient.
+    pin the other fields to zero for the recipient. Loan grids emit one
+    comma-joined param per column (see REPAYMENT_LOAN_LIST_PARAMS), skipping
+    rows without a balance -- data_editor's blank add-row must not become a
+    phantom loan in the recipient's grid.
     """
     params = {"tool": "repayment"}
     for key, param, cast in REPAYMENT_SHARE_FIELDS:
@@ -11498,6 +11548,15 @@ def build_repayment_share_params() -> dict:
         if value in (None, "", False, 0):
             continue
         params[param] = str(int(value) if cast is int else value)
+    for key, columns in REPAYMENT_LOAN_LIST_PARAMS:
+        loans = sanitize_loan_rows(st.session_state.get(key),
+                                   private=(key == "existing_private_loans"))
+        if not loans:
+            continue
+        for column, param, cast in columns:
+            values = [(loan.get(column) or 0) for loan in loans]
+            params[param] = ",".join(
+                str(int(v)) if cast is int else f"{float(v):g}" for v in values)
     return params
 
 
@@ -11528,15 +11587,42 @@ def seed_repayment_from_share() -> None:
             st.session_state.setdefault(key, get_shared_int(param, 0))
         else:
             st.session_state.setdefault(key, get_shared_float(param, 0.0))
-    # A term of 0 is below the widget's min_value and Streamlit raises on it.
-    # An absent ?rpt= means "not shared", not "zero years".
-    if not st.session_state.get("existing_private_term"):
-        st.session_state["existing_private_term"] = PRIVATE_TERM_YEARS
+    # The loan grids: one comma list per column, index-aligned. The balance
+    # column decides how many loans the link carries; a ragged shorter column
+    # (a hand-edited link) pads with the default rather than crashing the page
+    # for everyone who opens it. A single-value old-style link parses as a
+    # one-loan list through exactly the same path.
+    for key, columns in REPAYMENT_LOAN_LIST_PARAMS:
+        primary = get_shared_default(columns[0][1], "")
+        if primary == "":
+            continue
+        parts_by_column = {
+            column: get_shared_default(param, "").split(",")
+            for column, param, _ in columns
+        }
+        rows = []
+        for i in range(len(parts_by_column["balance"])):
+            row = {}
+            for column, param, cast in columns:
+                parts = parts_by_column[column]
+                raw = parts[i].strip() if i < len(parts) else ""
+                try:
+                    row[column] = int(float(raw)) if cast is int else float(raw)
+                except ValueError:
+                    row[column] = 0
+            # A term of 0 is below the grid's minimum, and an absent ?rpt=
+            # means "not shared", not "zero years".
+            if key == "existing_private_loans" and not row.get("term"):
+                row["term"] = PRIVATE_TERM_YEARS
+            rows.append(row)
+        rows = [r for r in rows if (r.get("balance") or 0) > 0]
+        if rows:
+            st.session_state.setdefault(key, rows)
     # A link carrying a private balance must arrive with the section OPEN, or
     # the fields are hidden and the else-branch zeroes the very numbers the
     # link was built to share. Belt and braces with ?rhp= above: an older link
     # predating that param still has ?rpb=, and that is enough to know.
-    if st.session_state.get("existing_private_balance"):
+    if st.session_state.get("existing_private_loans"):
         st.session_state["existing_has_private"] = True
 
     # The checkboxes are stored as 0/1 and must reach the widget as bools, or
@@ -11544,6 +11630,38 @@ def seed_repayment_from_share() -> None:
     for key in ("existing_forgivable", "existing_pslf", "existing_has_private"):
         if key in st.session_state:
             st.session_state[key] = bool(st.session_state[key])
+
+
+def sanitize_loan_rows(loans, private: bool = False) -> list:
+    """st.data_editor's dynamic grid emits blank rows and None/NaN cells, and
+    only real loans may reach a simulator. Drops rows without a positive
+    balance, coerces missing/negative/NaN rates to 0, floors a private term
+    at 1 (a zero-year term divides by zero in the amortisation) and a missing
+    actual payment at 0.
+
+    NaN is the sneaky one: `max(nan, 0)` is nan and `nan > 0` is False, so
+    every coercion here goes through the `v > 0` comparison, which NaN fails.
+    """
+    def _num(value, fallback=0.0):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return v if v > 0 else fallback
+
+    clean = []
+    for row in (loans or []):
+        if not isinstance(row, dict):
+            continue
+        balance = _num(row.get("balance"))
+        if balance <= 0:
+            continue
+        entry = {"balance": balance, "rate": _num(row.get("rate"))}
+        if private:
+            entry["term"] = int(_num(row.get("term"), PRIVATE_TERM_YEARS)) or PRIVATE_TERM_YEARS
+            entry["actual"] = _num(row.get("actual"))
+        clean.append(entry)
+    return clean
 
 
 def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
@@ -11554,7 +11672,9 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                                  private_balance: float = 0.0,
                                  private_rate: float = 0.0,
                                  private_term_years: int = PRIVATE_TERM_YEARS,
-                                 private_actual_payment: float = 0.0) -> list:
+                                 private_actual_payment: float = 0.0,
+                                 federal_loans: list = None,
+                                 private_loans: list = None) -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -11563,10 +11683,35 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     that those simulators derived income from a major; income_for_year now lets
     them take a salary instead.
 
+    `federal_loans`/`private_loans` (lists of row dicts, see
+    sanitize_loan_rows) supersede the scalar params, which remain as the
+    one-loan case so existing callers and the guards' fixtures are untouched.
+    The multi-loan arithmetic follows the plan's SHAPE, the same split
+    compute_scenario_results makes for an existing balance:
+
+      - An income-driven plan (RAP/IBR) charges ONE payment, sized by income
+        alone, covering every federal loan -- so those rows simulate the
+        POOLED balance at the principal-weighted rate.
+      - A fixed plan amortises each note at its own rate over the plan's term
+        and the bills add -- so those rows chain per-loan results through
+        combine_repayment_results. The Tiered term is keyed on the TOTAL
+        balance: the statute sets it by what is owed, not per-note.
+
     `forgivable` is False for Parent PLUS, which is not eligible for RAP or
     IBR at all. Returning the rows anyway with a note would invite a borrower
     to compare against plans they cannot join.
     """
+    fed_loans = sanitize_loan_rows(
+        federal_loans if federal_loans is not None
+        else [{"balance": balance, "rate": rate}])
+    priv_loans = sanitize_loan_rows(
+        private_loans if private_loans is not None
+        else [{"balance": private_balance, "rate": private_rate,
+               "term": private_term_years, "actual": private_actual_payment}],
+        private=True)
+    total_fed = sum(loan["balance"] for loan in fed_loans)
+    fed_rate = (sum(loan["balance"] * loan["rate"] for loan in fed_loans) / total_fed
+                if total_fed else 0.0)
     # Under PSLF the income-driven plans stop at 120 payments instead of running
     # their full 20- or 30-year term. That is the entire mechanism: same payment,
     # same accrual, the balance is simply written off ten years in.
@@ -11586,35 +11731,54 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     idr_months = max(idr_term * 12 - prior, 0)
     rap_months = max(rap_term * 12 - prior, 0)
 
-    # The private tranche, amortised ONCE on its own terms and added to every
-    # row. It is not federal, so no plan forgives it, no plan reduces its
-    # payment, and it must never enter the pool an income-driven simulator can
-    # write off -- that is exactly the bug CLAUDE.md records, where $464,461 was
-    # "forgiven" on a $193,033 loan because private money rode along inside the
-    # forgivable balance. Keeping it in a separate result makes that impossible
-    # by construction rather than by care.
-    # `private_actual_payment` is what the borrower actually sends each month
-    # when that is MORE than the term's required payment -- the OP-shaped case
-    # this tool kept silent about. The override is private-tranche only: this
-    # loan is plain amortisation with no subsidy or forgiveness arithmetic to
-    # interact with, so paying more is honest math, whereas extra on the
-    # income-driven federal side changes waiver and discharge behaviour and is
-    # deliberately not modelled here.
-    private_result = (calculate_standard_repayment(
-                          private_balance, private_rate, private_term_years,
-                          monthly_payment_override=private_actual_payment or None)
-                      if private_balance > 0 else None)
-    if private_result is not None and private_actual_payment:
-        # The required-pace figures, attached to the row like `countback` is:
-        # computed HERE so the renderer and the PDF read one precomputed pair
-        # instead of re-running a simulator each on their own basis.
-        _required = calculate_standard_repayment(private_balance, private_rate,
-                                                 private_term_years)
-        private_result["required_pace"] = {
-            "monthly_payment": _required["monthly_payment"],
-            "payoff_years": _required["payoff_years"],
-            "total_interest": _required["total_interest"],
-        }
+    # The private tranche, amortised on its own terms and added to every row.
+    # It is not federal, so no plan forgives it, no plan reduces its payment,
+    # and it must never enter the pool an income-driven simulator can write
+    # off -- that is exactly the bug CLAUDE.md records, where $464,461 was
+    # "forgiven" on a $193,033 loan because private money rode along inside
+    # the forgivable balance. Keeping it in separate results makes that
+    # impossible by construction rather than by care.
+    # Each row's `actual` is what the borrower actually sends that loan each
+    # month when that is MORE than its term's required payment. The override
+    # is private-tranche only: these loans are plain amortisation with no
+    # subsidy or forgiveness arithmetic to interact with, so paying more is
+    # honest math, whereas extra on the income-driven federal side changes
+    # waiver and discharge behaviour and is deliberately not modelled here.
+    private_result = None
+    if priv_loans:
+        def _private_sim(loan: dict, with_override: bool) -> dict:
+            return calculate_standard_repayment(
+                loan["balance"], loan["rate"], loan["term"],
+                monthly_payment_override=(loan["actual"] or None)
+                                          if with_override else None)
+
+        _per_results = [_private_sim(loan, True) for loan in priv_loans]
+        private_result = _per_results[0]
+        for _r in _per_results[1:]:
+            private_result = combine_repayment_results(private_result, _r)
+        # Per-loan detail, carried for the PDF's breakdown table -- the
+        # combined PRIVATE_ROW_LABEL row cannot tell a multi-loan borrower
+        # which loan is which.
+        private_result["per_loan"] = [
+            {**loan, "monthly_payment": result["monthly_payment"],
+             "payoff_years": result["payoff_years"],
+             "total_interest": result["total_interest"]}
+            for loan, result in zip(priv_loans, _per_results)]
+        if any(loan["actual"] for loan in priv_loans):
+            # The required-pace figures, attached to the row like `countback`
+            # is: computed HERE so the renderer and the PDF read one
+            # precomputed set instead of re-running simulators each on their
+            # own basis. Combined across loans, matching the combined row the
+            # caption sits under.
+            _required = _private_sim(priv_loans[0], False)
+            for loan in priv_loans[1:]:
+                _required = combine_repayment_results(
+                    _required, _private_sim(loan, False))
+            private_result["required_pace"] = {
+                "monthly_payment": _required["monthly_payment"],
+                "payoff_years": _required["payoff_years"],
+                "total_interest": _required["total_interest"],
+            }
 
     def with_private(federal_result: dict) -> dict:
         combined = combine_repayment_results(federal_result, private_result)
@@ -11625,29 +11789,48 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
         combined["federal_only"] = federal_result
         return combined
 
+    def fixed_over(term_years: int) -> dict:
+        """One fixed plan across every federal loan: each note amortises at
+        its OWN rate over the plan's term and the bills add, chained through
+        combine_repayment_results -- the same summing a servicer's per-loan
+        billing does. The income-driven rows below are the opposite shape:
+        one pooled simulation, because one payment covers every federal loan.
+        """
+        if not fed_loans:
+            return calculate_standard_repayment(0.0, 0.0, term_years)
+        result = calculate_standard_repayment(
+            fed_loans[0]["balance"], fed_loans[0]["rate"], term_years)
+        for loan in fed_loans[1:]:
+            result = combine_repayment_results(
+                result,
+                calculate_standard_repayment(loan["balance"], loan["rate"], term_years))
+        return result
+
     rows = []
-    std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
+    std = fixed_over(STANDARD_TERM_YEARS)
     # The FEDERAL 10-year Standard payment, kept before the private tranche is
     # added. It is the threshold a RAP month must clear to count toward
     # IBR/ICR/PAYE, and that test is about the federal payment alone -- adding
     # private money to both sides would let a large private loan make a tiny
-    # RAP payment look like it cleared the bar.
+    # RAP payment look like it cleared the bar. On multiple loans the combined
+    # scalar is the SUM of the per-loan 10-year payments, which is the bill a
+    # servicer actually compares against.
     federal_standard_monthly = std["monthly_payment"]
     rows.append(("Standard (10-year)", with_private(std),
                  "Qualifies for PSLF — but it also clears the loan in exactly 120 "
                  "payments, so there is nothing left to forgive."
                  if pslf else "Fixed payment. No forgiveness."))
-    ext = calculate_standard_repayment(balance, rate, EXTENDED_STANDARD_TERM_YEARS)
+    ext = fixed_over(EXTENDED_STANDARD_TERM_YEARS)
     rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", with_private(ext),
                  "Does NOT qualify for PSLF." if pslf else
                  "Fixed payment stretched out. No forgiveness, more interest."))
-    tiered_term = calculate_tiered_standard_term(balance)
-    tiered = calculate_standard_repayment(balance, rate, tiered_term)
+    tiered_term = calculate_tiered_standard_term(total_fed)
+    tiered = fixed_over(tiered_term)
     rows.append((f"2026 Tiered Standard ({tiered_term}-year)", with_private(tiered),
                  "Does NOT qualify for PSLF, or even for TEPSLF." if pslf else
                  "Fixed payment over a term set by your balance."))
     if forgivable:
-        rap = simulate_rap_schedule(balance, rate, None, dependents,
+        rap = simulate_rap_schedule(total_fed, fed_rate, None, dependents,
                                      annual_income=annual_income,
                                      max_term_years=rap_term,
                                      max_months=rap_months)
@@ -11670,7 +11853,7 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                      f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
                      f"1-10% of total income, minimum ${RAP_MIN_PAYMENT}/month. "
                      "Unpaid interest waived. Remainder forgiven at 30 years."))
-        idr = calculate_idr_repayment(balance, rate, None, annual_income=annual_income,
+        idr = calculate_idr_repayment(total_fed, fed_rate, None, annual_income=annual_income,
                                        starting_interest=starting_interest,
                                        max_term_years=idr_term,
                                        max_months=idr_months)
@@ -11679,23 +11862,27 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                      "payments." if pslf else
                      "10% of income above a $22,000 allowance. Forgiven at 20 years. "
                      "Closed to loans originated on or after July 1, 2026."))
-    # The private tranche is one loan, identical under every plan, so it is
-    # returned once rather than as a row per plan -- which is also the
-    # clearest statement of the fact that no federal plan touches it.
+    # The private tranche is identical under every plan, so it is returned
+    # once rather than as a row per plan -- which is also the clearest
+    # statement of the fact that no federal plan touches it.
     if private_result is not None:
-        rows.append((PRIVATE_ROW_LABEL, private_result,
-                     f"Repaid in full over {private_term_years} years. Not "
-                     "federal: no plan forgives it, and nothing about it "
-                     "changes with your income or your plan."))
+        if len(priv_loans) == 1:
+            _priv_note = (f"Repaid in full over {priv_loans[0]['term']} years. "
+                          "Not federal: no plan forgives it, and nothing about "
+                          "it changes with your income or your plan.")
+        else:
+            _priv_note = (f"{len(priv_loans)} loans, each repaid in full on its "
+                          "own term. Not federal: no plan forgives them, and "
+                          "nothing about them changes with your income or plan.")
+        rows.append((PRIVATE_ROW_LABEL, private_result, _priv_note))
     return rows
 
 
 def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        prior_payments, forgivable, pslf, chart_label,
-                       enabled: bool, private_balance: float = 0.0,
-                       private_rate: float = 0.0,
-                       private_term: int = PRIVATE_TERM_YEARS,
-                       private_actual: float = 0.0,
+                       enabled: bool,
+                       federal_loans: list = None,
+                       private_loans: list = None,
                        age: int = 0) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
@@ -11720,9 +11907,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         data=generate_pdf_repayment_report(
             rows, balance, rate, income, deps, accrued, prior_payments,
             forgivable, pslf, chart_label=chart_label,
-            private_balance=private_balance, private_rate=private_rate,
-            private_term=private_term,
-            private_actual_payment=private_actual, age=age),
+            federal_loans=federal_loans, private_loans=private_loans,
+            age=age),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -11816,27 +12002,66 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # every row. Grouping them makes that structural rather than something
         # a visitor has to infer from the captions.
         st.markdown("**Federal loans**")
+        # One row per loan, add/delete built in. The data is OWNED by our own
+        # session key (a list of row dicts): st.data_editor's widget key
+        # stores an edit-state dict, NOT the frame, so the share pipeline and
+        # the seeder read/write the plain key and the editor renders from it.
+        # Legacy keys (a single balance/rate typed before the grids existed,
+        # or seeded from a pre-grid link) migrate to a one-row list once.
+        if "existing_federal_loans" not in st.session_state:
+            _legacy_bal = st.session_state.get("existing_balance") or 0
+            st.session_state["existing_federal_loans"] = (
+                [{"balance": int(_legacy_bal),
+                  "rate": float(st.session_state.get("existing_rate") or 0.0)}]
+                if _legacy_bal else [{"balance": 0, "rate": 0.0}])
+        _fed_edited = st.data_editor(
+            pd.DataFrame(st.session_state["existing_federal_loans"],
+                         columns=["balance", "rate"]),
+            num_rows="dynamic", hide_index=True, use_container_width=True,
+            key="existing_federal_editor",
+            column_config={
+                "balance": st.column_config.NumberColumn(
+                    "Balance ($)", min_value=0, max_value=2_000_000,
+                    step=1_000, format="$%d",
+                    help="This loan's current balance."),
+                "rate": st.column_config.NumberColumn(
+                    # step 0.01, matching the two-decimal display: a 0.1 step
+                    # made the grid RENDER 6.05 as 6.00 while computing with
+                    # 6.05 -- a display that contradicts its own data.
+                    "Rate (%)", min_value=0.0, max_value=20.0, step=0.01,
+                    format="%.2f",
+                    help="This loan's interest rate."),
+            })
+        st.session_state["existing_federal_loans"] = _fed_edited.to_dict("records")
+        fed_loans = sanitize_loan_rows(st.session_state["existing_federal_loans"])
+        balance = sum(loan["balance"] for loan in fed_loans)
+        rate = (sum(loan["balance"] * loan["rate"] for loan in fed_loans) / balance
+                if balance else 0.0)
+        if len(fed_loans) > 1:
+            st.caption((
+                f"{len(fed_loans)} loans, {fmt_money_md(balance)} total at a "
+                f"weighted {rate:.2f}% — the income-driven plans treat these "
+                "as one balance with one payment, and the fixed plans bill "
+                "each on its own schedule."
+            ))
         c1, c2, c3 = st.columns(3)
-        balance = c1.number_input("Current balance ($)", min_value=0, max_value=2_000_000,
-                                   step=1_000, key="existing_balance")
-        rate = c2.number_input("Interest rate (%)", min_value=0.0, max_value=20.0,
-                                step=0.1, key="existing_rate")
-        income = c3.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
+        income = c1.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
                                   step=1_000, key="existing_income",
                                   help="Adjusted gross income. The income-driven plans "
                                        "size their payment from it; the fixed plans ignore it.")
-        c4, c5, c6 = st.columns(3)
-        deps = c4.number_input("Dependent children", min_value=0, max_value=10, step=1,
+        deps = c2.number_input("Dependent children", min_value=0, max_value=10, step=1,
                                 key="existing_dependents",
                                 help="RAP lowers the payment by $50/month each.")
-        accrued = c5.number_input(
+        accrued = c3.number_input(
             "of which unpaid interest ($)", min_value=0, max_value=2_000_000, step=1_000,
             key="existing_accrued_interest",
             help="If your servicer shows principal and accrued interest separately "
                  "-- common after a period on SAVE, where interest never "
-                 "capitalised -- put the interest part here. It changes how "
+                 "capitalised -- put the interest part here. It applies to the "
+                 "federal balance as a whole. It changes how "
                  "payments are applied and is shown separately on the balance chart. "
                  "Leave at 0 if you only know one number.")
+        c4, _, c6 = st.columns(3)
         # 0 means "not answered", the same convention every optional number in
         # this form uses. Asked because "payoff 16.8 yrs" and "you'd be 43"
         # land very differently, and only the visitor knows which one decides.
@@ -11896,56 +12121,74 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "forgives them or lowers their payment for your income.")
 
         if has_private:
-            pc1, pc2 = st.columns(2)
-            private_balance = pc1.number_input(
-                "Private / non-federal balance ($)", min_value=0,
-                max_value=2_000_000, step=1_000, key="existing_private_balance",
-                help="Repaid alongside the federal balance above, on its own "
-                     "terms. Every row below is your TOTAL bill -- federal plan "
-                     "plus this.")
-            private_rate = pc2.number_input(
-                "Private interest rate (%)", min_value=0.0, max_value=30.0,
-                step=0.1, key="existing_private_rate",
-                help="Private rates are credit-priced and usually higher than "
-                     "federal.")
-            # min_value=1: a zero-year term divides by zero in the amortisation,
-            # and there is no reading of "repaid over no years".
-            private_term = pc1.number_input(
-                "Private repayment term (years)", min_value=1, max_value=30,
-                step=1, key="existing_private_term",
-                help="From your loan agreement. Private terms commonly run 5-20 "
-                     f"years; {PRIVATE_TERM_YEARS} is only the starting value "
-                     "here, not a rule. A longer term lowers the payment and "
-                     "raises the total interest, and unlike the federal rows "
-                     "nothing about it changes with your income.")
-            # Private tranche only, deliberately: this loan is plain
-            # amortisation, so paying more is honest arithmetic. Extra on the
-            # income-driven federal side changes RAP's waiver and the
-            # forgiveness clocks and is not modelled -- see the disclaimer at
-            # the bottom of the module.
-            private_actual = pc2.number_input(
-                "What you actually pay on it per month ($) — optional",
-                min_value=0, max_value=50_000, step=25,
-                key="existing_private_actual",
-                help="If you pay more than the required payment, put the real "
-                     "monthly figure here and the private loan is modelled at "
-                     "that pace. Leave at 0 for the required payment.")
+            # Same own-the-frame pattern as the federal grid above, with the
+            # same one-time migration from the pre-grid single-loan keys.
+            if "existing_private_loans" not in st.session_state:
+                _legacy_pb = st.session_state.get("existing_private_balance") or 0
+                st.session_state["existing_private_loans"] = (
+                    [{"balance": int(_legacy_pb),
+                      "rate": float(st.session_state.get("existing_private_rate") or 0.0),
+                      "term": int(st.session_state.get("existing_private_term")
+                                  or PRIVATE_TERM_YEARS),
+                      "actual": int(st.session_state.get("existing_private_actual") or 0)}]
+                    if _legacy_pb else
+                    [{"balance": 0, "rate": 0.0,
+                      "term": PRIVATE_TERM_YEARS, "actual": 0}])
+            _priv_edited = st.data_editor(
+                pd.DataFrame(st.session_state["existing_private_loans"],
+                             columns=["balance", "rate", "term", "actual"]),
+                num_rows="dynamic", hide_index=True, use_container_width=True,
+                key="existing_private_editor",
+                column_config={
+                    "balance": st.column_config.NumberColumn(
+                        "Balance ($)", min_value=0, max_value=2_000_000,
+                        step=1_000, format="$%d",
+                        help="Repaid alongside the federal balance above, on "
+                             "its own terms. Every row below is your TOTAL "
+                             "bill -- federal plan plus these."),
+                    "rate": st.column_config.NumberColumn(
+                        # step 0.01 for the same display-vs-data reason as the
+                        # federal grid's rate column.
+                        "Rate (%)", min_value=0.0, max_value=30.0, step=0.01,
+                        format="%.2f",
+                        help="Private rates are credit-priced and usually "
+                             "higher than federal."),
+                    # min 1: a zero-year term divides by zero in the
+                    # amortisation, and there is no reading of "repaid over
+                    # no years".
+                    "term": st.column_config.NumberColumn(
+                        "Term (yrs)", min_value=1, max_value=30, step=1,
+                        help="From the loan agreement. Private terms commonly "
+                             f"run 5-20 years; {PRIVATE_TERM_YEARS} is only "
+                             "the starting value, not a rule."),
+                    # Private tranche only, deliberately: these loans are
+                    # plain amortisation, so paying more is honest arithmetic.
+                    # Extra on the income-driven federal side changes RAP's
+                    # waiver and the forgiveness clocks and is not modelled --
+                    # see the disclaimer at the bottom of the module.
+                    "actual": st.column_config.NumberColumn(
+                        "Actual $/mo (optional)", min_value=0, max_value=50_000,
+                        step=25,
+                        help="If you pay this loan more than its required "
+                             "payment, the real monthly figure. 0 means the "
+                             "required payment."),
+                })
+            st.session_state["existing_private_loans"] = _priv_edited.to_dict("records")
+            priv_loans = sanitize_loan_rows(
+                st.session_state["existing_private_loans"], private=True)
         else:
-            # HIDING AN INPUT MUST ALSO NEUTRALISE IT. Streamlit keeps a
-            # widget's value in session_state after it stops being rendered, so
-            # reading the stored balance here would leave a hidden number moving
-            # every row on the page with nothing on screen to explain it -- a
-            # visitor who typed a balance, then unticked the box, would still be
-            # shown a total bill that includes it. Zero is the only honest
-            # reading of an unticked box. The stored values are deliberately NOT
-            # cleared, so re-ticking restores what they typed.
-            private_balance, private_rate = 0.0, 0.0
-            private_term = PRIVATE_TERM_YEARS
-            private_actual = 0.0
+            # HIDING AN INPUT MUST ALSO NEUTRALISE IT. Streamlit keeps values
+            # in session_state after their widgets stop being rendered, so
+            # reading the stored grid here would leave hidden loans moving
+            # every row on the page with nothing on screen to explain it. An
+            # empty list is the only honest reading of an unticked box. The
+            # stored rows are deliberately NOT cleared, so re-ticking restores
+            # what was typed.
+            priv_loans = []
 
-
-        if not balance or not rate:
-            st.info("Enter a balance and a rate to compare plans.")
+        if not fed_loans:
+            st.info("Add at least one federal loan — a balance and its rate — "
+                    "to compare plans.")
             return
 
         # A payment count that has already reached a plan's term means the
@@ -11976,10 +12219,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             starting_interest=accrued,
                                             pslf=pslf and forgivable,
                                             prior_payments=prior_payments,
-                                            private_balance=private_balance,
-                                            private_rate=private_rate,
-                                            private_term_years=private_term,
-                                            private_actual_payment=private_actual)
+                                            federal_loans=fed_loans,
+                                            private_loans=priv_loans)
         plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
         private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
 
@@ -11998,20 +12239,26 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.dataframe(_repayment_table(plan_rows, federal_only=True),
                          hide_index=True, use_container_width=True)
 
-            st.markdown("**Private / non-federal loan** — the same under every "
-                        "plan above")
+            st.markdown("**Private / non-federal loan"
+                        + ("s" if len(priv_loans) > 1 else "")
+                        + "** — the same under every plan above")
             st.dataframe(_repayment_table([private_row]),
                          hide_index=True, use_container_width=True)
             # What the aggressive pace is worth, from the required_pace pair
             # compare_existing_loan_plans precomputed -- read, never recompute,
             # for the same reason the countback verdict is read (the renderer
-            # cannot pick the wrong basis for a number it never derives).
+            # cannot pick the wrong basis for a number it never derives). The
+            # comparison is combined-vs-combined: the row's own monthly figure
+            # already reflects every effective override, so an entered actual
+            # that fell at or below its loan's required payment shows up here
+            # as "nothing changed" rather than as a phantom saving.
             _pace = private_row[1].get("required_pace")
             if _pace is not None:
-                if private_actual > _pace["monthly_payment"] + 0.005:
+                _actual_monthly = private_row[1]["monthly_payment"]
+                if _actual_monthly > _pace["monthly_payment"] + 0.005:
                     _saved = _pace["total_interest"] - private_row[1]["total_interest"]
                     st.caption((
-                        f"At **{fmt_money_md(private_actual)}/mo** instead of the "
+                        f"At **{fmt_money_md(_actual_monthly)}/mo** instead of the "
                         f"required {fmt_money_md(_pace['monthly_payment'])}, this "
                         f"clears in **{private_row[1]['payoff_years']:.1f} years** "
                         f"instead of {_pace['payoff_years']:.1f} — saving "
@@ -12019,8 +12266,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     ))
                 else:
                     st.caption((
-                        f"The {fmt_money_md(private_actual)}/mo you entered is at "
-                        f"or below the required payment of "
+                        f"The actual payment you entered is at or below the "
+                        f"required payment of "
                         f"{fmt_money_md(_pace['monthly_payment'])}, so the rows "
                         "use the required payment — a lender does not accept "
                         "less as a plan."
@@ -12091,8 +12338,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 f"{fmt_money_md(_std_fed['monthly_payment'])} and "
                 f"{fmt_money_md(_tiered_fed['monthly_payment'])} a month on "
                 "your federal balance"
-                + (" (your private loan is unchanged either way)"
-                   if private_balance else "")
+                + ((" (your private loan" + ("s are" if len(priv_loans) > 1
+                                             else " is")
+                    + " unchanged either way)") if priv_loans else "")
                 + ". Neither is income-driven and neither forgives "
                 "anything, so the automatic outcome is the one that ignores "
                 "your income. **The window runs from your servicer's notice, "
@@ -12101,16 +12349,18 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "Repayment Plans*."
             )
 
+        _priv_total = sum(loan["balance"] for loan in priv_loans)
         if forgivable:
             st.caption(
-                ("" if not private_balance else
+                ("" if not priv_loans else
                  f"**Each row is your total bill** — the federal plan plus the "
-                 f"{fmt_money_md(private_balance)} private balance over "
-                 f"{int(private_term)} years. No plan forgives private debt or "
-                 f"lowers its payment for your income, so the private part is "
-                 f"the same in every row. **Payoff is when the LAST loan clears**, "
-                 f"which is why a row can outlast the federal term in its own "
-                 f"name.  \n")
+                 f"{fmt_money_md(_priv_total)} of private balance"
+                 + ("s" if len(priv_loans) > 1 else "")
+                 + ", each repaid on its own term. No plan forgives private "
+                 f"debt or lowers its payment for your income, so the private "
+                 f"part is the same in every row. **Payoff is when the LAST "
+                 f"loan clears**, which is why a row can outlast the federal "
+                 f"term in its own name.  \n")
                 + f"**Payoff is time from today**, not from when you first borrowed"
                 + (f" — the {prior_payments} payments you have already made are "
                    "subtracted from the income-driven rows." if prior_payments else ".")
@@ -12155,10 +12405,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         _repayment_actions(rows, balance, rate, income, deps, accrued,
                            prior_payments, forgivable, pslf and forgivable,
                            chosen, enabled=always_open,
-                           private_balance=private_balance,
-                           private_rate=private_rate,
-                           private_term=private_term,
-                           private_actual=private_actual, age=age)
+                           federal_loans=fed_loans, private_loans=priv_loans,
+                           age=age)
         st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
                          use_container_width=True, config=PLOTLY_CHART_CONFIG,
                          key="existing_balance_chart")
