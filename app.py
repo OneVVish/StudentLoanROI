@@ -3188,6 +3188,13 @@ STANDALONE_TOOLS = {
     },
 }
 
+# Where a visit can have navigated FROM. Validated against this set before any
+# nav: event is written -- an unvalidated ?from= lets a hand-edited URL inject
+# arbitrary text straight into usage_logs.action, which is the research dataset.
+NAV_CALCULATOR = "calculator"
+NAV_ORIGINS = frozenset({NAV_CALCULATOR}) | frozenset(STANDALONE_TOOLS)
+
+
 # Every action that represents one visit landing. Anything asking "how many
 # people came at all" must use ALL of them, or it silently undercounts the
 # moment a tool link is shared. Derived, so a new tool cannot be added to the
@@ -3241,6 +3248,11 @@ def internal_tool_url(tool: str = "") -> str:
         params["src"] = src
     if tool:
         params["tool"] = tool
+    # Where this link is being clicked FROM, so the landing on the other side
+    # can record the transition. Reads the latch rather than taking a
+    # parameter: every caller is a page rendering itself, so the one thing they
+    # could get wrong is naming the wrong origin.
+    params["from"] = current_page_key()
     return "./?" + urlencode(params) if params else "./"
 
 
@@ -3248,6 +3260,33 @@ def pageview_action() -> str:
     """The landing action for this visit."""
     tool = requested_tool()
     return STANDALONE_TOOLS[tool]["action"] if tool else "pageview"
+
+
+def current_page_key() -> str:
+    """Which page is rendering: a STANDALONE_TOOLS key, or "calculator".
+
+    Prefers the latch, falling back to the query param so this is correct even
+    when called before section 5 seeds it.
+    """
+    return st.session_state.get("active_tool") or requested_tool() or NAV_CALCULATOR
+
+
+def nav_action(origin: str, destination: str, inpage: bool = False) -> str:
+    """The transition event, or "" when the origin is not one we recognise.
+
+    A SEPARATE event, never a suffix on the pageview action: five readers match
+    those whole strings exactly (the admin landing metrics, the traffic-by-
+    source table, analyze_survey's survey-rate denominator), so appending to
+    them would silently zero every landing count.
+
+    The event:k=v shape is not decorative -- analyze_survey.py already parses
+    any action of that form into a named event with its keys as columns, so
+    this arrives in the analysis tooling structured, with no parser to write.
+    """
+    if origin not in NAV_ORIGINS or destination not in NAV_ORIGINS:
+        return ""
+    suffix = ":inpage=1" if inpage else ""
+    return f"nav:from={origin}:to={destination}{suffix}"
 
 
 def mark_interaction(field: str):
@@ -8808,6 +8847,11 @@ if "pageview_logged" not in st.session_state:
     # describes the visit as it ARRIVED, which is exactly what the param says
     # on the first render, and pageview_logged stops any rerun re-entering.
     log_usage_event(pageview_action())
+    # And where they came from, as its own event. Inside the same
+    # pageview_logged guard, so it fires exactly once per landing.
+    _nav = nav_action(get_shared_default("from", ""), current_page_key())
+    if _nav:
+        log_usage_event(_nav)
 
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
@@ -11282,6 +11326,11 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             "about whether to borrow in the first place — this is about what "
             "to do once you have."
         )
+        if not always_open:
+            st.caption(
+                "Comparing plans is a question of its own — "
+                f"[open this as its own page]({internal_tool_url('repayment')})."
+            )
         # Two subsections, because the page compares FEDERAL plans and a
         # private balance is not one of them -- it rides along unchanged in
         # every row. Grouping them makes that structural rather than something
@@ -11792,6 +11841,11 @@ def render_school_search(always_open: bool = False) -> None:
     # tool should not have to click to reach it. Same treatment as
     # render_existing_loan_comparison.
     with st.expander("🔎 Find schools that fit a budget", expanded=always_open):
+        if not always_open:
+            st.caption(
+                "Searching by budget is a question of its own — "
+                f"[open this as its own page]({internal_tool_url('schools')})."
+            )
         st.caption(
             "Sorted by cost, and by nothing else. Every salary in this app comes "
             "from the occupation or major you picked — never from the school — so "
@@ -12022,6 +12076,15 @@ def render_school_search(always_open: bool = False) -> None:
                 if _src:
                     _handoff["src"] = _src
                 st.query_params.from_dict(_handoff)
+                # A real schools -> calculator transition that produces NO new
+                # pageview, because it is a rerun rather than a navigation.
+                # Marked inpage so the admin table can keep them apart: cold
+                # landings are derived as tool pageviews minus inbound PAGE
+                # navigations, and a nav with no matching pageview would drive
+                # that negative.
+                _nav = nav_action("schools", NAV_CALCULATOR, inpage=True)
+                if _nav:
+                    log_usage_event(_nav)
                 st.rerun()
             st.rerun()
 
@@ -12264,6 +12327,47 @@ if admin_enabled:
     _land_cols[0].metric("Calculator landings", _calculator_views)
     for _col, (_label, _n) in zip(_land_cols[1:], _tool_views.items()):
         _col.metric(f"{_label} landings", _n)
+
+    # Where visits came FROM. Parsed out of the nav: events rather than stored
+    # in columns of their own -- usage_logs has four columns and action is the
+    # only free-text one, which is this codebase's stated convention for new
+    # event types (see migrations.sql).
+    _navs = usage_df[usage_df["action"].astype(str).str.startswith("nav:")] \
+        if _have_actions else pd.DataFrame(columns=["action"])
+    if not _navs.empty:
+        _parsed = _navs["action"].str.extract(
+            r"^nav:from=(?P<From>[^:]+):to=(?P<To>[^:]+)(?P<Inpage>:inpage=1)?$")
+        _parsed = _parsed.dropna(subset=["From", "To"])
+        _parsed["Kind"] = _parsed["Inpage"].notna().map(
+            {True: "In-page handoff", False: "Page navigation"})
+        _table = (_parsed.groupby(["From", "To", "Kind"], as_index=False)
+                          .size().rename(columns={"size": "Count"})
+                          .sort_values("Count", ascending=False))
+        st.markdown("**Where visits came from**")
+        render_centered_table(_table)
+        # Cold = landed on a tool without following one of our own links. The
+        # subtraction uses PAGE navigations only; an in-page handoff produces
+        # no pageview, so counting it here would drive this negative.
+        _page_navs = _parsed[_parsed["Kind"] == "Page navigation"]
+        _cold = []
+        for _key, _t in STANDALONE_TOOLS.items():
+            _landed = int((usage_df["action"] == _t["action"]).sum())
+            _inbound = int((_page_navs["To"] == _key).sum())
+            _cold.append({"Tool": _t["label"], "Landings": _landed,
+                          "From inside the app": _inbound,
+                          "Arrived cold": max(_landed - _inbound, 0)})
+        render_centered_table(pd.DataFrame(_cold))
+        st.caption(
+            "**Arrived cold** is a landing with no `?from=` — a typed URL, a "
+            "shared link, or a search result. It is a subtraction, so it is a "
+            "floor rather than an exact count: a visitor who copies a link out "
+            "of their address bar passes `?from=` on to whoever they send it "
+            "to, and that recipient is counted as internal. Bounded and "
+            "one-directional — it can only understate cold arrivals."
+        )
+    else:
+        st.markdown("**Where visits came from**")
+        st.caption("No navigation between pages recorded yet.")
 
     st.caption(
         "**Pageviews** is the total of the landing row above -- the calculator "
