@@ -73,22 +73,26 @@ SHARE_EXEMPT = {
     "school_search_b": "raw search text; ?school_b= carries the resolved name",
     "school_pick_a": "disambiguation picker; ?school= carries the resolved name",
     "school_pick_b": "disambiguation picker; ?school_b= carries the resolved name",
-    # The existing-loan comparison. A separate question from the scenario --
-    # what to do about debt you already have, not whether to take it on -- so
-    # these are not scenario fields and a shared link has nothing to say about
-    # them. Deliberately NOT round-tripped for a second reason: a balance and
-    # an income are the most identifying numbers a visitor can type, and a
-    # share link is a URL that gets pasted into chats and emails.
-    "existing_balance": "existing-loan comparison; not a scenario field, and personal",
-    "existing_rate": "existing-loan comparison; not a scenario field",
-    "existing_accrued_interest": "existing-loan comparison; not a scenario field, and personal",
-    "existing_income": "existing-loan comparison; not a scenario field, and personal",
-    "existing_dependents": "existing-loan comparison; not a scenario field",
-    "existing_forgivable": "existing-loan comparison; not a scenario field",
-    "existing_chart_plan": "which plan's chart to view; a view control, not an input",
-    "existing_pslf": "existing-loan comparison; not a scenario field",
-    "existing_prior_payments": "existing-loan comparison; not a scenario field, "
-                               "and a payment history is personal",
+    # The existing-loan comparison. Exempt from the CALCULATOR's share, which
+    # is what this file checks: a shared scenario is about a major and a school
+    # and must never pick up a balance someone typed into a different tool.
+    # They DO round-trip, through the repayment tool's own
+    # build_repayment_share_params -- checked separately below, against
+    # REPAYMENT_SHARE_FIELDS, because that emitter builds its params from a
+    # table rather than from string literals this file could see.
+    "existing_balance": "repayment tool; rides ?rb= via build_repayment_share_params",
+    "existing_rate": "repayment tool; rides ?rr=",
+    "existing_accrued_interest": "repayment tool; rides ?rui=",
+    "existing_income": "repayment tool; rides ?ri=",
+    "existing_dependents": "repayment tool; rides ?rd=",
+    "existing_forgivable": "repayment tool; rides ?rf=",
+    "existing_pslf": "repayment tool; rides ?rpslf=",
+    "existing_prior_payments": "repayment tool; rides ?rp=",
+    "existing_private_balance": "repayment tool; rides ?rpb=",
+    "existing_private_rate": "repayment tool; rides ?rpr=",
+    "existing_private_term": "repayment tool; rides ?rpt=",
+    "existing_chart_plan": "which plan's chart to view; a view control, not an "
+                           "input, so it is genuinely not shared",
     # Display-only / derived.
     "loan_mode_unavailable_display": "read-only display of a forced value",
 }
@@ -255,14 +259,61 @@ def main() -> int:
             f"             ever carry it."
         )
 
+    # The repayment tool's own share pipeline. Its emitter and its seeder both
+    # loop over REPAYMENT_SHARE_FIELDS, so every param name reaches
+    # get_shared_* as a VARIABLE -- the constant-only scan above cannot see a
+    # single one of them, and would report a fully-broken pipeline as clean.
+    # Check the table itself instead: every repayment widget must appear in it,
+    # and every param must be distinct and not collide with a calculator param.
+    fields = next((n for n in ast.walk(tree)
+                   if isinstance(n, ast.Assign)
+                   and any(getattr(t, "id", "") == "REPAYMENT_SHARE_FIELDS"
+                           for t in n.targets)), None)
+    if fields is None:
+        failures.append("  REPAYMENT_SHARE_FIELDS is gone; the repayment tool's "
+                        "share pipeline is unchecked.")
+    else:
+        pairs = [(e.elts[0].value, e.elts[1].value) for e in fields.value.elts]
+        shared_repayment = {k for k, _ in pairs}
+        params_repayment = [p for _, p in pairs]
+
+        # Which widgets belong to the repayment tool comes from SHARE_EXEMPT's
+        # own reasons, not from a name prefix. A prefix caught existing_debt
+        # and existing_debt_rate -- the RETURNING-STUDENT sidebar fields, which
+        # ride the calculator's share and have nothing to do with this tool.
+        # Keying on the reason makes the exempt map the single source of truth:
+        # a new repayment widget must be declared there (or the read-side check
+        # fires), and declaring it as "repayment tool" then requires it here.
+        repayment_widgets = {k for k, why in SHARE_EXEMPT.items()
+                             if why.startswith("repayment tool")}
+        for key in sorted(repayment_widgets - shared_repayment):
+            failures.append(
+                f"  REPAYMENT   {key!r} is a repayment-tool input but is not in\n"
+                f"              REPAYMENT_SHARE_FIELDS, so its Share button\n"
+                f"              silently drops it.")
+        for key in sorted(shared_repayment - repayment_widgets):
+            failures.append(
+                f"  REPAYMENT   REPAYMENT_SHARE_FIELDS names {key!r}, which is not\n"
+                f"              a repayment widget key. A typo here fails silently.")
+        if len(set(params_repayment)) != len(params_repayment):
+            failures.append("  REPAYMENT   duplicate query param in "
+                            "REPAYMENT_SHARE_FIELDS; one field would overwrite another.")
+        clash = set(params_repayment) & emitted
+        if clash:
+            failures.append(
+                f"  REPAYMENT   {sorted(clash)} collide with calculator share params.\n"
+                f"              A repayment link would be read as a scenario field.")
+
     checked = len(widget_keys) - len([k for k in widget_keys if k in SHARE_EXEMPT])
     if failures:
         print(f"share-link coverage: {len(failures)} problem(s)\n")
         print("\n\n".join(failures))
         return 1
 
+    n_rep = len(pairs) if fields is not None else 0
     print(f"share-link coverage OK -- {checked} sidebar inputs round-trip, "
-          f"{len(SHARE_EXEMPT)} exempt, {len(emitted)} params emitted.")
+          f"{len(SHARE_EXEMPT)} exempt, {len(emitted)} params emitted; "
+          f"{n_rep} repayment inputs round-trip via their own emitter.")
     return 0
 
 
