@@ -197,7 +197,27 @@ def filter_to_state(df: pd.DataFrame, state_abbr: str) -> pd.DataFrame:
         matches = values.str.upper() == state_abbr
     else:
         matches = values.str.lower() == STATE_ABBR_TO_NAME[state_abbr].lower()
-    return df[matches]
+    filtered = df[matches]
+    # Loud, not "Wrote 0 rows" with exit 0 -- an empty result overwrites a good
+    # CSV with nothing, and the abbreviation was already validated above, so
+    # zero matches means the FILE is wrong (or its state values were renamed).
+    if filtered.empty:
+        raise ValueError(
+            f"0 rows matched state '{state_abbr}' in column '{column}'. "
+            f"Sample values: {values.dropna().unique()[:5].tolist()}. "
+            f"Is this really the BLS State release?"
+        )
+    # The Metro release also carries a prim_state column, so --state CA against
+    # it filters fine -- and pools every CA metro, duplicating each occ_code
+    # once per area. In the State release each occupation appears exactly once
+    # per state, so duplicates are diagnostic of the wrong file.
+    if "occ_code" in filtered.columns and filtered["occ_code"].duplicated().any():
+        raise ValueError(
+            f"State '{state_abbr}' matched {len(filtered)} rows with duplicated "
+            f"occupation codes -- multiple areas per state, so this looks like the "
+            f"*Metro* release. Pass the State release to --state (or use --metros)."
+        )
+    return filtered
 
 
 def release_vintage(xlsx_path: str) -> str:
@@ -212,8 +232,18 @@ def release_vintage(xlsx_path: str) -> str:
     what happened here: the metro files were built from M2024 while
     cleaned_careers.csv moved on to M2025, leaving 18% of New York
     occupations reading *below* the national wage purely from a year of
-    wage growth."""
-    match = re.search(r"[_\b]M(\d{4})", Path(xlsx_path).stem, flags=re.IGNORECASE)
+    wage growth.
+
+    The token must not sit inside a longer word (the "M" of "MSA" is not a
+    vintage), hence the lookbehind. The previous pattern was `[_\\b]M` --
+    inside a character class `\\b` is a literal BACKSPACE, not a word
+    boundary, so it effectively required an underscore and returned None for
+    `national-M2025.xlsx` or a bare `M2025.xlsx`. Every downstream mismatch
+    check is guarded by `if vintage and ...`, so a None didn't fail loudly --
+    it silently switched the vintage guard off, which is the one failure mode
+    this function exists to prevent."""
+    match = re.search(r"(?<![A-Za-z0-9])M(\d{4})", Path(xlsx_path).stem,
+                      flags=re.IGNORECASE)
     return f"M{match.group(1)}" if match else None
 
 
@@ -227,6 +257,16 @@ def national_all_occupations_median(xlsx_path: str) -> float:
         raise ValueError(
             f"'{xlsx_path}' has no o_group == 'total' row, so it can't supply the "
             f"national all-occupations median. Pass the BLS *National* release."
+        )
+    # Exactly one, not "at least one". The State and Metro releases parse fine
+    # here and carry one 'total' row PER AREA -- taking .iloc[0] off one of
+    # those silently used the first area's median (Alabama's, alphabetically)
+    # as every city's wage-index denominator.
+    if len(totals) > 1:
+        raise ValueError(
+            f"'{xlsx_path}' has {len(totals)} o_group == 'total' rows -- one per "
+            f"area, so this looks like a State or Metro release. The wage index's "
+            f"denominator must come from the *National* release, which has exactly one."
         )
     median = clean_wage_column(totals["a_median"]).iloc[0]
     if pd.isna(median):
@@ -577,6 +617,14 @@ if __name__ == "__main__":
     except ValueError as exc:
         raise SystemExit(f"Error: {exc}")
 
+    # Refuse to write nothing. Every mode's output overwrites a committed CSV
+    # the app reads at runtime, and "Wrote 0 rows" with exit 0 reads as
+    # success in a shell pipeline while deleting the dataset it replaced.
+    if clean_df.empty:
+        raise SystemExit(
+            f"Error: 0 rows survived cleaning -- refusing to overwrite "
+            f"'{output_path}' with an empty file. Check the input release."
+        )
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     clean_df.to_csv(output_path, index=False)
     print(f"Wrote {len(clean_df)} rows to {output_path}")

@@ -167,6 +167,17 @@ def add_education_column(cleaned_csv_path: str, education_xlsx_path: str, sheet_
     careers_df["occ_code"] = careers_df["occ_code"].astype(str).str.strip()
     education_df = load_education_data(education_xlsx_path, sheet_name=sheet_name)
 
+    # REFRESH, not only first-time add: the committed CSVs already carry these
+    # columns from the previous run, and merging them in again produced
+    # typical_education_x/_y and a KeyError -- the documented in-place refresh
+    # (`-o cleaned_careers.csv`) had been broken since the first run's output
+    # was committed. The stale columns are dropped and rebuilt from the
+    # education file being passed in, which is the refresh semantics the
+    # docstring promises.
+    careers_df = careers_df.drop(columns=[
+        c for c in ("typical_education", "occupation_type")
+        if c in careers_df.columns])
+
     before = len(careers_df)
     merged = careers_df.merge(education_df, on="occ_code", how="left")
     merged["typical_education"] = merged["typical_education"].fillna("")
@@ -194,7 +205,17 @@ if __name__ == "__main__":
     except ValueError as exc:
         raise SystemExit(f"Error: {exc}")
 
-    result_df.to_csv(output_path, index=False)
     matched = int((result_df["typical_education"] != "").sum())
+    # A zero-match join is not a result, it is a broken key: a release that
+    # reformats occ_code would print "0 matched" and exit 0, after which
+    # app.py silently charges UNDERGRAD_YEARS for every occupation (program
+    # length falls back when typical_education is empty). Refuse to write.
+    if matched == 0:
+        raise SystemExit(
+            f"Error: 0 of {len(result_df)} occupation codes matched the education "
+            f"file -- the join key is broken (occ_code format change?). Refusing "
+            f"to overwrite {output_path} with an all-empty typical_education column."
+        )
+    result_df.to_csv(output_path, index=False)
     print(f"Wrote {len(result_df)} rows to {output_path} ({matched} matched a typical_education value, "
           f"{len(result_df) - matched} unmatched/kept as \"\").")

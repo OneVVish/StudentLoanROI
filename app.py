@@ -2288,15 +2288,43 @@ _COUNTERFACTUAL_RETURNING = {
 }
 
 
+def returning_baseline_ready() -> bool:
+    """Both returning-mode salary answers present. Until then the comparison
+    stays on the high-school-graduate baseline and the page says so, rather
+    than silently measuring a degree against zero.
+
+    Lives in section 2 (not beside its widgets in section 4) because
+    counterfactual_vocab below must ask the same question: the vocabulary has
+    to switch when the ARITHMETIC switches, and the arithmetic switches on
+    this, not on the radio. Reads session_state defensively for the same
+    reason counterfactual_vocab does -- outside a Streamlit runtime the
+    answer is "not ready", which is also correct for analyze_model.py.
+    """
+    try:
+        return bool(st.session_state.get("current_salary", 0)
+                    and st.session_state.get("salary_no_degree_10y", 0))
+    except Exception:
+        return False
+
+
 def counterfactual_vocab() -> dict:
     """The words for whichever baseline this session is being measured against.
+
+    Keys on the radio AND returning_baseline_ready(), because the model only
+    swaps baselines once both salaries are entered (returning_kwargs withholds
+    them until then). Keying on the radio alone shipped the original bug's
+    mirror image: the moment the radio flipped, every metric card said
+    "Staying Put -- (No New Loan)" over a number still computed against the
+    debt-free high school graduate, while the sidebar warning said the
+    opposite. Words and arithmetic must read the same switch.
 
     Reads session_state defensively: analyze_model.py execs sections 1-2
     outside a Streamlit runtime, and it models first-time students only, so the
     high-school vocabulary is the correct fallback there rather than an error.
     """
     try:
-        returning = st.session_state.get("student_mode_radio") == STUDENT_MODE_RETURNING
+        returning = (st.session_state.get("student_mode_radio") == STUDENT_MODE_RETURNING
+                     and returning_baseline_ready())
     except Exception:
         returning = False
     return _COUNTERFACTUAL_RETURNING if returning else _COUNTERFACTUAL_FIRST
@@ -3298,7 +3326,8 @@ def traffic_report_dates(usage_df, tz: str = TRAFFIC_REPORT_TZ):
     return parsed.dt.tz_convert(tz).dt.date
 
 
-def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None) -> dict:
+def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None,
+                    days: int = 7) -> dict:
     """Everything the daily digest and the admin trend panels both report.
 
     Pure -- frames in, frames out, no Streamlit -- so the scheduled digest and
@@ -3309,6 +3338,13 @@ def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None) -> dict:
 
     `asof` makes a run reproducible and lets a missed day be recovered; it
     defaults to today in the reporting zone.
+
+    `days` is the rolling-window length. The window keys stay "last7"/
+    "prior7" whatever it is -- they are key NAMES read by the admin panel and
+    the digest, not descriptions, and renaming them per run would break every
+    reader. Before this parameter existed analyze_traffic.py's --days changed
+    only the digest's label: "14-day total" was printed over a hardcoded
+    7-day sum.
     """
     pages = [NAV_CALCULATOR] + list(STANDALONE_TOOLS)
     empty = pd.DataFrame(columns=pages + ["total"])
@@ -3354,8 +3390,8 @@ def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None) -> dict:
     windows = {
         "yesterday": window(y, 1),
         "prior_day": window(y - timedelta(days=1), 1),
-        "last7": window(y, 7),
-        "prior7": window(y - timedelta(days=7), 7),
+        "last7": window(y, days),
+        "prior7": window(y - timedelta(days=days), days),
     }
 
     # Cold vs internal, per tool. Page navigations only -- an in-page handoff
@@ -3565,8 +3601,12 @@ def log_usage_event(action: str):
             ),
             ttl=0,
         )
-    except Exception:
-        pass
+    except Exception as error:
+        # Reported, not swallowed silently: a forgotten migration rejects the
+        # WHOLE row (PGRST204) and an unreported one is indistinguishable from
+        # a day with no traffic. Reporting goes to the server console only, so
+        # this still can't take the page down.
+        report_write_failure("usage_logs insert", error)
 
 
 def save_survey_response(respondent_role: str, hs_graduation_year: str,
@@ -3607,10 +3647,13 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             # The paired pre/post measurement. Survey-only, so it is a named
             # argument like the four above rather than a member of context --
             # context is spread into four tables, and these columns exist on
-            # one. Placed before **context so a context key added later cannot
-            # silently overwrite a measurement.
-            **(instrument or {}),
+            # one. Spread AFTER **context because in a dict literal the LAST
+            # spread wins: this order is what stops a context key added later
+            # from silently overwriting a measurement. (It used to be spread
+            # first, under a comment claiming the opposite of Python's
+            # semantics -- latent only because no key collided.)
             **context,
+            **(instrument or {}),
         }
         execute_query(
             conn.table("survey_responses").insert([json_safe_row(row)], count="None"),
@@ -4058,7 +4101,8 @@ def save_pdf_download(context: dict) -> bool:
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("pdf_downloads insert", error)
         return False
 
 
@@ -4081,7 +4125,8 @@ def save_scenario_share(context: dict) -> bool:
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("scenario_shares insert", error)
         return False
 
 
@@ -4166,7 +4211,8 @@ def maybe_log_scenario_event(context: dict) -> bool:
             ttl=0,
         )
         return True
-    except Exception:
+    except Exception as error:
+        report_write_failure("scenario_events insert", error)
         return False
 
 
@@ -5153,6 +5199,21 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
     month (negative amortization); any balance still outstanding after
     `max_term_years` is forgiven.
     """
+    # Nothing borrowed, nothing to repay -- the same guard the Standard
+    # simulator has, for the same reason: without it the loop still emits one
+    # month and reports a 0.1-year payoff on a $0 loan. The Standard guard's
+    # comment calls that the resting state for the 430 no-degree occupations;
+    # income-driven plans reach it the same way once selected for one.
+    if principal <= 0:
+        return {
+            "total_interest": 0.0,
+            "payoff_years": 0.0,
+            "schedule": pd.DataFrame([{"month": 0, "year": 0.0, "balance": 0.0,
+                                       "payment": 0.0}]),
+            "total_paid_in_roi_window": 0.0,
+            "forgiven_amount": 0.0,
+        }
+
     monthly_rate = annual_rate_pct / 100 / 12
     # `principal` is the whole balance owed; starting_interest says how much of
     # it is already-accrued unpaid interest rather than borrowed money. Default
@@ -5301,6 +5362,22 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
     at least $50 that month -- so the balance never grows from unpaid
     interest. Any balance remaining after max_term_years (30 real years /
     360 payments) is forgiven."""
+    # Same zero-principal guard as the other two simulators -- and RAP is the
+    # DEFAULT strategy for 2026+ starts, so a no-degree occupation (loan
+    # forced to 0) rests on this path and showed "Payoff Timeline 0.1 yrs"
+    # without it.
+    if principal <= 0:
+        return {
+            "total_interest": 0.0,
+            "waived_interest": 0.0,
+            "government_match": 0.0,
+            "payoff_years": 0.0,
+            "schedule": pd.DataFrame([{"month": 0, "year": 0.0, "balance": 0.0,
+                                       "payment": 0.0}]),
+            "total_paid_in_roi_window": 0.0,
+            "forgiven_amount": 0.0,
+        }
+
     monthly_rate = annual_rate_pct / 100 / 12
     balance = principal
     total_paid_in_roi_window = 0.0
@@ -5605,6 +5682,17 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
     read; roi_pct comes back None and is discarded.
     """
     paid_by_year = cumulative_loan_paid_by_year(scenario["repayment_result"], years)
+    # Rebuilt from the scalars the scenario was computed under, so the chart's
+    # baseline is the SAME baseline as the metric above it. Omitting this
+    # kwarg -- the one baseline argument this call site ever dropped -- made
+    # the returning-student chart plot the HS-grad curve under a legend that
+    # named the visitor's current path.
+    baseline_curve = (
+        returning_student_curve(scenario["baseline_salary_now"],
+                                scenario["baseline_salary_in_10y"])
+        if scenario.get("baseline_salary_now") is not None
+        and scenario.get("baseline_salary_in_10y") is not None
+        else None)
     points = []
     for year in range(1, years + 1):
         result = calculate_roi(
@@ -5614,6 +5702,7 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
             enrollment_years=scenario["enrollment_years"],
             working_years=scenario["working_years"],
             baseline_start_age=scenario.get("baseline_start_age"),
+            baseline_curve=baseline_curve,
         )
         points.append({"year": year,
                        "major": result["major_net_position"],
@@ -6071,8 +6160,14 @@ def _merge_balance_schedules(a, b, a_flat=0.0, b_flat=0.0):
                                     + component(b, "principal_balance").values)
         out["interest_balance"] = (component(a, "interest_balance").values
                                    + component(b, "interest_balance").values)
-    if "payment" in a.columns or "payment" in b.columns:
-        out["payment"] = (payments(a, a_flat).values + payments(b, b_flat).values)
+    # Unconditional, not gated on either input carrying the column. A merged
+    # schedule's summed FLAT payment is wrong for every month after the
+    # shorter loan clears, so any consumer reading a combined result needs the
+    # per-month column to see the step down -- including when BOTH sides are
+    # fixed-payment (new Standard beside an existing Tiered balance), which is
+    # exactly the case the old gate excluded. The reconstruction above already
+    # handles a column-less side correctly: flat while it owes, zero after.
+    out["payment"] = (payments(a, a_flat).values + payments(b, b_flat).values)
     return out
 
 
@@ -6277,19 +6372,61 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         elif repayment_strategy == STANDARD_STRATEGY_LABEL:
             existing_result = calculate_standard_repayment(
                 existing_debt, existing_rate, roi_window_years=roi_window_years)
-        elif repayment_strategy == RAP_STRATEGY_LABEL:
-            existing_result = simulate_rap_schedule(
-                existing_debt, existing_rate, major_name, dependents,
-                roi_window_years=roi_window_years)
-        else:
-            existing_result = calculate_idr_repayment(
-                existing_debt, existing_rate, major_name, roi_window_years=roi_window_years)
 
     # Same combiner as the forgivable/non-forgivable split above -- it also
     # takes the LATER payoff, which is what returning-student mode reports, and
     # merges the schedules so the balance chart shows the whole debt rather
     # than only the new loan.
-    combined_repayment = combine_repayment_results(repayment_result, existing_result)
+    #
+    # Fixed-payment plans only. Standard and Tiered amortise each loan on its
+    # own schedule, so two separately-simulated results genuinely add. An
+    # income-driven payment does NOT add: RAP and IDR size ONE payment from
+    # income alone and that payment covers every federal loan the borrower has,
+    # so simulating the new loan and the existing balance separately and
+    # summing charged the statutory payment TWICE -- $500/month against a
+    # published $250 on a $60k+$30k pair at $60k AGI -- and reported a payoff
+    # roughly twice as fast as reality. For those plans the two balances are
+    # instead simulated as one pool below.
+    if existing_result is not None or not (existing_debt and existing_debt > 0):
+        combined_repayment = combine_repayment_results(repayment_result, existing_result)
+    else:
+        # RAP / IDR with an existing balance: one income-driven simulation over
+        # new-forgivable + existing, at their principal-weighted rate. The
+        # blend is honest here for the same reason split_loan_financing's is --
+        # under one income-driven plan both balances are repaid on identical
+        # terms (one payment, same waiver/forgiveness rules). The existing
+        # balance is treated as federal Direct, which is also what simulating
+        # it under RAP/IDR always assumed. Any nonforgivable tranche of the
+        # NEW loan (Parent PLUS / private gap) keeps its own fixed schedule
+        # beside the pool, exactly as in the no-existing-debt path.
+        #
+        # repayment_result above deliberately stays the new-loan-only
+        # simulation: the ROI charges the degree the full income-driven
+        # payment (conservative), and the break-even and paid-by-year series
+        # keep their documented meaning. Only the combined bill -- what the
+        # visitor is told they will pay each month and when they are free --
+        # is corrected here.
+        _forgivable_new = (financing["forgivable_principal"] if financing
+                           else principal_for_repayment)
+        _forgivable_new_rate = (financing["forgivable_rate"] if financing
+                                else rate_for_repayment)
+        _pool = _forgivable_new + existing_debt
+        _pool_rate = ((_forgivable_new * _forgivable_new_rate
+                       + existing_debt * existing_rate) / _pool) if _pool else 0.0
+        if repayment_strategy == RAP_STRATEGY_LABEL:
+            _joint = simulate_rap_schedule(
+                _pool, _pool_rate, major_name, dependents,
+                roi_window_years=roi_window_years)
+        else:
+            _joint = calculate_idr_repayment(
+                _pool, _pool_rate, major_name, roi_window_years=roi_window_years)
+        if financing and financing.get("nonforgivable_principal", 0) > 0:
+            _nonfederal = calculate_standard_repayment(
+                financing["nonforgivable_principal"], financing["nonforgivable_rate"],
+                roi_window_years=roi_window_years)
+            combined_repayment = combine_repayment_results(_joint, _nonfederal)
+        else:
+            combined_repayment = _joint
 
     return {
         "major": major_name,
@@ -6325,6 +6462,15 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         "existing_debt_result": existing_result,
         "combined_repayment": combined_repayment,
         "baseline_curve_used": baseline_curve is not None,
+        # The SCALARS behind baseline_curve, not the callable -- the same
+        # hashability reasoning that builds the curve from scalars above.
+        # build_net_position_series re-derives the curve from these so the
+        # chart's per-year calculate_roi calls use the baseline this scenario
+        # was actually computed under; without them the chart silently fell
+        # back to the HS-grad curve while the metric above it used the
+        # returning-student one, under a legend naming the returning baseline.
+        "baseline_salary_now": baseline_salary_now,
+        "baseline_salary_in_10y": baseline_salary_in_10y,
         "roi_result": roi_result,
         # None unless the cap-and-gap split was applied (Detailed mode); the
         # results page / PDF show the federal-vs-gap breakdown when it's set.
@@ -6672,7 +6818,7 @@ def get_loan_to_income_risk_tier(loan_to_takehome_pct: float, effective_tax_rate
     return {"tier": tier, "color": color, "manageable_threshold": manageable_threshold, "caution_threshold": caution_threshold}
 
 
-def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_month: int) -> float:
+def get_monthly_payment_for_stage(repayment_result: dict, target_month: int) -> float:
     """The loan payment at a given career-stage snapshot. If the loan is
     already paid off or forgiven by target_month, the payment is $0 for
     either strategy -- Standard's constant monthly_payment is only valid
@@ -6691,12 +6837,17 @@ def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_
     if target_month > repayment_result["payoff_years"] * 12:
         return 0.0
     schedule = repayment_result["schedule"]
-    # Standard is flat, and so is anything whose schedule carries no per-month
-    # payment column. Testing for the column rather than for the strategy NAME
-    # is what lets a new income-driven plan be added without this silently
-    # reading a column that isn't there.
-    if strategy in (STANDARD_STRATEGY_LABEL, TIERED_STANDARD_STRATEGY_LABEL) \
-            or "payment" not in schedule.columns:
+    # Read the per-month payment column whenever the schedule carries one;
+    # fall back to the flat monthly_payment only when it doesn't. Testing for
+    # the column rather than for the strategy NAME matters twice over: a new
+    # income-driven plan works without edits here, and a COMBINED result
+    # (new + existing loan merged by _merge_balance_schedules, which
+    # reconstructs a payment column) reports the stepped payment after the
+    # shorter loan ends. The old strategy-name test made a combined
+    # Standard-family result report the summed flat payment for months where
+    # one of the loans was already paid off -- payment_series's documented
+    # caveat, resurfacing here.
+    if "payment" not in schedule.columns:
         return repayment_result.get("monthly_payment", 0.0)
     row = schedule[schedule["month"] == target_month]
     return row.iloc[0]["payment"] if not row.empty else 0.0
@@ -6853,15 +7004,17 @@ def payment_series(result: dict) -> pd.DataFrame:
     cumulative_loan_paid_by_year already follows -- rather than assuming one and
     silently charting zeros for the other.
 
-    CAUTION ON A *COMBINED* RESULT. `_merge_balance_schedules` reconstructs a
-    flat payment for whichever tranche lacks one and sums them, so a combined
-    row reports the same total for every month even after the shorter loan has
-    been paid off: a 10-year federal plan beside a 15-year private balance reads
-    as one constant figure for all 15 years, when the true path steps down once
-    the federal half clears. That is why build_payment_chart STACKS the two
-    tranches from their own series rather than charting the combined column --
-    each drops to zero when its own loan ends. Anything else plotting payments
-    from a combined result inherits the same flaw.
+    CAUTION ON A *COMBINED* RESULT. The scalar `monthly_payment` on a combined
+    result is the SUM of two flat payments and never steps down, so anything
+    reconstructing from it reports one constant figure even after the shorter
+    loan clears: a 10-year federal plan beside a 15-year private balance reads
+    as one payment for all 15 years. The merged schedule's per-month `payment`
+    column does not have this flaw -- _merge_balance_schedules reconstructs
+    each tranche's payment only for the months it still owes, so the column
+    steps down correctly (it is emitted unconditionally for exactly this
+    reason). build_payment_chart still STACKS the two tranches from their own
+    series rather than charting the combined column, because the split itself
+    -- which tranche costs what -- is the information the chart exists to show.
     """
     sched = result.get("schedule")
     if sched is None or sched.empty:
@@ -7201,6 +7354,12 @@ def wage_ridgeline_rows(percentiles: dict, geography_label: str,
     itself would draw the same curve twice and imply a difference that isn't
     there. build_major_data's overlay decides which, so this follows the data
     rather than the selected city (see get_wage_distribution_context)."""
+    # A collapsed one-row chart carries the geography stamp as its label, and
+    # the stamp for the national fallback is the lowercase key "national" --
+    # shown as-is, the same row read "United States" when it appeared under a
+    # metro and "national" when it stood alone. One name for one geography.
+    if str(geography_label).strip().lower() == "national":
+        geography_label = "United States"
     rows = []
     for label, pct in ((geography_label, percentiles),
                         ("United States", national_percentiles)):
@@ -7895,10 +8054,28 @@ def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
 def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> Image:
     """PDF counterpart to build_balance_chart -- simplified redraw for
     print, not required to be pixel-identical to the on-screen interactive
-    version."""
+    version.
+
+    Same principal/unpaid-interest split as the on-screen twin, behind the
+    same balance_split_is_informative gate and in the same two colours. The
+    split shipped on the Plotly side alone (2026-08-02), so for the exact
+    case the stacked view exists for -- an income-driven payment below the
+    interest, principal pinned while the interest pool balloons -- the PDF
+    silently flattened the story back to one undifferentiated line. The
+    chart-twin rule in CLAUDE.md is about WHAT a chart shows, and this was a
+    what, not a how."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
-    ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
-    ax.set_title("Loan Balance Over Time")
+    if balance_split_is_informative(schedule_df):
+        ax.stackplot(schedule_df["year"],
+                     schedule_df["principal_balance"],
+                     schedule_df["interest_balance"],
+                     labels=["Principal", "Unpaid interest"],
+                     colors=["#4C78A8", "#E45756"])
+        ax.legend(loc="upper left", fontsize=8)
+        ax.set_title("Loan Balance Over Time — principal vs unpaid interest")
+    else:
+        ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
+        ax.set_title("Loan Balance Over Time")
     ax.set_xlabel("Years")
     ax.set_ylabel("Remaining Balance ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
@@ -7948,18 +8125,31 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     return _pdf_image_from_figure(fig)
 
 
-def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int) -> Image:
+def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
+                                  baseline_head_start_years: int = 0) -> Image:
     """PDF counterpart to build_net_position_chart. Takes the same prebuilt
     frame, so the two can't disagree about the trajectory -- what is hand-kept
-    in sync is the styling and the zero line (see CLAUDE.md on the chart
-    twins)."""
+    in sync is the styling, the zero line, and the head-start annotation (see
+    CLAUDE.md on the chart twins). The annotation matters MORE here than on
+    screen: the report is read detached from the app, so a baseline that
+    opens several years of wages ahead has no sidebar option nearby to
+    explain it and reads as a modelling error."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
     for label, group in frame.groupby("Series", sort=False):
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
                 linewidth=2, label=label)
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
-    ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
-                  fontsize=11)
+    if baseline_head_start_years:
+        ax.annotate(
+            f"Baseline starts {baseline_head_start_years} years ahead — "
+            f"{counterfactual_vocab()['head_start']}.",
+            xy=(0.0, 1.02), xycoords="axes fraction", ha="left",
+            fontsize=8, color="#666666")
+        ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
+                     fontsize=11, pad=22)
+    else:
+        ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
+                     fontsize=11)
     ax.set_xlabel("Years after graduation")
     ax.set_ylabel("Cumulative gross pay minus loan payments ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
@@ -8451,7 +8641,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         build_pdf_net_position_chart(
             net_position_frame([(major, scenario)], col_index,
                                 get_metro_wage_index(city), roi_window_years),
-            roi_window_years),
+            roi_window_years,
+            # Same value the on-screen chart passes -- with foregone earnings
+            # off, enrollment_years is 0 and the annotation stays away.
+            baseline_head_start_years=scenario["enrollment_years"]),
     ]
 
     # Mirrors the on-screen break-even banner -- same breakeven_summary call,
@@ -8685,6 +8878,48 @@ def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int) -> Table:
     ])
 
 
+def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
+                                     takehome_stages_a, takehome_stages_b,
+                                     styles) -> list:
+    """Take-home tables for both scenarios in the compare report.
+
+    Mirrors the on-screen compare branch's render_takehome_block(
+    show_charts=False): every NUMBER, no pie charts. The single report keeps
+    its per-stage charts because it describes one scenario; here two
+    scenarios x two stages x two charts would be eight images saying what
+    four table rows already say, so the report takes the same deliberate
+    asymmetry the on-screen columns do. The compare PDF previously had no
+    take-home at all -- the downloadable artifact of the randomly assigned
+    contrast arm was missing a section the single arm's carries, the same
+    one-branch-only gap the on-screen parity fix chased.
+    """
+    if not takehome_stages_a or not takehome_stages_b:
+        return []
+    flowables = [
+        Spacer(1, 12),
+        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {city}"),
+                  styles["section"]),
+    ]
+    for panel_label, scenario, stages in (
+            ("A", scenario_a, takehome_stages_a),
+            ("B", scenario_b, takehome_stages_b)):
+        flowables += [
+            Spacer(1, 6),
+            Paragraph(f"{panel_label}: {xml_escape(scenario['major'])}",
+                      styles["body"]),
+            _pdf_table(full_width=True, rows=[
+                ["Career Stage", "Gross Salary", "Take-Home Pay (annual)",
+                 "Monthly Disposable", "COL-Adjusted Disposable"],
+                *[[label, fmt_money(f["gross"]),
+                   fmt_money(f["take_home"]["net_take_home"]),
+                   fmt_money(f["disposable_nominal"]),
+                   fmt_money(f["disposable_col_adjusted"])]
+                  for label, f in stages],
+            ]),
+        ]
+    return flowables
+
+
 def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_year_a,
                                  personal_contribution_per_year_a, grants_per_year_a, interest_rate,
                                  repayment_strategy, scenario_a, major_b, school_name_b, in_state_b,
@@ -8702,7 +8937,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                 professional_debt_a: float = None,
                                 professional_school_a: str = None,
                                  federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None, professional_debt_b: float = None, professional_school_b: str = None,
-                                 include_fees: bool = False) -> bytes:
+                                 include_fees: bool = False,
+                                 takehome_stages_a: list = None,
+                                 takehome_stages_b: list = None) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, per-scenario break-even, plus the
     loan-balance and net-position comparison charts.
@@ -8811,7 +9048,13 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                  (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
                 col_index, get_metro_wage_index(city), roi_window_years),
             roi_window_years,
+            # max of the two, matching the on-screen compare chart.
+            baseline_head_start_years=max(scenario_a["enrollment_years"],
+                                          scenario_b["enrollment_years"]),
         ),
+        *_pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
+                                          takehome_stages_a, takehome_stages_b,
+                                          styles),
         *_pdf_resources_section(styles, [("Scenario A", school_name_a), ("Scenario B", school_name_b)]),
     ]
     # One per scenario, labelled -- in Career mode A and B are different
@@ -9963,10 +10206,18 @@ def returning_kwargs() -> dict:
     # once she has said what she earns. Swapping to a zero baseline would
     # compare the degree against earning nothing and report a spectacular
     # return -- the app would be answering a question she has not been asked yet.
+    _existing_debt = float(st.session_state.get("existing_debt", 0) or 0)
     kwargs = {
-        "existing_debt": float(st.session_state.get("existing_debt", 0) or 0),
-        "existing_debt_rate": float(st.session_state.get("existing_debt_rate")
-                                     if st.session_state.get("existing_debt", 0) else 0) or None,
+        "existing_debt": _existing_debt,
+        # None only when there is no debt for the rate to describe. A rate of
+        # 0.0 is a real answer (a family loan, a promotional refi) -- the old
+        # `float(...) or None` collapsed it to None and compute_scenario_results
+        # then silently repriced an interest-free balance at the NEW loan's
+        # rate. The widget is seeded with DEFAULT_FEDERAL_RATE, so .get's
+        # fallback only fires before the rate widget has ever rendered.
+        "existing_debt_rate": (float(st.session_state.get("existing_debt_rate",
+                                                          DEFAULT_FEDERAL_RATE))
+                               if _existing_debt else None),
     }
     if returning_baseline_ready():
         kwargs["baseline_salary_now"] = float(st.session_state["current_salary"])
@@ -9997,12 +10248,9 @@ def _sync_foregone_to_enrollment() -> None:
         st.session_state["count_foregone_earnings"] = True
 
 
-def returning_baseline_ready() -> bool:
-    """Both salary answers present. Until then the comparison stays on the
-    high-school-graduate baseline and the page says so, rather than silently
-    measuring a degree against zero."""
-    return bool(st.session_state.get("current_salary", 0)
-                and st.session_state.get("salary_no_degree_10y", 0))
+# returning_baseline_ready() lives in section 2a beside counterfactual_vocab,
+# which now shares it -- the vocabulary must flip on the same condition the
+# arithmetic flips on, and two copies of that condition is how they diverge.
 
 
 def breakeven_kwargs() -> dict:
@@ -11674,14 +11922,26 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         _tiered_row = next((r for label, r, _ in rows
                             if label.startswith("2026 Tiered Standard")), None)
         if forgivable and _std_row is not None and _tiered_row is not None:
+            # FEDERAL-only figures, read from the federal_only result the rows
+            # carry -- the same basis discipline as the count-back threshold
+            # above, for the same reason. Auto-enrollment moves only the
+            # federal loan; the private payment is owed under every plan
+            # including staying put, so quoting the combined rows here
+            # inflated the cost of missing the window by the entire private
+            # payment ($2,581 shown where the federal change was $681).
+            _std_fed = _std_row.get("federal_only", _std_row)
+            _tiered_fed = _tiered_row.get("federal_only", _tiered_row)
             st.info(
                 "**If you're on SAVE, a clock may already be running.** Your "
                 "servicer's notice to leave SAVE starts a 90-day window to "
                 "choose a plan. Miss it and you are enrolled automatically — "
                 "into Standard or the new Tiered Standard, "
-                f"{fmt_money_md(_std_row['monthly_payment'])} and "
-                f"{fmt_money_md(_tiered_row['monthly_payment'])} a month on this "
-                "balance. Neither is income-driven and neither forgives "
+                f"{fmt_money_md(_std_fed['monthly_payment'])} and "
+                f"{fmt_money_md(_tiered_fed['monthly_payment'])} a month on "
+                "your federal balance"
+                + (" (your private loan is unchanged either way)"
+                   if private_balance else "")
+                + ". Neither is income-driven and neither forgives "
                 "anything, so the automatic outcome is the one that ignores "
                 "your income. **The window runs from your servicer's notice, "
                 "not a fixed national date** — check yours rather than this "
@@ -12859,8 +13119,16 @@ def takehome_figures(scenario: dict, major_name: str, stage_key: int, city: dict
     numbers on screen and in the download."""
     gross = get_annual_salary_for_year(major_name, stage_key)
     take_home = calculate_take_home_pay(gross, city["state_key"], city["local_tax_rate"])
+    # combined_repayment, not repayment_result, for the same reason the
+    # Monthly Payment metric uses it: disposable income is what is left after
+    # the payment the visitor actually makes, and for a returning student that
+    # includes the existing balance. Reading the new-loan-only result here
+    # overstated a returning student's disposable income by their entire
+    # existing payment. Identical for first-time students, where the two
+    # results are the same object.
     monthly_payment = get_monthly_payment_for_stage(
-        scenario["repayment_result"], scenario["strategy_label"], (stage_key + 1) * 12)
+        scenario.get("combined_repayment") or scenario["repayment_result"],
+        (stage_key + 1) * 12)
     disposable_nominal = take_home["net_take_home"] / 12 - monthly_payment
     return {
         "gross": gross, "take_home": take_home, "monthly_payment": monthly_payment,
@@ -13101,6 +13369,52 @@ def render_payoff_age(scenario: dict, current_age, program_years: int,
         st.caption(f"You'd be **{age:.0f}** when this is fully repaid.")
 
 
+def render_loan_basis_disclosure(loan_basis: str, loan_source: str,
+                                  default_loan, reported_debt, school_name: str,
+                                  program_years: int, simplified_scale: float) -> None:
+    """The Simplified-mode caption saying what the loan figure IS -- a scaled
+    estimate, a school-reported median, or nothing financed at all.
+
+    Shared by the single branch and both compare panels, because these
+    sentences are the difference between "a number" and "a number the visitor
+    knows not to over-trust". The compare branch shipped without them: a
+    contrast-arm visitor saw a scaled estimate under loan_amount_label with
+    nothing on screen saying it was an estimate -- an H2 confound on exactly
+    the kind of disclosure H2's framing contrast is about. Only the prose is
+    shared; the single branch's year-by-year Detailed table stays in that
+    branch, since the Detailed case renders a table there and nothing here.
+    """
+    if loan_basis == "no_program":
+        st.caption(
+            "BLS lists no degree requirement for this career, so nothing is financed "
+            "and no tuition is charged against it. The earnings comparison below still "
+            "applies -- it's the cost side that goes to zero, not the pay."
+        )
+    elif loan_basis == "reported_scaled":
+        st.caption((
+            f"This uses **{fmt_money(default_loan)}** -- an **estimate**, not a reported "
+            f"figure. College Scorecard publishes {fmt_money(reported_debt)} for "
+            f"{school_name}, but that is one institution-wide median blending completers "
+            "of every credential length, with no per-year or per-credential breakdown. We "
+            f"scale it by the ratio of cumulative federal Direct borrowing limits, "
+            f"{program_years} years against {UNDERGRAD_YEARS} "
+            f"(**{simplified_scale * 100:.0f}%**), because the Scorecard figure counts "
+            "**federal loans only** and federal limits are what bound federal borrowing. "
+            "Direct PLUS and private borrowing aren't included either way, so a student "
+            "who needed those owes more. Switch to Detailed mode to model your own cost, "
+            "aid, and gap financing instead."
+        ).replace("$", r"\$"))
+    elif loan_source == "college":
+        st.caption((
+            f"This uses **{fmt_money(default_loan)}** -- the median debt graduates of "
+            f"{school_name} who borrowed leave with (College Scorecard), across "
+            "completers of every credential length. It counts "
+            "**federal loans only** -- Direct PLUS and private borrowing aren't included, "
+            "so a student who needed those owes more. Switch to Detailed mode in the "
+            "sidebar to model your own cost, aid, and gap financing instead."
+        ).replace("$", r"\$"))
+
+
 def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: int,
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
                            col_index: float, career_data_source_name: str,
@@ -13110,7 +13424,10 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
                            loan_basis: str = None, program_years: int = None,
-                           current_age: int = None):
+                           current_age: int = None,
+                           loan_source: str = None, default_loan=None,
+                           reported_debt=None, school_name: str = None,
+                           simplified_scale: float = 1.0):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -13157,6 +13474,10 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # has no time dimension) and for the 430 occupations needing no degree.
         if loan_basis is not None:
             st.metric(loan_amount_label(loan_basis, program_years), fmt_money(loan_amount))
+            # The same what-this-figure-is prose the single branch shows.
+            render_loan_basis_disclosure(loan_basis, loan_source, default_loan,
+                                         reported_debt, school_name,
+                                         program_years, simplified_scale)
         # combined_repayment, not repayment_result: what the visitor pays and
         # when they are free includes any existing balance. It EQUALS
         # repayment_result when there is none, so this needs no conditional.
@@ -13182,10 +13503,30 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                 .replace("$", chr(92) + "$")
             )
         render_financing_note(scenario.get("financing"))
+        # The two ABSOLUTE positions, not just their difference. The single
+        # branch shows all three side by side; the contrast arm used to see
+        # the absolutes only as chart lines, never as numbers. Stacked rather
+        # than st.columns: this panel already sits inside Compare Mode's A/B
+        # split, and Streamlit allows one level of column nesting.
+        _cf = counterfactual_vocab()
+        st.metric(
+            f"{_cf['metric_label']} — {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
+            fmt_money(roi_result["hs_net_position"]),
+        )
+        st.metric(f"{scenario['major']} — {roi_window_years}-Yr Net Position",
+                  fmt_money(roi_result["major_net_position"]))
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
             fmt_money(roi_result["earnings_premium"]),
             delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
+            # Same explanation the single branch's premium metric carries --
+            # "COL-Adjusted" must not be jargon in one arm and explained in
+            # the other.
+            help=f"How much more money you'd have after {roi_window_years} years by going into "
+                 f"this career instead of {_cf['instead_of']} -- "
+                 "bigger is better. \"COL-Adjusted\" means we've factored in how "
+                 "expensive it is to live in your chosen city, so this is a fair "
+                 "comparison no matter where you live.",
         )
         render_forgiveness_note(repayment_result, scenario.get("strategy_label"), compact=True)
 
@@ -13199,6 +13540,12 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             hs_wage_index=hs_wage_index,
             personal_contribution=scenario["personal_contribution"],
             enrollment_years=scenario["enrollment_years"],
+            # working_years was the one baseline kwarg this call site dropped
+            # -- the omission find_breakeven_loan's docstring warns about.
+            # Without it a part-time-CC scenario's verdict was solved against
+            # a stricter baseline than the premium printed beside it, and
+            # only in Compare Mode, the randomly assigned contrast arm.
+            working_years=scenario["working_years"],
             baseline_start_age=scenario["baseline_start_age"],
             federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees,
             **breakeven_kwargs())
@@ -13334,6 +13681,9 @@ if compare_mode:
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_a, program_years=program_years_a,
         current_age=st.session_state.get("current_age") if is_returning else None,
+        loan_source=loan_source_a, default_loan=default_loan_a,
+        reported_debt=reported_debt_a, school_name=school_name_a,
+        simplified_scale=simplified_scale_a,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -13344,6 +13694,9 @@ if compare_mode:
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_b, program_years=program_years_b,
         current_age=st.session_state.get("current_age") if is_returning else None,
+        loan_source=loan_source_b, default_loan=default_loan_b,
+        reported_debt=reported_debt_b, school_name=school_name_b,
+        simplified_scale=simplified_scale_b,
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -13366,14 +13719,16 @@ if compare_mode:
     # split is stated numerically by the ratio metric.
     st.subheader(f"🏙️ Real-World Take-Home — {city}")
     th_col_a, th_col_b = st.columns(2)
+    # Returns captured for the PDF below, same as the single branch does --
+    # the compare report renders these stages as tables.
     with th_col_a:
         panel_heading(f"A: {scenario_a['major']}")
-        render_takehome_block(scenario_a, major, city, city_info,
-                               show_charts=False, heading=False, stage_layout="stacked")
+        _th_a = render_takehome_block(scenario_a, major, city, city_info,
+                                      show_charts=False, heading=False, stage_layout="stacked")
     with th_col_b:
         panel_heading(f"B: {scenario_b['major']}")
-        render_takehome_block(scenario_b, major_b, city, city_info,
-                               show_charts=False, heading=False, stage_layout="stacked")
+        _th_b = render_takehome_block(scenario_b, major_b, city, city_info,
+                                      show_charts=False, heading=False, stage_layout="stacked")
 
     st.plotly_chart(
         build_comparison_balance_chart(
@@ -13435,6 +13790,7 @@ if compare_mode:
         loan_source_a=loan_source_a, loan_source_b=loan_source_b,
         federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'),
         federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, professional_school_b=st.session_state.get('prof_school_b'), include_fees=True,
+        takehome_stages_a=_th_a["stages"], takehome_stages_b=_th_b["stages"],
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
@@ -13511,39 +13867,16 @@ else:
         years=program_years_a,
         cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
     )
-    if loan_basis_a == "no_program":
-        st.caption(
-            "BLS lists no degree requirement for this career, so nothing is financed "
-            "and no tuition is charged against it. The earnings comparison below still "
-            "applies -- it's the cost side that goes to zero, not the pay."
-        )
-    elif loan_basis_a == "reported_scaled":
-        st.caption((
-            f"This uses **{fmt_money(default_loan_a)}** -- an **estimate**, not a reported "
-            f"figure. College Scorecard publishes {fmt_money(reported_debt_a)} for "
-            f"{school_name_a}, but that is one institution-wide median blending completers "
-            "of every credential length, with no per-year or per-credential breakdown. We "
-            f"scale it by the ratio of cumulative federal Direct borrowing limits, "
-            f"{program_years_a} years against {UNDERGRAD_YEARS} "
-            f"(**{simplified_scale_a * 100:.0f}%**), because the Scorecard figure counts "
-            "**federal loans only** and federal limits are what bound federal borrowing. "
-            "Direct PLUS and private borrowing aren't included either way, so a student "
-            "who needed those owes more. Switch to Detailed mode to model your own cost, "
-            "aid, and gap financing instead."
-        ).replace("$", r"\$"))
-    elif loan_source_a == "college":
-        # The loan is the college-reported figure, not a per-year cost buildup, so
-        # a year-by-year COA->loan table would contradict the total. Show the
-        # reported number instead; the cost-based per-year breakdown appears only
-        # when the personal calc is actually the loan in use.
-        st.caption((
-            f"This uses **{fmt_money(default_loan_a)}** -- the median debt graduates of "
-            f"{school_name_a} who borrowed leave with (College Scorecard), across "
-            "completers of every credential length. It counts "
-            "**federal loans only** -- Direct PLUS and private borrowing aren't included, "
-            "so a student who needed those owes more. Switch to Detailed mode in the "
-            "sidebar to model your own cost, aid, and gap financing instead."
-        ).replace("$", r"\$"))
+    # The what-this-figure-is prose is shared with the compare panels (see
+    # render_loan_basis_disclosure); only the Detailed year-by-year table
+    # below stays branch-local. The loan is the college-reported figure in
+    # the Simplified cases, not a per-year cost buildup, so a year-by-year
+    # COA->loan table would contradict the total there.
+    if (loan_basis_a in ("no_program", "reported_scaled")
+            or loan_source_a == "college"):
+        render_loan_basis_disclosure(loan_basis_a, loan_source_a, default_loan_a,
+                                     reported_debt_a, school_name_a,
+                                     program_years_a, simplified_scale_a)
     else:
         st.caption(
             "Here's how your loan builds up year by year -- Cost of Attendance "
@@ -14434,10 +14767,8 @@ still modelled — tick **Compare against pre-2026 repayment plans** under
 Advanced Analysis to add them back — but as a comparison against the old rules,
 not as choices. A shared link naming a superseded plan is mapped to the plan
 that replaced it (Standard 10-Year → Tiered Standard, IDR → RAP) rather than
-being dropped to whatever happens to be first. (RAP also still appears under **Advanced
-Analysis → 2026 Regulatory & Macro Forecasting**, which additionally models the
-Tiered Standard Plan.) **Parent PLUS is not eligible for RAP**, which is why it
-sits in the non-forgivable pool described above.
+being dropped to whatever happens to be first. **Parent PLUS is not eligible
+for RAP**, which is why it sits in the non-forgivable pool described above.
 
 One simplification: the plan follows the **start** year, while in reality each
 year's loans are judged by their own disbursement date, so a 2025 starter's
@@ -14967,9 +15298,14 @@ no email, no IP address and no account. Each visit gets a random ID that is
 thrown away when you close the tab, so two visits can't be linked to each
 other or to you.
 
-**Advanced Analysis Settings (optional, off by default).** Five extra
+**Advanced Analysis Settings (optional, off by default).** Four extra
 modules live in a sidebar expander. Each one is opt-in, and the calculator
-behaves exactly as described above when all five are left off.
+behaves exactly as described above when all four are left off.
+
+- **Compare against pre-2026 repayment plans.** Adds Standard 10-Year and
+  IBR-style IDR back into the Repayment Strategy list, as a comparison
+  against the old rules — see the repayment-plans section above for why
+  they are not offered as choices for a 2026+ start.
 
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
   fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard

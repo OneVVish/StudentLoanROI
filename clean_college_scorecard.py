@@ -25,6 +25,7 @@ Usage:
 import argparse
 import re
 import sys
+from pathlib import Path
 
 import pandas as pd
 
@@ -254,9 +255,15 @@ if __name__ == "__main__":
         description="Clean College Scorecard data and calculate in-state/out-of-state cost of attendance."
     )
     parser.add_argument("input_csv", help="Path to the raw College Scorecard institution CSV")
-    parser.add_argument("-o", "--output", default="college_coa_clean.csv", help="Output CSV path")
+    # data/, matching where app.py reads it (and where every other pipeline
+    # writes). The old default was the repo root, so a run without -o
+    # "succeeded" while the app stayed on the stale committed file.
+    parser.add_argument("-o", "--output", default="data/college_coa_clean.csv",
+                        help="Output CSV path (default: data/college_coa_clean.csv, "
+                             "which is the file app.py reads)")
     args = parser.parse_args()
 
     clean_df = build_clean_dataframe(args.input_csv)
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     clean_df.to_csv(args.output, index=False)
     print(f"Wrote {len(clean_df)} rows to {args.output}")
