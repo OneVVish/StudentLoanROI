@@ -2118,6 +2118,11 @@ NYFED_MAJOR_SOC_GROUP = {
 # term; it is an assumption, not a published rule, and the page says so.
 PRIVATE_TERM_YEARS = 10
 
+# The label that marks the private tranche's own row in the comparison. Every
+# consumer that wants only the federal PLANS filters it out by this constant --
+# never by position, which changes whenever a plan is added.
+PRIVATE_ROW_LABEL = "Private / non-federal loan"
+
 RAP_DEPENDENT_REDUCTION = 50  # $/month per dependent
 RAP_MIN_PAYMENT = 10  # $/month floor on the payment ITSELF, after the
                       # dependent deduction -- not just the lowest AGI band.
@@ -8319,21 +8324,46 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     story.append(_pdf_table(inputs, header=True))
     story.append(Spacer(1, 12))
 
-    story.append(Paragraph("Plan comparison", styles["section"]))
-    table = [["Plan", "Monthly", "Payoff", "Total interest", "Forgiven", "Interest waived"]]
-    for label, r, _note in rows:
-        monthly = (r["monthly_payment"] if "monthly_payment" in r
-                   else first_payment_of(r))
-        table.append([
-            label,
-            fmt_money(monthly),
-            f"{r['payoff_years']:.1f} yrs",
-            fmt_money(r["total_interest"]),
-            fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "--",
-            fmt_money(r.get("waived_interest")) if r.get("waived_interest")
-            else ("$0" if "RAP" in label else "--"),
-        ])
-    story.append(_pdf_table(table, header=True, full_width=True))
+    def plan_table(subset, federal_only=False):
+        table = [["Plan", "Monthly", "Payoff", "Total interest", "Forgiven",
+                  "Interest waived"]]
+        for label, r, _note in subset:
+            if federal_only:
+                r = r.get("federal_only", r)
+            monthly = (r["monthly_payment"] if "monthly_payment" in r
+                       else first_payment_of(r))
+            table.append([
+                label,
+                fmt_money(monthly),
+                f"{r['payoff_years']:.1f} yrs",
+                fmt_money(r["total_interest"]),
+                fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "--",
+                fmt_money(r.get("waived_interest")) if r.get("waived_interest")
+                else ("$0" if "RAP" in label else "--"),
+            ])
+        return _pdf_table(table, header=True, full_width=True)
+
+    plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
+    private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
+
+    # Same three views as the screen, in the same order -- see the chart-twin
+    # rule in CLAUDE.md. A PDF that showed only the combined total while the
+    # page showed the split would be the drift this codebase keeps paying for.
+    if private_row is None:
+        story.append(Paragraph("Plan comparison", styles["section"]))
+        story.append(plan_table(plan_rows))
+    else:
+        story.append(Paragraph("Federal plans -- this is the choice you're making",
+                               styles["section"]))
+        story.append(plan_table(plan_rows, federal_only=True))
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("Private / non-federal loan -- the same under "
+                               "every plan above", styles["section"]))
+        story.append(plan_table([private_row]))
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("Combined -- what you actually pay",
+                               styles["section"]))
+        story.append(plan_table(plan_rows))
     story.append(Spacer(1, 6))
     if prior_payments:
         story.append(Paragraph(
@@ -10872,6 +10902,7 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_private_balance", "rpb", int),
     ("existing_private_rate", "rpr", float),
     ("existing_private_term", "rpt", int),
+    ("existing_has_private", "rhp", int),
 )
 
 
@@ -10897,7 +10928,18 @@ def seed_repayment_from_share() -> None:
     render_existing_loan_comparison rather than at module level because the
     widgets it seeds live inside that function -- Streamlit raises if a key is
     assigned once its widget exists.
+
+    ONCE PER SESSION, not once per rerun. The setdefaults below are harmless to
+    repeat, but the has-private line is a plain assignment, and re-running it
+    every rerun made the checkbox impossible to untick: the balance was still
+    in session_state, so each attempt to close the section immediately forced
+    it back open. Seeding is a first-render concern; after that the widgets own
+    their values.
     """
+    if st.session_state.get("_repayment_seeded"):
+        return
+    st.session_state["_repayment_seeded"] = True
+
     for key, param, cast in REPAYMENT_SHARE_FIELDS:
         raw = get_shared_default(param, "")
         if raw == "":
@@ -10910,9 +10952,16 @@ def seed_repayment_from_share() -> None:
     # An absent ?rpt= means "not shared", not "zero years".
     if not st.session_state.get("existing_private_term"):
         st.session_state["existing_private_term"] = PRIVATE_TERM_YEARS
-    # The two checkboxes are stored as 0/1 and must reach the widget as bools,
-    # or Streamlit renders an int into a checkbox and the value is lost.
-    for key in ("existing_forgivable", "existing_pslf"):
+    # A link carrying a private balance must arrive with the section OPEN, or
+    # the fields are hidden and the else-branch zeroes the very numbers the
+    # link was built to share. Belt and braces with ?rhp= above: an older link
+    # predating that param still has ?rpb=, and that is enough to know.
+    if st.session_state.get("existing_private_balance"):
+        st.session_state["existing_has_private"] = True
+
+    # The checkboxes are stored as 0/1 and must reach the widget as bools, or
+    # Streamlit renders an int into a checkbox and the value is lost.
+    for key in ("existing_forgivable", "existing_pslf", "existing_has_private"):
         if key in st.session_state:
             st.session_state[key] = bool(st.session_state[key])
 
@@ -10968,7 +11017,13 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                       if private_balance > 0 else None)
 
     def with_private(federal_result: dict) -> dict:
-        return combine_repayment_results(federal_result, private_result)
+        combined = combine_repayment_results(federal_result, private_result)
+        # Carried so the renderer and the PDF can show the federal half on its
+        # own without re-running any simulator. Recomputing there would be a
+        # second implementation of the same numbers, which is the drift trap
+        # the chart twins already document.
+        combined["federal_only"] = federal_result
+        return combined
 
     rows = []
     std = calculate_standard_repayment(balance, rate, STANDARD_TERM_YEARS)
@@ -11024,6 +11079,14 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                      "payments." if pslf else
                      "10% of income above a $22,000 allowance. Forgiven at 20 years. "
                      "Closed to loans originated on or after July 1, 2026."))
+    # The private tranche is one loan, identical under every plan, so it is
+    # returned once rather than as a row per plan -- which is also the
+    # clearest statement of the fact that no federal plan touches it.
+    if private_result is not None:
+        rows.append((PRIVATE_ROW_LABEL, private_result,
+                     f"Repaid in full over {private_term_years} years. Not "
+                     "federal: no plan forgives it, and nothing about it "
+                     "changes with your income or your plan."))
     return rows
 
 
@@ -11091,6 +11154,33 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         )
 
 
+def _repayment_table(rows: list, federal_only: bool = False) -> pd.DataFrame:
+    """One comparison table. `federal_only` reads each row's pre-combination
+    result instead of the combined one, so the federal and combined views are
+    the SAME numbers filtered, never two calculations that could disagree.
+    """
+    out = []
+    for label, r, note in rows:
+        if federal_only:
+            r = r.get("federal_only", r)
+        out.append({
+            "Plan": label,
+            "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
+                        else fmt_money(first_payment_of(r))),
+            "Payoff": f"{r['payoff_years']:.1f} yrs",
+            "Total interest": fmt_money(r["total_interest"]),
+            "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
+            # Only RAP has a subsidy, so every other row is an em dash rather
+            # than $0 -- "$0" would read as a subsidy that failed rather than a
+            # plan that has none.
+            "Interest waived": (fmt_money(r["waived_interest"])
+                                if r.get("waived_interest") else
+                                ("$0" if "RAP" in label else "—")),
+            "What it is": note,
+        })
+    return pd.DataFrame(out)
+
+
 def render_existing_loan_comparison(always_open: bool = False) -> None:
     """Plan comparison for someone already in repayment.
 
@@ -11113,6 +11203,11 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             "about whether to borrow in the first place — this is about what "
             "to do once you have."
         )
+        # Two subsections, because the page compares FEDERAL plans and a
+        # private balance is not one of them -- it rides along unchanged in
+        # every row. Grouping them makes that structural rather than something
+        # a visitor has to infer from the captions.
+        st.markdown("**Federal loans**")
         c1, c2, c3 = st.columns(3)
         balance = c1.number_input("Current balance ($)", min_value=0, max_value=2_000_000,
                                    step=1_000, key="existing_balance")
@@ -11140,6 +11235,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "eligible for RAP or IBR, and private loans are outside the "
                  "federal system entirely, so the income-driven rows are hidden.")
 
+        st.caption(
+            "Your income and dependants change the **income-driven** rows only "
+            "— RAP and IBR size their payment from them. The fixed-payment "
+            "plans ignore both, and so does any private balance below."
+        )
+
         pslf = st.checkbox(
             "I work full-time for a government or 501(c)(3) employer (PSLF)",
             key="existing_pslf", disabled=not forgivable,
@@ -11155,32 +11256,6 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
 
         # Months, not years: servicers report a qualifying-payment COUNT, and
         # rounding it to a year moves forgiveness by up to eleven payments.
-        pc1, pc2 = st.columns(2)
-        private_balance = pc1.number_input(
-            "Private / non-federal balance ($)", min_value=0, max_value=2_000_000,
-            step=1_000, key="existing_private_balance",
-            help="A second tranche repaid alongside the federal balance above. "
-                 "Leave at 0 if you have none. Private loans are outside the "
-                 "federal system: no plan forgives them, no plan lowers their "
-                 "payment for your income, and they are repaid in full on their "
-                 "own fixed schedule. Every row below is your TOTAL bill -- "
-                 "federal plan plus this.")
-        private_rate = pc2.number_input(
-            "Private interest rate (%)", min_value=0.0, max_value=30.0, step=0.1,
-            key="existing_private_rate", disabled=not private_balance,
-            help="Private rates are credit-priced and usually higher than "
-                 "federal.")
-        # min_value=1: a zero-year term divides by zero in the amortisation, and
-        # there is no sensible reading of "repaid over no years".
-        private_term = pc1.number_input(
-            "Private repayment term (years)", min_value=1, max_value=30, step=1,
-            key="existing_private_term", disabled=not private_balance,
-            help="From your loan agreement. Private terms commonly run 5-20 "
-                 f"years; {PRIVATE_TERM_YEARS} is only the starting value here, "
-                 "not a rule. A longer term lowers the payment and raises the "
-                 "total interest, and unlike the federal rows nothing about it "
-                 "changes with your income.")
-
         prior_payments = st.number_input(
             "Qualifying payments already made (months)", min_value=0, max_value=480,
             step=1, key="existing_prior_payments", disabled=not forgivable,
@@ -11191,6 +11266,54 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "you have never been on an income-driven plan, or don't know. "
                  "The fixed-term plans ignore this: they forgive nothing, so "
                  "there is no clock to have made progress against.")
+
+        st.markdown("**Private / non-federal loans**")
+        # Behind an opt-in: most borrowers have only federal loans, and three
+        # extra fields is a lot of form to make them read past. Ticking it is
+        # also a cleaner signal than a 0 left in a balance box.
+        has_private = st.checkbox(
+            "I also have private or other non-federal loans",
+            key="existing_has_private",
+            help="Private, state, institutional or refinanced loans -- anything "
+                 "outside the federal Direct system. They are repaid alongside "
+                 "the federal balance on their own terms, and no federal plan "
+                 "forgives them or lowers their payment for your income.")
+
+        if has_private:
+            pc1, pc2 = st.columns(2)
+            private_balance = pc1.number_input(
+                "Private / non-federal balance ($)", min_value=0,
+                max_value=2_000_000, step=1_000, key="existing_private_balance",
+                help="Repaid alongside the federal balance above, on its own "
+                     "terms. Every row below is your TOTAL bill -- federal plan "
+                     "plus this.")
+            private_rate = pc2.number_input(
+                "Private interest rate (%)", min_value=0.0, max_value=30.0,
+                step=0.1, key="existing_private_rate",
+                help="Private rates are credit-priced and usually higher than "
+                     "federal.")
+            # min_value=1: a zero-year term divides by zero in the amortisation,
+            # and there is no reading of "repaid over no years".
+            private_term = pc1.number_input(
+                "Private repayment term (years)", min_value=1, max_value=30,
+                step=1, key="existing_private_term",
+                help="From your loan agreement. Private terms commonly run 5-20 "
+                     f"years; {PRIVATE_TERM_YEARS} is only the starting value "
+                     "here, not a rule. A longer term lowers the payment and "
+                     "raises the total interest, and unlike the federal rows "
+                     "nothing about it changes with your income.")
+        else:
+            # HIDING AN INPUT MUST ALSO NEUTRALISE IT. Streamlit keeps a
+            # widget's value in session_state after it stops being rendered, so
+            # reading the stored balance here would leave a hidden number moving
+            # every row on the page with nothing on screen to explain it -- a
+            # visitor who typed a balance, then unticked the box, would still be
+            # shown a total bill that includes it. Zero is the only honest
+            # reading of an unticked box. The stored values are deliberately NOT
+            # cleared, so re-ticking restores what they typed.
+            private_balance, private_rate = 0.0, 0.0
+            private_term = PRIVATE_TERM_YEARS
+
 
         if not balance or not rate:
             st.info("Enter a balance and a rate to compare plans.")
@@ -11227,21 +11350,32 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             private_balance=private_balance,
                                             private_rate=private_rate,
                                             private_term_years=private_term)
-        st.dataframe(pd.DataFrame([{
-            "Plan": label,
-            "Monthly": (fmt_money(r["monthly_payment"]) if "monthly_payment" in r
-                        else fmt_money(first_payment_of(r))),
-            "Payoff": f"{r['payoff_years']:.1f} yrs",
-            "Total interest": fmt_money(r["total_interest"]),
-            "Forgiven": fmt_money(r["forgiven_amount"]) if r["forgiven_amount"] else "—",
-            # Only RAP has a subsidy, so every other row is an em dash rather
-            # than $0 -- "$0" would read as a subsidy that failed rather than a
-            # plan that has none.
-            "Interest waived": (fmt_money(r["waived_interest"])
-                                if r.get("waived_interest") else
-                                ("$0" if "RAP" in label else "—")),
-            "What it is": note,
-        } for label, r, note in rows]), hide_index=True, use_container_width=True)
+        plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
+        private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
+
+        if private_row is None:
+            # No private tranche: one table, and no headings to imply a split
+            # that does not exist.
+            st.dataframe(_repayment_table(plan_rows),
+                         hide_index=True, use_container_width=True)
+        else:
+            # Three views of the same numbers. Federal first because it is what
+            # the page is actually comparing; private second because it is one
+            # unchanging loan; combined last because it is the bill, and reading
+            # it before the two halves makes the halves look like a breakdown of
+            # a decision rather than the decision itself.
+            st.markdown("**Federal plans** — this is the choice you're making")
+            st.dataframe(_repayment_table(plan_rows, federal_only=True),
+                         hide_index=True, use_container_width=True)
+
+            st.markdown("**Private / non-federal loan** — the same under every "
+                        "plan above")
+            st.dataframe(_repayment_table([private_row]),
+                         hide_index=True, use_container_width=True)
+
+            st.markdown("**Combined** — what you actually pay")
+            st.dataframe(_repayment_table(plan_rows),
+                         hide_index=True, use_container_width=True)
 
         # The one-way door, given its own block because it is the single most
         # decision-relevant fact on this page and it inverts against intuition:
