@@ -6681,6 +6681,79 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
     return fig
 
 
+def payment_series(result: dict) -> pd.DataFrame:
+    """Year and monthly payment, for any repayment result.
+
+    Two shapes exist and both are real: IDR and RAP emit a per-month `payment`
+    column because theirs moves with income, while the Standard family carries
+    only a flat monthly_payment. Read whichever is present -- the same rule
+    cumulative_loan_paid_by_year already follows -- rather than assuming one and
+    silently charting zeros for the other.
+
+    CAUTION ON A *COMBINED* RESULT. `_merge_balance_schedules` reconstructs a
+    flat payment for whichever tranche lacks one and sums them, so a combined
+    row reports the same total for every month even after the shorter loan has
+    been paid off: a 10-year federal plan beside a 15-year private balance reads
+    as one constant figure for all 15 years, when the true path steps down once
+    the federal half clears. That is why build_payment_chart STACKS the two
+    tranches from their own series rather than charting the combined column --
+    each drops to zero when its own loan ends. Anything else plotting payments
+    from a combined result inherits the same flaw.
+    """
+    sched = result.get("schedule")
+    if sched is None or sched.empty:
+        return pd.DataFrame(columns=["year", "payment"])
+    if "payment" in sched.columns:
+        return sched[["year", "payment"]].copy()
+    flat = float(result.get("monthly_payment", 0.0))
+    return pd.DataFrame({"year": sched["year"], "payment": flat})
+
+
+def build_payment_chart(result: dict, label: str, federal_result: dict = None,
+                        private_result: dict = None):
+    """Monthly payment over time.
+
+    The companion to the balance chart, and it shows something the balance
+    cannot: an income-driven payment RISES as income does, and a single
+    "Monthly" figure in the table is only its first month. On RAP the same
+    chart shows the $10 floor as a flat opening stretch.
+
+    When a private tranche exists this stacks federal under private, because
+    the private part is a constant floor while the federal part moves -- the
+    same fact the three-table split states in numbers.
+    """
+    if federal_result is not None and private_result is not None:
+        fed = payment_series(federal_result).rename(columns={"payment": "Federal plan"})
+        priv = payment_series(private_result).rename(columns={"payment": "Private loan"})
+        merged = pd.merge(fed, priv, on="year", how="outer").sort_values("year")
+        # A loan that ends leaves the other still running; its payment is then
+        # zero, not missing, or the area chart would break the series where the
+        # shorter loan finishes.
+        merged[["Federal plan", "Private loan"]] = merged[
+            ["Federal plan", "Private loan"]].fillna(0.0)
+        stacked = merged.melt(id_vars="year",
+                              value_vars=["Federal plan", "Private loan"],
+                              var_name="component", value_name="payment")
+        fig = px.area(
+            stacked, x="year", y="payment", color="component",
+            title=f"Monthly Payment Over Time — {label}",
+            labels={"year": "Years", "payment": "Monthly payment ($)",
+                    "component": ""},
+            color_discrete_map={"Federal plan": "#4C78A8",
+                                "Private loan": "#B279A2"},
+        )
+        fig.update_layout(hovermode="x unified", title_font_size=14)
+        return fig
+
+    series = payment_series(result)
+    fig = px.line(series, x="year", y="payment",
+                  title=f"Monthly Payment Over Time — {label}",
+                  labels={"year": "Years", "payment": "Monthly payment ($)"})
+    fig.update_traces(line=dict(width=3))
+    fig.update_layout(hovermode="x unified", title_font_size=14)
+    return fig
+
+
 def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
                         roi_window_years: int) -> pd.DataFrame:
     """Tidy {year, Series, Net Position} frame for the net-position chart, from
@@ -7670,6 +7743,33 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> I
     return _pdf_image_from_figure(fig)
 
 
+def build_pdf_payment_chart(result: dict, label: str,
+                            federal_result: dict = None,
+                            private_result: dict = None) -> Image:
+    """PDF twin of build_payment_chart. Same data, same stacking rule, redrawn
+    for print -- see the chart-twin warning in CLAUDE.md. Not required to be
+    pixel-identical, but a change to what the on-screen version SHOWS needs the
+    same change here."""
+    fig, ax = plt.subplots(figsize=(6, 3.0))
+    if federal_result is not None and private_result is not None:
+        fed = payment_series(federal_result)
+        priv = payment_series(private_result)
+        merged = pd.merge(fed, priv, on="year", how="outer",
+                          suffixes=("_fed", "_priv")).sort_values("year").fillna(0.0)
+        ax.stackplot(merged["year"], merged["payment_fed"], merged["payment_priv"],
+                     labels=["Federal plan", "Private loan"],
+                     colors=["#4C78A8", "#B279A2"])
+        ax.legend(loc="upper left", fontsize=8)
+    else:
+        series = payment_series(result)
+        ax.plot(series["year"], series["payment"], linewidth=2.5)
+    ax.set_title(f"Monthly Payment Over Time - {label}")
+    ax.set_xlabel("Years")
+    ax.set_ylabel("Monthly payment ($)")
+    ax.grid(True, alpha=0.3)
+    return _pdf_image_from_figure(fig)
+
+
 def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
                                         schedule_b: pd.DataFrame, label_b: str) -> Image:
     """PDF counterpart to build_comparison_balance_chart."""
@@ -8389,6 +8489,17 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         story.append(build_pdf_balance_chart(chosen["schedule"], chart_label))
         story.append(Paragraph(f"Balance over time under {chart_label}.",
                                styles["caption"]))
+        story.append(Spacer(1, 8))
+        _fed = chosen.get("federal_only") if chart_label != PRIVATE_ROW_LABEL else None
+        story.append(build_pdf_payment_chart(
+            chosen, chart_label,
+            federal_result=_fed if private_row is not None else None,
+            private_result=(private_row[1] if private_row is not None
+                            and _fed is not None else None)))
+        story.append(Paragraph(
+            "Monthly payment over time. An income-driven payment rises with "
+            "income, so the table's monthly figure is only its first month.",
+            styles["caption"]))
         story.append(Spacer(1, 10))
 
     story.append(Paragraph("What this does and does not include", styles["section"]))
@@ -11470,7 +11581,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # how an input that fed only that split came to look like it did
         # nothing.
         plan_labels = [label for label, _, _ in rows]
-        chosen = st.selectbox("Show the balance over time for", plan_labels,
+        chosen = st.selectbox("Show the charts for", plan_labels,
                                key="existing_chart_plan")
         chosen_result = next(r for label, r, _ in rows if label == chosen)
         _repayment_actions(rows, balance, rate, income, deps, accrued,
@@ -11482,6 +11593,27 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
                          use_container_width=True, config=PLOTLY_CHART_CONFIG,
                          key="existing_balance_chart")
+
+        # Payments beside the balance. The balance chart cannot show that an
+        # income-driven payment RISES with income -- the table's "Monthly" is
+        # only its first month -- nor that RAP opens on a flat $10 floor.
+        # Stacked when a private tranche exists and the selected row is a
+        # combined plan, so the constant private floor is visible under the
+        # moving federal part; the private row itself is already just one loan.
+        _fed = chosen_result.get("federal_only") if chosen != PRIVATE_ROW_LABEL else None
+        _priv = next((r for label, r, _ in rows if label == PRIVATE_ROW_LABEL), None)
+        st.plotly_chart(
+            build_payment_chart(chosen_result, chosen,
+                                federal_result=_fed if _priv is not None else None,
+                                private_result=_priv if _fed is not None else None),
+            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+            key="existing_payment_chart")
+        if "payment" not in chosen_result.get("schedule", pd.DataFrame()).columns:
+            st.caption(
+                "A fixed-payment plan, so this line is flat by construction — it "
+                "is here to be compared against the income-driven plans, whose "
+                "payment moves with income."
+            )
         if accrued > 0 and not balance_split_is_informative(chosen_result["schedule"]):
             st.caption(
                 f"This plan clears your {fmt_money(accrued)} of unpaid interest early, "
