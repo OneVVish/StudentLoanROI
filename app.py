@@ -2104,7 +2104,7 @@ NYFED_MAJOR_SOC_GROUP = {
     "Treatment Therapy": "29",
 }
 
-# ---- 2026 Federal Repayment Plans: RAP & Tiered Standard (optional "Advanced Analysis" mode) -
+# ---- 2026 Federal Repayment Plans: RAP & Tiered Standard ------------------
 # Real, enacted federal law: the One Big Beautiful Bill Act (H.R. 1, 2025)
 # replaces existing IDR plans with the Repayment Assistance Plan (RAP) and
 # introduces a Tiered Standard Plan, both effective for new federal loan
@@ -3751,7 +3751,6 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         params["prof_school_b"] = st.session_state["prof_school_b"]
     params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
     params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
-    params["future"] = "1" if st.session_state.get("enable_future_proofing") else "0"
     # In prestige mode the tier REPLACES the school, so ?school= holds a tier
     # label that no school lookup can resolve -- the tier params are what make
     # such a link reconstructable.
@@ -8058,46 +8057,6 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
             PageBreak(), Paragraph("AI Employability Risk Analysis", styles["section"]),
             _pdf_table(rows),
         ]
-    if module_context.get("future_forecasting_active"):
-        elements += [
-            PageBreak(), Paragraph("2026 Federal Repayment Plans (RAP & Tiered Standard)", styles["section"]),
-        ]
-        if scenario_a is not None:
-            for suffix, scenario, major_name, rate, label in [
-                (key_suffix_a, scenario_a, major_name_a, interest_rate_a,
-                 "Scenario A" if scenario_b is not None else None),
-                (key_suffix_b, scenario_b, major_name_b, interest_rate_b, "Scenario B"),
-            ]:
-                if scenario is None:
-                    continue
-                dependents = st.session_state.get(f"rap_dependents_{suffix}", 0)
-                tiered_res, tiered_roi = compute_future_plan_result(
-                    scenario, major_name, rate, "2026 Tiered Standard Plan", dependents,
-                    col_index=col_index, hs_wage_index=hs_wage_index,
-                    roi_window_years=roi_window_years)
-                rap_res, rap_roi = compute_future_plan_result(
-                    scenario, major_name, rate, "2026 Repayment Assistance Plan (RAP)", dependents,
-                    col_index=col_index, hs_wage_index=hs_wage_index,
-                    roi_window_years=roi_window_years)
-                term_years = calculate_tiered_standard_term(scenario["effective_principal"])
-                rap_pay = calculate_rap_payment(get_annual_salary_for_year(major_name, 0), dependents)
-                if label:
-                    elements.append(Paragraph(f"<b>{label}: {xml_escape(major_name)}</b>", styles["body"]))
-                elements += [
-                    _pdf_table([
-                        ["Plan", "Monthly", "Payoff / Forgiveness", "Interest", "Forgiven (30yr)",
-                         f"{roi_window_years}-Yr Premium"],
-                        ["Tiered Standard", fmt_money(tiered_res["monthly_payment"]), f"{term_years} yrs",
-                         fmt_money(tiered_res["total_interest"]), "-", fmt_money(tiered_roi["earnings_premium"])],
-                        ["RAP (Yr-1 income)", fmt_money(rap_pay["monthly_payment"]),
-                         f"{rap_res['payoff_years']:.1f} yrs", "$0 (waived)",
-                         fmt_money(rap_res["forgiven_amount"]), fmt_money(rap_roi["earnings_premium"])],
-                    ]),
-                    Spacer(1, 8),
-                    build_pdf_comparison_balance_chart(tiered_res["schedule"], "Tiered Standard",
-                                                        rap_res["schedule"], "RAP"),
-                    Spacer(1, 12),
-                ]
     return elements
 
 
@@ -9002,15 +8961,12 @@ st.session_state.setdefault("enable_prestige_mode", False)
 apply_shared_flag("prestige", "enable_prestige_mode")
 st.session_state.setdefault("enable_ai_mode", False)
 apply_shared_flag("ai", "enable_ai_mode")
-st.session_state.setdefault("enable_future_proofing", False)
-apply_shared_flag("future", "enable_future_proofing")
 # Seeded here rather than at its checkbox, which renders far below several
 # blocks that already read this key before the widget exists.
 st.session_state.setdefault("count_foregone_earnings", False)
 apply_shared_flag("foregone", "count_foregone_earnings")
 enable_prestige_mode = st.session_state["enable_prestige_mode"]
 enable_ai_mode = st.session_state["enable_ai_mode"]
-enable_future_proofing = st.session_state["enable_future_proofing"]
 prestige_tier_a = None
 prestige_tier_b = None
 
@@ -9827,9 +9783,9 @@ dataset_mode = st.session_state["dataset_mode_radio"]
 
 # One place the baseline arguments are assembled, spread into every
 # compute_scenario_results / find_breakeven_loan call. Threading them by hand
-# through five call sites is exactly how hs_wage_index went missing from
-# compute_future_plan_result and put a 76% overstatement on screen -- a dict
-# spread cannot be half-applied.
+# through five call sites is exactly how hs_wage_index went missing from the
+# 2026-plans module (since removed) and put a 76% overstatement on screen -- a
+# dict spread cannot be half-applied.
 def returning_kwargs() -> dict:
     """Baseline + existing-debt arguments, or empty in first-time mode."""
     if not is_returning:
@@ -10374,12 +10330,6 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
         help="Show a modeled AI task-exposure estimate for your chosen "
              "major's occupation group, based on published research -- see "
              "Methodology.",
-    )
-    enable_future_proofing = st.checkbox(
-        "Enable 2026 Federal Repayment Plans (RAP & Tiered)", key="enable_future_proofing", on_change=lambda: mark_interaction("enable_future_proofing"),
-        help="Compare the two real 2026 federal repayment plans side by side -- "
-             "the Repayment Assistance Plan (RAP) and the Tiered Standard Plan, "
-             "both effective July 1, 2026. See Methodology.",
     )
     enable_legacy_plans = st.checkbox(
         "Compare against pre-2026 repayment plans", key="enable_legacy_plans",
@@ -13042,181 +12992,8 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
     return {"ai_mode_active": True, "scenario_a_ai_risk_level": risk_a}
 
 
-def compute_future_plan_result(scenario: dict, major_name: str, interest_rate: float,
-                                future_plan: str, dependents: int, col_index: float = 100.0,
-                                hs_wage_index: float = 1.0,
-                                roi_window_years: int = ROI_WINDOW_YEARS) -> tuple:
-    """Recomputes a 2026 plan's repayment schedule + ROI position -- shared
-    by the on-screen render (_render_plan, inside
-    render_future_proofing_section) and the PDF's module-section chart
-    building, so both call the exact same numbers instead of risking
-    drift between two copies of this logic. Pure function, no Streamlit
-    widget calls, safe to call a second time outside the on-screen
-    closure with the same inputs."""
-    effective_principal = scenario["effective_principal"]
-    financing = scenario.get("financing")
-    nonforgivable = (financing or {}).get("nonforgivable_principal", 0) or 0
-    if future_plan == "2026 Tiered Standard Plan":
-        term_years = calculate_tiered_standard_term(effective_principal)
-        result = calculate_standard_repayment(effective_principal, interest_rate, term_years,
-                                               roi_window_years=roi_window_years)
-    elif nonforgivable > 0:
-        # RAP is a federal plan and forgives at the end of its term, so it has
-        # the same problem the main IDR path did: Parent PLUS and private money
-        # are not eligible and must not be written off with the rest. Run RAP on
-        # the student's own Direct loans and amortise the rest beside it.
-        # Tiered Standard above needs no split -- it forgives nothing, so both
-        # pools are already repaid in full.
-        federal_part = simulate_rap_schedule(
-            financing["forgivable_principal"], financing["forgivable_rate"],
-            major_name, dependents, roi_window_years=roi_window_years)
-        nonfederal_part = calculate_standard_repayment(
-            financing["nonforgivable_principal"], financing["nonforgivable_rate"],
-            roi_window_years=roi_window_years)
-        result = combine_repayment_results(federal_part, nonfederal_part)
-    else:
-        result = simulate_rap_schedule(effective_principal, interest_rate, major_name, dependents,
-                                        roi_window_years=roi_window_years)
-    # enrollment_years/working_years/baseline_start_age come off the scenario
-    # rather than defaulting: baseline_start_age's age offset is derived from
-    # enrollment_years (see baseline_start_age_for), so passing one without the
-    # other would place the baseline at the wrong age entirely. Before this
-    # they all defaulted, which quietly compared these plans' premiums against
-    # a no-head-start baseline while the rest of the page used one with it.
-    #
-    # hs_wage_index matters as much as the rest: without it this module
-    # compared a city-scaled graduate salary against a NATIONAL high-school
-    # baseline, so the metro wage premium landed on the degree's side of the
-    # scale only -- the same asymmetry calculate_roi's own comment describes,
-    # reappearing here because the argument simply wasn't forwarded.
-    roi_result_2026 = calculate_roi(major_name, result["total_paid_in_roi_window"],
-                                     scenario["total_investment"], col_index=col_index,
-                                     years=roi_window_years,
-                                     hs_wage_index=hs_wage_index,
-                                     enrollment_years=scenario["enrollment_years"],
-                                     working_years=scenario["working_years"],
-                                     baseline_start_age=scenario["baseline_start_age"])
-    return result, roi_result_2026
-
-
-def render_future_proofing_section(scenario_a: dict, major_name_a: str, interest_rate_a: float,
-                                    scenario_b: dict = None, major_name_b: str = None,
-                                    interest_rate_b: float = None, col_index: float = 100.0,
-                                    hs_wage_index: float = 1.0,
-                                    roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
-    """2026 Federal Repayment Plans container: compares the RAP and Tiered
-    Standard plans side by side (only rendered when enable_future_proofing is
-    True). Returns the
-    {column_name: value} fields for build_module_context. See the RAP_*
-    constants and calculate_tiered_standard_term/calculate_rap_payment/
-    simulate_rap_schedule (section 2e-2) for the real, cited mechanics
-    behind these numbers."""
-    st.subheader("⚖️ 2026 Federal Repayment Plans — RAP vs. Tiered Standard")
-    st.caption(
-        "Compares the two real 2026 federal repayment plans side by side -- the "
-        "Repayment Assistance Plan (RAP) and the Tiered Standard Plan, created by "
-        "the One Big Beautiful Bill Act (H.R. 1, 2025) and effective for new "
-        "federal loan borrowers July 1, 2026. See Methodology for sourcing and "
-        "important caveats before relying on these numbers."
-    )
-
-    def _render_plans(scenario, major_name, interest_rate, key_suffix):
-        """Both 2026 plans compared side by side: RAP and Tiered Standard, on the
-        same metrics and one overlaid balance chart, so a borrower sees the
-        trade-off directly instead of flipping a dropdown."""
-        dependents = st.number_input(
-            "Dependents (for RAP)", min_value=0, max_value=10, value=0,
-            key=f"rap_dependents_{key_suffix}",
-            help="Reduces the RAP payment by $50/month per dependent (real OBBBA provision).",
-        )
-        tiered_res, tiered_roi = compute_future_plan_result(
-            scenario, major_name, interest_rate, "2026 Tiered Standard Plan", dependents,
-            col_index=col_index, hs_wage_index=hs_wage_index,
-            roi_window_years=roi_window_years,
-        )
-        rap_res, rap_roi = compute_future_plan_result(
-            scenario, major_name, interest_rate, "2026 Repayment Assistance Plan (RAP)", dependents,
-            col_index=col_index, hs_wage_index=hs_wage_index,
-            roi_window_years=roi_window_years,
-        )
-        term_years = calculate_tiered_standard_term(scenario["effective_principal"])
-        rap_pay = calculate_rap_payment(get_annual_salary_for_year(major_name, 0), dependents)
-        render_centered_table(pd.DataFrame([
-            {"Plan": "Tiered Standard",
-             "Monthly Payment": fmt_money(tiered_res["monthly_payment"]),
-             "Payoff / Forgiveness": f"{term_years} yrs (fixed)",
-             "Interest Paid": fmt_money(tiered_res["total_interest"]),
-             "Forgiven (30 yr)": "—",
-             f"{roi_window_years}-Yr Premium": fmt_money(tiered_roi["earnings_premium"])},
-            {"Plan": "RAP (Year-1 income)",
-             "Monthly Payment": fmt_money(rap_pay["monthly_payment"]),
-             "Payoff / Forgiveness": f"{rap_res['payoff_years']:.1f} yrs",
-             # Was hardcoded "$0 (waived)", which is the same error the
-             # simulator carried: RAP waives only the interest a payment does
-             # not cover, so a borrower whose payment exceeds the accrual pays
-             # all of it. Read the computed figure like every other row does.
-             "Interest Paid": fmt_money(rap_res["total_interest"]),
-             "Forgiven (30 yr)": fmt_money(rap_res["forgiven_amount"]),
-             f"{roi_window_years}-Yr Premium": fmt_money(rap_roi["earnings_premium"])},
-        ]))
-        st.caption(
-            "Under **RAP**, payments track your income, **unpaid** interest is waived — the "
-            "part your payment doesn't cover, which is nothing if you earn enough to cover it "
-            "— and the government matches up to $50/month toward principal, so the balance "
-            "never grows and anything left is forgiven after 30 years. **Tiered Standard** is a fixed "
-            "payment over a term set by your balance. Premium is the COL-adjusted "
-            f"{roi_window_years}-year earnings premium under each plan."
-        )
-        st.plotly_chart(
-            build_comparison_balance_chart(tiered_res["schedule"], "Tiered Standard",
-                                            rap_res["schedule"], "RAP"),
-            use_container_width=True, key=f"future_compare_chart_{key_suffix}", config=PLOTLY_CHART_CONFIG,
-        )
-        return "Both (Tiered Standard & RAP)"
-
-    if scenario_b is not None:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            panel_heading(f"Scenario A: {major_name_a}")
-            plan_a = _render_plans(scenario_a, major_name_a, interest_rate_a, "a")
-        with col_b:
-            panel_heading(f"Scenario B: {major_name_b}")
-            plan_b = _render_plans(scenario_b, major_name_b, interest_rate_b, "b")
-        context = {
-            "future_forecasting_active": True, "future_plan_selected": plan_a,
-            "scenario_b_future_plan_selected": plan_b,
-        }
-        macro_major = major_name_a
-    else:
-        plan_a = _render_plans(scenario_a, major_name_a, interest_rate_a, "single")
-        context = {"future_forecasting_active": True, "future_plan_selected": plan_a}
-        macro_major = major_name_a
-
-    st.divider()
-    st.markdown("**Spatial Cost-of-Living Comparison**")
-    st.caption(
-        "Reuses this app's real per-city cost-of-living data (BEA Regional "
-        "Price Parities, via CITY_DATA), not a flat percentage assumption, "
-        "across a Low/Moderate/High sample."
-    )
-    sample_cities = ["Columbus, OH", "National Average", "San Francisco, CA"]
-    gross = get_annual_salary_for_year(macro_major, 9)
-    col_rows = []
-    for c in sample_cities:
-        info = CITY_DATA[c]
-        take_home = calculate_take_home_pay(gross, info["state_key"], info["local_tax_rate"])
-        disposable = adjust_for_cost_of_living(take_home["net_take_home"], info["col_index"])
-        col_rows.append({
-            "City": c, "CoL Index": info["col_index"],
-            "COL-Adjusted Disposable Income (annual)": fmt_money(disposable),
-        })
-    render_centered_table(pd.DataFrame(col_rows))
-
-    return context
-
-
 def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
-                          ai_context: dict = None, future_context: dict = None) -> dict:
+                          ai_context: dict = None) -> dict:
     """Flat {column_name: value} dict of whichever optional advanced modules
     are active, in the same shape build_scenario_context already uses --
     merged into every save_survey_response/save_pdf_download/
@@ -13229,8 +13006,6 @@ def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
             context["scenario_b_prestige_tier"] = prestige_tier_b
     if ai_context:
         context.update(ai_context)
-    if future_context:
-        context.update(future_context)
     # The Trade Apprenticeship module was removed (see migrations.sql). Its
     # apprenticeship_* columns are retained in Supabase and simply stop being
     # written -- dropping them would destroy the history they already hold.
@@ -13340,18 +13115,10 @@ if compare_mode:
     if enable_ai_mode:
         ai_context = render_ai_risk_section(major, major_b)
 
-    future_context = {}
-    if enable_future_proofing:
-        future_context = render_future_proofing_section(scenario_a, major, interest_rate,
-                                                          scenario_b, major_b, interest_rate_b,
-                                                          col_index=city_info["col_index"],
-                                                          hs_wage_index=get_metro_wage_index(city),
-                                                          roi_window_years=roi_horizon_years)
-
     module_context = build_module_context(
         prestige_tier_a if enable_prestige_mode else None,
         prestige_tier_b if enable_prestige_mode else None,
-        ai_context, future_context,
+        ai_context,
     )
 
     # Runs on every rerun; maybe_log_scenario_event dedupes so only an actual
@@ -13676,15 +13443,8 @@ else:
     if enable_ai_mode:
         ai_context = render_ai_risk_section(major)
 
-    future_context = {}
-    if enable_future_proofing:
-        future_context = render_future_proofing_section(scenario, major, interest_rate,
-                                                          col_index=city_info["col_index"],
-                                                          hs_wage_index=get_metro_wage_index(city),
-                                                          roi_window_years=roi_horizon_years)
-
     module_context = build_module_context(
-        prestige_tier_a if enable_prestige_mode else None, None, ai_context, future_context,
+        prestige_tier_a if enable_prestige_mode else None, None, ai_context,
     )
 
     # See the Compare Mode branch above -- same dedupe-on-rerun logging, for
@@ -14343,8 +14103,19 @@ only those:
   payment never falls below **$10/month**, including after the $50-per-dependent
   reduction — so unlike IBR, RAP has no $0 payment. Below about $10,000 of
   income the $10 floor *is* the payment.
-- **2026 Tiered Standard Plan.** A fixed payment over a term set by how much
-  you owe. Forgives nothing, so nothing is taxed either.
+- **2026 Tiered Standard Plan.** A fixed term of 10/15/20/25 years depending on
+  loan balance. Forgives nothing, so nothing is taxed either.
+
+Both were created by the One Big Beautiful Bill Act (H.R. 1, 2025) and are
+effective for new federal loan borrowers from July 1, 2026, with existing
+borrowers transitioning by July 1, 2028. Sources: U.S. Dept. of Education,
+["Fact Sheet: The Trump Administration Is Simplifying Student Loan
+Repayment"](https://www.ed.gov/about/news/press-release/fact-sheet-trump-administration-simplifying-student-loan-repayment),
+corroborated by Congressional Research Service In Focus IF13075, and
+[studentaid.gov's OBBBA definitions](https://studentaid.gov/announcements-events/big-updates/definitions#rap).
+Like this app's IDR model these are **administratively simplified, not an exact
+copy of federal rules** — confirm current terms at studentaid.gov before relying
+on them for a real decision.
 
 **Switching between income-driven plans is not symmetric**, and the repayment
 comparison models both directions. Payments made under any income-driven plan
@@ -14960,27 +14731,6 @@ behaves exactly as described above when all five are left off.
   group — a representative approximation, clearly labeled as such, since a major
   spreads across many jobs. A few majors that span the whole labor market
   (Interdisciplinary Studies, Liberal Arts) are left unmapped and show no level.
-- **2026 Federal Repayment Plans (RAP & Tiered Standard).** Compares two *real, enacted* federal
-  loan repayment plans created by the One Big Beautiful Bill Act (H.R. 1,
-  2025): the **Repayment Assistance Plan (RAP)** and the **Tiered Standard
-  Plan**, both effective for new federal loan borrowers starting July 1,
-  2026 (existing borrowers transition by July 1, 2028). Source: U.S. Dept.
-  of Education, ["Fact Sheet: The Trump Administration Is Simplifying
-  Student Loan Repayment"](https://www.ed.gov/about/news/press-release/fact-sheet-trump-administration-simplifying-student-loan-repayment),
-  corroborated by Congressional Research Service In Focus IF13075. RAP
-  payments are 1% of AGI per $10,000 AGI band (capped at 10% for AGI ≥
-  $100,000, with a flat $10/month floor below $10,000 AGI), minus $50/month
-  per dependent — with unpaid interest waived and up to a $50/month
-  government principal-match, so your balance never grows from unpaid
-  interest, and any remainder forgiven after 30 years. The Tiered Standard
-  Plan is a fixed term of 10/15/20/25 years depending on loan balance. Like
-  this app's existing IDR model, these are **administratively simplified,
-  not an exact copy of federal rules** — confirm current terms at
-  [studentaid.gov](https://studentaid.gov/) before relying on them for a
-  real decision, since administrative details can still shift before the
-  2026/2028 effective dates. The cost-of-living comparison in this section
-  reuses this app's own real per-city data (BEA Regional Price Parities, see
-  above) — not a separate, flat percentage assumption.
 - **Count foregone earnings during enrollment.** By default this calculator
   starts its earnings clock at *graduation*: it compares a graduate's first
   N years of post-degree salary against a high-school graduate's same N

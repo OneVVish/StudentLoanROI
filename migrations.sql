@@ -1203,3 +1203,41 @@ alter table scenario_events
 --     sessions that ran a search, not sessions that landed and left, so
 --     it undercounts -- but it is a real lower bound, which the
 --     repayment module has no equivalent of.
+
+
+-- =====================================================================
+-- 2026-08-03  "2026 Federal Repayment Plans" module removed
+-- =====================================================================
+-- NO DDL. Same treatment as the Trade Apprenticeship removal above: the
+-- columns stay, they simply stop being written. Dropping them would
+-- destroy the history they already hold.
+--
+-- Columns now frozen (last written 2026-08-02):
+--     future_forecasting_active
+--     future_plan_selected
+--     scenario_b_future_plan_selected
+-- on survey_responses, pdf_downloads, scenario_shares and scenario_events.
+--
+-- WHY IT WENT. It was an optional Advanced Analysis module that compared
+-- RAP against the Tiered Standard Plan. Both are now ordinary entries in
+-- the main Repayment Strategy dropdown -- RAP is the DEFAULT for 2026+
+-- start years -- so the module compared two plans the visitor could
+-- already select, using a second code path (compute_future_plan_result)
+-- that had to be kept in step with calculate_roi by hand. That second
+-- path is exactly where hs_wage_index went missing and put a 76%
+-- overstatement on screen. Removing it removes the drift surface.
+--
+-- Reading this later:
+--
+--   * future_forecasting_active IS NULL means one of two different
+--     things and they cannot be told apart after this date: the visitor
+--     did not enable the module (before), or the module did not exist
+--     (after). Condition on the date, not on the column.
+--
+--   * A TRUE in that column means the visitor opted into a side-by-side
+--     RAP/Tiered comparison. It does NOT mean they were repaying under
+--     RAP -- that is repayment_strategy, which is independent and is the
+--     column any plan-choice analysis wants.
+--
+--   * ?future= is no longer emitted or read. Old share links carrying it
+--     still load; the param is ignored rather than erroring.
