@@ -7354,6 +7354,12 @@ def wage_ridgeline_rows(percentiles: dict, geography_label: str,
     itself would draw the same curve twice and imply a difference that isn't
     there. build_major_data's overlay decides which, so this follows the data
     rather than the selected city (see get_wage_distribution_context)."""
+    # A collapsed one-row chart carries the geography stamp as its label, and
+    # the stamp for the national fallback is the lowercase key "national" --
+    # shown as-is, the same row read "United States" when it appeared under a
+    # metro and "national" when it stood alone. One name for one geography.
+    if str(geography_label).strip().lower() == "national":
+        geography_label = "United States"
     rows = []
     for label, pct in ((geography_label, percentiles),
                         ("United States", national_percentiles)):
@@ -8119,18 +8125,31 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     return _pdf_image_from_figure(fig)
 
 
-def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int) -> Image:
+def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
+                                  baseline_head_start_years: int = 0) -> Image:
     """PDF counterpart to build_net_position_chart. Takes the same prebuilt
     frame, so the two can't disagree about the trajectory -- what is hand-kept
-    in sync is the styling and the zero line (see CLAUDE.md on the chart
-    twins)."""
+    in sync is the styling, the zero line, and the head-start annotation (see
+    CLAUDE.md on the chart twins). The annotation matters MORE here than on
+    screen: the report is read detached from the app, so a baseline that
+    opens several years of wages ahead has no sidebar option nearby to
+    explain it and reads as a modelling error."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
     for label, group in frame.groupby("Series", sort=False):
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
                 linewidth=2, label=label)
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
-    ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
-                  fontsize=11)
+    if baseline_head_start_years:
+        ax.annotate(
+            f"Baseline starts {baseline_head_start_years} years ahead — "
+            f"{counterfactual_vocab()['head_start']}.",
+            xy=(0.0, 1.02), xycoords="axes fraction", ha="left",
+            fontsize=8, color="#666666")
+        ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
+                     fontsize=11, pad=22)
+    else:
+        ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
+                     fontsize=11)
     ax.set_xlabel("Years after graduation")
     ax.set_ylabel("Cumulative gross pay minus loan payments ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
@@ -8622,7 +8641,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         build_pdf_net_position_chart(
             net_position_frame([(major, scenario)], col_index,
                                 get_metro_wage_index(city), roi_window_years),
-            roi_window_years),
+            roi_window_years,
+            # Same value the on-screen chart passes -- with foregone earnings
+            # off, enrollment_years is 0 and the annotation stays away.
+            baseline_head_start_years=scenario["enrollment_years"]),
     ]
 
     # Mirrors the on-screen break-even banner -- same breakeven_summary call,
@@ -9026,6 +9048,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                  (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
                 col_index, get_metro_wage_index(city), roi_window_years),
             roi_window_years,
+            # max of the two, matching the on-screen compare chart.
+            baseline_head_start_years=max(scenario_a["enrollment_years"],
+                                          scenario_b["enrollment_years"]),
         ),
         *_pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
                                           takehome_stages_a, takehome_stages_b,
@@ -13344,6 +13369,52 @@ def render_payoff_age(scenario: dict, current_age, program_years: int,
         st.caption(f"You'd be **{age:.0f}** when this is fully repaid.")
 
 
+def render_loan_basis_disclosure(loan_basis: str, loan_source: str,
+                                  default_loan, reported_debt, school_name: str,
+                                  program_years: int, simplified_scale: float) -> None:
+    """The Simplified-mode caption saying what the loan figure IS -- a scaled
+    estimate, a school-reported median, or nothing financed at all.
+
+    Shared by the single branch and both compare panels, because these
+    sentences are the difference between "a number" and "a number the visitor
+    knows not to over-trust". The compare branch shipped without them: a
+    contrast-arm visitor saw a scaled estimate under loan_amount_label with
+    nothing on screen saying it was an estimate -- an H2 confound on exactly
+    the kind of disclosure H2's framing contrast is about. Only the prose is
+    shared; the single branch's year-by-year Detailed table stays in that
+    branch, since the Detailed case renders a table there and nothing here.
+    """
+    if loan_basis == "no_program":
+        st.caption(
+            "BLS lists no degree requirement for this career, so nothing is financed "
+            "and no tuition is charged against it. The earnings comparison below still "
+            "applies -- it's the cost side that goes to zero, not the pay."
+        )
+    elif loan_basis == "reported_scaled":
+        st.caption((
+            f"This uses **{fmt_money(default_loan)}** -- an **estimate**, not a reported "
+            f"figure. College Scorecard publishes {fmt_money(reported_debt)} for "
+            f"{school_name}, but that is one institution-wide median blending completers "
+            "of every credential length, with no per-year or per-credential breakdown. We "
+            f"scale it by the ratio of cumulative federal Direct borrowing limits, "
+            f"{program_years} years against {UNDERGRAD_YEARS} "
+            f"(**{simplified_scale * 100:.0f}%**), because the Scorecard figure counts "
+            "**federal loans only** and federal limits are what bound federal borrowing. "
+            "Direct PLUS and private borrowing aren't included either way, so a student "
+            "who needed those owes more. Switch to Detailed mode to model your own cost, "
+            "aid, and gap financing instead."
+        ).replace("$", r"\$"))
+    elif loan_source == "college":
+        st.caption((
+            f"This uses **{fmt_money(default_loan)}** -- the median debt graduates of "
+            f"{school_name} who borrowed leave with (College Scorecard), across "
+            "completers of every credential length. It counts "
+            "**federal loans only** -- Direct PLUS and private borrowing aren't included, "
+            "so a student who needed those owes more. Switch to Detailed mode in the "
+            "sidebar to model your own cost, aid, and gap financing instead."
+        ).replace("$", r"\$"))
+
+
 def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: int,
                            loan_amount: float, interest_rate: float, repayment_strategy: str,
                            col_index: float, career_data_source_name: str,
@@ -13353,7 +13424,10 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
                            loan_basis: str = None, program_years: int = None,
-                           current_age: int = None):
+                           current_age: int = None,
+                           loan_source: str = None, default_loan=None,
+                           reported_debt=None, school_name: str = None,
+                           simplified_scale: float = 1.0):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -13400,6 +13474,10 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # has no time dimension) and for the 430 occupations needing no degree.
         if loan_basis is not None:
             st.metric(loan_amount_label(loan_basis, program_years), fmt_money(loan_amount))
+            # The same what-this-figure-is prose the single branch shows.
+            render_loan_basis_disclosure(loan_basis, loan_source, default_loan,
+                                         reported_debt, school_name,
+                                         program_years, simplified_scale)
         # combined_repayment, not repayment_result: what the visitor pays and
         # when they are free includes any existing balance. It EQUALS
         # repayment_result when there is none, so this needs no conditional.
@@ -13425,10 +13503,30 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                 .replace("$", chr(92) + "$")
             )
         render_financing_note(scenario.get("financing"))
+        # The two ABSOLUTE positions, not just their difference. The single
+        # branch shows all three side by side; the contrast arm used to see
+        # the absolutes only as chart lines, never as numbers. Stacked rather
+        # than st.columns: this panel already sits inside Compare Mode's A/B
+        # split, and Streamlit allows one level of column nesting.
+        _cf = counterfactual_vocab()
+        st.metric(
+            f"{_cf['metric_label']} — {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
+            fmt_money(roi_result["hs_net_position"]),
+        )
+        st.metric(f"{scenario['major']} — {roi_window_years}-Yr Net Position",
+                  fmt_money(roi_result["major_net_position"]))
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
             fmt_money(roi_result["earnings_premium"]),
             delta=fmt_pct(roi_result["roi_pct"]) + " ROI" if roi_result["roi_pct"] is not None else None,
+            # Same explanation the single branch's premium metric carries --
+            # "COL-Adjusted" must not be jargon in one arm and explained in
+            # the other.
+            help=f"How much more money you'd have after {roi_window_years} years by going into "
+                 f"this career instead of {_cf['instead_of']} -- "
+                 "bigger is better. \"COL-Adjusted\" means we've factored in how "
+                 "expensive it is to live in your chosen city, so this is a fair "
+                 "comparison no matter where you live.",
         )
         render_forgiveness_note(repayment_result, scenario.get("strategy_label"), compact=True)
 
@@ -13583,6 +13681,9 @@ if compare_mode:
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_a, program_years=program_years_a,
         current_age=st.session_state.get("current_age") if is_returning else None,
+        loan_source=loan_source_a, default_loan=default_loan_a,
+        reported_debt=reported_debt_a, school_name=school_name_a,
+        simplified_scale=simplified_scale_a,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -13593,6 +13694,9 @@ if compare_mode:
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_b, program_years=program_years_b,
         current_age=st.session_state.get("current_age") if is_returning else None,
+        loan_source=loan_source_b, default_loan=default_loan_b,
+        reported_debt=reported_debt_b, school_name=school_name_b,
+        simplified_scale=simplified_scale_b,
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -13763,39 +13867,16 @@ else:
         years=program_years_a,
         cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
     )
-    if loan_basis_a == "no_program":
-        st.caption(
-            "BLS lists no degree requirement for this career, so nothing is financed "
-            "and no tuition is charged against it. The earnings comparison below still "
-            "applies -- it's the cost side that goes to zero, not the pay."
-        )
-    elif loan_basis_a == "reported_scaled":
-        st.caption((
-            f"This uses **{fmt_money(default_loan_a)}** -- an **estimate**, not a reported "
-            f"figure. College Scorecard publishes {fmt_money(reported_debt_a)} for "
-            f"{school_name_a}, but that is one institution-wide median blending completers "
-            "of every credential length, with no per-year or per-credential breakdown. We "
-            f"scale it by the ratio of cumulative federal Direct borrowing limits, "
-            f"{program_years_a} years against {UNDERGRAD_YEARS} "
-            f"(**{simplified_scale_a * 100:.0f}%**), because the Scorecard figure counts "
-            "**federal loans only** and federal limits are what bound federal borrowing. "
-            "Direct PLUS and private borrowing aren't included either way, so a student "
-            "who needed those owes more. Switch to Detailed mode to model your own cost, "
-            "aid, and gap financing instead."
-        ).replace("$", r"\$"))
-    elif loan_source_a == "college":
-        # The loan is the college-reported figure, not a per-year cost buildup, so
-        # a year-by-year COA->loan table would contradict the total. Show the
-        # reported number instead; the cost-based per-year breakdown appears only
-        # when the personal calc is actually the loan in use.
-        st.caption((
-            f"This uses **{fmt_money(default_loan_a)}** -- the median debt graduates of "
-            f"{school_name_a} who borrowed leave with (College Scorecard), across "
-            "completers of every credential length. It counts "
-            "**federal loans only** -- Direct PLUS and private borrowing aren't included, "
-            "so a student who needed those owes more. Switch to Detailed mode in the "
-            "sidebar to model your own cost, aid, and gap financing instead."
-        ).replace("$", r"\$"))
+    # The what-this-figure-is prose is shared with the compare panels (see
+    # render_loan_basis_disclosure); only the Detailed year-by-year table
+    # below stays branch-local. The loan is the college-reported figure in
+    # the Simplified cases, not a per-year cost buildup, so a year-by-year
+    # COA->loan table would contradict the total there.
+    if (loan_basis_a in ("no_program", "reported_scaled")
+            or loan_source_a == "college"):
+        render_loan_basis_disclosure(loan_basis_a, loan_source_a, default_loan_a,
+                                     reported_debt_a, school_name_a,
+                                     program_years_a, simplified_scale_a)
     else:
         st.caption(
             "Here's how your loan builds up year by year -- Cost of Attendance "
