@@ -31,7 +31,7 @@ different caveats.
 import argparse
 import ast
 import sys
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pandas as pd
 
@@ -124,6 +124,56 @@ def render(w: dict, days: int) -> str:
     return "\n".join(out)
 
 
+def load_email_config():
+    """The [email] block from .streamlit/secrets.toml, or None if absent.
+
+    Read straight from the file rather than through Streamlit, since this runs
+    outside a Streamlit runtime. The app password never leaves this function's
+    return value: it is passed to smtplib and is never printed, logged, or
+    included in an error message -- an SMTP failure reports the exception type
+    and the server's reply, both of which are safe.
+    """
+    try:
+        import tomllib
+        with open(".streamlit/secrets.toml", "rb") as fh:
+            cfg = tomllib.load(fh).get("email")
+    except Exception:
+        return None
+    if not cfg:
+        return None
+    missing = [k for k in ("username", "app_password", "to") if not cfg.get(k)]
+    if missing:
+        print(f"  [email] section is present but missing {missing}; not sending.",
+              file=sys.stderr)
+        return None
+    return cfg
+
+
+def send_digest_email(body: str, subject: str, cfg: dict) -> None:
+    """Send the digest over SMTP+STARTTLS. Raises on failure, deliberately.
+
+    A digest that silently fails to send is worse than one that never existed:
+    you would be waiting on a mail that is not coming, and reading no news as
+    good news. The caller lets the exception reach the runner, which marks the
+    whole run FAILED.
+    """
+    import smtplib
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["From"] = cfg["username"]
+    msg["To"] = cfg["to"]
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    host = cfg.get("smtp_host", "smtp.gmail.com")
+    port = int(cfg.get("smtp_port", 587))
+    with smtplib.SMTP(host, port, timeout=30) as smtp:
+        smtp.starttls()
+        smtp.login(cfg["username"], cfg["app_password"])
+        smtp.send_message(msg)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -134,6 +184,11 @@ def main() -> int:
     ap.add_argument("--asof", default=None,
                     help="run as if today were this YYYY-MM-DD; makes a run "
                          "reproducible and lets a missed day be recovered")
+    ap.add_argument("--email", action="store_true",
+                    help="also email the digest, using the [email] block in "
+                         ".streamlit/secrets.toml. Skips with a note if that "
+                         "block is absent; FAILS if it is present and the send "
+                         "does not succeed.")
     ap.add_argument("-o", "--output", default=None,
                     help="also write the per-day landings table to this CSV")
     args = ap.parse_args()
@@ -148,7 +203,20 @@ def main() -> int:
     print(f"  {len(usage):,} rows", file=sys.stderr)
 
     w = ns["traffic_windows"](usage, tz=tz, asof=asof)
-    print(render(w, args.days))
+    digest = render(w, args.days)
+    print(digest)
+
+    if args.email:
+        cfg = load_email_config()
+        if cfg is None:
+            print("  No [email] block in .streamlit/secrets.toml; not sending.",
+                  file=sys.stderr)
+        else:
+            yesterday = asof - timedelta(days=1)
+            subject = (f"StudentLoanROI traffic — {yesterday:%a %-d %b} — "
+                       f"{w['windows'].get('yesterday', {}).get('total', 0)} landings")
+            send_digest_email(digest, subject, cfg)
+            print(f"  Emailed to {cfg['to']}", file=sys.stderr)
 
     if args.output and not w["daily"].empty:
         w["daily"].to_csv(args.output)

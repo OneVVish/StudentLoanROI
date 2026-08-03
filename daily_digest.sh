@@ -24,7 +24,10 @@ LOG="analysis_output/traffic_digest.log"
 mkdir -p analysis_output
 
 STAMP="$(date '+%Y-%m-%d %H:%M %Z')"
-OUT="$("$PY" analyze_traffic.py "$@" 2>&1)"
+# --email is always requested; analyze_traffic.py skips it with a note when
+# .streamlit/secrets.toml has no [email] block, so this same runner works
+# before and after the mailbox is configured.
+OUT="$("$PY" analyze_traffic.py --email "$@" 2>&1)"
 STATUS=$?
 
 {
