@@ -10872,6 +10872,7 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_private_balance", "rpb", int),
     ("existing_private_rate", "rpr", float),
     ("existing_private_term", "rpt", int),
+    ("existing_has_private", "rhp", int),
 )
 
 
@@ -10897,7 +10898,18 @@ def seed_repayment_from_share() -> None:
     render_existing_loan_comparison rather than at module level because the
     widgets it seeds live inside that function -- Streamlit raises if a key is
     assigned once its widget exists.
+
+    ONCE PER SESSION, not once per rerun. The setdefaults below are harmless to
+    repeat, but the has-private line is a plain assignment, and re-running it
+    every rerun made the checkbox impossible to untick: the balance was still
+    in session_state, so each attempt to close the section immediately forced
+    it back open. Seeding is a first-render concern; after that the widgets own
+    their values.
     """
+    if st.session_state.get("_repayment_seeded"):
+        return
+    st.session_state["_repayment_seeded"] = True
+
     for key, param, cast in REPAYMENT_SHARE_FIELDS:
         raw = get_shared_default(param, "")
         if raw == "":
@@ -10910,9 +10922,16 @@ def seed_repayment_from_share() -> None:
     # An absent ?rpt= means "not shared", not "zero years".
     if not st.session_state.get("existing_private_term"):
         st.session_state["existing_private_term"] = PRIVATE_TERM_YEARS
-    # The two checkboxes are stored as 0/1 and must reach the widget as bools,
-    # or Streamlit renders an int into a checkbox and the value is lost.
-    for key in ("existing_forgivable", "existing_pslf"):
+    # A link carrying a private balance must arrive with the section OPEN, or
+    # the fields are hidden and the else-branch zeroes the very numbers the
+    # link was built to share. Belt and braces with ?rhp= above: an older link
+    # predating that param still has ?rpb=, and that is enough to know.
+    if st.session_state.get("existing_private_balance"):
+        st.session_state["existing_has_private"] = True
+
+    # The checkboxes are stored as 0/1 and must reach the widget as bools, or
+    # Streamlit renders an int into a checkbox and the value is lost.
+    for key in ("existing_forgivable", "existing_pslf", "existing_has_private"):
         if key in st.session_state:
             st.session_state[key] = bool(st.session_state[key])
 
@@ -11113,6 +11132,11 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             "about whether to borrow in the first place — this is about what "
             "to do once you have."
         )
+        # Two subsections, because the page compares FEDERAL plans and a
+        # private balance is not one of them -- it rides along unchanged in
+        # every row. Grouping them makes that structural rather than something
+        # a visitor has to infer from the captions.
+        st.markdown("**Federal loans**")
         c1, c2, c3 = st.columns(3)
         balance = c1.number_input("Current balance ($)", min_value=0, max_value=2_000_000,
                                    step=1_000, key="existing_balance")
@@ -11140,6 +11164,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "eligible for RAP or IBR, and private loans are outside the "
                  "federal system entirely, so the income-driven rows are hidden.")
 
+        st.caption(
+            "Your income and dependants change the **income-driven** rows only "
+            "— RAP and IBR size their payment from them. The fixed-payment "
+            "plans ignore both, and so does any private balance below."
+        )
+
         pslf = st.checkbox(
             "I work full-time for a government or 501(c)(3) employer (PSLF)",
             key="existing_pslf", disabled=not forgivable,
@@ -11155,32 +11185,6 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
 
         # Months, not years: servicers report a qualifying-payment COUNT, and
         # rounding it to a year moves forgiveness by up to eleven payments.
-        pc1, pc2 = st.columns(2)
-        private_balance = pc1.number_input(
-            "Private / non-federal balance ($)", min_value=0, max_value=2_000_000,
-            step=1_000, key="existing_private_balance",
-            help="A second tranche repaid alongside the federal balance above. "
-                 "Leave at 0 if you have none. Private loans are outside the "
-                 "federal system: no plan forgives them, no plan lowers their "
-                 "payment for your income, and they are repaid in full on their "
-                 "own fixed schedule. Every row below is your TOTAL bill -- "
-                 "federal plan plus this.")
-        private_rate = pc2.number_input(
-            "Private interest rate (%)", min_value=0.0, max_value=30.0, step=0.1,
-            key="existing_private_rate", disabled=not private_balance,
-            help="Private rates are credit-priced and usually higher than "
-                 "federal.")
-        # min_value=1: a zero-year term divides by zero in the amortisation, and
-        # there is no sensible reading of "repaid over no years".
-        private_term = pc1.number_input(
-            "Private repayment term (years)", min_value=1, max_value=30, step=1,
-            key="existing_private_term", disabled=not private_balance,
-            help="From your loan agreement. Private terms commonly run 5-20 "
-                 f"years; {PRIVATE_TERM_YEARS} is only the starting value here, "
-                 "not a rule. A longer term lowers the payment and raises the "
-                 "total interest, and unlike the federal rows nothing about it "
-                 "changes with your income.")
-
         prior_payments = st.number_input(
             "Qualifying payments already made (months)", min_value=0, max_value=480,
             step=1, key="existing_prior_payments", disabled=not forgivable,
@@ -11191,6 +11195,54 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "you have never been on an income-driven plan, or don't know. "
                  "The fixed-term plans ignore this: they forgive nothing, so "
                  "there is no clock to have made progress against.")
+
+        st.markdown("**Private / non-federal loans**")
+        # Behind an opt-in: most borrowers have only federal loans, and three
+        # extra fields is a lot of form to make them read past. Ticking it is
+        # also a cleaner signal than a 0 left in a balance box.
+        has_private = st.checkbox(
+            "I also have private or other non-federal loans",
+            key="existing_has_private",
+            help="Private, state, institutional or refinanced loans -- anything "
+                 "outside the federal Direct system. They are repaid alongside "
+                 "the federal balance on their own terms, and no federal plan "
+                 "forgives them or lowers their payment for your income.")
+
+        if has_private:
+            pc1, pc2 = st.columns(2)
+            private_balance = pc1.number_input(
+                "Private / non-federal balance ($)", min_value=0,
+                max_value=2_000_000, step=1_000, key="existing_private_balance",
+                help="Repaid alongside the federal balance above, on its own "
+                     "terms. Every row below is your TOTAL bill -- federal plan "
+                     "plus this.")
+            private_rate = pc2.number_input(
+                "Private interest rate (%)", min_value=0.0, max_value=30.0,
+                step=0.1, key="existing_private_rate",
+                help="Private rates are credit-priced and usually higher than "
+                     "federal.")
+            # min_value=1: a zero-year term divides by zero in the amortisation,
+            # and there is no reading of "repaid over no years".
+            private_term = pc1.number_input(
+                "Private repayment term (years)", min_value=1, max_value=30,
+                step=1, key="existing_private_term",
+                help="From your loan agreement. Private terms commonly run 5-20 "
+                     f"years; {PRIVATE_TERM_YEARS} is only the starting value "
+                     "here, not a rule. A longer term lowers the payment and "
+                     "raises the total interest, and unlike the federal rows "
+                     "nothing about it changes with your income.")
+        else:
+            # HIDING AN INPUT MUST ALSO NEUTRALISE IT. Streamlit keeps a
+            # widget's value in session_state after it stops being rendered, so
+            # reading the stored balance here would leave a hidden number moving
+            # every row on the page with nothing on screen to explain it -- a
+            # visitor who typed a balance, then unticked the box, would still be
+            # shown a total bill that includes it. Zero is the only honest
+            # reading of an unticked box. The stored values are deliberately NOT
+            # cleared, so re-ticking restores what they typed.
+            private_balance, private_rate = 0.0, 0.0
+            private_term = PRIVATE_TERM_YEARS
+
 
         if not balance or not rate:
             st.info("Enter a balance and a rate to compare plans.")
