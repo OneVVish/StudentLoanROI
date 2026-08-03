@@ -93,6 +93,8 @@ SHARE_EXEMPT = {
     "existing_private_term": "repayment tool; rides ?rpt=",
     "existing_has_private": "repayment tool; rides ?rhp=, and is forced on by "
                             "seed_repayment_from_share when ?rpb= is present",
+    "existing_private_actual": "repayment tool; rides ?rpa=",
+    "existing_age": "repayment tool; rides ?rage=",
     "existing_chart_plan": "which plan's chart to view; a view control, not an "
                            "input, so it is genuinely not shared",
     # Display-only / derived.
