@@ -12233,10 +12233,17 @@ if admin_enabled:
     _pageviews = usage_df[usage_df["action"].isin(PAGEVIEW_ACTIONS)] if (
         not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
     # Per-tool landings, so a new standalone page shows up here without an edit.
+    # Built from the registry unconditionally -- an empty usage_df must yield
+    # zeros, not an empty dict. It previously yielded {}, which rendered the
+    # caption as "one per standalone tool ()." and reported nothing at all on a
+    # fresh dataset.
+    _have_actions = not usage_df.empty and "action" in usage_df.columns
     _tool_views = {
-        t["label"]: int((usage_df["action"] == t["action"]).sum())
+        t["label"]: (int((usage_df["action"] == t["action"]).sum())
+                     if _have_actions else 0)
         for t in STANDALONE_TOOLS.values()
-    } if (not usage_df.empty and "action" in usage_df.columns) else {}
+    }
+    _calculator_views = int((usage_df["action"] == "pageview").sum()) if _have_actions else 0
     _visits = (int(_pageviews["session_id"].dropna().nunique())
                if "session_id" in _pageviews.columns else 0)
 
@@ -12250,13 +12257,21 @@ if admin_enabled:
     col3.metric("Survey Responses", len(survey_df))
     col4.metric("PDF Downloads", len(pdf_downloads_df))
     col5.metric("Scenario Shares", len(scenario_shares_df))
+    # Where each visit LANDED, as its own row. This lived only inside the
+    # caption below, which is the wrong place for a number anyone would want to
+    # read off: it is a number, so it gets a metric.
+    _land_cols = st.columns(1 + len(_tool_views))
+    _land_cols[0].metric("Calculator landings", _calculator_views)
+    for _col, (_label, _n) in zip(_land_cols[1:], _tool_views.items()):
+        _col.metric(f"{_label} landings", _n)
+
     st.caption(
-        "**Pageviews** counts every landing action -- `pageview` (the calculator) "
-        "plus one per standalone tool ("
-        + ", ".join(f"{label}: {n}" for label, n in _tool_views.items())
-        + "). Each tool is logged separately because they are different "
-        "populations asking different questions, but a visit is a visit, so this "
-        "total counts all of them. "
+        "**Pageviews** is the total of the landing row above -- the calculator "
+        "plus every standalone tool. Each is logged under its own action because "
+        "they are different populations asking different questions, but a visit "
+        "is a visit, so the total counts all of them. Landings split cleanly "
+        "only from 2026-08-02; before that every tool visit was logged as a "
+        "plain `pageview` (see migrations.sql). "
         "**Unique visits** de-duplicates "
         "them by session. They diverge for two reasons, neither of them traffic: "
         "rows written before `session_id` existed cannot be de-duplicated at all "
