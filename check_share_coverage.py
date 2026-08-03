@@ -111,6 +111,10 @@ PARAM_EXEMPT = {
     "research": "survey-enable flag; deliberately excluded from share links",
     "tool": "page-mode flag (?tool=repayment / ?tool=schools); a shared SCENARIO "
             "must not drag the recipient onto a different tool",
+    "from": "which page an internal cross-link was clicked from, set by "
+            "internal_tool_url and read once at the landing to log the "
+            "transition. A shared link is not a navigation from anywhere, so "
+            "build_share_params must never emit it",
     "cc_a": "legacy boolean, superseded by cc_mode_a; read for old links only",
     "cc_b": "legacy boolean, superseded by cc_mode_b; read for old links only",
 }

@@ -1241,3 +1241,56 @@ alter table scenario_events
 --
 --   * ?future= is no longer emitted or read. Old share links carrying it
 --     still load; the param is ignored rather than erroring.
+
+
+-- =====================================================================
+-- 2026-08-03  usage_logs.action gains "nav:from=X:to=Y"
+-- =====================================================================
+-- NO DDL. usage_logs has four columns and `action` is the only free-text
+-- one; this file's own earlier entries state the convention that new
+-- event types go there rather than into a column.
+--
+-- Emitted once per landing that followed one of the app's own internal
+-- links, alongside (never instead of) the pageview action. X and Y are
+-- "calculator" or a STANDALONE_TOOLS key, validated against NAV_ORIGINS
+-- before the row is written -- an unvalidated ?from= would let a
+-- hand-edited URL inject arbitrary text into the research dataset.
+--
+-- One variant carries a third segment: "nav:from=schools:to=calculator
+-- :inpage=1" is the "Use this school" handoff, which is a rerun rather
+-- than a navigation and so produces NO pageview.
+--
+-- Reading this later:
+--
+--   * It is a SEPARATE event, not a suffix on the pageview action, and
+--     that is load-bearing. Five readers match landing actions by whole
+--     string -- the admin landing metrics, the traffic-by-source table
+--     and analyze_survey's survey-rate denominator -- so a suffix would
+--     have silently zeroed every landing count.
+--
+--   * The event:k=v shape is the one analyze_survey.py already parses
+--     generically, so `nav` arrives there as a named event with `from`,
+--     `to` and `inpage` as columns, with no parser to write.
+--
+--   * COLD ARRIVALS ARE A FLOOR, NOT A COUNT. The admin panel derives
+--     them as tool pageviews minus inbound page navigations. A visitor
+--     who copies a URL out of their address bar passes ?from= on to
+--     whoever they send it to, and that recipient is then counted as
+--     internal. The error is bounded and one-directional: it can only
+--     understate cold arrivals, never overstate them.
+--
+--   * DO NOT subtract in-page handoffs. They have no matching pageview,
+--     so including them can drive the cold figure negative.
+--
+--   * Nothing here links one visitor across pages. A cross-link starts a
+--     new Streamlit session with a new session_id, and the originating
+--     session_id is deliberately NOT carried: a copied URL would then
+--     make two people look like one journey, which is the same class of
+--     fabricated linkage that keeps ?src= out of share links. These are
+--     transition COUNTS and cannot answer "what did this visitor do
+--     next".
+--
+--   * Transitions exist only from 2026-08-03. Before that the calculator
+--     had no links to either tool at all -- both were in-page expanders
+--     -- so main->tool navigation did not merely go unrecorded, it could
+--     not happen.

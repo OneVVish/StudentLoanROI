@@ -146,8 +146,66 @@ def main() -> int:
                 f"  src value mangled in transit\n      sent {raw!r}, "
                 f"link carries {got!r}\n      {url}")
 
-    # 7. Every registered tool must be reachable by its own key, or a page
-    #    exists that nothing links to.
+    # 7. Every link must say where it was clicked FROM, and that origin must be
+    #    a member of NAV_ORIGINS -- the landing validates against that set
+    #    before writing a nav: event, so a link carrying anything else produces
+    #    no event at all and the transition is silently lost.
+    origins = ns["NAV_ORIGINS"]
+    for page in ["", *tools]:
+        for dest in ["", *tools]:
+            checked += 1
+            st.session_state = {}
+            st.query_params = FakeQueryParams({})
+            ns["get_traffic_source"]()
+            st.session_state["active_tool"] = page      # "" == the calculator
+            url = ns["internal_tool_url"](dest)
+            got = parse_qs(urlparse(url).query).get("from", [None])[0]
+            want = page or "calculator"
+            if got != want:
+                problems.append(
+                    f"  link from {want!r} to {dest or 'calculator'!r} carries "
+                    f"from={got!r}\n      {url}")
+            elif got not in origins:
+                problems.append(
+                    f"  from={got!r} is not in NAV_ORIGINS, so the landing will "
+                    f"discard it and the transition is lost\n      {url}")
+
+    # 8. nav_action must REFUSE anything outside the known set. An unvalidated
+    #    ?from= would let a hand-edited URL write arbitrary text into
+    #    usage_logs.action, which is the research dataset.
+    for bogus in ("bogus", "", "calculator; drop", "../admin", "Calculator"):
+        checked += 1
+        if ns["nav_action"](bogus, "repayment") != "":
+            problems.append(
+                f"  nav_action accepted an unknown origin {bogus!r} -- a "
+                f"hand-edited URL could inject it into the action stream")
+    checked += 1
+    if ns["nav_action"]("calculator", "bogus") != "":
+        problems.append("  nav_action accepted an unknown DESTINATION")
+
+    # 9. The shapes the admin table's parser and analyze_survey both rely on.
+    checked += 1
+    if ns["nav_action"]("calculator", "repayment") != "nav:from=calculator:to=repayment":
+        problems.append(f"  page-navigation shape changed: "
+                        f"{ns['nav_action']('calculator', 'repayment')!r}")
+    checked += 1
+    if ns["nav_action"]("schools", "calculator", inpage=True) != \
+            "nav:from=schools:to=calculator:inpage=1":
+        problems.append(f"  in-page shape changed: "
+                        f"{ns['nav_action']('schools', 'calculator', inpage=True)!r}")
+
+    # 10. A nav event must never collide with a landing action. Five readers
+    #     match those whole strings exactly; a nav that looked like one would
+    #     silently inflate the landing counts.
+    for a, b in [(o, d) for o in origins for d in origins]:
+        act = ns["nav_action"](a, b)
+        checked += 1
+        if act in ns["PAGEVIEW_ACTIONS"]:
+            problems.append(f"  nav_action produced {act!r}, which is also a "
+                            f"landing action -- it would be counted as a visit")
+
+    # 11. Every registered tool must be reachable by its own key, or a page
+    #     exists that nothing links to.
     for tool in tools:
         checked += 1
         url = url_for({}, tool)
