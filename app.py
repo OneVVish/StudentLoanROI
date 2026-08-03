@@ -2288,15 +2288,43 @@ _COUNTERFACTUAL_RETURNING = {
 }
 
 
+def returning_baseline_ready() -> bool:
+    """Both returning-mode salary answers present. Until then the comparison
+    stays on the high-school-graduate baseline and the page says so, rather
+    than silently measuring a degree against zero.
+
+    Lives in section 2 (not beside its widgets in section 4) because
+    counterfactual_vocab below must ask the same question: the vocabulary has
+    to switch when the ARITHMETIC switches, and the arithmetic switches on
+    this, not on the radio. Reads session_state defensively for the same
+    reason counterfactual_vocab does -- outside a Streamlit runtime the
+    answer is "not ready", which is also correct for analyze_model.py.
+    """
+    try:
+        return bool(st.session_state.get("current_salary", 0)
+                    and st.session_state.get("salary_no_degree_10y", 0))
+    except Exception:
+        return False
+
+
 def counterfactual_vocab() -> dict:
     """The words for whichever baseline this session is being measured against.
+
+    Keys on the radio AND returning_baseline_ready(), because the model only
+    swaps baselines once both salaries are entered (returning_kwargs withholds
+    them until then). Keying on the radio alone shipped the original bug's
+    mirror image: the moment the radio flipped, every metric card said
+    "Staying Put -- (No New Loan)" over a number still computed against the
+    debt-free high school graduate, while the sidebar warning said the
+    opposite. Words and arithmetic must read the same switch.
 
     Reads session_state defensively: analyze_model.py execs sections 1-2
     outside a Streamlit runtime, and it models first-time students only, so the
     high-school vocabulary is the correct fallback there rather than an error.
     """
     try:
-        returning = st.session_state.get("student_mode_radio") == STUDENT_MODE_RETURNING
+        returning = (st.session_state.get("student_mode_radio") == STUDENT_MODE_RETURNING
+                     and returning_baseline_ready())
     except Exception:
         returning = False
     return _COUNTERFACTUAL_RETURNING if returning else _COUNTERFACTUAL_FIRST
@@ -5605,6 +5633,17 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
     read; roi_pct comes back None and is discarded.
     """
     paid_by_year = cumulative_loan_paid_by_year(scenario["repayment_result"], years)
+    # Rebuilt from the scalars the scenario was computed under, so the chart's
+    # baseline is the SAME baseline as the metric above it. Omitting this
+    # kwarg -- the one baseline argument this call site ever dropped -- made
+    # the returning-student chart plot the HS-grad curve under a legend that
+    # named the visitor's current path.
+    baseline_curve = (
+        returning_student_curve(scenario["baseline_salary_now"],
+                                scenario["baseline_salary_in_10y"])
+        if scenario.get("baseline_salary_now") is not None
+        and scenario.get("baseline_salary_in_10y") is not None
+        else None)
     points = []
     for year in range(1, years + 1):
         result = calculate_roi(
@@ -5614,6 +5653,7 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
             enrollment_years=scenario["enrollment_years"],
             working_years=scenario["working_years"],
             baseline_start_age=scenario.get("baseline_start_age"),
+            baseline_curve=baseline_curve,
         )
         points.append({"year": year,
                        "major": result["major_net_position"],
@@ -6071,8 +6111,14 @@ def _merge_balance_schedules(a, b, a_flat=0.0, b_flat=0.0):
                                     + component(b, "principal_balance").values)
         out["interest_balance"] = (component(a, "interest_balance").values
                                    + component(b, "interest_balance").values)
-    if "payment" in a.columns or "payment" in b.columns:
-        out["payment"] = (payments(a, a_flat).values + payments(b, b_flat).values)
+    # Unconditional, not gated on either input carrying the column. A merged
+    # schedule's summed FLAT payment is wrong for every month after the
+    # shorter loan clears, so any consumer reading a combined result needs the
+    # per-month column to see the step down -- including when BOTH sides are
+    # fixed-payment (new Standard beside an existing Tiered balance), which is
+    # exactly the case the old gate excluded. The reconstruction above already
+    # handles a column-less side correctly: flat while it owes, zero after.
+    out["payment"] = (payments(a, a_flat).values + payments(b, b_flat).values)
     return out
 
 
@@ -6277,19 +6323,61 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         elif repayment_strategy == STANDARD_STRATEGY_LABEL:
             existing_result = calculate_standard_repayment(
                 existing_debt, existing_rate, roi_window_years=roi_window_years)
-        elif repayment_strategy == RAP_STRATEGY_LABEL:
-            existing_result = simulate_rap_schedule(
-                existing_debt, existing_rate, major_name, dependents,
-                roi_window_years=roi_window_years)
-        else:
-            existing_result = calculate_idr_repayment(
-                existing_debt, existing_rate, major_name, roi_window_years=roi_window_years)
 
     # Same combiner as the forgivable/non-forgivable split above -- it also
     # takes the LATER payoff, which is what returning-student mode reports, and
     # merges the schedules so the balance chart shows the whole debt rather
     # than only the new loan.
-    combined_repayment = combine_repayment_results(repayment_result, existing_result)
+    #
+    # Fixed-payment plans only. Standard and Tiered amortise each loan on its
+    # own schedule, so two separately-simulated results genuinely add. An
+    # income-driven payment does NOT add: RAP and IDR size ONE payment from
+    # income alone and that payment covers every federal loan the borrower has,
+    # so simulating the new loan and the existing balance separately and
+    # summing charged the statutory payment TWICE -- $500/month against a
+    # published $250 on a $60k+$30k pair at $60k AGI -- and reported a payoff
+    # roughly twice as fast as reality. For those plans the two balances are
+    # instead simulated as one pool below.
+    if existing_result is not None or not (existing_debt and existing_debt > 0):
+        combined_repayment = combine_repayment_results(repayment_result, existing_result)
+    else:
+        # RAP / IDR with an existing balance: one income-driven simulation over
+        # new-forgivable + existing, at their principal-weighted rate. The
+        # blend is honest here for the same reason split_loan_financing's is --
+        # under one income-driven plan both balances are repaid on identical
+        # terms (one payment, same waiver/forgiveness rules). The existing
+        # balance is treated as federal Direct, which is also what simulating
+        # it under RAP/IDR always assumed. Any nonforgivable tranche of the
+        # NEW loan (Parent PLUS / private gap) keeps its own fixed schedule
+        # beside the pool, exactly as in the no-existing-debt path.
+        #
+        # repayment_result above deliberately stays the new-loan-only
+        # simulation: the ROI charges the degree the full income-driven
+        # payment (conservative), and the break-even and paid-by-year series
+        # keep their documented meaning. Only the combined bill -- what the
+        # visitor is told they will pay each month and when they are free --
+        # is corrected here.
+        _forgivable_new = (financing["forgivable_principal"] if financing
+                           else principal_for_repayment)
+        _forgivable_new_rate = (financing["forgivable_rate"] if financing
+                                else rate_for_repayment)
+        _pool = _forgivable_new + existing_debt
+        _pool_rate = ((_forgivable_new * _forgivable_new_rate
+                       + existing_debt * existing_rate) / _pool) if _pool else 0.0
+        if repayment_strategy == RAP_STRATEGY_LABEL:
+            _joint = simulate_rap_schedule(
+                _pool, _pool_rate, major_name, dependents,
+                roi_window_years=roi_window_years)
+        else:
+            _joint = calculate_idr_repayment(
+                _pool, _pool_rate, major_name, roi_window_years=roi_window_years)
+        if financing and financing.get("nonforgivable_principal", 0) > 0:
+            _nonfederal = calculate_standard_repayment(
+                financing["nonforgivable_principal"], financing["nonforgivable_rate"],
+                roi_window_years=roi_window_years)
+            combined_repayment = combine_repayment_results(_joint, _nonfederal)
+        else:
+            combined_repayment = _joint
 
     return {
         "major": major_name,
@@ -6325,6 +6413,15 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         "existing_debt_result": existing_result,
         "combined_repayment": combined_repayment,
         "baseline_curve_used": baseline_curve is not None,
+        # The SCALARS behind baseline_curve, not the callable -- the same
+        # hashability reasoning that builds the curve from scalars above.
+        # build_net_position_series re-derives the curve from these so the
+        # chart's per-year calculate_roi calls use the baseline this scenario
+        # was actually computed under; without them the chart silently fell
+        # back to the HS-grad curve while the metric above it used the
+        # returning-student one, under a legend naming the returning baseline.
+        "baseline_salary_now": baseline_salary_now,
+        "baseline_salary_in_10y": baseline_salary_in_10y,
         "roi_result": roi_result,
         # None unless the cap-and-gap split was applied (Detailed mode); the
         # results page / PDF show the federal-vs-gap breakdown when it's set.
@@ -6672,7 +6769,7 @@ def get_loan_to_income_risk_tier(loan_to_takehome_pct: float, effective_tax_rate
     return {"tier": tier, "color": color, "manageable_threshold": manageable_threshold, "caution_threshold": caution_threshold}
 
 
-def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_month: int) -> float:
+def get_monthly_payment_for_stage(repayment_result: dict, target_month: int) -> float:
     """The loan payment at a given career-stage snapshot. If the loan is
     already paid off or forgiven by target_month, the payment is $0 for
     either strategy -- Standard's constant monthly_payment is only valid
@@ -6691,12 +6788,17 @@ def get_monthly_payment_for_stage(repayment_result: dict, strategy: str, target_
     if target_month > repayment_result["payoff_years"] * 12:
         return 0.0
     schedule = repayment_result["schedule"]
-    # Standard is flat, and so is anything whose schedule carries no per-month
-    # payment column. Testing for the column rather than for the strategy NAME
-    # is what lets a new income-driven plan be added without this silently
-    # reading a column that isn't there.
-    if strategy in (STANDARD_STRATEGY_LABEL, TIERED_STANDARD_STRATEGY_LABEL) \
-            or "payment" not in schedule.columns:
+    # Read the per-month payment column whenever the schedule carries one;
+    # fall back to the flat monthly_payment only when it doesn't. Testing for
+    # the column rather than for the strategy NAME matters twice over: a new
+    # income-driven plan works without edits here, and a COMBINED result
+    # (new + existing loan merged by _merge_balance_schedules, which
+    # reconstructs a payment column) reports the stepped payment after the
+    # shorter loan ends. The old strategy-name test made a combined
+    # Standard-family result report the summed flat payment for months where
+    # one of the loans was already paid off -- payment_series's documented
+    # caveat, resurfacing here.
+    if "payment" not in schedule.columns:
         return repayment_result.get("monthly_payment", 0.0)
     row = schedule[schedule["month"] == target_month]
     return row.iloc[0]["payment"] if not row.empty else 0.0
@@ -9963,10 +10065,18 @@ def returning_kwargs() -> dict:
     # once she has said what she earns. Swapping to a zero baseline would
     # compare the degree against earning nothing and report a spectacular
     # return -- the app would be answering a question she has not been asked yet.
+    _existing_debt = float(st.session_state.get("existing_debt", 0) or 0)
     kwargs = {
-        "existing_debt": float(st.session_state.get("existing_debt", 0) or 0),
-        "existing_debt_rate": float(st.session_state.get("existing_debt_rate")
-                                     if st.session_state.get("existing_debt", 0) else 0) or None,
+        "existing_debt": _existing_debt,
+        # None only when there is no debt for the rate to describe. A rate of
+        # 0.0 is a real answer (a family loan, a promotional refi) -- the old
+        # `float(...) or None` collapsed it to None and compute_scenario_results
+        # then silently repriced an interest-free balance at the NEW loan's
+        # rate. The widget is seeded with DEFAULT_FEDERAL_RATE, so .get's
+        # fallback only fires before the rate widget has ever rendered.
+        "existing_debt_rate": (float(st.session_state.get("existing_debt_rate",
+                                                          DEFAULT_FEDERAL_RATE))
+                               if _existing_debt else None),
     }
     if returning_baseline_ready():
         kwargs["baseline_salary_now"] = float(st.session_state["current_salary"])
@@ -9997,12 +10107,9 @@ def _sync_foregone_to_enrollment() -> None:
         st.session_state["count_foregone_earnings"] = True
 
 
-def returning_baseline_ready() -> bool:
-    """Both salary answers present. Until then the comparison stays on the
-    high-school-graduate baseline and the page says so, rather than silently
-    measuring a degree against zero."""
-    return bool(st.session_state.get("current_salary", 0)
-                and st.session_state.get("salary_no_degree_10y", 0))
+# returning_baseline_ready() lives in section 2a beside counterfactual_vocab,
+# which now shares it -- the vocabulary must flip on the same condition the
+# arithmetic flips on, and two copies of that condition is how they diverge.
 
 
 def breakeven_kwargs() -> dict:
@@ -12859,8 +12966,16 @@ def takehome_figures(scenario: dict, major_name: str, stage_key: int, city: dict
     numbers on screen and in the download."""
     gross = get_annual_salary_for_year(major_name, stage_key)
     take_home = calculate_take_home_pay(gross, city["state_key"], city["local_tax_rate"])
+    # combined_repayment, not repayment_result, for the same reason the
+    # Monthly Payment metric uses it: disposable income is what is left after
+    # the payment the visitor actually makes, and for a returning student that
+    # includes the existing balance. Reading the new-loan-only result here
+    # overstated a returning student's disposable income by their entire
+    # existing payment. Identical for first-time students, where the two
+    # results are the same object.
     monthly_payment = get_monthly_payment_for_stage(
-        scenario["repayment_result"], scenario["strategy_label"], (stage_key + 1) * 12)
+        scenario.get("combined_repayment") or scenario["repayment_result"],
+        (stage_key + 1) * 12)
     disposable_nominal = take_home["net_take_home"] / 12 - monthly_payment
     return {
         "gross": gross, "take_home": take_home, "monthly_payment": monthly_payment,
