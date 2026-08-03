@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.studentloanroi.trafficdigest</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/rv889214/StudentLoanROI/daily_digest.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/rv889214/StudentLoanROI</string>
+
+  <!-- 08:07, not 08:00: nothing here needs the hour boundary, and an
+       off-minute avoids piling onto every other scheduled job on the machine.
+       Morning local so that "yesterday" is a complete day in the reporting
+       timezone the digest buckets by. -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>7</integer>
+  </dict>
+
+  <!-- The Mac is not always awake at 08:07. Without this the run is simply
+       skipped and the day is lost; with it, launchd fires once after wake.
+       analyze_traffic.py's --asof exists for the same reason. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/rv889214/StudentLoanROI/analysis_output/traffic_digest.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/rv889214/StudentLoanROI/analysis_output/traffic_digest.launchd.log</string>
+</dict>
+</plist>
