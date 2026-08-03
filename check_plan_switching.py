@@ -56,6 +56,22 @@ def load():
     return ns
 
 
+def monthly(result):
+    """What the borrower hands over in month one.
+
+    Mirrors the renderer: Standard-family rows carry a flat monthly_payment,
+    while IDR and RAP carry a per-month `payment` column because theirs moves
+    with income. After combine_repayment_results an income-driven row still has
+    no monthly_payment -- the private tranche reaches it through the merged
+    schedule's reconstructed payment column instead, which is exactly what has
+    to be read here or the check tests a number the visitor never sees.
+    """
+    if "monthly_payment" in result:
+        return float(result["monthly_payment"])
+    sched = result["schedule"]
+    return float(sched["payment"].iloc[0]) if "payment" in sched.columns else 0.0
+
+
 def row(rows, needle):
     for label, result, note in rows:
         if needle in label:
@@ -162,6 +178,76 @@ def main() -> int:
             f"  a $25,000 earner has {back['counting']} of {back['total']} RAP "
             f"months counting back; expected 0 of a non-empty schedule, which is "
             f"what triggers the one-way-door warning")
+
+    # 7. THE PRIVATE TRANCHE MUST NOT BE FORGIVEN, AND MUST NOT MOVE THE
+    #    COUNT-BACK THRESHOLD. Both are the same class of bug: private money
+    #    riding inside a federal pool. CLAUDE.md records the first costing
+    #    $464,461 of imaginary forgiveness on a $193,033 loan.
+    PRIV, PRIV_RATE = 40_000.0, 11.0
+    base_rows = compare(BAL, RATE, low, 0, True, 0.0, False, 0)
+    priv_rows = compare(BAL, RATE, low, 0, True, 0.0, False, 0, PRIV, PRIV_RATE)
+
+    _, base_rap, _ = row(base_rows, "RAP")
+    _, priv_rap, _ = row(priv_rows, "RAP")
+    checked += 1
+    if abs(priv_rap["forgiven_amount"] - base_rap["forgiven_amount"]) > 1.0:
+        problems.append(
+            f"  adding a ${PRIV:,.0f} PRIVATE balance changed RAP's forgiven "
+            f"amount from ${base_rap['forgiven_amount']:,.0f} to "
+            f"${priv_rap['forgiven_amount']:,.0f}. Private debt is outside the "
+            f"federal system and can never be forgiven.")
+
+    # The count-back verdict is a FEDERAL test, and this case is sized so that
+    # getting it wrong VISIBLY flips the answer. A $40k private loan is not
+    # enough -- at this income the combined payment still falls short of the
+    # threshold, so a combined-basis implementation would pass by luck. Pick a
+    # private balance whose payment ALONE clears the federal Standard payment,
+    # then assert that it did, so this can never silently stop discriminating.
+    BIG_PRIV = 150_000.0
+    big_rows = compare(BAL, RATE, low, 0, True, 0.0, False, 0, BIG_PRIV, PRIV_RATE)
+    _, big_rap, _ = row(big_rows, "RAP")
+    big_priv_only = ns["calculate_standard_repayment"](BIG_PRIV, PRIV_RATE, 10)
+    threshold = base_rap.get("countback", {}).get("threshold", 0.0)
+    checked += 1
+    if big_priv_only["monthly_payment"] <= threshold:
+        problems.append(
+            f"  the count-back fixture no longer discriminates: the private "
+            f"payment ${big_priv_only['monthly_payment']:,.0f} does not exceed "
+            f"the ${threshold:,.0f} threshold, so a combined-basis bug would "
+            f"pass unnoticed. Raise BIG_PRIV.")
+    checked += 1
+    if big_rap.get("countback", {}).get("counting") != \
+       base_rap.get("countback", {}).get("counting"):
+        problems.append(
+            f"  a ${BIG_PRIV:,.0f} private balance changed the RAP count-back "
+            f"verdict from {base_rap.get('countback')} to "
+            f"{big_rap.get('countback')}. The test compares the FEDERAL RAP "
+            f"payment against the FEDERAL 10-year Standard payment; private "
+            f"money belongs on neither side.")
+
+    # It must still show up in what the borrower PAYS, or it has been dropped
+    # rather than separated.
+    checked += 1
+    if priv_rap["total_interest"] <= base_rap["total_interest"]:
+        problems.append(
+            f"  adding a ${PRIV:,.0f} private balance at {PRIV_RATE}% did not "
+            f"increase total interest ({base_rap['total_interest']:,.0f} -> "
+            f"{priv_rap['total_interest']:,.0f}); the tranche is being ignored, "
+            f"not amortised alongside.")
+
+    # And it is identical in every row, since no plan touches it.
+    deltas = []
+    for label in ("Standard (10-year)", "Extended", "Tiered", "RAP", "IBR-style"):
+        _, a, _ = row(base_rows, label)
+        _, b, _ = row(priv_rows, label)
+        if a and b:
+            deltas.append(round(monthly(b) - monthly(a), 2))
+    checked += 1
+    if len(set(deltas)) > 1:
+        problems.append(
+            f"  the private tranche added a DIFFERENT monthly amount to each "
+            f"plan {deltas}. No federal plan alters a private loan, so the "
+            f"increment must be identical in every row.")
 
     if problems:
         print(f"plan switching: {len(problems)} violation(s) across {checked} checks\n")

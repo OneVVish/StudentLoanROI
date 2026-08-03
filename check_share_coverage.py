@@ -88,6 +88,8 @@ SHARE_EXEMPT = {
     "existing_forgivable": "repayment tool; rides ?rf=",
     "existing_pslf": "repayment tool; rides ?rpslf=",
     "existing_prior_payments": "repayment tool; rides ?rp=",
+    "existing_private_balance": "repayment tool; rides ?rpb=",
+    "existing_private_rate": "repayment tool; rides ?rpr=",
     "existing_chart_plan": "which plan's chart to view; a view control, not an "
                            "input, so it is genuinely not shared",
     # Display-only / derived.
