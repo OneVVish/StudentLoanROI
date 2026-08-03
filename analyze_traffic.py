@@ -202,7 +202,10 @@ def main() -> int:
     usage = fetch_usage_logs()
     print(f"  {len(usage):,} rows", file=sys.stderr)
 
-    w = ns["traffic_windows"](usage, tz=tz, asof=asof)
+    # days is passed to the arithmetic, not just to the label. It used to go
+    # only to render(), which printed "14-day total" over traffic_windows'
+    # hardcoded 7-day sums -- a wrong number presented with confidence.
+    w = ns["traffic_windows"](usage, tz=tz, asof=asof, days=args.days)
     digest = render(w, args.days)
     print(digest)
 

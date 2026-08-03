@@ -3326,7 +3326,8 @@ def traffic_report_dates(usage_df, tz: str = TRAFFIC_REPORT_TZ):
     return parsed.dt.tz_convert(tz).dt.date
 
 
-def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None) -> dict:
+def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None,
+                    days: int = 7) -> dict:
     """Everything the daily digest and the admin trend panels both report.
 
     Pure -- frames in, frames out, no Streamlit -- so the scheduled digest and
@@ -3337,6 +3338,13 @@ def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None) -> dict:
 
     `asof` makes a run reproducible and lets a missed day be recovered; it
     defaults to today in the reporting zone.
+
+    `days` is the rolling-window length. The window keys stay "last7"/
+    "prior7" whatever it is -- they are key NAMES read by the admin panel and
+    the digest, not descriptions, and renaming them per run would break every
+    reader. Before this parameter existed analyze_traffic.py's --days changed
+    only the digest's label: "14-day total" was printed over a hardcoded
+    7-day sum.
     """
     pages = [NAV_CALCULATOR] + list(STANDALONE_TOOLS)
     empty = pd.DataFrame(columns=pages + ["total"])
@@ -3382,8 +3390,8 @@ def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None) -> dict:
     windows = {
         "yesterday": window(y, 1),
         "prior_day": window(y - timedelta(days=1), 1),
-        "last7": window(y, 7),
-        "prior7": window(y - timedelta(days=7), 7),
+        "last7": window(y, days),
+        "prior7": window(y - timedelta(days=days), days),
     }
 
     # Cold vs internal, per tool. Page navigations only -- an in-page handoff
@@ -6955,15 +6963,17 @@ def payment_series(result: dict) -> pd.DataFrame:
     cumulative_loan_paid_by_year already follows -- rather than assuming one and
     silently charting zeros for the other.
 
-    CAUTION ON A *COMBINED* RESULT. `_merge_balance_schedules` reconstructs a
-    flat payment for whichever tranche lacks one and sums them, so a combined
-    row reports the same total for every month even after the shorter loan has
-    been paid off: a 10-year federal plan beside a 15-year private balance reads
-    as one constant figure for all 15 years, when the true path steps down once
-    the federal half clears. That is why build_payment_chart STACKS the two
-    tranches from their own series rather than charting the combined column --
-    each drops to zero when its own loan ends. Anything else plotting payments
-    from a combined result inherits the same flaw.
+    CAUTION ON A *COMBINED* RESULT. The scalar `monthly_payment` on a combined
+    result is the SUM of two flat payments and never steps down, so anything
+    reconstructing from it reports one constant figure even after the shorter
+    loan clears: a 10-year federal plan beside a 15-year private balance reads
+    as one payment for all 15 years. The merged schedule's per-month `payment`
+    column does not have this flaw -- _merge_balance_schedules reconstructs
+    each tranche's payment only for the months it still owes, so the column
+    steps down correctly (it is emitted unconditionally for exactly this
+    reason). build_payment_chart still STACKS the two tranches from their own
+    series rather than charting the combined column, because the split itself
+    -- which tranche costs what -- is the information the chart exists to show.
     """
     sched = result.get("schedule")
     if sched is None or sched.empty:
@@ -7997,10 +8007,28 @@ def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
 def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> Image:
     """PDF counterpart to build_balance_chart -- simplified redraw for
     print, not required to be pixel-identical to the on-screen interactive
-    version."""
+    version.
+
+    Same principal/unpaid-interest split as the on-screen twin, behind the
+    same balance_split_is_informative gate and in the same two colours. The
+    split shipped on the Plotly side alone (2026-08-02), so for the exact
+    case the stacked view exists for -- an income-driven payment below the
+    interest, principal pinned while the interest pool balloons -- the PDF
+    silently flattened the story back to one undifferentiated line. The
+    chart-twin rule in CLAUDE.md is about WHAT a chart shows, and this was a
+    what, not a how."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
-    ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
-    ax.set_title("Loan Balance Over Time")
+    if balance_split_is_informative(schedule_df):
+        ax.stackplot(schedule_df["year"],
+                     schedule_df["principal_balance"],
+                     schedule_df["interest_balance"],
+                     labels=["Principal", "Unpaid interest"],
+                     colors=["#4C78A8", "#E45756"])
+        ax.legend(loc="upper left", fontsize=8)
+        ax.set_title("Loan Balance Over Time — principal vs unpaid interest")
+    else:
+        ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
+        ax.set_title("Loan Balance Over Time")
     ax.set_xlabel("Years")
     ax.set_ylabel("Remaining Balance ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
@@ -8787,6 +8815,48 @@ def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int) -> Table:
     ])
 
 
+def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
+                                     takehome_stages_a, takehome_stages_b,
+                                     styles) -> list:
+    """Take-home tables for both scenarios in the compare report.
+
+    Mirrors the on-screen compare branch's render_takehome_block(
+    show_charts=False): every NUMBER, no pie charts. The single report keeps
+    its per-stage charts because it describes one scenario; here two
+    scenarios x two stages x two charts would be eight images saying what
+    four table rows already say, so the report takes the same deliberate
+    asymmetry the on-screen columns do. The compare PDF previously had no
+    take-home at all -- the downloadable artifact of the randomly assigned
+    contrast arm was missing a section the single arm's carries, the same
+    one-branch-only gap the on-screen parity fix chased.
+    """
+    if not takehome_stages_a or not takehome_stages_b:
+        return []
+    flowables = [
+        Spacer(1, 12),
+        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {city}"),
+                  styles["section"]),
+    ]
+    for panel_label, scenario, stages in (
+            ("A", scenario_a, takehome_stages_a),
+            ("B", scenario_b, takehome_stages_b)):
+        flowables += [
+            Spacer(1, 6),
+            Paragraph(f"{panel_label}: {xml_escape(scenario['major'])}",
+                      styles["body"]),
+            _pdf_table(full_width=True, rows=[
+                ["Career Stage", "Gross Salary", "Take-Home Pay (annual)",
+                 "Monthly Disposable", "COL-Adjusted Disposable"],
+                *[[label, fmt_money(f["gross"]),
+                   fmt_money(f["take_home"]["net_take_home"]),
+                   fmt_money(f["disposable_nominal"]),
+                   fmt_money(f["disposable_col_adjusted"])]
+                  for label, f in stages],
+            ]),
+        ]
+    return flowables
+
+
 def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_year_a,
                                  personal_contribution_per_year_a, grants_per_year_a, interest_rate,
                                  repayment_strategy, scenario_a, major_b, school_name_b, in_state_b,
@@ -8804,7 +8874,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                 professional_debt_a: float = None,
                                 professional_school_a: str = None,
                                  federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None, professional_debt_b: float = None, professional_school_b: str = None,
-                                 include_fees: bool = False) -> bytes:
+                                 include_fees: bool = False,
+                                 takehome_stages_a: list = None,
+                                 takehome_stages_b: list = None) -> bytes:
     """PDF mirroring the on-screen Compare Mode view: both scenarios'
     profile summaries + metric tables, per-scenario break-even, plus the
     loan-balance and net-position comparison charts.
@@ -8914,6 +8986,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                 col_index, get_metro_wage_index(city), roi_window_years),
             roi_window_years,
         ),
+        *_pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
+                                          takehome_stages_a, takehome_stages_b,
+                                          styles),
         *_pdf_resources_section(styles, [("Scenario A", school_name_a), ("Scenario B", school_name_b)]),
     ]
     # One per scenario, labelled -- in Career mode A and B are different
@@ -13499,14 +13574,16 @@ if compare_mode:
     # split is stated numerically by the ratio metric.
     st.subheader(f"🏙️ Real-World Take-Home — {city}")
     th_col_a, th_col_b = st.columns(2)
+    # Returns captured for the PDF below, same as the single branch does --
+    # the compare report renders these stages as tables.
     with th_col_a:
         panel_heading(f"A: {scenario_a['major']}")
-        render_takehome_block(scenario_a, major, city, city_info,
-                               show_charts=False, heading=False, stage_layout="stacked")
+        _th_a = render_takehome_block(scenario_a, major, city, city_info,
+                                      show_charts=False, heading=False, stage_layout="stacked")
     with th_col_b:
         panel_heading(f"B: {scenario_b['major']}")
-        render_takehome_block(scenario_b, major_b, city, city_info,
-                               show_charts=False, heading=False, stage_layout="stacked")
+        _th_b = render_takehome_block(scenario_b, major_b, city, city_info,
+                                      show_charts=False, heading=False, stage_layout="stacked")
 
     st.plotly_chart(
         build_comparison_balance_chart(
@@ -13568,6 +13645,7 @@ if compare_mode:
         loan_source_a=loan_source_a, loan_source_b=loan_source_b,
         federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'),
         federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, professional_school_b=st.session_state.get('prof_school_b'), include_fees=True,
+        takehome_stages_a=_th_a["stages"], takehome_stages_b=_th_b["stages"],
     )
     with top_actions_container:
         compare_pdf_col, compare_share_col = st.columns(2)
