@@ -11781,14 +11781,26 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         _tiered_row = next((r for label, r, _ in rows
                             if label.startswith("2026 Tiered Standard")), None)
         if forgivable and _std_row is not None and _tiered_row is not None:
+            # FEDERAL-only figures, read from the federal_only result the rows
+            # carry -- the same basis discipline as the count-back threshold
+            # above, for the same reason. Auto-enrollment moves only the
+            # federal loan; the private payment is owed under every plan
+            # including staying put, so quoting the combined rows here
+            # inflated the cost of missing the window by the entire private
+            # payment ($2,581 shown where the federal change was $681).
+            _std_fed = _std_row.get("federal_only", _std_row)
+            _tiered_fed = _tiered_row.get("federal_only", _tiered_row)
             st.info(
                 "**If you're on SAVE, a clock may already be running.** Your "
                 "servicer's notice to leave SAVE starts a 90-day window to "
                 "choose a plan. Miss it and you are enrolled automatically — "
                 "into Standard or the new Tiered Standard, "
-                f"{fmt_money_md(_std_row['monthly_payment'])} and "
-                f"{fmt_money_md(_tiered_row['monthly_payment'])} a month on this "
-                "balance. Neither is income-driven and neither forgives "
+                f"{fmt_money_md(_std_fed['monthly_payment'])} and "
+                f"{fmt_money_md(_tiered_fed['monthly_payment'])} a month on "
+                "your federal balance"
+                + (" (your private loan is unchanged either way)"
+                   if private_balance else "")
+                + ". Neither is income-driven and neither forgives "
                 "anything, so the automatic outcome is the one that ignores "
                 "your income. **The window runs from your servicer's notice, "
                 "not a fixed national date** — check yours rather than this "
@@ -13314,6 +13326,12 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             hs_wage_index=hs_wage_index,
             personal_contribution=scenario["personal_contribution"],
             enrollment_years=scenario["enrollment_years"],
+            # working_years was the one baseline kwarg this call site dropped
+            # -- the omission find_breakeven_loan's docstring warns about.
+            # Without it a part-time-CC scenario's verdict was solved against
+            # a stricter baseline than the premium printed beside it, and
+            # only in Compare Mode, the randomly assigned contrast arm.
+            working_years=scenario["working_years"],
             baseline_start_age=scenario["baseline_start_age"],
             federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees,
             **breakeven_kwargs())
