@@ -8449,6 +8449,13 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     # Same three views as the screen, in the same order -- see the chart-twin
     # rule in CLAUDE.md. A PDF that showed only the combined total while the
     # page showed the split would be the drift this codebase keeps paying for.
+    #
+    # Page 1 is the visitor's own figures and nothing else; the comparison
+    # starts on a fresh page. With a private tranche that is three tables plus
+    # their notes, which reportlab would otherwise break across a page boundary
+    # at whatever row it ran out of room -- splitting a five-plan table after
+    # two rows makes the remaining three look like a different comparison.
+    story.append(PageBreak())
     if private_row is None:
         story.append(Paragraph("Plan comparison", styles["section"]))
         story.append(plan_table(plan_rows))
@@ -8486,6 +8493,10 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     if chosen is None and rows:
         chart_label, chosen = rows[0][0], rows[0][1]
     if chosen is not None and not chosen["schedule"].empty:
+        # Charts on their own page too. Two 3-inch images plus their captions do
+        # not fit under the tables, and a chart orphaned from its caption -- or
+        # split across the fold -- is worse than one page further on.
+        story.append(PageBreak())
         story.append(build_pdf_balance_chart(chosen["schedule"], chart_label))
         story.append(Paragraph(f"Balance over time under {chart_label}.",
                                styles["caption"]))
@@ -8502,7 +8513,13 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
             styles["caption"]))
         story.append(Spacer(1, 10))
 
-    story.append(Paragraph("What this does and does not include", styles["section"]))
+    # Its own page, unconditionally. KeepTogether alone would have put it there
+    # for this report and somewhere else for a shorter one -- the caveats are
+    # the part a reader is most likely to be pointed BACK to ("see the last
+    # page"), so a fixed location beats a tidy one. KeepTogether is kept behind
+    # it so the block cannot split if the list ever outgrows a page.
+    story.append(PageBreak())
+    caveats = [Paragraph("What this does and does not include", styles["section"])]
     for line in (
         "Simplified models of the real plans. Your servicer's figures will differ.",
         "Forgiven balances are taxable as ordinary income in the year they are "
@@ -8519,7 +8536,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         "private part is identical in every row -- what differs between rows is "
         "only the federal half.",
     ) if private_balance else ()):
-        story.append(Paragraph(f"- {line}", styles["caption"]))
+        caveats.append(Paragraph(f"- {line}", styles["caption"]))
+    story.append(KeepTogether(caveats))
 
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=letter).build(
