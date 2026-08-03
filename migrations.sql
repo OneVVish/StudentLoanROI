@@ -1152,16 +1152,33 @@ alter table scenario_events
 --     mechanism could not succeed. Rows at +00:00 are not a cluster of
 --     UK/Iceland traffic.
 --
---   * Any time-of-day analysis that crosses this date is comparing UTC
---     against local. "Do people use this in the evening?" is the obvious
---     casualty: a US visitor at 8pm local was stamped 03:00 the next day,
---     so pre-fix rows push evening usage into the small hours AND onto
---     the following calendar date. Day-boundary buckets are affected too,
---     not just hour-of-day.
+--   * CORRECTED 2026-08-03, having been overstated here. Every row is a
+--     correct ABSOLUTE INSTANT in both eras: now_local().isoformat()
+--     always emits an offset, "+00:00" before the fix and the visitor's
+--     real zone after. Normalise with pd.to_datetime(..., utc=True) and
+--     daily/weekly buckets are valid straight ACROSS this date. The
+--     earlier claim that pre-fix rows "push evening usage onto the
+--     following calendar date" is true only of the naive wall-clock text,
+--     not of a parsed timestamp.
 --
---   * Not recoverable. No column records the visitor's zone, so a
---     pre-fix UTC timestamp cannot be converted back. Restrict
---     time-of-day work to rows from this date onward.
+--   * What IS lost before this date is the VISITOR'S OWN local time of
+--     day. Those rows all say +00:00 wherever the visitor was, and no
+--     column records their zone, so "do people use this in the evening,
+--     their time?" is answerable only from this date onward. The instant
+--     is fine; the wall clock beside it is not.
+--
+--   * Bucket in a NAMED zone, not UTC. app.py's TRAFFIC_REPORT_TZ
+--     (America/Los_Angeles) exists for this: .dt.date straight off UTC
+--     files a 20:00 Pacific visit under the following day, which for a
+--     US audience misplaces roughly every evening session. Correct
+--     instants, wrong bucket.
+--
+--   * `timestamp` is a TEXT column (see README.md), not timestamptz, so
+--     Postgres normalises nothing and any SQL "ORDER BY timestamp" or
+--     "timestamp < '...'" is a LEXICOGRAPHIC string comparison. That was
+--     safe only while every row carried +00:00, and has not been since
+--     this date. Parse in pandas, or compare on a substring you know is
+--     zone-stable.
 --
 --   * Ordering is unaffected -- UTC is monotonic. The existing guidance
 --     to order scenario_events by event_seq rather than timestamp still
