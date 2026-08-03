@@ -80,21 +80,23 @@ SHARE_EXEMPT = {
     # build_repayment_share_params -- checked separately below, against
     # REPAYMENT_SHARE_FIELDS, because that emitter builds its params from a
     # table rather than from string literals this file could see.
-    "existing_balance": "repayment tool; rides ?rb= via build_repayment_share_params",
-    "existing_rate": "repayment tool; rides ?rr=",
     "existing_accrued_interest": "repayment tool; rides ?rui=",
     "existing_income": "repayment tool; rides ?ri=",
     "existing_dependents": "repayment tool; rides ?rd=",
     "existing_forgivable": "repayment tool; rides ?rf=",
     "existing_pslf": "repayment tool; rides ?rpslf=",
     "existing_prior_payments": "repayment tool; rides ?rp=",
-    "existing_private_balance": "repayment tool; rides ?rpb=",
-    "existing_private_rate": "repayment tool; rides ?rpr=",
-    "existing_private_term": "repayment tool; rides ?rpt=",
     "existing_has_private": "repayment tool; rides ?rhp=, and is forced on by "
                             "seed_repayment_from_share when ?rpb= is present",
-    "existing_private_actual": "repayment tool; rides ?rpa=",
     "existing_age": "repayment tool; rides ?rage=",
+    # The loan GRIDS. These are session keys backing st.data_editor (whose
+    # widget keys, existing_federal_editor/existing_private_editor, store
+    # edit-state dicts the guard's widget scan cannot see anyway). They ride
+    # comma-joined lists via REPAYMENT_LOAN_LIST_PARAMS, checked below.
+    "existing_federal_loans": "repayment loan grid; rides ?rb=&rr= as comma "
+                              "lists via REPAYMENT_LOAN_LIST_PARAMS",
+    "existing_private_loans": "repayment loan grid; rides ?rpb=&rpr=&rpt=&rpa= "
+                              "as comma lists via REPAYMENT_LOAN_LIST_PARAMS",
     "existing_chart_plan": "which plan's chart to view; a view control, not an "
                            "input, so it is genuinely not shared",
     # Display-only / derived.
@@ -303,9 +305,35 @@ def main() -> int:
             failures.append(
                 f"  REPAYMENT   REPAYMENT_SHARE_FIELDS names {key!r}, which is not\n"
                 f"              a repayment widget key. A typo here fails silently.")
+        # The loan grids' comma-list params. One session key feeds several
+        # params (a column each), which the 1:1 table above cannot express --
+        # so they live in their own table, and this checks it the same way:
+        # the keys must be declared grid keys in SHARE_EXEMPT, and the params
+        # must be distinct from each other, from the scalar table's, and from
+        # the calculator's.
+        lists = next((n for n in ast.walk(tree)
+                      if isinstance(n, ast.Assign)
+                      and any(getattr(t, "id", "") == "REPAYMENT_LOAN_LIST_PARAMS"
+                              for t in n.targets)), None)
+        if lists is None:
+            failures.append("  REPAYMENT   REPAYMENT_LOAN_LIST_PARAMS is gone; the "
+                            "loan grids' share pipeline is unchecked.")
+        else:
+            grid_keys = {e.elts[0].value for e in lists.value.elts}
+            for entry in lists.value.elts:
+                for col in entry.elts[1].elts:
+                    params_repayment.append(col.elts[1].value)
+            declared_grids = {k for k, why in SHARE_EXEMPT.items()
+                              if why.startswith("repayment loan grid")}
+            for key in sorted(grid_keys ^ declared_grids):
+                failures.append(
+                    f"  REPAYMENT   loan-grid key {key!r} is in exactly one of\n"
+                    f"              REPAYMENT_LOAN_LIST_PARAMS and SHARE_EXEMPT;\n"
+                    f"              the two must name the same grids.")
         if len(set(params_repayment)) != len(params_repayment):
-            failures.append("  REPAYMENT   duplicate query param in "
-                            "REPAYMENT_SHARE_FIELDS; one field would overwrite another.")
+            failures.append("  REPAYMENT   duplicate query param across "
+                            "REPAYMENT_SHARE_FIELDS and REPAYMENT_LOAN_LIST_PARAMS; "
+                            "one field would overwrite another.")
         clash = set(params_repayment) & emitted
         if clash:
             failures.append(

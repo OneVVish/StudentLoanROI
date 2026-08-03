@@ -154,6 +154,36 @@ def main() -> int:
             f"Standard override ${override:,.0f}/mo on ${principal:,.0f} @ {rate}%",
             principal, result, rate)
 
+    # Multi-loan grids: two federal notes on a fixed plan chained with two
+    # private loans (one paying an override) -- four schedules combined twice
+    # over, which is the repayment tool's whole-bill shape. The books must
+    # balance against the SUMMED principals: a chain that dropped or
+    # double-counted a tranche is invisible in any single result.
+    multi_rows = ns["compare_existing_loan_plans"](
+        0, 0, 32_000.0,
+        federal_loans=[{"balance": 40_000.0, "rate": 6.5},
+                       {"balance": 20_000.0, "rate": 3.0}],
+        private_loans=[{"balance": 30_000.0, "rate": 8.0, "term": 10, "actual": 0},
+                       {"balance": 15_000.0, "rate": 9.5, "term": 7,
+                        "actual": 400.0}])
+    _std_multi = next(r for label, r, _ in multi_rows
+                      if label.startswith("Standard"))
+    checked += 1
+    problems += check("multi-loan Standard combined (2 federal + 2 private)",
+                      105_000.0, _std_multi)
+    # The RAP row separately: its federal side is the POOLED simulation, so a
+    # pool that silently drops a note stays internally consistent (the
+    # wrong-but-consistent class again) and only the identity against the
+    # SUMMED principals can see it. The Standard row cannot stand in -- it is
+    # built from the per-loan chain, a different code path.
+    _rap_multi = next((r for label, r, _ in multi_rows if "RAP" in label), None)
+    if _rap_multi is None:
+        problems.append("  multi-loan RAP row missing from compare_existing_loan_plans")
+    else:
+        checked += 1
+        problems += check("multi-loan RAP combined (pooled federal + 2 private)",
+                          105_000.0, _rap_multi)
+
     if problems:
         print(f"repayment invariants: {len(problems)} violation(s) across {checked} cases\n")
         print("\n\n".join(problems))
