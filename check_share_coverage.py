@@ -90,6 +90,7 @@ SHARE_EXEMPT = {
                             "seed_repayment_from_share when ?rpb= is present",
     "existing_age": "repayment tool; rides ?rage=",
     "existing_extra_monthly": "repayment tool; rides ?rx=",
+    "existing_old_ibr": "repayment tool; rides ?rob=",
     # The loan GRIDS. These are session keys backing st.data_editor (whose
     # widget keys, existing_federal_editor/existing_private_editor, store
     # edit-state dicts the guard's widget scan cannot see anyway). They ride
