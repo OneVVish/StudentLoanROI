@@ -188,6 +188,62 @@ def main() -> int:
             f"  RAP extra_payments mis-applied: month-1 payment ${got:,.2f} is "
             f"not the statutory ${statutory:,.2f} plus exactly the $200.00 extra.")
 
+    # The fixed-plan avalanche: several notes, extra targeted highest-rate
+    # first with retired notes' payments rolling forward. Three distinct
+    # failure shapes, three distinct checks:
+    #  - conservation (payments == principals + interest to the cent);
+    #  - equivalence: on ONE note the avalanche must reproduce the plain
+    #    override path, or the two simulators disagree about the same loan;
+    #  - TARGETING: with distinct rates and an extra, the highest-rate note
+    #    must die first. Conservation cannot see a reversed sort key --
+    #    paying the wrong note first still balances the books perfectly.
+    ava = ns["simulate_fixed_avalanche"](
+        [{"balance": 46_300.0, "rate": 6.05}, {"balance": 22_600.0, "rate": 3.4},
+         {"balance": 8_000.0, "rate": 9.5}],
+        10, extra_payments=((1, 300.0), (25, 1_200.0)))
+    checked += 1
+    problems += check("fixed avalanche, 3 notes + stepped extras",
+                      76_900.0, ava, 6.0)
+    payoffs = ava["per_loan_payoff_months"]
+    checked += 1
+    if not (payoffs[2] < payoffs[0] < payoffs[1]):
+        problems.append(
+            f"  avalanche targeting broken: payoff months {payoffs} for rates "
+            f"(6.05, 3.4, 9.5) -- the highest rate must die first and the "
+            f"lowest last.")
+    # The budget must never shrink: a retired note's payment ROLLS FORWARD
+    # into the remaining notes. Conservation cannot see this one either --
+    # paying less each month still balances its own books, it just takes
+    # longer -- so check the payment column directly: every month except the
+    # final partial one pays that month's full budget.
+    base_budget = ava["monthly_payment"] - 300.0   # month-1 budget minus its extra
+    sched = ava["schedule"]
+    checked += 1
+    for _, row_ in sched.iloc[:-1].iterrows():
+        expected = base_budget + (300.0 if row_["month"] >= 1 else 0.0) \
+                   + (1_200.0 if row_["month"] >= 25 else 0.0)
+        if abs(row_["payment"] - expected) > 0.01:
+            problems.append(
+                f"  avalanche budget shrank: month {int(row_['month'])} paid "
+                f"${row_['payment']:,.2f} against a ${expected:,.2f} budget -- "
+                f"a retired note's payment must roll forward, not vanish.")
+            break
+    single_ava = ns["simulate_fixed_avalanche"](
+        [{"balance": 68_900.0, "rate": 6.0}], 9, extra_payments=((1, 773.0),))
+    single_override = ns["calculate_standard_repayment"](
+        68_900.0, 6.0, 9,
+        monthly_payment_override=single_ava["monthly_payment"])
+    checked += 1
+    if (abs(single_ava["total_interest"] - single_override["total_interest"]) > 2.0
+            or abs(single_ava["payoff_years"] - single_override["payoff_years"]) > 0.1):
+        problems.append(
+            f"  single-note avalanche disagrees with the override path: "
+            f"interest {single_ava['total_interest']:,.2f} vs "
+            f"{single_override['total_interest']:,.2f}, payoff "
+            f"{single_ava['payoff_years']:.2f} vs "
+            f"{single_override['payoff_years']:.2f} -- same loan, same money, "
+            f"two answers.")
+
     # Multi-loan grids: two federal notes on a fixed plan chained with two
     # private loans (one paying an override) -- four schedules combined twice
     # over, which is the repayment tool's whole-bill shape. The books must
