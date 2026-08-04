@@ -154,6 +154,40 @@ def main() -> int:
             f"Standard override ${override:,.0f}/mo on ${principal:,.0f} @ {rate}%",
             principal, result, rate)
 
+    # The strategy simulator's extra-payment hook: statutory + a stepped-up
+    # extra must still balance the books. RAP is the load-bearing case -- a
+    # larger payment covers more interest, so the WAIVER shrinks, and the
+    # identity is what proves the subsidy-forfeiture arithmetic conserves
+    # money rather than double-counting the covered interest.
+    extras = ((1, 200.0), (49, 1_600.0))
+    for label, principal, rate, result in (
+        ("RAP + pivot extras, low earner", 60_000.0, 6.5,
+         ns["simulate_rap_schedule"](60_000.0, 6.5, "LowEarner", 0,
+                                     extra_payments=extras)),
+        ("IDR + pivot extras, low earner", 60_000.0, 6.5,
+         ns["calculate_idr_repayment"](60_000.0, 6.5, "LowEarner",
+                                       extra_payments=extras)),
+        ("RAP + extras, high earner", 190_000.0, 9.07,
+         ns["simulate_rap_schedule"](190_000.0, 9.07, "HighEarner", 0,
+                                     extra_payments=((13, 900.0),))),
+    ):
+        checked += 1
+        problems += check(label, principal, result, rate)
+
+    # Conservation cannot see a MIS-SIZED extra: applying double the extra
+    # still balances its own books, since a larger payment is a larger
+    # payment. So check the behaviour directly -- month one's payment must be
+    # the statutory RAP payment plus EXACTLY the extra.
+    rap_extra = ns["simulate_rap_schedule"](60_000.0, 6.5, "LowEarner", 0,
+                                            extra_payments=((1, 200.0),))
+    statutory = ns["calculate_rap_payment"](32_000.0)["monthly_payment"]
+    got = float(rap_extra["schedule"]["payment"].iloc[0])
+    checked += 1
+    if abs(got - (statutory + 200.0)) > 0.01:
+        problems.append(
+            f"  RAP extra_payments mis-applied: month-1 payment ${got:,.2f} is "
+            f"not the statutory ${statutory:,.2f} plus exactly the $200.00 extra.")
+
     # Multi-loan grids: two federal notes on a fixed plan chained with two
     # private loans (one paying an override) -- four schedules combined twice
     # over, which is the repayment tool's whole-bill shape. The books must
