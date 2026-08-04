@@ -15165,7 +15165,7 @@ to you. Results may be published in aggregate; nothing identifying anyone will a
 **You can stop at any time** by not submitting, or by closing the tab. The survey itself
 saves nothing until you press Submit.
 
-Questions about the research? Contact **veervish11@gmail.com**.
+Questions about the research? Contact **LoanCal.info@gmail.com**.
 
 *By submitting, you agree to take part. You must be {RESEARCH_MIN_AGE} or over.*
 """
