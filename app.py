@@ -12038,10 +12038,30 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "Comparing plans is a question of its own — "
                 f"[open this as its own page]({internal_tool_url('repayment')})."
             )
-        # Two subsections, because the page compares FEDERAL plans and a
-        # private balance is not one of them -- it rides along unchanged in
-        # every row. Grouping them makes that structural rather than something
-        # a visitor has to infer from the captions.
+        # Three subsections: who you are, then the FEDERAL plans the page
+        # compares, then the private balance that is not one of them -- it
+        # rides along unchanged in every row. Grouping makes that structural
+        # rather than something a visitor has to infer from the captions.
+        # Personal facts first: they read once and apply to everything below,
+        # whereas the loan grids are the part a visitor iterates on.
+        st.markdown("**Personal info**")
+        p1, p2, p3 = st.columns(3)
+        income = p1.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
+                                  step=1_000, key="existing_income",
+                                  help="Adjusted gross income. The income-driven plans "
+                                       "size their payment from it; the fixed plans ignore it.")
+        deps = p2.number_input("Dependent children", min_value=0, max_value=10, step=1,
+                                key="existing_dependents",
+                                help="RAP lowers the payment by $50/month each.")
+        # 0 means "not answered", the same convention every optional number in
+        # this form uses. Asked because "payoff 16.8 yrs" and "you'd be 43"
+        # land very differently, and only the visitor knows which one decides.
+        age = p3.number_input(
+            "Your age (optional)", min_value=0, max_value=80, step=1,
+            key="existing_age",
+            help="Only used to say how old you'd be when each plan ends. "
+                 "Leave at 0 to skip.")
+
         st.markdown("**Federal loans**")
         # One row per loan, add/delete built in. The data is OWNED by our own
         # session key (a list of row dicts): st.data_editor's widget key
@@ -12085,15 +12105,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "as one balance with one payment, and the fixed plans bill "
                 "each on its own schedule."
             ))
-        c1, c2, c3 = st.columns(3)
-        income = c1.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
-                                  step=1_000, key="existing_income",
-                                  help="Adjusted gross income. The income-driven plans "
-                                       "size their payment from it; the fixed plans ignore it.")
-        deps = c2.number_input("Dependent children", min_value=0, max_value=10, step=1,
-                                key="existing_dependents",
-                                help="RAP lowers the payment by $50/month each.")
-        accrued = c3.number_input(
+        c1, c2 = st.columns([2, 1])
+        accrued = c1.number_input(
             "of which unpaid interest ($)", min_value=0, max_value=2_000_000, step=1_000,
             key="existing_accrued_interest",
             help="If your servicer shows principal and accrued interest separately "
@@ -12102,16 +12115,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "federal balance as a whole. It changes how "
                  "payments are applied and is shown separately on the balance chart. "
                  "Leave at 0 if you only know one number.")
-        c4, _, c6 = st.columns(3)
-        # 0 means "not answered", the same convention every optional number in
-        # this form uses. Asked because "payoff 16.8 yrs" and "you'd be 43"
-        # land very differently, and only the visitor knows which one decides.
-        age = c4.number_input(
-            "Your age (optional)", min_value=0, max_value=80, step=1,
-            key="existing_age",
-            help="Only used to say how old you'd be when each plan ends. "
-                 "Leave at 0 to skip.")
-        forgivable = c6.checkbox(
+        forgivable = c2.checkbox(
             "These are my own federal Direct loans", value=True, key="existing_forgivable",
             help="Untick for Parent PLUS or private loans. Parent PLUS is not "
                  "eligible for RAP or IBR, and private loans are outside the "
