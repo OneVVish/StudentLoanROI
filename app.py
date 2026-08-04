@@ -5272,7 +5272,8 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              payment_rate: float = IDR_PAYMENT_RATE,
                              max_term_years: int = IDR_MAX_TERM_YEARS,
                              max_months: int = None,
-                             roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
+                             roi_window_years: int = ROI_WINDOW_YEARS,
+                             extra_payments: tuple = ()) -> dict:
     """
     Models a payment as 10% of discretionary income (salary above a flat
     living allowance). Salary each year comes from get_annual_salary_for_year,
@@ -5281,6 +5282,13 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
     rather than balance-based, it can fall below the interest accruing that
     month (negative amortization); any balance still outstanding after
     `max_term_years` is forgiven.
+
+    `extra_payments` is the strategy simulator's hook: ((from_month,
+    monthly_amount), ...) increments added to the statutory payment from that
+    month on -- how "redirect the freed private payment at the federal
+    balance" is modelled. Cumulative when several apply, capped by the same
+    final-month arithmetic as the statutory payment, and () -- the default --
+    leaves every existing caller byte-identical.
     """
     # Nothing borrowed, nothing to repay -- the same guard the Standard
     # simulator has, for the same reason: without it the loop still emits one
@@ -5319,6 +5327,8 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         current_salary = income_for_year(major_name, year_index, annual_income, income_growth)
         discretionary_monthly = max((current_salary / 12) - (living_adjustment / 12), 0.0)
         payment = discretionary_monthly * payment_rate
+        payment += sum(amount for start, amount in extra_payments
+                       if month >= start)
 
         # Interest accrues on PRINCIPAL, not on principal plus already-accrued
         # interest. Unpaid federal interest does not capitalise while it sits
@@ -5437,14 +5447,23 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
                            annual_income: float = None, income_growth: float = 0.03,
                            max_term_years: int = RAP_MAX_TERM_YEARS,
                            max_months: int = None,
-                           roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
+                           roi_window_years: int = ROI_WINDOW_YEARS,
+                           extra_payments: tuple = ()) -> dict:
     """Year-by-year RAP amortization: payment = calculate_rap_payment against
     that year's real salary (get_annual_salary_for_year), with RAP's real
     interest-waiver + up to $50/month government principal-match provisions
     applied whenever the borrower's own payment doesn't reduce principal by
     at least $50 that month -- so the balance never grows from unpaid
     interest. Any balance remaining after max_term_years (30 real years /
-    360 payments) is forgiven."""
+    360 payments) is forgiven.
+
+    `extra_payments` (((from_month, monthly_amount), ...)) adds to the
+    statutory payment from that month on -- the strategy simulator's hook,
+    same contract as calculate_idr_repayment's. Note what falls out of the
+    existing arithmetic for free: a larger payment covers more of the
+    interest, so RAP waives LESS -- the "extra payments forfeit the subsidy"
+    behaviour the module's disclaimer describes is modelled, not asserted.
+    The default () leaves every existing caller byte-identical."""
     # Same zero-principal guard as the other two simulators -- and RAP is the
     # DEFAULT strategy for 2026+ starts, so a no-degree occupation (loan
     # forced to 0) rests on this path and showed "Payoff Timeline 0.1 yrs"
@@ -5484,6 +5503,8 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
         year_index = (month - 1) // 12
         agi = income_for_year(major_name, year_index, annual_income, income_growth)
         payment = calculate_rap_payment(agi, dependents)["monthly_payment"]
+        payment += sum(amount for start, amount in extra_payments
+                       if month >= start)
         interest = balance * monthly_rate
         # Same final-month cap as the IDR simulator -- see the note there.
         # Applied BEFORE the interest split below so the waived figure cannot
@@ -8783,7 +8804,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   private_actual_payment: float = 0.0,
                                   age: int = 0,
                                   federal_loans: list = None,
-                                  private_loans: list = None) -> bytes:
+                                  private_loans: list = None,
+                                  strategy: dict = None) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -8988,6 +9010,23 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
             styles["caption"]))
         story.append(Spacer(1, 10))
 
+    # The commit-or-ride fork, from the same precomputed analysis and the
+    # same shared sentences the on-screen panel shows (the chart-twin rule,
+    # applied to prose).
+    if strategy is not None:
+        story.append(Spacer(1, 10))
+        story.append(Paragraph("Commit or ride -- the fork, in numbers",
+                               styles["section"]))
+        for sentence in strategy_verdict_sentences(strategy):
+            story.append(Paragraph(sentence, styles["body"]))
+        if not strategy["pslf"]:
+            story.append(Paragraph(
+                "Assumes ~3% annual raises, single filer, federal tax only on "
+                "the discharge (state tax would add to it), and the published "
+                "2026 rules. The private side is paid identically in both arms "
+                "and is excluded from these totals. Estimates, not advice.",
+                styles["caption"]))
+
     # Its own page, unconditionally. KeepTogether alone would have put it there
     # for this report and somewhere else for a shorter one -- the caveats are
     # the part a reader is most likely to be pointed BACK to ("see the last
@@ -8998,19 +9037,21 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     for line in (
         "Simplified models of the real plans. Your servicer's figures will differ.",
         "Forgiven balances are taxable as ordinary income in the year they are "
-        "discharged. That tax is NOT included above.",
-        "Extra payments are not modelled. Paying more than the minimum shortens "
-        "every row, and under RAP it also forfeits the interest subsidy in any "
-        "month the extra covers the interest.",
+        "discharged. That tax is not in the tables above; the commit-or-ride "
+        "section prices it.",
+        "Extra payments are modelled only where entered -- the private grid's "
+        "Actual column and the commit-or-ride extra -- and under RAP an extra "
+        "payment forfeits the interest subsidy in any month it covers the "
+        "interest, which the simulation accounts for.",
         "RAP's payment is 1-10% of income minus $50 per dependent, floored at "
         "$10/month. Source: studentaid.gov OBBBA definitions.",
     ) + ((
         "Every row is your TOTAL bill: the federal plan plus the private "
-        f"balance amortised separately over {int(private_term)} years. No plan "
-        "forgives private debt or lowers its payment for your income, so the "
-        "private part is identical in every row -- what differs between rows is "
-        "only the federal half.",
-    ) if private_balance else ()):
+        "balances amortised separately, each on its own term. No plan forgives "
+        "private debt or lowers its payment for your income, so the private "
+        "part is identical in every row -- what differs between rows is only "
+        "the federal half.",
+    ) if priv_list else ()):
         caveats.append(Paragraph(f"- {line}", styles["caption"]))
     story.append(KeepTogether(caveats))
 
@@ -11557,6 +11598,7 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_pslf", "rpslf", int),
     ("existing_has_private", "rhp", int),
     ("existing_age", "rage", int),
+    ("existing_extra_monthly", "rx", int),
 )
 
 # The two loan GRIDS. One session key (a list of row dicts backing a
@@ -11919,12 +11961,202 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     return rows
 
 
+def discharge_tax_estimate(forgiven_amount: float, annual_income: float,
+                            years_until_discharge: float,
+                            income_growth: float = 0.03) -> dict:
+    """Rough federal tax on an income-driven discharge. Since January 1, 2026
+    (the ARPA exclusion's expiry) a discharged balance is ordinary income in
+    the year of discharge, and the tool's disclaimer said so without a
+    number -- but "there's a tax" and "call it $6,000" are different facts to
+    plan around.
+
+    The discharge stacks ON TOP of that year's income, so this computes
+    tax(income + forgiven) - tax(income) at the projected discharge-year
+    income rather than forgiven x today's marginal rate, which understates
+    any discharge big enough to cross a bracket. Single filer, standard
+    deduction, federal only -- state tax varies by state and is excluded, so
+    the real bill can only be higher; callers say both. PSLF discharges are
+    not taxed and callers skip this under PSLF.
+    """
+    income_at = (float(annual_income)
+                 * (1 + income_growth) ** max(years_until_discharge, 0.0))
+    tax = (calculate_federal_tax(income_at + max(forgiven_amount, 0.0))
+           - calculate_federal_tax(income_at))
+    return {
+        "tax": tax,
+        "income_at_discharge": income_at,
+        "effective_rate": (tax / forgiven_amount) if forgiven_amount > 0 else 0.0,
+    }
+
+
+def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
+                             starting_interest: float = 0.0,
+                             prior_payments: int = 0,
+                             pslf: bool = False,
+                             extra_now: float = 0.0,
+                             prefer_label: str = None):
+    """The commit-or-ride fork, in numbers: ride the chosen income-driven
+    plan's minimum to discharge (and pay the discharge-year tax), or pivot --
+    once the private loans clear, redirect their freed payment at the federal
+    balance (plus any extra the borrower can spare today) and pay it off.
+
+    This is the analysis the tool's own table almost makes but never states:
+    every row holds one plan CONSTANT, while the decision borrowers actually
+    face is a sequence. Pure computation on precomputed rows, shared by the
+    renderer and the PDF so the two cannot disagree (the countback
+    discipline); returns None when the fork does not exist -- no income-driven
+    row, no income entered, or nothing to redirect (no private loans and no
+    extra).
+
+    The private side is deliberately EXCLUDED from both arms' totals: it is
+    paid identically either way, so only federal-side dollars differ, and
+    including it would inflate both numbers by the same amount while looking
+    like information. Income-driven rows only -- extra dollars against
+    multiple fixed-plan notes need a targeting order (avalanche), which is a
+    different feature.
+    """
+    fed_loans = sanitize_loan_rows(fed_loans)
+    if not fed_loans or (annual_income or 0) <= 0:
+        return None
+    private_row = next((r for label, r, _ in rows if label == PRIVATE_ROW_LABEL),
+                       None)
+    if private_row is None and extra_now <= 0:
+        return None
+
+    candidates = [label for label, _, _ in rows
+                  if "RAP" in label or label.startswith("IBR")]
+    if not candidates:
+        return None
+    plan_label = (prefer_label if prefer_label in candidates
+                  else next(iter(candidates)))
+    ride_row = next(r for label, r, _ in rows if label == plan_label)
+    ride = ride_row.get("federal_only", ride_row)
+
+    # Mirror compare_existing_loan_plans' term arithmetic exactly, or the
+    # strategy simulation answers a different question than the row above it.
+    idr_term = PSLF_QUALIFYING_YEARS if pslf else IDR_MAX_TERM_YEARS
+    rap_term = PSLF_QUALIFYING_YEARS if pslf else RAP_MAX_TERM_YEARS
+    prior = max(int(prior_payments or 0), 0)
+
+    total_fed = sum(loan["balance"] for loan in fed_loans)
+    fed_rate = (sum(loan["balance"] * loan["rate"] for loan in fed_loans)
+                / total_fed if total_fed else 0.0)
+
+    pivot_month = (int(round(private_row["payoff_years"] * 12))
+                   if private_row is not None else 0)
+    freed = float(private_row["monthly_payment"]) if private_row is not None else 0.0
+    extras = tuple(
+        entry for entry in ((1, float(extra_now)), (pivot_month + 1, freed))
+        if entry[1] > 0)
+
+    if "RAP" in plan_label:
+        strategy = simulate_rap_schedule(
+            total_fed, fed_rate, None, dependents, annual_income=annual_income,
+            max_term_years=rap_term, max_months=max(rap_term * 12 - prior, 0),
+            extra_payments=extras)
+    else:
+        strategy = calculate_idr_repayment(
+            total_fed, fed_rate, None, annual_income=annual_income,
+            starting_interest=starting_interest,
+            max_term_years=idr_term, max_months=max(idr_term * 12 - prior, 0),
+            extra_payments=extras)
+
+    def _arm(result: dict) -> dict:
+        paid = float(result["schedule"]["payment"].sum()
+                     if "payment" in result["schedule"].columns
+                     else result.get("monthly_payment", 0.0) * len(result["schedule"]))
+        forgiven = float(result.get("forgiven_amount", 0.0) or 0.0)
+        if forgiven > 0 and not pslf:
+            tax_info = discharge_tax_estimate(forgiven, annual_income,
+                                              result["payoff_years"])
+        else:
+            tax_info = {"tax": 0.0, "income_at_discharge": 0.0,
+                        "effective_rate": 0.0}
+        return {"paid": paid, "years": float(result["payoff_years"]),
+                "forgiven": forgiven, **tax_info,
+                "all_in": paid + tax_info["tax"]}
+
+    ride_arm, strategy_arm = _arm(ride), _arm(strategy)
+    return {
+        "plan_label": plan_label,
+        "pslf": bool(pslf),
+        "pivot_month": pivot_month,
+        "freed": freed,
+        "extra_now": float(extra_now),
+        "ride": ride_arm,
+        "strategy": strategy_arm,
+        "savings": ride_arm["all_in"] - strategy_arm["all_in"],
+    }
+
+
+def strategy_verdict_sentences(analysis: dict) -> list:
+    """The commit-or-ride verdict as plain sentences, shared by the on-screen
+    panel and the PDF so the wording cannot drift (the chart-twin rule,
+    applied to prose). Plain fmt_money throughout: the screen caller escapes
+    the whole block for markdown, the PDF uses it as-is.
+    """
+    ride, strat = analysis["ride"], analysis["strategy"]
+    plan = analysis["plan_label"]
+    if analysis["pslf"]:
+        return [
+            f"With PSLF, riding usually wins. Your {plan} payments stop at "
+            f"{PSLF_QUALIFYING_PAYMENTS} qualifying payments and the discharge "
+            "is tax-free -- extra federal payments mostly just shrink what "
+            "gets forgiven. Keep the federal minimum and point spare dollars "
+            "at the private side instead."]
+
+    ride_txt = (
+        f"Ride {plan} to the end: {fmt_money(ride['paid'])} in payments over "
+        f"{ride['years']:.0f} years on the federal side"
+        + (f", then {fmt_money(ride['forgiven'])} is discharged and taxed as "
+           f"that year's income -- roughly {fmt_money(ride['tax'])} more"
+           if ride["forgiven"] > 0 else ", clearing the balance")
+        + f". All-in: {fmt_money(ride['all_in'])}.")
+
+    parts = []
+    if analysis["extra_now"] > 0:
+        parts.append(f"put {fmt_money(analysis['extra_now'])}/mo extra at the "
+                     "federal balance starting now")
+    if analysis["freed"] > 0:
+        _target = "too" if parts else "at the federal balance"
+        parts.append(f"once the private side clears in year "
+                     f"{analysis['pivot_month'] / 12:.1f}, redirect its "
+                     f"{fmt_money(analysis['freed'])}/mo {_target}")
+    if strat["forgiven"] > 0:
+        # The extra didn't clear the balance before the term -- saying
+        # "debt-free in N years" over a path that ends in a discharge would
+        # be false in exactly the case where the pivot loses.
+        _outcome = (f". Even then the balance outlasts the term: "
+                    f"{fmt_money(strat['paid'])} paid over "
+                    f"{strat['years']:.0f} years, plus "
+                    f"{fmt_money(strat['tax'])} discharge tax on the "
+                    f"{fmt_money(strat['forgiven'])} still forgiven")
+    else:
+        _outcome = (f". Debt-free on the federal side in "
+                    f"{strat['years']:.1f} years, "
+                    f"{fmt_money(strat['paid'])} paid")
+    pivot_txt = ("Or pivot: " + ", and ".join(parts) + _outcome
+                 + f". All-in: {fmt_money(strat['all_in'])}.")
+
+    delta = analysis["savings"]
+    if delta > 0.5:
+        verdict = f"The pivot saves about {fmt_money(delta)} against riding it out."
+    elif delta < -0.5:
+        verdict = (f"Riding it out costs about {fmt_money(-delta)} less than the "
+                   "pivot -- the low payment plus the discharge beats prepaying "
+                   "here.")
+    else:
+        verdict = "The two paths land within a dollar of each other."
+    return [ride_txt, pivot_txt, verdict]
+
+
 def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        prior_payments, forgivable, pslf, chart_label,
                        enabled: bool,
                        federal_loans: list = None,
                        private_loans: list = None,
-                       age: int = 0) -> None:
+                       age: int = 0,
+                       strategy: dict = None) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
     Only on the standalone page (`enabled`). Inside the calculator this module
@@ -11949,7 +12181,7 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
             rows, balance, rate, income, deps, accrued, prior_payments,
             forgivable, pslf, chart_label=chart_label,
             federal_loans=federal_loans, private_loans=private_loans,
-            age=age),
+            age=age, strategy=strategy),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -12433,6 +12665,16 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         chosen = st.selectbox("Show the charts for", plan_labels,
                                key="existing_chart_plan")
         chosen_result = next(r for label, r, _ in rows if label == chosen)
+        # Read-before-render (the sidebar's established pattern): the extra-
+        # payment widget renders inside the strategy panel at the bottom, but
+        # the analysis has to exist HERE so the PDF button a few lines down
+        # can carry the same numbers the panel shows. On the rerun a widget
+        # edit triggers, session_state already holds the new value.
+        extra_now = float(st.session_state.get("existing_extra_monthly") or 0)
+        strategy_analysis = pivot_strategy_analysis(
+            rows, fed_loans, income, deps, starting_interest=accrued,
+            prior_payments=prior_payments, pslf=pslf and forgivable,
+            extra_now=extra_now, prefer_label=chosen)
         # "Payoff 16.8 yrs" is a number; "you'd be 43" is a decision aid --
         # the same reasoning as render_payoff_age on the calculator side,
         # including its retirement-age warning threshold. For the selected
@@ -12451,7 +12693,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            prior_payments, forgivable, pslf and forgivable,
                            chosen, enabled=always_open,
                            federal_loans=fed_loans, private_loans=priv_loans,
-                           age=age)
+                           age=age, strategy=strategy_analysis)
         st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
                          use_container_width=True, config=PLOTLY_CHART_CONFIG,
                          key="existing_balance_chart")
@@ -12499,13 +12741,53 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             )
 
         render_rap_subsidy_answer(rows)
+
+        # The commit-or-ride fork. Every row above holds one plan CONSTANT;
+        # the decision borrowers actually face is a sequence -- ride the
+        # minimum to a taxed discharge, or kill the private side and redirect
+        # its payment. This panel prices both arms of that fork for the
+        # selected income-driven plan. Hidden for Parent PLUS (no
+        # income-driven rows exist to ride).
+        if forgivable:
+            st.markdown("**🧭 Commit or ride — the fork, in numbers**")
+            st.number_input(
+                "Extra you could put toward the federal balance each month ($)",
+                min_value=0, max_value=50_000, step=25,
+                key="existing_extra_monthly",
+                help="Optional. Added to the income-driven payment starting "
+                     "now, on top of the automatic pivot of freed private "
+                     "payments. Under RAP, extra that covers the interest "
+                     "also forfeits that month's subsidy — the simulation "
+                     "prices that, not just the faster payoff.")
+            if strategy_analysis is None:
+                st.caption(
+                    "Enter your income above — and either a private loan to "
+                    "pivot from or an extra amount here — and this panel "
+                    "prices the fork: ride the plan's minimum to a taxed "
+                    "discharge, or pay the balance down."
+                )
+            else:
+                st.info("\n\n".join(
+                    strategy_verdict_sentences(strategy_analysis)
+                ).replace("$", r"\$"))
+                if not strategy_analysis["pslf"]:
+                    st.caption(
+                        "Assumes ~3% annual raises, single filer, federal tax "
+                        "only on the discharge (state tax would add to it), "
+                        "and the published 2026 rules. The private side is "
+                        "paid identically in both arms and is excluded from "
+                        "these totals. Estimates, not advice."
+                    )
+
         st.caption(
             "Simplified models of the real plans, not your servicer's figures — payments "
             "here come from this app's own formulas and your actual bill will differ. "
             "Forgiven balances are taxable as ordinary income in the year they are "
-            "discharged, and that tax is **not** included above. Extra payments are not "
-            "modelled: paying more than the minimum shortens every row, and under RAP it "
-            "also forfeits the subsidy in any month the extra covers the interest."
+            "discharged; that tax is **not** in the tables above, but the commit-or-ride "
+            "panel prices it. Extra payments are modelled only where entered — the "
+            "private grid's Actual column and the panel above — and under RAP an extra "
+            "payment forfeits the subsidy in any month it covers the interest, which "
+            "the simulation accounts for."
         )
 
 
