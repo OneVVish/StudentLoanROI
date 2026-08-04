@@ -11989,6 +11989,100 @@ def discharge_tax_estimate(forgiven_amount: float, annual_income: float,
     }
 
 
+def simulate_fixed_avalanche(loans: list, term_years: int,
+                              extra_payments: tuple = (),
+                              roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
+    """Fixed-plan repayment across several notes, with extra dollars targeted
+    avalanche-style: highest rate first, rolling down.
+
+    Each note keeps its own required payment -- its amortisation payment over
+    the plan's term at its own rate, exactly what the fixed rows in
+    compare_existing_loan_plans charge. The month's BUDGET is the sum of
+    every note's required payment (a retired note's payment does not shrink
+    the budget -- rolling it forward is the whole point, and the first thing
+    the r/StudentLoans thread's top commenter said) plus the extra_payments
+    schedule. Requireds are paid first on every living note; whatever the
+    budget has left cascades to the highest-rate note still alive, then the
+    next, so an extra big enough to clear its target mid-month is not
+    silently swallowed.
+
+    Interest accrues before payment each month, and every dollar paid comes
+    out of a balance -- so payments equal principals plus interest to the
+    cent when the last note dies, which is what the invariant guard checks.
+    `per_loan_payoff_months` (aligned to the input order) is emitted so the
+    guard can also assert the TARGETING: with distinct rates and an extra,
+    the highest-rate note must die first -- conservation alone cannot see a
+    reversed sort key, since paying the wrong note first still balances the
+    books.
+    """
+    loans = sanitize_loan_rows(loans)
+    if not loans:
+        return calculate_standard_repayment(0.0, 0.0, term_years)
+    n_months = term_years * 12
+    notes = []
+    for loan in loans:
+        monthly_rate = loan["rate"] / 100 / 12
+        required = (loan["balance"] / n_months if monthly_rate == 0
+                    else loan["balance"] * monthly_rate
+                         / (1 - (1 + monthly_rate) ** -n_months))
+        notes.append({"balance": loan["balance"], "monthly_rate": monthly_rate,
+                      "required": required, "rate": loan["rate"],
+                      "payoff_month": None})
+    target_order = sorted(range(len(notes)), key=lambda i: -notes[i]["rate"])
+    budget_base = sum(note["required"] for note in notes)
+
+    total_interest = 0.0
+    total_paid_in_window = 0.0
+    schedule_rows = []
+    for month in range(1, n_months + 1):
+        for note in notes:
+            if note["balance"] <= 0:
+                continue
+            interest = note["balance"] * note["monthly_rate"]
+            total_interest += interest
+            note["balance"] += interest
+        budget = budget_base + sum(amount for start, amount in extra_payments
+                                   if month >= start)
+        paid = 0.0
+        for note in notes:
+            if note["balance"] <= 0:
+                continue
+            payment = min(note["required"], note["balance"])
+            note["balance"] -= payment
+            paid += payment
+        for index in target_order:
+            note = notes[index]
+            remaining = budget - paid
+            if remaining <= 0:
+                break
+            if note["balance"] <= 0:
+                continue
+            payment = min(remaining, note["balance"])
+            note["balance"] -= payment
+            paid += payment
+        for note in notes:
+            if note["balance"] <= 0 and note["payoff_month"] is None:
+                note["payoff_month"] = month
+        if month <= roi_window_years * 12:
+            total_paid_in_window += paid
+        schedule_rows.append({"month": month, "year": month / 12,
+                              "balance": sum(n["balance"] for n in notes),
+                              "payment": paid})
+        if all(note["balance"] <= 0 for note in notes):
+            break
+
+    schedule_df = pd.DataFrame(schedule_rows)
+    return {
+        "monthly_payment": budget_base + sum(a for s, a in extra_payments if s <= 1),
+        "total_interest": total_interest,
+        "payoff_years": schedule_df["month"].iloc[-1] / 12,
+        "schedule": schedule_df,
+        "total_paid_in_roi_window": total_paid_in_window,
+        "forgiven_amount": 0.0,
+        "per_loan_payoff_months": [note["payoff_month"] for note in notes],
+    }
+
+
 def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
                              starting_interest: float = 0.0,
                              prior_payments: int = 0,
@@ -12011,9 +12105,11 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
     The private side is deliberately EXCLUDED from both arms' totals: it is
     paid identically either way, so only federal-side dollars differ, and
     including it would inflate both numbers by the same amount while looking
-    like information. Income-driven rows only -- extra dollars against
-    multiple fixed-plan notes need a targeting order (avalanche), which is a
-    different feature.
+    like information. On an income-driven plan the extra joins the pooled
+    payment; on a fixed plan it goes through simulate_fixed_avalanche --
+    highest-rate note first, rolling down -- because extra dollars against
+    several fixed notes need a targeting order and highest-rate-first is the
+    one that minimises interest.
     """
     fed_loans = sanitize_loan_rows(fed_loans)
     if not fed_loans or (annual_income or 0) <= 0:
@@ -12023,12 +12119,21 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
     if private_row is None and extra_now <= 0:
         return None
 
-    candidates = [label for label, _, _ in rows
-                  if "RAP" in label or label.startswith("IBR")]
-    if not candidates:
+    income_driven = [label for label, _, _ in rows
+                     if "RAP" in label or label.startswith("IBR")]
+    fixed = [label for label, _, _ in rows
+             if label.startswith(("Standard", "Extended", "2026 Tiered"))]
+    if prefer_label in income_driven or prefer_label in fixed:
+        plan_label = prefer_label
+    elif income_driven:
+        plan_label = income_driven[0]
+    elif fixed:
+        # Parent PLUS: no income-driven rows exist, but the avalanche fork is
+        # exactly as real for a fixed-only borrower.
+        plan_label = fixed[0]
+    else:
         return None
-    plan_label = (prefer_label if prefer_label in candidates
-                  else next(iter(candidates)))
+    is_fixed = plan_label in fixed
     ride_row = next(r for label, r, _ in rows if label == plan_label)
     ride = ride_row.get("federal_only", ride_row)
 
@@ -12049,7 +12154,18 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
         entry for entry in ((1, float(extra_now)), (pivot_month + 1, freed))
         if entry[1] > 0)
 
-    if "RAP" in plan_label:
+    if is_fixed:
+        # The plan's term, exactly as the row derived it. Tiered's term keys
+        # on the TOTAL balance, same as compare_existing_loan_plans.
+        if plan_label.startswith("Extended"):
+            _term = EXTENDED_STANDARD_TERM_YEARS
+        elif plan_label.startswith("2026 Tiered"):
+            _term = calculate_tiered_standard_term(total_fed)
+        else:
+            _term = STANDARD_TERM_YEARS
+        strategy = simulate_fixed_avalanche(fed_loans, _term,
+                                            extra_payments=extras)
+    elif "RAP" in plan_label:
         strategy = simulate_rap_schedule(
             total_fed, fed_rate, None, dependents, annual_income=annual_income,
             max_term_years=rap_term, max_months=max(rap_term * 12 - prior, 0),
@@ -12073,12 +12189,15 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
             tax_info = {"tax": 0.0, "income_at_discharge": 0.0,
                         "effective_rate": 0.0}
         return {"paid": paid, "years": float(result["payoff_years"]),
-                "forgiven": forgiven, **tax_info,
+                "forgiven": forgiven,
+                "interest": float(result.get("total_interest", 0.0) or 0.0),
+                **tax_info,
                 "all_in": paid + tax_info["tax"]}
 
     ride_arm, strategy_arm = _arm(ride), _arm(strategy)
     return {
         "plan_label": plan_label,
+        "fixed": is_fixed,
         "pslf": bool(pslf),
         "pivot_month": pivot_month,
         "freed": freed,
@@ -12097,7 +12216,11 @@ def strategy_verdict_sentences(analysis: dict) -> list:
     """
     ride, strat = analysis["ride"], analysis["strategy"]
     plan = analysis["plan_label"]
-    if analysis["pslf"]:
+    # Under PSLF the income-driven ride is tax-free forgiveness at 120
+    # payments and prepaying mostly shrinks the write-off -- but a FIXED plan
+    # forgives nothing under PSLF either way (Standard retires in exactly 120
+    # payments), so the fixed fork is priced normally.
+    if analysis["pslf"] and not analysis.get("fixed"):
         return [
             f"With PSLF, riding usually wins. Your {plan} payments stop at "
             f"{PSLF_QUALIFYING_PAYMENTS} qualifying payments and the discharge "
@@ -12105,13 +12228,19 @@ def strategy_verdict_sentences(analysis: dict) -> list:
             "gets forgiven. Keep the federal minimum and point spare dollars "
             "at the private side instead."]
 
-    ride_txt = (
-        f"Ride {plan} to the end: {fmt_money(ride['paid'])} in payments over "
-        f"{ride['years']:.0f} years on the federal side"
-        + (f", then {fmt_money(ride['forgiven'])} is discharged and taxed as "
-           f"that year's income -- roughly {fmt_money(ride['tax'])} more"
-           if ride["forgiven"] > 0 else ", clearing the balance")
-        + f". All-in: {fmt_money(ride['all_in'])}.")
+    if analysis.get("fixed"):
+        ride_txt = (
+            f"Stay on {plan}'s required payments: {fmt_money(ride['paid'])} "
+            f"over {ride['years']:.0f} years on the federal side, "
+            f"{fmt_money(ride['interest'])} of it interest.")
+    else:
+        ride_txt = (
+            f"Ride {plan} to the end: {fmt_money(ride['paid'])} in payments over "
+            f"{ride['years']:.0f} years on the federal side"
+            + (f", then {fmt_money(ride['forgiven'])} is discharged and taxed as "
+               f"that year's income -- roughly {fmt_money(ride['tax'])} more"
+               if ride["forgiven"] > 0 else ", clearing the balance")
+            + f". All-in: {fmt_money(ride['all_in'])}.")
 
     parts = []
     if analysis["extra_now"] > 0:
@@ -12136,11 +12265,20 @@ def strategy_verdict_sentences(analysis: dict) -> list:
                     f"{strat['years']:.1f} years, "
                     f"{fmt_money(strat['paid'])} paid")
     pivot_txt = ("Or pivot: " + ", and ".join(parts) + _outcome
+                 + (" -- the extra targets the highest-rate note first and "
+                    "rolls down as each clears"
+                    if analysis.get("fixed") else "")
                  + f". All-in: {fmt_money(strat['all_in'])}.")
 
     delta = analysis["savings"]
     if delta > 0.5:
-        verdict = f"The pivot saves about {fmt_money(delta)} against riding it out."
+        if analysis.get("fixed"):
+            verdict = (f"Targeting the highest rate first saves about "
+                       f"{fmt_money(delta)} in interest and "
+                       f"{ride['years'] - strat['years']:.1f} years against "
+                       "the required schedule.")
+        else:
+            verdict = f"The pivot saves about {fmt_money(delta)} against riding it out."
     elif delta < -0.5:
         verdict = (f"Riding it out costs about {fmt_money(-delta)} less than the "
                    "pivot -- the low payment plus the discharge beats prepaying "
@@ -12744,40 +12882,56 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
 
         # The commit-or-ride fork. Every row above holds one plan CONSTANT;
         # the decision borrowers actually face is a sequence -- ride the
-        # minimum to a taxed discharge, or kill the private side and redirect
-        # its payment. This panel prices both arms of that fork for the
-        # selected income-driven plan. Hidden for Parent PLUS (no
-        # income-driven rows exist to ride).
-        if forgivable:
-            st.markdown("**🧭 Commit or ride — the fork, in numbers**")
-            st.number_input(
-                "Extra you could put toward the federal balance each month ($)",
-                min_value=0, max_value=50_000, step=25,
-                key="existing_extra_monthly",
-                help="Optional. Added to the income-driven payment starting "
-                     "now, on top of the automatic pivot of freed private "
-                     "payments. Under RAP, extra that covers the interest "
-                     "also forfeits that month's subsidy — the simulation "
-                     "prices that, not just the faster payoff.")
-            if strategy_analysis is None:
+        # minimum (to a taxed discharge, or just to the fixed term), or kill
+        # the private side and redirect its payment. Prices both arms for the
+        # selected plan: income-driven extras join the pooled payment; fixed-
+        # plan extras go avalanche-style, highest-rate note first. Renders
+        # for Parent PLUS too -- no income-driven rows exist there, but the
+        # avalanche fork on the fixed rows is exactly as real.
+        st.markdown("**🧭 Commit or ride — the fork, in numbers**")
+        st.number_input(
+            "Extra you could put toward the federal balance each month ($)",
+            min_value=0, max_value=50_000, step=25,
+            key="existing_extra_monthly",
+            help="Optional, added on top of the automatic pivot of freed "
+                 "private payments. On an income-driven plan it joins the "
+                 "payment (under RAP, extra that covers the interest also "
+                 "forfeits that month's subsidy — the simulation prices "
+                 "that). On a fixed plan it targets the highest-rate note "
+                 "first and rolls down as each clears.")
+        if strategy_analysis is None:
+            st.caption(
+                "Enter your income above — and either a private loan to "
+                "pivot from or an extra amount here — and this panel "
+                "prices the fork: stay on the plan's minimum, or pay the "
+                "balance down."
+            )
+        else:
+            st.info("\n\n".join(
+                strategy_verdict_sentences(strategy_analysis)
+            ).replace("$", r"\$"))
+            # Avalanche logic stops at the federal boundary by design (the
+            # private side is excluded from both arms) -- but rate ordering
+            # doesn't care about that boundary, so when a private rate tops
+            # every federal one, say so rather than let the panel imply the
+            # federal target is optimal.
+            if (priv_loans and fed_loans
+                    and max(l["rate"] for l in priv_loans)
+                        > max(l["rate"] for l in fed_loans)):
                 st.caption(
-                    "Enter your income above — and either a private loan to "
-                    "pivot from or an extra amount here — and this panel "
-                    "prices the fork: ride the plan's minimum to a taxed "
-                    "discharge, or pay the balance down."
+                    "Your highest interest rate is on a **private** loan, so "
+                    "extra dollars there first beat any federal targeting — "
+                    "model that by raising that loan's **Actual $/mo** in "
+                    "the grid above."
                 )
-            else:
-                st.info("\n\n".join(
-                    strategy_verdict_sentences(strategy_analysis)
-                ).replace("$", r"\$"))
-                if not strategy_analysis["pslf"]:
-                    st.caption(
-                        "Assumes ~3% annual raises, single filer, federal tax "
-                        "only on the discharge (state tax would add to it), "
-                        "and the published 2026 rules. The private side is "
-                        "paid identically in both arms and is excluded from "
-                        "these totals. Estimates, not advice."
-                    )
+            if not strategy_analysis["pslf"] or strategy_analysis.get("fixed"):
+                st.caption(
+                    "Assumes ~3% annual raises, single filer, federal tax "
+                    "only on the discharge (state tax would add to it), "
+                    "and the published 2026 rules. The private side is "
+                    "paid identically in both arms and is excluded from "
+                    "these totals. Estimates, not advice."
+                )
 
         st.caption(
             "Simplified models of the real plans, not your servicer's figures — payments "
