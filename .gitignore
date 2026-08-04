@@ -19,6 +19,10 @@ research_paper_draft.md
 # Slide deck for counselor/teacher outreach -- kept local, not part of the app codebase
 presentation/
 
+# Marketing/outreach working files (src taxonomy, email templates, launch copy,
+# send logs) -- kept local for the same reason as presentation/
+marketing/
+
 # Everything feeding the research paper stays local, same as the draft above:
 # scope/limitations notes, paper structure outlines, and any future drafts.
 # Ignored rather than merely untracked -- this repo's commits are routinely
