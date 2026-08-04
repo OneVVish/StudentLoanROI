@@ -174,6 +174,36 @@ def main() -> int:
         checked += 1
         problems += check(label, principal, result, rate)
 
+    # The old-IBR variant: same simulator, two constants swapped -- so the
+    # books must balance at 15%/25y, and the month-one payment must be
+    # EXACTLY 1.5x the 10% variant's at the same income. The ratio check is
+    # the one that matters: a toggle that changes the label but not the rate
+    # balances its own books perfectly.
+    old_ibr_result = ns["calculate_idr_repayment"](
+        290_000.0, 6.5, "HighEarner",
+        payment_rate=0.15, max_term_years=25)
+    checked += 1
+    problems += check("old IBR (15%/25y), high earner", 290_000.0,
+                      old_ibr_result, 6.5)
+    # The ratio check goes through compare_existing_loan_plans, NOT the
+    # simulator directly: the first break tried was a row that passed
+    # payment_rate=IDR_PAYMENT_RATE under an "old IBR" label -- the simulator
+    # was fine, the WIRING was broken, and a simulator-level check sailed
+    # straight past it.
+    def _ibr_first(old: bool) -> float:
+        rows_ = ns["compare_existing_loan_plans"](290_000.0, 6.5, 175_000.0,
+                                                  old_ibr=old)
+        r = next(r for label, r, _ in rows_ if label.startswith("IBR"))
+        return float(r["schedule"]["payment"].iloc[0])
+    old_first, new_first = _ibr_first(True), _ibr_first(False)
+    checked += 1
+    if abs(old_first - 1.5 * new_first) > 0.01:
+        problems.append(
+            f"  old-IBR rate not applied to the ROW: month-1 payment "
+            f"${old_first:,.2f} is not 1.5x the 10%% variant's "
+            f"${new_first:,.2f}. The label may say old IBR while the rate "
+            f"stayed 10%%.")
+
     # Conservation cannot see a MIS-SIZED extra: applying double the extra
     # still balances its own books, since a larger payment is a larger
     # payment. So check the behaviour directly -- month one's payment must be

@@ -1080,6 +1080,16 @@ SUB_BACHELORS_EDUCATION_LEVELS = {
 IDR_LIVING_ADJUSTMENT = 22000
 IDR_PAYMENT_RATE = 0.10
 IDR_MAX_TERM_YEARS = 20
+# Old IBR, for borrowers whose first federal loan predates July 1, 2014: the
+# same shape at 15% of discretionary income with forgiveness at 25 years.
+# The repayment tool's `existing_old_ibr` toggle swaps the IBR row onto these
+# two numbers -- everything else (the flat living allowance, the simulator)
+# is shared. That flat allowance is the one simplification worth restating
+# wherever this variant is shown: real IBR subtracts 150% of the poverty
+# line FOR THE FAMILY SIZE, so a bigger household pays less than the flat
+# figure suggests, on either variant.
+OLD_IBR_PAYMENT_RATE = 0.15
+OLD_IBR_MAX_TERM_YEARS = 25
 
 STANDARD_TERM_YEARS = 10
 # The Extended Standard plan: a fixed payment stretched to 25 years, for
@@ -8805,7 +8815,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   age: int = 0,
                                   federal_loans: list = None,
                                   private_loans: list = None,
-                                  strategy: dict = None) -> bytes:
+                                  strategy: dict = None,
+                                  old_ibr: bool = False) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -8869,6 +8880,10 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         inputs.append(["Your age", str(int(age))])
     inputs.append(["Loan type", "Own federal Direct loans" if forgivable
                                 else "Parent PLUS or private -- not IDR-eligible"])
+    if old_ibr and forgivable:
+        inputs.append(["IBR variant", "Old IBR (first loan before July 2014): "
+                                      "15% of discretionary income, 25-year "
+                                      "forgiveness"])
     if pslf:
         inputs.append(["PSLF employment", f"Yes -- forgiveness at "
                                           f"{PSLF_QUALIFYING_PAYMENTS} payments"])
@@ -11599,6 +11614,7 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_has_private", "rhp", int),
     ("existing_age", "rage", int),
     ("existing_extra_monthly", "rx", int),
+    ("existing_old_ibr", "rob", int),
 )
 
 # The two loan GRIDS. One session key (a list of row dicts backing a
@@ -11710,7 +11726,8 @@ def seed_repayment_from_share() -> None:
 
     # The checkboxes are stored as 0/1 and must reach the widget as bools, or
     # Streamlit renders an int into a checkbox and the value is lost.
-    for key in ("existing_forgivable", "existing_pslf", "existing_has_private"):
+    for key in ("existing_forgivable", "existing_pslf", "existing_has_private",
+                "existing_old_ibr"):
         if key in st.session_state:
             st.session_state[key] = bool(st.session_state[key])
 
@@ -11757,7 +11774,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                                  private_term_years: int = PRIVATE_TERM_YEARS,
                                  private_actual_payment: float = 0.0,
                                  federal_loans: list = None,
-                                 private_loans: list = None) -> list:
+                                 private_loans: list = None,
+                                 old_ibr: bool = False) -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -11795,10 +11813,16 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     total_fed = sum(loan["balance"] for loan in fed_loans)
     fed_rate = (sum(loan["balance"] * loan["rate"] for loan in fed_loans) / total_fed
                 if total_fed else 0.0)
+    # `old_ibr` is a fact about the borrower, not a plan choice: a first
+    # federal loan before July 1, 2014 puts them on old IBR -- 15% of
+    # discretionary income, forgiveness at 25 years -- instead of the 2014+
+    # 10%/20-year variant. Same simulator, two constants swapped.
+    ibr_rate = OLD_IBR_PAYMENT_RATE if old_ibr else IDR_PAYMENT_RATE
+    ibr_years = OLD_IBR_MAX_TERM_YEARS if old_ibr else IDR_MAX_TERM_YEARS
     # Under PSLF the income-driven plans stop at 120 payments instead of running
-    # their full 20- or 30-year term. That is the entire mechanism: same payment,
-    # same accrual, the balance is simply written off ten years in.
-    idr_term = PSLF_QUALIFYING_YEARS if pslf else IDR_MAX_TERM_YEARS
+    # their full 20-, 25- or 30-year term. That is the entire mechanism: same
+    # payment, same accrual, the balance is simply written off ten years in.
+    idr_term = PSLF_QUALIFYING_YEARS if pslf else ibr_years
     rap_term = PSLF_QUALIFYING_YEARS if pslf else RAP_MAX_TERM_YEARS
 
     # Qualifying payments already made shorten what is LEFT, on the
@@ -11938,12 +11962,16 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                      "Unpaid interest waived. Remainder forgiven at 30 years."))
         idr = calculate_idr_repayment(total_fed, fed_rate, None, annual_income=annual_income,
                                        starting_interest=starting_interest,
+                                       payment_rate=ibr_rate,
                                        max_term_years=idr_term,
                                        max_months=idr_months)
-        rows.append(("IBR-style income-driven", with_private(idr),
+        _ibr_label = ("IBR-style income-driven (old IBR)" if old_ibr
+                      else "IBR-style income-driven")
+        rows.append((_ibr_label, with_private(idr),
                      f"Qualifies. Remainder forgiven at {PSLF_QUALIFYING_PAYMENTS} "
                      "payments." if pslf else
-                     "10% of income above a $22,000 allowance. Forgiven at 20 years. "
+                     f"{ibr_rate:.0%} of income above a $22,000 allowance. "
+                     f"Forgiven at {ibr_years} years. "
                      "Closed to loans originated on or after July 1, 2026."))
     # The private tranche is identical under every plan, so it is returned
     # once rather than as a row per plan -- which is also the clearest
@@ -12088,7 +12116,8 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
                              prior_payments: int = 0,
                              pslf: bool = False,
                              extra_now: float = 0.0,
-                             prefer_label: str = None):
+                             prefer_label: str = None,
+                             old_ibr: bool = False):
     """The commit-or-ride fork, in numbers: ride the chosen income-driven
     plan's minimum to discharge (and pay the discharge-year tax), or pivot --
     once the private loans clear, redirect their freed payment at the federal
@@ -12138,8 +12167,11 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
     ride = ride_row.get("federal_only", ride_row)
 
     # Mirror compare_existing_loan_plans' term arithmetic exactly, or the
-    # strategy simulation answers a different question than the row above it.
-    idr_term = PSLF_QUALIFYING_YEARS if pslf else IDR_MAX_TERM_YEARS
+    # strategy simulation answers a different question than the row above it
+    # -- including the old-IBR variant's 15%/25-year constants.
+    ibr_rate = OLD_IBR_PAYMENT_RATE if old_ibr else IDR_PAYMENT_RATE
+    ibr_years = OLD_IBR_MAX_TERM_YEARS if old_ibr else IDR_MAX_TERM_YEARS
+    idr_term = PSLF_QUALIFYING_YEARS if pslf else ibr_years
     rap_term = PSLF_QUALIFYING_YEARS if pslf else RAP_MAX_TERM_YEARS
     prior = max(int(prior_payments or 0), 0)
 
@@ -12174,6 +12206,7 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
         strategy = calculate_idr_repayment(
             total_fed, fed_rate, None, annual_income=annual_income,
             starting_interest=starting_interest,
+            payment_rate=ibr_rate,
             max_term_years=idr_term, max_months=max(idr_term * 12 - prior, 0),
             extra_payments=extras)
 
@@ -12294,7 +12327,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        federal_loans: list = None,
                        private_loans: list = None,
                        age: int = 0,
-                       strategy: dict = None) -> None:
+                       strategy: dict = None,
+                       old_ibr: bool = False) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
     Only on the standalone page (`enabled`). Inside the calculator this module
@@ -12319,7 +12353,7 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
             rows, balance, rate, income, deps, accrued, prior_payments,
             forgivable, pslf, chart_label=chart_label,
             federal_loans=federal_loans, private_loans=private_loans,
-            age=age, strategy=strategy),
+            age=age, strategy=strategy, old_ibr=old_ibr),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -12497,6 +12531,20 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             "plans ignore both, and so does any private balance below."
         )
 
+        # A fact about the borrower's history, not a plan choice: the first
+        # loan's date decides WHICH IBR they have. Same simulator either way,
+        # 15%/25y instead of 10%/20y.
+        old_ibr = st.checkbox(
+            "My first federal loan was before July 2014 (old IBR)",
+            key="existing_old_ibr", disabled=not forgivable,
+            help="Borrowers whose first federal loan predates July 1, 2014 "
+                 "have the original IBR: 15% of discretionary income with "
+                 "forgiveness at 25 years, instead of the 10%/20-year version. "
+                 "Ticking this puts the IBR row on those terms. Both versions "
+                 "use this app's flat $22,000 allowance; the real formula "
+                 "subtracts 150% of the poverty line for your family size, so "
+                 "a bigger household pays less than shown.")
+
         pslf = st.checkbox(
             "I work full-time for a government or 501(c)(3) employer (PSLF)",
             key="existing_pslf", disabled=not forgivable,
@@ -12635,7 +12683,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             pslf=pslf and forgivable,
                                             prior_payments=prior_payments,
                                             federal_loans=fed_loans,
-                                            private_loans=priv_loans)
+                                            private_loans=priv_loans,
+                                            old_ibr=old_ibr and forgivable)
         plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
         private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
 
@@ -12800,6 +12849,13 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # how an input that fed only that split came to look like it did
         # nothing.
         plan_labels = [label for label, _, _ in rows]
+        # The row set is not static: toggling old IBR renames the IBR row,
+        # and unticking "my own Direct loans" removes the income-driven rows
+        # entirely. A keyed selectbox keeps its stored value across both, and
+        # Streamlit raises on a value that is no longer among the options --
+        # the reconcile_cc_mode lesson, applied here.
+        if st.session_state.get("existing_chart_plan") not in plan_labels:
+            st.session_state.pop("existing_chart_plan", None)
         chosen = st.selectbox("Show the charts for", plan_labels,
                                key="existing_chart_plan")
         chosen_result = next(r for label, r, _ in rows if label == chosen)
@@ -12812,7 +12868,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         strategy_analysis = pivot_strategy_analysis(
             rows, fed_loans, income, deps, starting_interest=accrued,
             prior_payments=prior_payments, pslf=pslf and forgivable,
-            extra_now=extra_now, prefer_label=chosen)
+            extra_now=extra_now, prefer_label=chosen,
+            old_ibr=old_ibr and forgivable)
         # "Payoff 16.8 yrs" is a number; "you'd be 43" is a decision aid --
         # the same reasoning as render_payoff_age on the calculator side,
         # including its retirement-age warning threshold. For the selected
@@ -12831,7 +12888,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            prior_payments, forgivable, pslf and forgivable,
                            chosen, enabled=always_open,
                            federal_loans=fed_loans, private_loans=priv_loans,
-                           age=age, strategy=strategy_analysis)
+                           age=age, strategy=strategy_analysis,
+                           old_ibr=old_ibr and forgivable)
         st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
                          use_container_width=True, config=PLOTLY_CHART_CONFIG,
                          key="existing_balance_chart")
