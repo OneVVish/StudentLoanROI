@@ -1,0 +1,23 @@
+# Never bake local secrets into the image -- start.sh writes them from the
+# environment at boot.
+.streamlit/
+
+# Local-only research/outreach material (gitignored too; belt and suspenders)
+presentation/
+marketing/
+analysis_output/
+research_paper_draft.md
+*_draft.md
+*_PLAN.md
+SCOPE.md
+
+# Raw government workbooks (hundreds of MB; the app reads the cleaned CSVs)
+*.xlsx
+Most-Recent-Cohorts-Institution.csv
+pppub*.csv
+
+# VCS + caches
+.git/
+__pycache__/
+*.pyc
+.venv/
