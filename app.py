@@ -9493,6 +9493,29 @@ for _presurvey_flag in ("presurvey_answered", "presurvey_skipped", "presurvey_sh
 
 st.sidebar.header("🎓 Your Profile")
 
+# The four slots below fix the sidebar's VISUAL order without touching its
+# EXECUTION order. Everything still executes exactly as before -- Financing
+# computes before Career (resolve_program_years, the school->metro city
+# inference, the prestige premium all depend on that), and ~20 widget keys
+# are re-pinned immediately before their widget renders -- but each widget
+# now writes into the slot where a student expects to find it: who you are,
+# what you'll study, where, and only then what it costs. st.container() is
+# position-anchored, so the sidebar renders slots in creation order no
+# matter when they are filled.
+#
+# DO NOT "simplify" this to `with slot:` blocks: st.sidebar.foo() does not
+# route through an active container context -- only calls made on the slot
+# variable itself land inside it. That asymmetry is why every sidebar call
+# below names its slot explicitly.
+_sb_who = st.sidebar.container()
+_sb_who.subheader("👤 About you")
+_sb_study = st.sidebar.container()
+_sb_study.subheader("📚 What you'll study")
+_sb_where = st.sidebar.container()
+_sb_where.subheader("🏫 School & city")
+_sb_pay = st.sidebar.container()
+_sb_pay.subheader("💵 Paying for it")
+
 # Resolved HERE, at the top of section 4, because the Financing block below
 # reads is_returning when it computes working_years -- well before this
 # section's own widget renders. Same read-before-the-widget pattern
@@ -9740,7 +9763,6 @@ program_years_b = resolve_program_years(
 graduate_years_b = graduate_years_for_education(resolve_typical_education(
     "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b"))
 
-st.sidebar.subheader("💰 Financing")
 
 if enable_prestige_mode:
     # College Prestige & Cost Estimator: replaces the school lookup with a
@@ -9752,7 +9774,7 @@ if enable_prestige_mode:
     default_tier_a_index = (
         prestige_tier_options.index(shared_tier_a) if shared_tier_a in prestige_tier_options else 0
     )
-    prestige_tier_a = st.sidebar.selectbox(
+    prestige_tier_a = _sb_where.selectbox(
         "College Tier Selection", prestige_tier_options, index=default_tier_a_index, key="prestige_tier_a", on_change=lambda: mark_interaction("prestige_tier_a"),
         help="A modeled college-tier cost + salary-premium estimate, in "
              "place of entering a specific school -- see Methodology for "
@@ -9763,7 +9785,7 @@ if enable_prestige_mode:
     in_state_a = True
     coa_per_year_a = COLLEGE_PRESTIGE_TIERS[prestige_tier_a]["coa_per_year"]
     coa_match_a = None
-    st.sidebar.caption(
+    _sb_where.caption(
         f"Annual Cost of Attendance for this tier: {fmt_money(coa_per_year_a)}".replace("$", r"\$")
     )
 else:
@@ -9780,7 +9802,7 @@ else:
     _apply_pending_school()
     st.session_state.setdefault("school_search_a",
                                  get_shared_default("school", "UC Berkeley"))
-    school_search_a = st.sidebar.text_input(
+    school_search_a = _sb_where.text_input(
         "Target Undergraduate School", placeholder="e.g. University of Michigan",
         key="school_search_a",
         on_change=lambda: (mark_interaction("school_a"),
@@ -9795,7 +9817,7 @@ else:
         # carries "(City, ST)" only for names that are actually shared, which
         # is what makes two "Southwestern College" entries distinguishable
         # instead of identical.
-        st.sidebar.selectbox(
+        _sb_where.selectbox(
             f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
             matching_schools_a, key="school_pick_a",
             format_func=lambda u: school_option_label(u, load_coa_dataset()),
@@ -9810,7 +9832,7 @@ else:
     # a Session State write is the conflict Streamlit warns about on every such
     # apply -- same conversion school_search_a needed for the same reason.
     st.session_state.setdefault("in_state_a", get_shared_default("in_state", "1") == "1")
-    in_state_a = st.sidebar.checkbox(
+    in_state_a = _sb_where.checkbox(
         "In-State Student?", key="in_state_a",
         on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
@@ -9822,7 +9844,7 @@ else:
                     if school_name_a else None)
     coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
     if coa_caption_a:
-        st.sidebar.caption(coa_caption_a)
+        _sb_where.caption(coa_caption_a)
 
     shared_coa_a = get_shared_default("coa", None)
     default_coa_per_year_a = None
@@ -9874,7 +9896,7 @@ predominant_degree_a = _debt_lookup_a.get("predominant_degree")
 simplified_available = median_debt_a is not None
 st.session_state.setdefault("loan_mode", get_shared_default("loan_mode", "Simplified"))
 if simplified_available:
-    loan_mode = st.sidebar.radio(
+    loan_mode = _sb_pay.radio(
         "Loan estimate (both scenarios)",
         options=["Simplified", "Detailed"],
         format_func=lambda m: {
@@ -9895,7 +9917,7 @@ else:
     # number, so it's disabled and Detailed is used. The stored "loan_mode"
     # preference is left untouched (this uses a separate display key) so it
     # returns if a reported figure does.
-    st.sidebar.radio(
+    _sb_pay.radio(
         "Loan estimate (both scenarios)", options=["Detailed"],
         format_func=lambda m: "Detailed — estimate from my cost & aid",
         key="loan_mode_unavailable_display", disabled=True,
@@ -9903,7 +9925,7 @@ else:
              "We don't have one for this selection, so the loan is estimated from "
              "your cost & aid below.",
     )
-    st.sidebar.caption("Simplified is unavailable for this school — using Detailed.")
+    _sb_pay.caption("Simplified is unavailable for this school — using Detailed.")
     effective_loan_mode = "Detailed"
 
 # Dependent vs independent sets the federal Direct borrowing cap, which decides
@@ -9912,7 +9934,7 @@ else:
 # Only rendered in Detailed (Simplified uses reported federal-only debt, no cap).
 st.session_state.setdefault("loan_dependency", get_shared_default("dependency", "dependent"))
 if effective_loan_mode == "Detailed":
-    loan_dependency = st.sidebar.radio(
+    loan_dependency = _sb_pay.radio(
         "Dependency status (both scenarios)",
         options=["dependent", "independent"],
         format_func=lambda d: {"dependent": "Dependent (parents' info on FAFSA)",
@@ -9950,7 +9972,7 @@ for _k in ("coa_per_year_a", "start_year_a",
         st.session_state[_k] = st.session_state[_k]
 if loan_source_a == "personal":
     if not enable_prestige_mode:
-        coa_per_year_a = st.sidebar.number_input(
+        coa_per_year_a = _sb_pay.number_input(
             "Cost of Attendance (per year, $)", min_value=0, max_value=100000, step=500,
             key="coa_per_year_a", on_change=lambda: mark_interaction("coa_per_year_a"),
             help="The full sticker price for your first year (Year 1) at this "
@@ -9959,7 +9981,7 @@ if loan_source_a == "personal":
                  "Years 2-4 are projected from this using the estimated COA "
                  "inflation rate. Auto-fills if we found your school above.",
         )
-    start_year_a = st.sidebar.selectbox(
+    start_year_a = _sb_pay.selectbox(
         "Year Starting Undergraduate School", _start_year_opts_a,
         key="start_year_a", on_change=lambda: mark_interaction("start_year_a"),
         help="If you won't start college right away, Cost of Attendance "
@@ -9967,7 +9989,7 @@ if loan_source_a == "personal":
              "inflation rate, before growing further across all 4 years "
              "of enrollment. Leave at the current year for no adjustment.",
     )
-    personal_contribution_per_year_a = st.sidebar.number_input(
+    personal_contribution_per_year_a = _sb_pay.number_input(
         "Personal Contribution (per year, $)", min_value=0, max_value=100000, step=500,
         key="personal_contribution_per_year_a", on_change=lambda: mark_interaction("personal_contribution_per_year_a"),
         help="Also called the Student Aid Index (SAI) -- the amount your family "
@@ -9976,7 +9998,7 @@ if loan_source_a == "personal":
              "Cost of Attendance to get the loan; it counts in the ROI% "
              "denominator without accruing interest.",
     )
-    grants_per_year_a = st.sidebar.number_input(
+    grants_per_year_a = _sb_pay.number_input(
         "Grants & Scholarships (per year, $)", min_value=0, max_value=100000, step=500,
         key="grants_per_year_a", on_change=lambda: mark_interaction("grants_per_year_a"),
         help="Grant or scholarship aid that reduces what you need to borrow. "
@@ -10010,7 +10032,7 @@ if program_years_a == 0 or graduate_years_a > 0:
 else:
     _cc_options_a, _cc_labels_a = cc_path_options(program_years_a)
     reconcile_cc_mode("cc_mode_a", _cc_options_a)
-    cc_mode_a = st.sidebar.radio(
+    cc_mode_a = _sb_pay.radio(
         "Community college path",
         options=_cc_options_a,
         format_func=lambda c: _cc_labels_a[c],
@@ -10059,7 +10081,7 @@ if cc_transfer_a:
     _default_state_a = (_shared_state_a if _shared_state_a in US_STATES or _shared_state_a == "__national__"
                         else (_school_state_a or _city_state_a or "__national__"))
     st.session_state.setdefault("cc_state_a", _default_state_a)
-    cc_state_key_a = st.sidebar.selectbox(
+    cc_state_key_a = _sb_pay.selectbox(
         "Community College State",
         ["__national__"] + sorted(US_STATES, key=lambda k: US_STATES[k]),
         format_func=lambda k: "National average" if k == "__national__" else US_STATES[k],
@@ -10078,7 +10100,7 @@ if cc_transfer_a:
     if st.session_state["cc_state_cost_seen_a"] != _state_cost_a:
         st.session_state["cc_state_cost_seen_a"] = _state_cost_a
         st.session_state["cc_coa_per_year_a"] = int(_state_cost_a)
-    cc_coa_per_year_a = st.sidebar.number_input(
+    cc_coa_per_year_a = _sb_pay.number_input(
         "Community College Cost (per year, $)", min_value=0, max_value=100000, step=250,
         key="cc_coa_per_year_a", on_change=lambda: mark_interaction("cc_coa_per_year_a"),
         help="Average annual in-district tuition & fees for the selected "
@@ -10217,7 +10239,7 @@ elif cc_transfer_a:
 else:
     _loan_note_a = ""
 if _loan_note_a:
-    st.sidebar.caption(_loan_note_a.replace("$", r"\$"))
+    _sb_pay.caption(_loan_note_a.replace("$", r"\$"))
 # The loan field default follows the active loan source (set by the Loan estimate
 # toggle above): the college-reported median debt in Simplified, the cost-based
 # personal calculation in Detailed.
@@ -10267,7 +10289,7 @@ if st.session_state.get("default_loan_a_seen") != default_loan_a:
     st.session_state["default_loan_a_seen"] = default_loan_a
     st.session_state["loan_amount_a"] = default_loan_a
 st.session_state.setdefault("loan_amount_a", default_loan_a)
-loan_amount = st.sidebar.number_input(
+loan_amount = _sb_pay.number_input(
     "Total Loan Amount ($)", min_value=0, max_value=1000000, step=500,
     key="loan_amount_a", on_change=lambda: mark_interaction("loan_amount_a"),
     help="In Simplified mode this is the median debt graduates who borrowed leave "
@@ -10277,26 +10299,26 @@ loan_amount = st.sidebar.number_input(
          "that's used everywhere below.",
 )
 if loan_basis_a == "no_program":
-    st.sidebar.caption(
+    _sb_pay.caption(
         "No loan: BLS says this job needs no degree, so there's no tuition to finance. "
         "Type an amount above if you're borrowing for training anyway."
     )
 elif loan_basis_a == "reported_scaled":
     # Never attach "the median debt graduates leave with" to a scaled number --
     # that sentence describes the raw figure, and the raw figure is shown.
-    st.sidebar.caption((
+    _sb_pay.caption((
         f"Estimated: College Scorecard reports {fmt_money(reported_debt_a)} for "
         f"{school_name_a} — institution-wide, across completers of every credential "
         f"length. Scaled to {fmt_money(default_loan_a)} for this {program_years_a}-year "
         "program. An estimate, not a reported figure."
     ).replace("$", r"\$"))
 elif loan_source_a == "college":
-    st.sidebar.caption((
+    _sb_pay.caption((
         f"Simplified: median debt for graduates of {school_name_a} who borrowed "
         f"({fmt_money(default_loan_a)}, College Scorecard). Switch to Detailed to "
         "estimate from your own cost & aid instead."
     ).replace("$", r"\$"))
-interest_rate = st.sidebar.number_input(
+interest_rate = _sb_pay.number_input(
     "Federal Direct rate (%)", min_value=0.0, max_value=20.0,
     value=get_shared_float("rate", DEFAULT_FEDERAL_RATE), step=0.1,
     # No key on this widget, so it is named explicitly here rather than being
@@ -10310,7 +10332,7 @@ interest_rate = st.sidebar.number_input(
 # Gap financing rate: only shown/used in Detailed, for need above the federal cap
 # (Direct PLUS or private). Simplified reads the seeded value but never uses it.
 if loan_source_a == "personal":
-    gap_rate_a = st.sidebar.number_input(
+    gap_rate_a = _sb_pay.number_input(
         "Gap financing rate (%)", min_value=0.0, max_value=25.0,
         step=0.1, key="gap_rate_a", on_change=lambda: mark_interaction("gap_rate_a"),
         help="Rate on borrowing above the federal Direct cap -- Direct PLUS "
@@ -10338,7 +10360,7 @@ st.session_state.setdefault(
     resolve_shared_strategy(shared_repayment_strategy, repayment_strategy_options))
 st.session_state["repayment_strategy_a"] = resolve_shared_strategy(
     st.session_state["repayment_strategy_a"], repayment_strategy_options)
-repayment_strategy = st.sidebar.selectbox(
+repayment_strategy = _sb_pay.selectbox(
     "Repayment Strategy", repayment_strategy_options,
     key="repayment_strategy_a",
     on_change=lambda: mark_interaction("repayment_strategy_a"),
@@ -10359,7 +10381,7 @@ _rap_in_use = (repayment_strategy == RAP_STRATEGY_LABEL
                or (st.session_state.get("compare_mode")
                    and st.session_state.get("repayment_strategy_b") == RAP_STRATEGY_LABEL))
 if _rap_in_use:
-    rap_dependents = st.sidebar.number_input(
+    rap_dependents = _sb_pay.number_input(
         "Dependent children (both scenarios)", min_value=0, max_value=10, step=1,
         key="rap_dependents", on_change=lambda: mark_interaction("rap_dependents"),
         help="RAP lowers your monthly payment by $50 per dependent child. "
@@ -10391,7 +10413,7 @@ st.session_state.setdefault(
     "roi_horizon_select",
     _shared_horizon if _shared_horizon in ROI_HORIZON_OPTIONS else ROI_WINDOW_YEARS,
 )
-roi_horizon_years = st.sidebar.selectbox(
+roi_horizon_years = _sb_pay.selectbox(
     "ROI Horizon", ROI_HORIZON_OPTIONS, key="roi_horizon_select",
     on_change=lambda: (mark_interaction("roi_horizon"), log_horizon_change()),
     format_func=lambda y: f"{y} years",
@@ -10401,7 +10423,6 @@ roi_horizon_years = st.sidebar.selectbox(
          "the payoff those years are buying.",
 )
 
-st.sidebar.subheader("💼 Career")
 
 # The wage basis is no longer a sidebar control. It used to be "Career Salary
 # Data: National / California", chosen independently of the city -- which made
@@ -10580,7 +10601,7 @@ if not MAJOR_DATA:
 # Rendered before "Choose by" because it changes what the whole section means:
 # in returning mode the comparison is against the visitor's own salary, not a
 # high school graduate's.
-st.sidebar.radio(
+_sb_who.radio(
     "Who is going to school?", STUDENT_MODE_OPTIONS, key="student_mode_radio",
     on_change=lambda: mark_interaction("student_mode_radio"),
     help="Straight from high school compares against a debt-free high school "
@@ -10592,19 +10613,19 @@ if is_returning:
     # Everything here is something the visitor knows about themselves. The app
     # asks rather than infers, because the alternative is guessing at a career
     # history it has no data for.
-    st.sidebar.number_input(
+    _sb_who.number_input(
         "Your age now", min_value=18, max_value=80, step=1, key="current_age",
         on_change=lambda: mark_interaction("current_age"),
         help="Used to say when you'd finish repaying -- 'repaid at 63' rather "
               "than 'payoff 14 years'.",
     )
-    st.sidebar.number_input(
+    _sb_who.number_input(
         "Your salary now ($/yr)", min_value=0, max_value=1_000_000, step=1_000,
         key="current_salary", on_change=lambda: mark_interaction("current_salary"),
         help="What you earn today. This replaces the high-school-graduate "
               "figure as the thing the degree is measured against.",
     )
-    st.sidebar.number_input(
+    _sb_who.number_input(
         "Your salary in 10 years WITHOUT the degree ($/yr)",
         min_value=0, max_value=1_000_000, step=1_000,
         key="salary_no_degree_10y",
@@ -10612,7 +10633,7 @@ if is_returning:
         help="Staying put isn't standing still. Leaving this at your current "
               "salary assumes no raises ever, which flatters the degree.",
     )
-    st.sidebar.number_input(
+    _sb_who.number_input(
         "Existing student debt ($)", min_value=0, max_value=1_000_000, step=1_000,
         key="existing_debt",
         on_change=lambda: mark_interaction("existing_debt"),
@@ -10621,7 +10642,7 @@ if is_returning:
               "you'd be paying it either way.",
     )
     if st.session_state.get("existing_debt", 0):
-        st.sidebar.number_input(
+        _sb_who.number_input(
             "Rate on that existing debt (%)", min_value=0.0, max_value=20.0,
             step=0.1, key="existing_debt_rate",
             on_change=lambda: mark_interaction("existing_debt_rate"),
@@ -10634,7 +10655,7 @@ if is_returning:
     # This is the biggest lever on the answer for a returning student -- for
     # someone on $60k, foregone earnings dwarf tuition -- which is exactly why
     # it is asked rather than assumed.
-    st.sidebar.radio(
+    _sb_who.radio(
         "While you study, will you keep working?",
         RETURNING_ENROLLMENT_OPTIONS, key="returning_enrollment",
         on_change=lambda: (mark_interaction("returning_enrollment"),
@@ -10650,7 +10671,7 @@ if is_returning:
     # producing a flattering number.
     if (st.session_state.get("returning_enrollment") == RETURNING_STOP_WORK
             and not st.session_state.get("count_foregone_earnings", True)):
-        st.sidebar.warning(
+        _sb_who.warning(
             "You've said you'll stop working, but **foregone earnings are "
             "switched off** below. The salary you'd give up is usually the "
             "biggest cost of going back — these figures leave it out entirely."
@@ -10660,13 +10681,13 @@ if is_returning:
     # returning-student inputs on screen and assumes the figures already use
     # them, when a blank salary leaves the old baseline in force.
     if not returning_baseline_ready():
-        st.sidebar.warning(
+        _sb_who.warning(
             "Enter both salaries above to compare against **your own pay**. "
             "Until then the figures still compare against a debt-free high "
             "school graduate, which understates what this degree has to beat."
         )
 
-dataset_mode = st.sidebar.radio(
+dataset_mode = _sb_study.radio(
     "Choose by", dataset_mode_options, key="dataset_mode_radio", on_change=lambda: mark_interaction("dataset_mode_radio"),
     help="Major: what people who studied that subject actually earn, "
          "including those who ended up working outside it (NY Fed, 73 "
@@ -10675,12 +10696,12 @@ dataset_mode = st.sidebar.radio(
          "occupations) -- richer, but it assumes you get that job.",
 )
 if dataset_mode == DATASET_MODE_MAJOR:
-    st.sidebar.caption(
+    _sb_study.caption(
         "Salaries reflect everyone who studied this — including the "
         f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
     )
 else:
-    st.sidebar.caption(
+    _sb_study.caption(
         "Salaries assume you land this job. Switch to **Major** to see what "
         "everyone who studied a subject earns, not just those working in it."
     )
@@ -10726,7 +10747,7 @@ if (st.session_state.get("major_select_a") not in major_options
         or st.session_state.get("major_select_a_mode") != dataset_mode):
     st.session_state["major_select_a"] = major_options[default_major_index]
 st.session_state["major_select_a_mode"] = dataset_mode
-major = st.sidebar.selectbox(
+major = _sb_study.selectbox(
     SELECTION_LABEL[dataset_mode], major_options, key="major_select_a",
     on_change=lambda: (mark_interaction("major"), mark_major_explicitly_selected()),
     help="Pick what you're evaluating -- this determines the salary numbers "
@@ -10751,7 +10772,7 @@ if (dataset_mode != DATASET_MODE_CAREER or is_returning) and not enable_prestige
         "credential_a", get_shared_default("cred", CREDENTIAL_BACHELORS))
     if st.session_state["credential_a"] not in CREDENTIAL_OPTIONS:
         st.session_state["credential_a"] = CREDENTIAL_BACHELORS
-    st.sidebar.radio(
+    _sb_study.radio(
         "What are you studying for?", CREDENTIAL_OPTIONS,
         format_func=lambda c: CREDENTIAL_LABELS[c],
         key="credential_a", on_change=lambda: mark_interaction("credential_a"),
@@ -10785,7 +10806,7 @@ if _credential_key_a and _cip_family_a and not enable_prestige_mode:
         st.session_state["grad_school_a"] = GRADUATE_SCHOOL_NATIONAL
     st.session_state["_grad_key_a"] = (_cip_family_a, _credential_key_a)
     if len(_grad_options_a) > 1:
-        st.sidebar.selectbox(
+        _sb_study.selectbox(
             "Graduate school", _grad_options_a,
             key="grad_school_a", on_change=lambda: mark_interaction("grad_school_a"),
             help="Median debt this school's graduates in your field leave with "
@@ -10796,7 +10817,7 @@ if _credential_key_a and _cip_family_a and not enable_prestige_mode:
         # graduate_debt_a was resolved before the financing block; re-reading
         # it here would let the two disagree after a mid-rerun change.
         render_graduate_debt_caption(graduate_debt_a, _credential_key_a,
-                                      st.session_state["grad_school_a"], st.sidebar)
+                                      st.session_state["grad_school_a"], _sb_study)
 
 _program_key_a = None if enable_prestige_mode else professional_program_for(major)
 professional_debt_a = None
@@ -10815,7 +10836,7 @@ if _program_key_a:
             or st.session_state["prof_school_a"] not in _prof_options_a):
         st.session_state["prof_school_a"] = PROFESSIONAL_SCHOOL_NATIONAL
     st.session_state["_prof_program_a"] = _program_key_a
-    st.sidebar.selectbox(
+    _sb_study.selectbox(
         PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
         key="prof_school_a", on_change=lambda: mark_interaction("prof_school_a"),
         help="Median debt that this school's graduates leave with, from College "
@@ -10826,7 +10847,7 @@ if _program_key_a:
     )
     professional_debt_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
     render_professional_debt_caption(major, st.session_state["prof_school_a"],
-                                      professional_debt_a, st.sidebar)
+                                      professional_debt_a, _sb_study)
 
 # Returning students only. Placed here because it needs the chosen major to
 # pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
@@ -10848,7 +10869,7 @@ if is_returning and major in MAJOR_DATA:
     if st.session_state.get("_salary_override_major") != major:
         st.session_state["_salary_override_major"] = major
         st.session_state["starting_salary_override"] = int(_bls_start)
-    st.sidebar.number_input(
+    _sb_study.number_input(
         "Your expected starting salary ($/yr)",
         min_value=0, max_value=1_000_000, step=1_000,
         key="starting_salary_override",
@@ -10856,7 +10877,7 @@ if is_returning and major in MAJOR_DATA:
         help="Pre-filled with the BLS figure for this occupation. Change it if "
               "you expect to start somewhere else.",
     )
-    st.sidebar.caption(
+    _sb_study.caption(
         f"The {fmt_money(_bls_start)} pre-filled here is what **everyone** in this "
         "occupation earns at entry level — not what someone entering it mid-career "
         "earns in year one. Career-changers commonly start below it, and some never "
@@ -10869,7 +10890,7 @@ if is_returning and major in MAJOR_DATA:
 
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
 if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
-    st.sidebar.caption((
+    _sb_study.caption((
         f"ℹ️ The typical entry-level education for {major} (BLS: "
         f"\"{typical_education_a}\") is below a bachelor's degree. This "
         f"app's Cost of Attendance/loan model below still assumes "
@@ -10882,7 +10903,7 @@ elif program_years_a == 0:
     # length" and not "we're charging a shorter one", but "there is nothing to
     # charge". Said plainly, because a $0 loan with no explanation reads as a
     # bug rather than as the answer.
-    st.sidebar.caption((
+    _sb_study.caption((
         f"ℹ️ BLS gives the typical entry-level education for {major} as "
         f"\"{typical_education_a}\" -- no degree required. So there's no "
         "tuition, no loan, and no years of foregone wages charged against it. "
@@ -10893,7 +10914,7 @@ elif is_graduate_education(typical_education_a):
     # real lengths, which dropped them into the sub-bachelor's branch below --
     # telling a visitor that a Master's degree "is below a bachelor's degree".
     # They need their own sentence, saying the opposite thing.
-    st.sidebar.caption((
+    _sb_study.caption((
         f"ℹ️ The typical entry-level education for {major} (BLS: "
         f"\"{typical_education_a}\") is ABOVE a bachelor's, so costs below cover "
         f"{program_years_for_education(typical_education_a)} years -- a bachelor's "
@@ -10907,7 +10928,7 @@ elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
     # mode names are plural BLS occupations ("Air Traffic Controllers"), so
     # "{major}'s" renders as "Controllers's" and "{major} typically needs"
     # disagrees in number. "The ... for {major}" sidesteps both.
-    st.sidebar.caption((
+    _sb_study.caption((
         f"ℹ️ The typical entry-level education for {major} (BLS: "
         f"\"{typical_education_a}\") is below a bachelor's degree, so costs "
         f"below are modelled over {program_years_for_education(typical_education_a)} "
@@ -10924,7 +10945,7 @@ if enable_prestige_mode:
 # No index= here: session_state already holds this widget's value (seeded via
 # setdefault up in the Career section, where MAJOR_DATA needed it) and passing
 # both would trigger Streamlit's widget-default-conflict warning.
-city = st.sidebar.selectbox(
+city = _sb_where.selectbox(
     "City / Metro Area", city_options, key="city_select", on_change=lambda: mark_interaction("city_select"),
     help="Where you plan to live and work after graduating. In Career mode "
          "this sets BOTH the wages (your metro's own BLS figures) and the "
@@ -10936,7 +10957,7 @@ city = st.sidebar.selectbox(
 # tuple has to still match the live selection: once the visitor moves the
 # control themselves, the value is theirs and this note would be a lie.
 if st.session_state.get("_city_inferred") == (school_name_a, city):
-    st.sidebar.caption(
+    _sb_where.caption(
         f"Set to {city} because {school_name_a} is there. This is where you'd "
         "*work*, not where you study — change it if you plan to leave. It "
         "re-sets whenever you pick a different school."
