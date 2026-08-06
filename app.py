@@ -13914,9 +13914,11 @@ you're considering. (Know your own costs? Switch **Loan estimate** to
 
 **Two settings change the answer most:**
 
-- **Major vs Career.** *Major* is everyone who studied it — including the
-  {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% working jobs that don't need the degree.
-  *Career* is people actually doing that job. Major is the honest default.
+- **Major vs Career.** *Major* is what everyone who studied it earns —
+  including graduates working jobs that don't use the degree. *Career* is
+  people actually doing that job, shown with the full range of what they
+  earn — from the 10th to the 90th percentile, not just one average. Major
+  is the honest default.
 - **ROI Horizon.** How many years into the future to look. Careers with long
   training flip with time: at 10 years, medicine is still $146,000 *behind* a
   high school grad — by 30 it's $3.5 million *ahead*.
