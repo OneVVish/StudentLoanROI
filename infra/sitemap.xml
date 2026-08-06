@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reference copy: the served file is the SITEMAP constant in
+     infra/worker.js. Change BOTH in the same PR. Query-string URLs are
+     valid sitemap entries; these are the app's three real pages
+     (STANDALONE_TOOLS in app.py plus the calculator root). -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://worthmydegree.com/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://worthmydegree.com/?tool=repayment</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://worthmydegree.com/?tool=schools</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+</urlset>
