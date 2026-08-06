@@ -2165,15 +2165,15 @@ LEGACY_STRATEGY_SUCCESSOR = {
 
 
 REPAYMENT_STRATEGY_HELP = (
-    "The two plans OBBBA gives a borrower whose loans start on or after "
-    "July 1, 2026. Repayment Assistance Plan (RAP): payment is 1-10% of your "
-    "total income, all unpaid interest is waived, and any remainder is "
-    "forgiven after 30 years -- forgiven amounts are taxable income that year. "
-    "2026 Tiered Standard Plan: a fixed payment over a term set by how much "
-    "you owe, forgiving nothing. The pre-2026 plans (Standard 10-Year and "
-    "IBR-style IDR) are closed to new loans; tick 'Compare against pre-2026 "
-    "plans' under Advanced Analysis to add them back for comparison. "
-    "See Methodology."
+    "Your two options for federal loans starting July 1, 2026 or later. "
+    "Repayment Assistance Plan (RAP): pay 1-10% of your income each month; "
+    "interest your payment doesn't cover is erased, and whatever is left "
+    "after 30 years is forgiven (you pay income tax on the forgiven amount "
+    "that year). 2026 Tiered Standard: a fixed monthly payment over a term "
+    "set by how much you owe -- nothing is forgiven. The pre-2026 plans "
+    "(Standard 10-Year, IBR-style IDR) are closed to new loans; tick "
+    "'Compare against pre-2026 repayment plans' under Advanced Analysis to "
+    "see them anyway. Details in Methodology."
 )
 
 
@@ -7369,6 +7369,17 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
             names=["Student Loan Payment", "What's Left to Spend"],
             values=[monthly_payment, remaining],
             title="Your Monthly Take-Home Pay: Loan vs. What's Left",
+            # Semantic colors, in sync with the PDF twin
+            # (build_pdf_takehome_vs_loan_chart): loan slice light red (money
+            # going out), remainder light green (money kept). A discrete MAP,
+            # not a sequence: px.pie sorts slices by value, so sequence colors
+            # land on whichever slice happens to be biggest -- the first cut
+            # of this shipped with the colors swapped for exactly that reason.
+            # Slices are directly labeled, so identity never rides on color
+            # alone.
+            color=["Student Loan Payment", "What's Left to Spend"],
+            color_discrete_map={"Student Loan Payment": "#F1948A",
+                                "What's Left to Spend": "#A9DFBF"},
         )
         # Show the dollar amount alongside the percentage on each slice, not
         # just percent -- "$4,631 (60%)" is more actionable than "60%" alone
@@ -8317,6 +8328,11 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
             labels=["Student Loan Payment", "What's Left to Spend"],
             autopct=lambda pct: f"${pct / 100 * _pie_total:,.0f}\n({pct:.0f}%)",
             startangle=90,
+            # Semantic colors, in sync with the on-screen twin: the loan slice
+            # light red (money going out), the remainder light green (money
+            # kept). Slices are directly labeled, so identity never rides on
+            # color alone.
+            colors=["#F1948A", "#A9DFBF"],
         )
         ax.set_title("Your Monthly Take-Home Pay: Loan vs. What's Left")
     else:
@@ -8457,7 +8473,7 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
         else:
             rows.append([_label, f"National average — {fmt_money(professional_debt)}"])
     if city_name is not None:
-        rows.append(["City / Metro Area", city_name])
+        rows.append(["Where you'll live and work", city_name])
     if start_year is not None:
         rows.append(["Year Starting Undergraduate School", str(start_year)])
     # Community-college path disclosure: without these rows the report shows a
@@ -8488,8 +8504,8 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
         rows.append(["Personal Contribution (per year)", fmt_money(personal_contribution_per_year)])
         rows.append(["Grants & Scholarships (per year)", fmt_money(grants_per_year)])
     rows += [
-        ["Federal Direct rate", fmt_pct(interest_rate_pct)],
-        ["Repayment Strategy", repayment_strategy_label],
+        ["Federal loan interest rate", fmt_pct(interest_rate_pct)],
+        ["How you'll repay", repayment_strategy_label],
     ]
     return rows
 
@@ -8693,7 +8709,12 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         # _pdf_resources_section) -- placed after the complete Loan Information
         # section so it no longer splits it.
         *_pdf_resources_section(styles, [(None, school_name_a)]),
-        Spacer(1, 12),
+        # Take-Home starts its own page: begun mid-page it straddled a page
+        # boundary, splitting the stage table from the charts. On a fresh page
+        # the header, the stage table and both stages' chart pairs fit
+        # together (~570pt of the 648pt content height -- the chart width
+        # below is trimmed to keep that true).
+        PageBreak(),
         Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major} in {city}"), styles["section"]),
         # One row per career stage, matching the on-screen block, which renders
         # them side by side rather than behind a selector.
@@ -8712,12 +8733,14 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
     _drawable = [(label, figs) for label, figs in takehome_stages
                  if figs["gross"] > 0 and figs["monthly_payment"] is not None]
     if _drawable:
-        # Both charts for a stage side by side, so each stage's pair fits on a
-        # single page -- stacked at full width they're each taller than half a
-        # page and the pair overflows, which forced a split.
-        _chart_w = (PDF_CONTENT_WIDTH - 18) / 2
+        # Both charts for a stage side by side, and slightly narrower than a
+        # strict half: the whole Take-Home page -- header, stage table, and
+        # BOTH stages' chart pairs -- must total under the 648pt content
+        # height so the section that just page-broke above stays one page.
+        # Stacked at full width each chart is taller than half a page.
+        _chart_w = (PDF_CONTENT_WIDTH - 44) / 2
         story += [
-            Spacer(1, 12),
+            Spacer(1, 8),
             Paragraph(_strip_emoji(
                 "Each block below is one career stage. The loan payment is the same "
                 "dollar amount in both -- what changes is how much of your pay it takes."),
@@ -8726,7 +8749,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         for _label, _figs in _drawable:
             _take_home = _figs["take_home"]
             story += [
-                Spacer(1, 8),
+                Spacer(1, 6),
                 Paragraph(_strip_emoji(_label), styles["section"]),
                 KeepTogether(Table(
                     [[build_pdf_takehome_pie_chart(_take_home, max_width=_chart_w),
@@ -8740,7 +8763,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                 )),
             ]
     story += [
-        Spacer(1, 12),
+        # Financial Position starts its own page too: with Take-Home filling
+        # its page above, this header rendered orphaned at the bottom of that
+        # page with its table and chart on the next.
+        PageBreak(),
         Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["section"]),
         _pdf_table([
             [f"{_cf['metric_label']} — {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
@@ -9563,7 +9589,7 @@ st.session_state.setdefault(
 # alike): hide the +/- stepper buttons, and show a $ or % unit prefix on
 # the left based on which one appears in the widget's own label -- every
 # number_input in this app has exactly one or the other (e.g. "Cost of
-# Attendance (per year, $)", "Federal Direct rate (%)"), and
+# Attendance (per year, $)", "Federal loan interest rate (%)"), and
 # Streamlit mirrors that label text onto the input's aria-label, so a
 # plain CSS attribute selector is enough without touching each widget.
 st.markdown(
@@ -9803,7 +9829,7 @@ else:
     st.session_state.setdefault("school_search_a",
                                  get_shared_default("school", "UC Berkeley"))
     school_search_a = _sb_where.text_input(
-        "Target Undergraduate School", placeholder="e.g. University of Michigan",
+        "Your college (type to search)", placeholder="e.g. University of Michigan",
         key="school_search_a",
         on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
@@ -9833,7 +9859,7 @@ else:
     # apply -- same conversion school_search_a needed for the same reason.
     st.session_state.setdefault("in_state_a", get_shared_default("in_state", "1") == "1")
     in_state_a = _sb_where.checkbox(
-        "In-State Student?", key="in_state_a",
+        "I'd pay in-state tuition", key="in_state_a",
         on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         help="Check this if you'd pay in-state tuition at the school above. "
@@ -9935,7 +9961,7 @@ else:
 st.session_state.setdefault("loan_dependency", get_shared_default("dependency", "dependent"))
 if effective_loan_mode == "Detailed":
     loan_dependency = _sb_pay.radio(
-        "Dependency status (both scenarios)",
+        "FAFSA dependency (both scenarios)",
         options=["dependent", "independent"],
         format_func=lambda d: {"dependent": "Dependent (parents' info on FAFSA)",
                                 "independent": "Independent"}[d],
@@ -10319,7 +10345,7 @@ elif loan_source_a == "college":
         "estimate from your own cost & aid instead."
     ).replace("$", r"\$"))
 interest_rate = _sb_pay.number_input(
-    "Federal Direct rate (%)", min_value=0.0, max_value=20.0,
+    "Federal loan interest rate (%)", min_value=0.0, max_value=20.0,
     value=get_shared_float("rate", DEFAULT_FEDERAL_RATE), step=0.1,
     # No key on this widget, so it is named explicitly here rather than being
     # picked up with the keyed ones. on_change does not require a key.
@@ -10333,7 +10359,7 @@ interest_rate = _sb_pay.number_input(
 # (Direct PLUS or private). Simplified reads the seeded value but never uses it.
 if loan_source_a == "personal":
     gap_rate_a = _sb_pay.number_input(
-        "Gap financing rate (%)", min_value=0.0, max_value=25.0,
+        "Rate on loans above the federal cap (%)", min_value=0.0, max_value=25.0,
         step=0.1, key="gap_rate_a", on_change=lambda: mark_interaction("gap_rate_a"),
         help="Rate on borrowing above the federal Direct cap -- Direct PLUS "
              "(~9% + 4.2% fee) or private/alternative loans. Applied to the "
@@ -10361,7 +10387,7 @@ st.session_state.setdefault(
 st.session_state["repayment_strategy_a"] = resolve_shared_strategy(
     st.session_state["repayment_strategy_a"], repayment_strategy_options)
 repayment_strategy = _sb_pay.selectbox(
-    "Repayment Strategy", repayment_strategy_options,
+    "How you'll repay", repayment_strategy_options,
     key="repayment_strategy_a",
     on_change=lambda: mark_interaction("repayment_strategy_a"),
     help=REPAYMENT_STRATEGY_HELP,
@@ -10414,7 +10440,7 @@ st.session_state.setdefault(
     _shared_horizon if _shared_horizon in ROI_HORIZON_OPTIONS else ROI_WINDOW_YEARS,
 )
 roi_horizon_years = _sb_pay.selectbox(
-    "ROI Horizon", ROI_HORIZON_OPTIONS, key="roi_horizon_select",
+    "How far ahead to look", ROI_HORIZON_OPTIONS, key="roi_horizon_select",
     on_change=lambda: (mark_interaction("roi_horizon"), log_horizon_change()),
     format_func=lambda y: f"{y} years",
     help="How far into the future every comparison on this page looks. "
@@ -10946,7 +10972,7 @@ if enable_prestige_mode:
 # setdefault up in the Career section, where MAJOR_DATA needed it) and passing
 # both would trigger Streamlit's widget-default-conflict warning.
 city = _sb_where.selectbox(
-    "City / Metro Area", city_options, key="city_select", on_change=lambda: mark_interaction("city_select"),
+    "Where you'll live and work after", city_options, key="city_select", on_change=lambda: mark_interaction("city_select"),
     help="Where you plan to live and work after graduating. In Career mode "
          "this sets BOTH the wages (your metro's own BLS figures) and the "
          "cost-of-living adjustment -- so a higher-paying, pricier city can "
@@ -11019,7 +11045,7 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
         "Compare against pre-2026 repayment plans", key="enable_legacy_plans",
         on_change=lambda: mark_interaction("enable_legacy_plans"),
         help="Adds Standard 10-Year and IBR-style Income-Driven Repayment back "
-             "to the Repayment Strategy dropdown. Both are closed to loans "
+             "to the 'How you'll repay' dropdown. Both are closed to loans "
              "originated on or after July 1, 2026, so they are a comparison "
              "against the old rules -- not plans you could choose. Off by "
              "default for that reason.",
@@ -11201,7 +11227,7 @@ if compare_mode:
             )
         else:
             school_search_b = st.text_input(
-                "Target Undergraduate School", placeholder="e.g. Ohio State University",
+                "Your college (type to search)", placeholder="e.g. Ohio State University",
                 value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
                 on_change=lambda: (mark_interaction("school_b"),
                                     _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
@@ -11223,7 +11249,7 @@ if compare_mode:
             school_unitid_b = _resolve_school_unitid("school_search_b", "school_pick_b")
 
             in_state_b = st.checkbox(
-                "In-State Student?", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
+                "I'd pay in-state tuition", value=get_shared_default("in_state_b", "1") == "1", key="in_state_b",
                 on_change=lambda: (mark_interaction("school_b"),
                                     _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 help="Check this if you'd pay in-state tuition at the school "
@@ -11510,7 +11536,7 @@ if compare_mode:
         if enable_prestige_mode:
             major_b = get_prestige_adjusted_major_name(major_b, prestige_tier_b)
         interest_rate_b = st.number_input(
-            "Federal Direct rate (%)", min_value=0.0, max_value=20.0,
+            "Federal loan interest rate (%)", min_value=0.0, max_value=20.0,
             value=get_shared_float("rate_b", DEFAULT_FEDERAL_RATE), step=0.1,
             key="interest_rate_b", on_change=lambda: mark_interaction("interest_rate_b"),
             help="Rate on federal Direct loans (the first ~$27k over four years, "
@@ -11519,7 +11545,7 @@ if compare_mode:
         )
         if loan_source_b == "personal":
             gap_rate_b = st.number_input(
-                "Gap financing rate (%)", min_value=0.0, max_value=25.0,
+                "Rate on loans above the federal cap (%)", min_value=0.0, max_value=25.0,
                 step=0.1, key="gap_rate_b", on_change=lambda: mark_interaction("gap_rate_b"),
                 help="Rate on borrowing above the federal Direct cap -- Direct "
                      "PLUS or private/alternative loans. Blended with the federal "
@@ -11538,7 +11564,7 @@ if compare_mode:
         st.session_state["repayment_strategy_b"] = resolve_shared_strategy(
             st.session_state["repayment_strategy_b"], repayment_strategy_options_b)
         repayment_strategy_b = st.selectbox(
-            "Repayment Strategy", repayment_strategy_options_b,
+            "How you'll repay", repayment_strategy_options_b,
             key="repayment_strategy_b", on_change=lambda: mark_interaction("repayment_strategy_b"),
             help=REPAYMENT_STRATEGY_HELP,
         )
@@ -13906,11 +13932,11 @@ it?** It runs on real government data — salaries, college costs, taxes, and th
 loan — versus someone who skipped college and went straight to work. Real salary
 data, real taxes, adjusted for your city.
 
-**How to use it.** Pick a major and school on the left. The loan fills in
-automatically, and every number updates as you change things — there's no
-calculate button. Nothing is saved and you can't break it, so try every path
-you're considering. (Know your own costs? Switch **Loan estimate** to
-**Detailed**.)
+**How to use it.** Work down the sidebar — **About you → What you'll study →
+School & city → Paying for it**. The loan fills in automatically, and every
+number updates as you change things — there's no calculate button. Nothing is
+saved and you can't break it, so try every path you're considering. (Know
+your own costs? Switch **Loan estimate** to **Detailed**.)
 
 **Two settings change the answer most:**
 
@@ -13919,7 +13945,7 @@ you're considering. (Know your own costs? Switch **Loan estimate** to
   people actually doing that job, shown with the full range of what they
   earn — from the 10th to the 90th percentile, not just one average.
   Default choice is Major.
-- **ROI Horizon.** How many years into the future to look. Careers with long
+- **How far ahead to look.** Careers with long
   training flip with time: at 10 years, medicine is still $146,000 *behind* a
   high school grad — by 30 it's $3.5 million *ahead*.
 
@@ -15989,7 +16015,7 @@ section). Each scenario has its own school
 field, so Compare Mode can hold, say, "Computer Science at School A"
 against "Computer Science at School B." When your school is found, Cost
 of Attendance below auto-fills using in-state or out-of-state pricing,
-based on whether you checked **In-State Student?**. If your school isn't
+based on whether you ticked **I'd pay in-state tuition**. If your school isn't
 found, or you'd rather enter your own number, typing over the auto-filled
 value always works — it won't get overwritten later.
 
@@ -16029,10 +16055,10 @@ Need above that limit can't be met with Direct loans — it comes from **Direct
 PLUS or private/alternative loans** at a higher rate, plus origination fees
 (1.057% on Direct Subsidized/Unsubsidized, 4.228% on Direct PLUS — stable
 since October 2020). So Detailed mode splits your loan into the capped federal
-tranche (at your **Federal Direct rate**) and a **gap tranche** (at your **Gap
-financing rate**), grosses each up for its fee, and repays the combined balance
+tranche (at your **Federal loan interest rate**) and a **gap tranche** (at your **Rate on loans
+above the federal cap**), grosses each up for its fee, and repays the combined balance
 at the principal-weighted **blended** rate — the breakdown is shown under the
-loan metrics. The **Dependency status** toggle sets the cap; professional-school
+loan metrics. The **FAFSA dependency** toggle sets the cap; professional-school
 debt (medicine, dentistry, law) is handled separately — see below. Interest
 rates reset every July 1: for loans first disbursed in **2026–27** the
 undergraduate Direct rate is **6.52%**, graduate/professional Direct
@@ -16180,7 +16206,7 @@ have the authority to do so. The model assumes the full amount is available, so
 where a school caps it lower the private shortfall is larger than shown.
 
 *A simplification worth knowing:* both non-federal tranches are priced at your
-single **Gap financing rate**. Real private loans are credit-priced and
+single **Rate on loans above the federal cap**. Real private loans are credit-priced and
 generally cost more than Direct PLUS, so the private portion above is if
 anything *understated* — the app has one non-federal rate input and inventing
 a spread would be a made-up number. The origination fee is applied to the PLUS
@@ -16370,7 +16396,7 @@ modules live in a sidebar expander. Each one is opt-in, and the calculator
 behaves exactly as described above when all four are left off.
 
 - **Compare against pre-2026 repayment plans.** Adds Standard 10-Year and
-  IBR-style IDR back into the Repayment Strategy list, as a comparison
+  IBR-style IDR back into the "How you'll repay" list, as a comparison
   against the old rules — see the repayment-plans section above for why
   they are not offered as choices for a 2026+ start.
 
