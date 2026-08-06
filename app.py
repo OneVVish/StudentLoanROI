@@ -13830,37 +13830,33 @@ st.info(
 with st.expander("❓ New here? Start with this"):
     st.markdown((
         f"""
-**What this compares.** Two futures: you, after this major and this loan — and someone
-who skipped college, took no debt, and started working right away. Both adjusted for what
-it costs to live in your city. Everything on this page is some version of that one
-comparison.
+This is a free, anonymous calculator for one of the biggest money decisions
+of your life: **is this degree, at this school, with this loan, actually worth
+it?** It runs on real government data — salaries, college costs, taxes, and the
+2026 federal student-loan rules — and answers in plain dollars.
 
-**What to do.** Pick your major and school on the left. Your loan fills in automatically
-from what graduates of that school typically borrow (**Simplified**); switch **Loan
-estimate** to **Detailed** to build it from your own cost and aid instead. Numbers update
-as you change them. Nothing is saved, there's no login, and you can't break it — try the
-majors you're actually deciding between. Don't know your real cost or family contribution?
-The **🎯 Get Your Real Numbers** section lower down links to two free official tools.
+**What it shows.** Two futures, side by side: you, after this degree and this
+loan — versus someone who skipped college and went straight to work. Real salary
+data, real taxes, adjusted for your city.
 
-**The two settings that change the answer most:**
+**How to use it.** Pick a major and school on the left. The loan fills in
+automatically, and every number updates as you change things — there's no
+calculate button. Nothing is saved and you can't break it, so try every path
+you're considering. (Know your own costs? Switch **Loan estimate** to
+**Detailed**.)
 
-- **Choose by: Major or Career.** *Major* is what everyone who studied that subject
-  earns — including the {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs
-  that don't need a degree. *Career* is what people already doing that job earn, which
-  assumes you become one of them. Same nominal path, about $233,000 apart over 10 years.
-  Major is the honest default; Career is the richer data.
-- **ROI Horizon.** How far ahead to look. This matters more than it sounds: careers that
-  train before they earn look terrible at 10 years, because 10 years is mostly training.
-  Medicine comes out **$146,000 behind** a high school graduate at 10 years, and
-  **$3.5 million ahead** at 30. Same data. The only thing that changed is where you stop
-  counting.
+**Two settings change the answer most:**
 
-**Two senses of "worth it."** This does answer whether a major is worth it *financially* —
-whether the extra earnings beat the cost of the debt. That's the **"Is this debt worth it?"**
-verdict at the top. What it can't answer is whether it's worth it *to you*: a field you'd
-love for less money can easily beat a lucrative one you'd dread, and only you can weigh
-that trade. Every number here is also an average for a whole major, not a prediction about
-you personally. Sources and assumptions are in **📚 Methodology & Sources** at the bottom.
+- **Major vs Career.** *Major* is everyone who studied it — including the
+  {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% working jobs that don't need the degree.
+  *Career* is people actually doing that job. Major is the honest default.
+- **ROI Horizon.** Where you stop counting changes the verdict: medicine is
+  $146,000 *behind* a high school grad at 10 years and $3.5 million *ahead*
+  at 30.
+
+**Keep in mind.** These are averages, not predictions about you — and "worth it
+financially" isn't the same as "worth it to you." Sources are in
+**📚 Methodology & Sources** at the bottom.
         """
     ).replace("$", r"\$"))
 
