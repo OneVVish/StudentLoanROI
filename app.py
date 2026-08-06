@@ -13854,6 +13854,12 @@ you're considering. (Know your own costs? Switch **Loan estimate** to
   training flip with time: at 10 years, medicine is still $146,000 *behind* a
   high school grad — by 30 it's $3.5 million *ahead*.
 
+**Two more tools, just below this guide:** 🔎 **Find schools that fit a
+budget** shows every US college your budget covers, priced at what *you'd*
+actually pay — and 💸 **Already have loans? Compare repayment plans** takes a
+balance you or your family already owe and compares every current federal
+plan on it.
+
 **Keep in mind.** These are averages, not predictions about you — and "worth it
 financially" isn't the same as "worth it to you." Sources are in
 **📚 Methodology & Sources** at the bottom.
