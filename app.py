@@ -13850,9 +13850,9 @@ you're considering. (Know your own costs? Switch **Loan estimate** to
 - **Major vs Career.** *Major* is everyone who studied it — including the
   {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% working jobs that don't need the degree.
   *Career* is people actually doing that job. Major is the honest default.
-- **ROI Horizon.** Where you stop counting changes the verdict: medicine is
-  $146,000 *behind* a high school grad at 10 years and $3.5 million *ahead*
-  at 30.
+- **ROI Horizon.** How many years into the future to look. Careers with long
+  training flip with time: at 10 years, medicine is still $146,000 *behind* a
+  high school grad — by 30 it's $3.5 million *ahead*.
 
 **Keep in mind.** These are averages, not predictions about you — and "worth it
 financially" isn't the same as "worth it to you." Sources are in
