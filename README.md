@@ -204,13 +204,21 @@ To run the app yourself, you need your own free Supabase project:
    ```
    `secrets.toml` is gitignored — never commit real credentials.
 
-The sidebar's "Admin Analytics View" checkbox reads all four tables back
-to show usage metrics and survey results; you can also browse them
-directly in Supabase's Table Editor. The checkbox is hidden by default —
-press Ctrl+Shift+A, or visit the app with `?admin=1` in the URL, to
-reveal it.
+An admin analytics dashboard reads the tables back to show usage metrics
+and survey results (you can also browse them directly in Supabase's Table
+Editor). It renders as its own page, only for visits carrying
+`?admin=<admin_key>` in the URL, where `admin_key` is a secret set in
+`secrets.toml` — no key configured means no admin page at all.
 
-## Deploying to Streamlit Community Cloud
+## Deploying
+
+Production runs as a Docker container on Railway behind Cloudflare — see
+[DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md) for that setup and
+[ARCHITECTURE.md](ARCHITECTURE.md) for the full topology. The original
+Streamlit Community Cloud path below still works and still serves the
+legacy deployment.
+
+### Streamlit Community Cloud
 
 1. Push your code to a GitHub repo (this one's already at
    [github.com/OneVVish/StudentLoanROI](https://github.com/OneVVish/StudentLoanROI)).
@@ -228,3 +236,11 @@ reveal it.
 This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and won't
 reflect any individual's actual salary, cost of living, or loan terms.
+
+## License
+
+Source is visible for portfolio review and research transparency —
+**all rights reserved**. No license is granted to use, modify, or deploy
+this code or a derivative of it. Reading and learning from it is the
+point; running a copy of it is not. (The underlying datasets are public
+US government data and remain public.)
