@@ -9316,6 +9316,30 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
 
 st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page_icon="🎓", layout="wide")
 
+# Global (every page: calculator, ?tool= pages, admin): stack st.columns
+# vertically on phone-width viewports. Streamlit columns only ever SQUEEZE --
+# flex-basis calc(N% - gap) at every width -- so on a 390px phone a
+# three-across metric row got ~120px per metric and Compare Mode's A/B
+# panels ~190px each, unreadable. Wrapping to full-width rows is what every
+# responsive grid does at this width; charts inside follow automatically
+# (every plotly_chart in this file is use_container_width=True). 640px
+# matches Streamlit's own mobile breakpoint (where the sidebar becomes an
+# overlay). The selectors are version-specific (Streamlit 1.58, pinned) --
+# re-verify on any bump, like the sidebar-pill CSS in section 5.
+st.markdown(
+    """<style>
+    @media (max-width: 640px) {
+        div[data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+        div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            flex: 1 1 100% !important;
+            width: 100% !important;
+            min-width: 100% !important;
+        }
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)
+
 # Shared by every components.html snippet that needs to reach the Streamlit
 # app itself -- its query params, or a hidden button in its DOM.
 #
@@ -13377,7 +13401,10 @@ repayment_only = active_tool == "repayment"
 # NAV_ORIGINS, the traffic split and the cross-page links, and an admin
 # surface belongs in none of them.
 if st.session_state.admin_revealed:
-    st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>",
+    # Hide the expand-sidebar button too: the sidebar is display:none, so the
+    # button would open nothing. Same on the ?tool= pages below.
+    st.markdown("<style>section[data-testid='stSidebar'],"
+                "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
                 unsafe_allow_html=True)
     st.title("📊 Admin Analytics Dashboard")
     st.caption(
@@ -13392,7 +13419,8 @@ if active_tool:
     # describes a scenario this page is not about, so it is hidden rather than
     # shown empty. Cheaper and far less invasive than making 2,000 lines of
     # module-level sidebar code conditional.
-    st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>",
+    st.markdown("<style>section[data-testid='stSidebar'],"
+                "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
                 unsafe_allow_html=True)
     st.title(STANDALONE_TOOLS[active_tool]["title"])
     st.caption(STANDALONE_TOOLS[active_tool]["caption"])
@@ -13401,6 +13429,28 @@ else:
     st.caption(
         "**Free · anonymous · no sign-up** — an educational estimate, not financial "
         "advice. Salary and cost figures are illustrative."
+    )
+    # On a phone Streamlit collapses the sidebar to a bare ">>" arrow in the
+    # corner -- and EVERY input lives in that sidebar, so a mobile visitor sees
+    # a calculator with no visible way to change anything. Dress the collapsed
+    # control up as a labeled pill so it reads as "here are the inputs" instead
+    # of an anonymous chevron. Renders only while the sidebar is collapsed
+    # (Streamlit removes the button otherwise), so on desktop with the sidebar
+    # open nothing changes. Selector is version-specific (Streamlit 1.58,
+    # pinned in requirements.txt) -- re-verify it if the pin ever moves.
+    st.markdown(
+        """<style>
+        button[data-testid='stExpandSidebarButton']{
+            background:#ff4b4b; border-radius:999px;
+            padding:0.3rem 0.95rem 0.3rem 0.55rem;
+            box-shadow:0 2px 8px rgba(0,0,0,0.25);
+        }
+        button[data-testid='stExpandSidebarButton'] span{color:#fff;}
+        button[data-testid='stExpandSidebarButton']::after{
+            content:"Inputs"; color:#fff; font-weight:600; font-size:0.9rem;
+        }
+        </style>""",
+        unsafe_allow_html=True,
     )
 if st.session_state.get("test_mode"):
     st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
@@ -13812,9 +13862,13 @@ if active_tool:
         st.caption("Other tools: " + " · ".join(_others))
     st.stop()
 
-st.info(
-    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
-    "anything. Everything below updates instantly as you change it, no button to click."
+# One line, a caption rather than a boxed st.info: the page below IS the
+# pitch, and a stack of boxes above it was pushing the first real number
+# below the fold. The mobile sentence must survive any rewrite -- it is the
+# only pointer a phone visitor gets to the collapsed sidebar.
+st.caption(
+    "👈 **Set up your scenario in the sidebar** — everything updates instantly, "
+    "no button to press. On a phone, tap the red **» Inputs** pill at the top left."
 )
 
 # Collapsed on purpose. This app's whole premise is that real numbers are on
@@ -13830,56 +13884,60 @@ st.info(
 with st.expander("❓ New here? Start with this"):
     st.markdown((
         f"""
-**What this compares.** Two futures: you, after this major and this loan — and someone
-who skipped college, took no debt, and started working right away. Both adjusted for what
-it costs to live in your city. Everything on this page is some version of that one
-comparison.
+This is a free, anonymous calculator for one of the biggest money decisions
+of your life: **is this degree, at this school, with this loan, actually worth
+it?** It runs on real government data — salaries, college costs, taxes, and the
+2026 federal student-loan rules — and answers in plain dollars.
 
-**What to do.** Pick your major and school on the left. Your loan fills in automatically
-from what graduates of that school typically borrow (**Simplified**); switch **Loan
-estimate** to **Detailed** to build it from your own cost and aid instead. Numbers update
-as you change them. Nothing is saved, there's no login, and you can't break it — try the
-majors you're actually deciding between. Don't know your real cost or family contribution?
-The **🎯 Get Your Real Numbers** section lower down links to two free official tools.
+**What it shows.** Two futures, side by side: you, after this degree and this
+loan — versus someone who skipped college and went straight to work. Real salary
+data, real taxes, adjusted for your city.
 
-**The two settings that change the answer most:**
+**How to use it.** Pick a major and school on the left. The loan fills in
+automatically, and every number updates as you change things — there's no
+calculate button. Nothing is saved and you can't break it, so try every path
+you're considering. (Know your own costs? Switch **Loan estimate** to
+**Detailed**.)
 
-- **Choose by: Major or Career.** *Major* is what everyone who studied that subject
-  earns — including the {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs
-  that don't need a degree. *Career* is what people already doing that job earn, which
-  assumes you become one of them. Same nominal path, about $233,000 apart over 10 years.
-  Major is the honest default; Career is the richer data.
-- **ROI Horizon.** How far ahead to look. This matters more than it sounds: careers that
-  train before they earn look terrible at 10 years, because 10 years is mostly training.
-  Medicine comes out **$146,000 behind** a high school graduate at 10 years, and
-  **$3.5 million ahead** at 30. Same data. The only thing that changed is where you stop
-  counting.
+**Two settings change the answer most:**
 
-**Two senses of "worth it."** This does answer whether a major is worth it *financially* —
-whether the extra earnings beat the cost of the debt. That's the **"Is this debt worth it?"**
-verdict at the top. What it can't answer is whether it's worth it *to you*: a field you'd
-love for less money can easily beat a lucrative one you'd dread, and only you can weigh
-that trade. Every number here is also an average for a whole major, not a prediction about
-you personally. Sources and assumptions are in **📚 Methodology & Sources** at the bottom.
+- **Major vs Career.** *Major* is everyone who studied it — including the
+  {UNDEREMPLOYMENT_OVERALL_PCT:.0f}% working jobs that don't need the degree.
+  *Career* is people actually doing that job. Major is the honest default.
+- **ROI Horizon.** How many years into the future to look. Careers with long
+  training flip with time: at 10 years, medicine is still $146,000 *behind* a
+  high school grad — by 30 it's $3.5 million *ahead*.
+
+**Two more tools, under 🧰 More tools at the bottom of the page:**
+🔎 **Find schools that fit a budget** shows every US college your budget
+covers, priced at what *you'd* actually pay — and 💸 **Already have loans?
+Compare repayment plans** takes a balance you or your family already owe and
+compares every current federal plan on it.
+
+**Keep in mind.** These are averages, not predictions about you — and "worth it
+financially" isn't the same as "worth it to you." Sources are in
+**📚 Methodology & Sources** at the bottom.
         """
     ).replace("$", r"\$"))
 
-# Reserved here, at the top of the page, so the Download PDF Report / Share
-# Scenario buttons render in this position even though the code that fills
-# them in runs much later (after the PDF bytes and share params are actually
-# computed) -- st.container() is position-anchored: content written into a
-# container later in the script still renders wherever the container was
-# first created, not wherever that code physically executes.
-top_actions_container = st.container()
-
-# The break-even verdict, anchored high on the page (same position-anchored
-# st.container() trick as top_actions_container above): it's the one output a
-# student can act on -- "is this debt worth it, yes or no" -- so it leads
-# rather than sitting under the ROI chart where it was easy to miss. Filled
-# from the single-scenario branch once the scenario is computed. Compare Mode
-# leaves it empty and shows a per-column verdict in each panel instead, since
-# a single top banner can't answer for two scenarios at once.
+# The break-even verdict, anchored high on the page via a position-anchored
+# st.container(): it's the one output a student can act on -- "is this debt
+# worth it, yes or no" -- so it leads the page, ABOVE the PDF/Share buttons
+# (the verdict is why a visitor is here; the buttons are what they do after
+# reading it). Content written into a container later in the script still
+# renders wherever the container was first created. Filled from the
+# single-scenario branch once the scenario is computed. Compare Mode leaves
+# it empty (an empty container renders nothing) and shows a per-column
+# verdict in each panel instead, since a single top banner can't answer for
+# two scenarios at once.
 breakeven_banner_container = st.container()
+
+# Reserved here so the Download PDF Report / Share Scenario buttons render
+# in this position even though the code that fills them in runs much later
+# (after the PDF bytes and share params are actually computed) -- the same
+# position-anchoring trick as the verdict banner above. Filled by BOTH
+# result branches.
+top_actions_container = st.container()
 
 # ---- 5b. School Data Lookup (local COA dataset + College Scorecard API) --
 # Cost of Attendance (in/out-of-state) comes from the local dataset built by
@@ -13945,16 +14003,13 @@ if not enable_prestige_mode:
     else:
         render_school_lookup(st.container(), school_name_a, "A", unitid=school_unitid_a)
 
-    # Directly under the lookup, which has just printed what the named school
-    # costs -- so the obvious next question ("is there anything cheaper that
-    # teaches this?") is answerable in the same breath. Above the 5c fork, so
-    # no result branch changes.
-    render_school_search()
-    # Also above the 5c fork, so both result branches get it and the H2 arms
-    # cannot differ by it. Placed last because it answers a different question
-    # from everything above -- what to do about debt you already have, rather
-    # than whether to take it on.
-    render_existing_loan_comparison()
+# The school-search and existing-loan expanders used to render right here,
+# stacked between the COA bar and the results. They moved to the "🧰 More
+# tools" zone after the branch rejoin (below Get Your Real Numbers): a
+# first-time visitor's path to the verdict now crosses zero side-quests.
+# Parity-safe in both homes -- shared before the fork, shared after the
+# rejoin -- and the standalone ?tool= pages are unaffected (the dispatch
+# calls the render functions directly).
 
 
 def _npc_link_markdown(school_name: str) -> str:
@@ -15100,6 +15155,17 @@ st.divider()
 # conditional short-circuits so the name isn't looked up in single-scenario mode.
 render_get_accurate_inputs(
     school_name_a, school_name_b if compare_mode else None, compare_mode, enable_prestige_mode)
+
+# The two companion tools, moved down from the pre-results stack (see the
+# comment where they used to live). Shared, after the rejoin, so both
+# experiment arms get them identically. The prestige gate is preserved
+# behavior, not a new decision -- both tools were already hidden in Prestige
+# Mode at their old position.
+if not enable_prestige_mode:
+    st.divider()
+    st.subheader("🧰 More tools")
+    render_school_search()
+    render_existing_loan_comparison()
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------
 
