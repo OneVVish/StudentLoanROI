@@ -7369,6 +7369,17 @@ def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: 
             names=["Student Loan Payment", "What's Left to Spend"],
             values=[monthly_payment, remaining],
             title="Your Monthly Take-Home Pay: Loan vs. What's Left",
+            # Semantic colors, in sync with the PDF twin
+            # (build_pdf_takehome_vs_loan_chart): loan slice light red (money
+            # going out), remainder light green (money kept). A discrete MAP,
+            # not a sequence: px.pie sorts slices by value, so sequence colors
+            # land on whichever slice happens to be biggest -- the first cut
+            # of this shipped with the colors swapped for exactly that reason.
+            # Slices are directly labeled, so identity never rides on color
+            # alone.
+            color=["Student Loan Payment", "What's Left to Spend"],
+            color_discrete_map={"Student Loan Payment": "#F1948A",
+                                "What's Left to Spend": "#A9DFBF"},
         )
         # Show the dollar amount alongside the percentage on each slice, not
         # just percent -- "$4,631 (60%)" is more actionable than "60%" alone
@@ -8317,6 +8328,11 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
             labels=["Student Loan Payment", "What's Left to Spend"],
             autopct=lambda pct: f"${pct / 100 * _pie_total:,.0f}\n({pct:.0f}%)",
             startangle=90,
+            # Semantic colors, in sync with the on-screen twin: the loan slice
+            # light red (money going out), the remainder light green (money
+            # kept). Slices are directly labeled, so identity never rides on
+            # color alone.
+            colors=["#F1948A", "#A9DFBF"],
         )
         ax.set_title("Your Monthly Take-Home Pay: Loan vs. What's Left")
     else:
@@ -8693,7 +8709,12 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         # _pdf_resources_section) -- placed after the complete Loan Information
         # section so it no longer splits it.
         *_pdf_resources_section(styles, [(None, school_name_a)]),
-        Spacer(1, 12),
+        # Take-Home starts its own page: begun mid-page it straddled a page
+        # boundary, splitting the stage table from the charts. On a fresh page
+        # the header, the stage table and both stages' chart pairs fit
+        # together (~570pt of the 648pt content height -- the chart width
+        # below is trimmed to keep that true).
+        PageBreak(),
         Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major} in {city}"), styles["section"]),
         # One row per career stage, matching the on-screen block, which renders
         # them side by side rather than behind a selector.
@@ -8712,12 +8733,14 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
     _drawable = [(label, figs) for label, figs in takehome_stages
                  if figs["gross"] > 0 and figs["monthly_payment"] is not None]
     if _drawable:
-        # Both charts for a stage side by side, so each stage's pair fits on a
-        # single page -- stacked at full width they're each taller than half a
-        # page and the pair overflows, which forced a split.
-        _chart_w = (PDF_CONTENT_WIDTH - 18) / 2
+        # Both charts for a stage side by side, and slightly narrower than a
+        # strict half: the whole Take-Home page -- header, stage table, and
+        # BOTH stages' chart pairs -- must total under the 648pt content
+        # height so the section that just page-broke above stays one page.
+        # Stacked at full width each chart is taller than half a page.
+        _chart_w = (PDF_CONTENT_WIDTH - 44) / 2
         story += [
-            Spacer(1, 12),
+            Spacer(1, 8),
             Paragraph(_strip_emoji(
                 "Each block below is one career stage. The loan payment is the same "
                 "dollar amount in both -- what changes is how much of your pay it takes."),
@@ -8726,7 +8749,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         for _label, _figs in _drawable:
             _take_home = _figs["take_home"]
             story += [
-                Spacer(1, 8),
+                Spacer(1, 6),
                 Paragraph(_strip_emoji(_label), styles["section"]),
                 KeepTogether(Table(
                     [[build_pdf_takehome_pie_chart(_take_home, max_width=_chart_w),
