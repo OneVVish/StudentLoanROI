@@ -9316,6 +9316,30 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
 
 st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page_icon="🎓", layout="wide")
 
+# Global (every page: calculator, ?tool= pages, admin): stack st.columns
+# vertically on phone-width viewports. Streamlit columns only ever SQUEEZE --
+# flex-basis calc(N% - gap) at every width -- so on a 390px phone a
+# three-across metric row got ~120px per metric and Compare Mode's A/B
+# panels ~190px each, unreadable. Wrapping to full-width rows is what every
+# responsive grid does at this width; charts inside follow automatically
+# (every plotly_chart in this file is use_container_width=True). 640px
+# matches Streamlit's own mobile breakpoint (where the sidebar becomes an
+# overlay). The selectors are version-specific (Streamlit 1.58, pinned) --
+# re-verify on any bump, like the sidebar-pill CSS in section 5.
+st.markdown(
+    """<style>
+    @media (max-width: 640px) {
+        div[data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+        div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            flex: 1 1 100% !important;
+            width: 100% !important;
+            min-width: 100% !important;
+        }
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)
+
 # Shared by every components.html snippet that needs to reach the Streamlit
 # app itself -- its query params, or a hidden button in its DOM.
 #
