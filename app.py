@@ -8763,7 +8763,10 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                 )),
             ]
     story += [
-        Spacer(1, 12),
+        # Financial Position starts its own page too: with Take-Home filling
+        # its page above, this header rendered orphaned at the bottom of that
+        # page with its table and chart on the next.
+        PageBreak(),
         Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["section"]),
         _pdf_table([
             [f"{_cf['metric_label']} — {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
