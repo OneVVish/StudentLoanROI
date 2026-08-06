@@ -11,7 +11,7 @@ Architecture:
   2. Helper Functions       -> financial math, file I/O, chart builders, API calls.
   3. Session State Setup    -> flags that make Streamlit's rerun-on-every-widget
                                 model behave like a normal single-page app.
-  4. Sidebar (Inputs)       -> user profile + admin toggle.
+  4. Sidebar (Inputs)       -> user profile.
   5. Main Page              -> admin dashboard (optional), calculator results,
                                 and the impact survey.
 """
@@ -9374,6 +9374,27 @@ st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page
 if "test_mode" not in st.session_state:
     st.session_state.test_mode = get_shared_default("test", "0") == "1"
 
+# Admin Analytics View is gated on a SECRET: ?admin=<admin_key>, compared
+# against `admin_key` in secrets.toml. It used to be a plain ?admin=1 plus a
+# Ctrl+Shift+A shortcut -- pure obscurity, and publicly documented obscurity
+# at that, since this repo is public and robots.txt names the param. A
+# shortcut can't carry a secret, so the shortcut (and the hidden trigger
+# button + injected JS it clicked) is gone rather than kept as a bypass.
+# A deployment with no admin_key configured fails CLOSED -- the panel is
+# unreachable, not open to everyone. Latched for the session like test_mode
+# (a share rewrites the URL and drops the param); `admin` still never rides
+# share or cross-page links (check_internal_links.py) and still fails safe
+# when dropped. Latched HERE, above the pageview logging below, because
+# an admin session must not count as traffic (see that block).
+if "admin_revealed" not in st.session_state:
+    try:
+        _admin_key = str(st.secrets.get("admin_key", "") or "")
+    except Exception:  # no secrets file at all (bare local checkout)
+        _admin_key = ""
+    st.session_state.admin_revealed = bool(_admin_key) and (
+        get_shared_default("admin", "") == _admin_key
+    )
+
 # The pre/post research instrument renders for everyone. It was held behind a
 # ?research=1 gate from 2026-07-31 to 2026-08-01 because the human-subjects
 # determination had not been obtained; that determination now exists (recorded
@@ -9405,22 +9426,31 @@ if "pageview_logged" not in st.session_state:
     # this order, which is why it never doubled -- the contrast is what
     # identified the bug.
     st.session_state.pageview_logged = True
-    # A distinct action for the standalone repayment page. Without it those
-    # visits land in the same "pageview" bucket as the calculator's, and the
-    # two are different populations answering different questions -- pooling
-    # them would quietly inflate calculator traffic the moment the repayment
-    # link is shared anywhere.
-    #
-    # Reads the query param rather than the latch below, because the latch is
-    # set hundreds of lines later and this fires first. Safe: a pageview
-    # describes the visit as it ARRIVED, which is exactly what the param says
-    # on the first render, and pageview_logged stops any rerun re-entering.
-    log_usage_event(pageview_action())
-    # And where they came from, as its own event. Inside the same
-    # pageview_logged guard, so it fires exactly once per landing.
-    _nav = nav_action(get_shared_default("from", ""), current_page_key())
-    if _nav:
-        log_usage_event(_nav)
+    # An admin session is the researcher checking the dashboard, not a
+    # visitor -- logging it would count the person reading the traffic
+    # numbers INTO the traffic numbers. ?test=1 already covered this when
+    # remembered; the key alone now suffices, which is why the admin latch
+    # moved above this block. log_usage_event's own test_mode check can't do
+    # this job: that flag is a different question (a developer testing), and
+    # an admin visit without it was still a real row.
+    if not st.session_state.admin_revealed:
+        # A distinct action for the standalone repayment page. Without it those
+        # visits land in the same "pageview" bucket as the calculator's, and the
+        # two are different populations answering different questions -- pooling
+        # them would quietly inflate calculator traffic the moment the repayment
+        # link is shared anywhere.
+        #
+        # Reads the query param rather than the tool latch below, because that
+        # latch is set hundreds of lines later and this fires first. Safe: a
+        # pageview describes the visit as it ARRIVED, which is exactly what the
+        # param says on the first render, and pageview_logged stops any rerun
+        # re-entering.
+        log_usage_event(pageview_action())
+        # And where they came from, as its own event. Inside the same
+        # pageview_logged guard, so it fires exactly once per landing.
+        _nav = nav_action(get_shared_default("from", ""), current_page_key())
+        if _nav:
+            log_usage_event(_nav)
 
 if "survey_submitted" not in st.session_state:
     st.session_state.survey_submitted = False
@@ -9432,27 +9462,6 @@ if "survey_submitted" not in st.session_state:
 for _presurvey_flag in ("presurvey_answered", "presurvey_skipped", "presurvey_shown_logged"):
     if _presurvey_flag not in st.session_state:
         st.session_state[_presurvey_flag] = False
-
-# Admin Analytics View is gated on a SECRET: ?admin=<admin_key>, compared
-# against `admin_key` in secrets.toml. It used to be a plain ?admin=1 plus a
-# Ctrl+Shift+A shortcut -- pure obscurity, and publicly documented obscurity
-# at that, since this repo is public and robots.txt names the param. A
-# shortcut can't carry a secret, so the shortcut (and the hidden trigger
-# button + injected JS it clicked) is gone rather than kept as a bypass.
-# A deployment with no admin_key configured fails CLOSED -- the panel is
-# unreachable, not open to everyone. Latched for the session like test_mode
-# (a share rewrites the URL and drops the param); `admin` still never rides
-# share or cross-page links (check_internal_links.py) and still fails safe
-# when dropped.
-if "admin_revealed" not in st.session_state:
-    try:
-        _admin_key = str(st.secrets.get("admin_key", "") or "")
-    except Exception:  # no secrets file at all (bare local checkout)
-        _admin_key = ""
-    st.session_state.admin_revealed = bool(_admin_key) and (
-        get_shared_default("admin", "") == _admin_key
-    )
-
 
 # ============================================================
 # 4. SIDEBAR — USER INPUTS
@@ -10996,11 +11005,12 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
 
 st.sidebar.divider()
 
-# The Admin Analytics checkbox renders only for a session that arrived with
-# the correct ?admin=<admin_key> secret (latched into admin_revealed near the
-# top of section 3). The Ctrl+Shift+A shortcut and its hidden trigger button
-# used to live here; see the admin_revealed comment for why they're gone.
-admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View") if st.session_state.admin_revealed else False
+# The "🔐 Admin Analytics View" checkbox lived here until 2026-08-06. The
+# dashboard is now its own page, dispatched at the top of section 5 for a
+# session that arrived with the correct ?admin=<admin_key> secret -- a valid
+# key IS the intent to see the dashboard, so a second click was pure
+# friction, and the checkbox was also the last admin trace visible in the
+# calculator's DOM.
 
 # Compare Mode adds a second scenario (Scenario B) rather than hiding the
 # widgets above -- those always represent Scenario A, in both modes. This
@@ -12993,6 +13003,357 @@ def render_rap_subsidy_answer(rows: list) -> None:
 # 5. MAIN PAGE
 # ============================================================
 
+# ---- 5a. Admin Analytics Dashboard: aggregation helpers -------------------
+
+def _admin_parse_dates(df: pd.DataFrame) -> pd.Series:
+    """usage_logs timestamps are ISO strings stamped in the visitor's own
+    timezone (now_local), so offsets vary row to row -- utc=True normalizes
+    them to one axis, errors='coerce' turns anything unparseable into NaT
+    rather than raising. Returns a Series of python dates aligned to df.index."""
+    return pd.to_datetime(df["timestamp"], utc=True, errors="coerce").dt.date
+
+
+def _admin_final_per_session(events_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per session_id -- the visitor's LAST scenario_events row (max
+    event_seq) -- so the breakdowns read as 'what each distinct visitor ended
+    up configuring', not raw event volume (a session that tried five majors
+    would otherwise count five times). Order by event_seq, never timestamp:
+    timestamps come from the visitor's own clock and can tie or run backwards."""
+    if events_df.empty or "session_id" not in events_df.columns:
+        return events_df
+    df = events_df.copy()
+    if "event_seq" in df.columns:
+        df["_seq"] = pd.to_numeric(df["event_seq"], errors="coerce").fillna(-1)
+        df = df.sort_values("_seq")
+    df = df.drop_duplicates(subset="session_id", keep="last")
+    return df.drop(columns=[c for c in ["_seq"] if c in df.columns])
+
+
+def _admin_count_table(df: pd.DataFrame, column: str, label: str,
+                        missing: str = "(none)") -> None:
+    """value_counts on one column, rendered via render_centered_table. NULL or
+    empty values fold into `missing` (newly-logged columns are all-NULL on
+    historical rows, so this is the common case at first). Emits a 'No data
+    yet' caption and returns when the column is absent or the frame is empty."""
+    if df.empty or column not in df.columns:
+        st.caption("No data yet.")
+        return
+    series = df[column].astype("object").where(df[column].notna(), missing)
+    series = series.replace("", missing)
+    counts = series.value_counts().reset_index()
+    counts.columns = [label, "Count"]
+    render_centered_table(counts)
+
+
+def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
+    """Distinct session_ids across the union of the given tables -- the funnel
+    counts visitors, not rows, and a visitor can appear in several tables."""
+    parts = [d["session_id"] for d in dfs if not d.empty and "session_id" in d.columns]
+    if not parts:
+        return 0
+    return int(pd.concat(parts, ignore_index=True).dropna().nunique())
+
+
+# ---- 5a. Admin Analytics Dashboard (rendered as its own page) ------------
+
+def render_admin_dashboard() -> None:
+    """The full analytics view. Called ONLY from the admin-page dispatch
+    below (the ?admin=<admin_key> gate) -- there is no in-calculator
+    rendering of this and no sidebar checkbox anymore; the secret in the
+    URL is the whole gate. Reads Supabase and section-2 helpers only, which
+    is what makes it safe to define here above the dispatch (a def below
+    its caller is a runtime NameError that py_compile cannot see -- the
+    render_school_search lesson)."""
+    # load_table_safe does select("*"); the columns= list is only the fallback
+    # frame's shape when a table can't be read, so it names what each panel needs.
+    usage_df = load_table_safe(
+        "usage_logs", columns=["timestamp", "action", "traffic_source", "session_id"])
+    events_df = load_table_safe(
+        "scenario_events",
+        columns=["timestamp", "session_id", "event_seq", "dataset_mode",
+                 "career_data_source", "loan_mode", "cc_mode_a", "scenario_a_major",
+                 "scenario_a_loan_amount", "scenario_a_repayment_strategy",
+                 "roi_horizon_years", "experiment_arm"])
+    pdf_downloads_df = load_table_safe("pdf_downloads", columns=["timestamp", "session_id"])
+    scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp", "session_id"])
+    survey_df = load_table_safe("survey_responses", columns=["timestamp", "session_id"])
+
+    # One row per distinct visitor's final configuration -- the basis for every
+    # "what visitors configured" breakdown below.
+    final_df = _admin_final_per_session(events_df)
+
+    # Pageviews and "everything logged" are separate numbers and were being
+    # conflated: the old single "Total App Interactions" was len(usage_df),
+    # i.e. every row of every kind -- pageviews, presurvey_shown, searches and
+    # the interaction: events -- which now reads as if it meant interactions in
+    # the specific sense those events introduced. Split, and both named for
+    # what they actually count.
+    # BOTH pageview actions: this metric answers "how many visits", and a
+    # repayment-page visit is a visit. The split is reported separately below
+    # rather than by quietly dropping one of them here.
+    _pageviews = usage_df[usage_df["action"].isin(PAGEVIEW_ACTIONS)] if (
+        not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
+    # Per-tool landings, so a new standalone page shows up here without an edit.
+    # Built from the registry unconditionally -- an empty usage_df must yield
+    # zeros, not an empty dict. It previously yielded {}, which rendered the
+    # caption as "one per standalone tool ()." and reported nothing at all on a
+    # fresh dataset.
+    _have_actions = not usage_df.empty and "action" in usage_df.columns
+    _tool_views = {
+        t["label"]: (int((usage_df["action"] == t["action"]).sum())
+                     if _have_actions else 0)
+        for t in STANDALONE_TOOLS.values()
+    }
+    _calculator_views = int((usage_df["action"] == "pageview").sum()) if _have_actions else 0
+    _visits = (int(_pageviews["session_id"].dropna().nunique())
+               if "session_id" in _pageviews.columns else 0)
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    # Unique visits as the delta rather than a sixth column: the two numbers
+    # only mean anything read together, and they differ for two reasons worth
+    # seeing side by side (see the caption).
+    col1.metric("Pageviews", len(_pageviews),
+                delta=f"{_visits} unique visits", delta_color="off")
+    col2.metric("Logged Events", len(usage_df))
+    col3.metric("Survey Responses", len(survey_df))
+    col4.metric("PDF Downloads", len(pdf_downloads_df))
+    col5.metric("Scenario Shares", len(scenario_shares_df))
+    # Where each visit LANDED, as its own row. This lived only inside the
+    # caption below, which is the wrong place for a number anyone would want to
+    # read off: it is a number, so it gets a metric.
+    _land_cols = st.columns(1 + len(_tool_views))
+    _land_cols[0].metric("Calculator landings", _calculator_views)
+    for _col, (_label, _n) in zip(_land_cols[1:], _tool_views.items()):
+        _col.metric(f"{_label} landings", _n)
+
+    # Where visits came FROM. Parsed out of the nav: events rather than stored
+    # in columns of their own -- usage_logs has four columns and action is the
+    # only free-text one, which is this codebase's stated convention for new
+    # event types (see migrations.sql).
+    _navs = usage_df[usage_df["action"].astype(str).str.startswith("nav:")] \
+        if _have_actions else pd.DataFrame(columns=["action"])
+    if not _navs.empty:
+        _parsed = _navs["action"].str.extract(
+            r"^nav:from=(?P<From>[^:]+):to=(?P<To>[^:]+)(?P<Inpage>:inpage=1)?$")
+        _parsed = _parsed.dropna(subset=["From", "To"])
+        _parsed["Kind"] = _parsed["Inpage"].notna().map(
+            {True: "In-page handoff", False: "Page navigation"})
+        _table = (_parsed.groupby(["From", "To", "Kind"], as_index=False)
+                          .size().rename(columns={"size": "Count"})
+                          .sort_values("Count", ascending=False))
+        st.markdown("**Where visits came from**")
+        render_centered_table(_table)
+        # Cold = landed on a tool without following one of our own links. The
+        # subtraction uses PAGE navigations only; an in-page handoff produces
+        # no pageview, so counting it here would drive this negative.
+        _page_navs = _parsed[_parsed["Kind"] == "Page navigation"]
+        _cold = []
+        for _key, _t in STANDALONE_TOOLS.items():
+            _landed = int((usage_df["action"] == _t["action"]).sum())
+            _inbound = int((_page_navs["To"] == _key).sum())
+            _cold.append({"Tool": _t["label"], "Landings": _landed,
+                          "From inside the app": _inbound,
+                          "Arrived cold": max(_landed - _inbound, 0)})
+        render_centered_table(pd.DataFrame(_cold))
+        st.caption(
+            "**Arrived cold** is a landing with no `?from=` — a typed URL, a "
+            "shared link, or a search result. It is a subtraction, so it is a "
+            "floor rather than an exact count: a visitor who copies a link out "
+            "of their address bar passes `?from=` on to whoever they send it "
+            "to, and that recipient is counted as internal. Bounded and "
+            "one-directional — it can only understate cold arrivals."
+        )
+    else:
+        st.markdown("**Where visits came from**")
+        st.caption("No navigation between pages recorded yet.")
+
+    st.caption(
+        "**Pageviews** is the total of the landing row above -- the calculator "
+        "plus every standalone tool. Each is logged under its own action because "
+        "they are different populations asking different questions, but a visit "
+        "is a visit, so the total counts all of them. Landings split cleanly "
+        "only from 2026-08-02; before that every tool visit was logged as a "
+        "plain `pageview` (see migrations.sql). "
+        "**Unique visits** de-duplicates "
+        "them by session. They diverge for two reasons, neither of them traffic: "
+        "rows written before `session_id` existed cannot be de-duplicated at all "
+        f"({int(usage_df['session_id'].isna().sum()) if not usage_df.empty and 'session_id' in usage_df.columns else 0} "
+        "of them), and until 2026-08-01 a real browser logged **two** pageviews "
+        "per visit — a race between the write and its guard, since fixed. Both "
+        "inflate the left number only. **Logged Events** is every row of every "
+        "kind, which is what this panel used to call \"App Interactions\"."
+    )
+
+    st.divider()
+
+    # (a) App interactions over time
+    # Trends, from the SAME function the scheduled digest calls -- see
+    # traffic_windows. Two implementations of "yesterday's landings" would
+    # drift, and the place it would surface is a digest disagreeing with this
+    # panel, with no way to tell which is right.
+    _tw = traffic_windows(usage_df)
+    st.markdown(f"#### 📈 Landings per day — calendar days in {_tw['tz']}")
+    if _tw["daily"].empty:
+        st.caption("No landings yet.")
+    else:
+        _chart = _tw["daily"].drop(columns=["total"])
+        _chart.index = pd.to_datetime(list(_chart.index))
+        st.bar_chart(_chart)
+        _w = _tw["windows"]
+        _t1, _t2, _t3 = st.columns(3)
+        _t1.metric("Yesterday", _w["yesterday"]["total"],
+                   delta=_w["yesterday"]["total"] - _w["prior_day"]["total"])
+        _t2.metric("Last 7 days", _w["last7"]["total"],
+                   delta=_w["last7"]["total"] - _w["prior7"]["total"])
+        if _tw["best_day"]:
+            _d, _n = _tw["best_day"]
+            _t3.metric("Best day", _n, delta=f"{_d:%a %d %b}", delta_color="off")
+        st.caption(
+            f"Days are calendar days in **{_tw['tz']}**, not UTC: timestamps are "
+            "correct instants, but bucketing them by UTC date files a 20:00 "
+            "Pacific visit under the next day. Days with no visits are shown as "
+            "zero rather than omitted — a gap would read as missing data rather "
+            "than as a quiet day."
+        )
+
+    # Every row of every kind, kept as its own chart rather than relabelled:
+    # it answers a different question (how much did people DO) and it is what
+    # this panel has always shown. It is not a traffic measure -- nav: events
+    # alone added roughly one row per internal navigation.
+    st.markdown("#### 🧮 Logged events per day — every row, not just landings")
+    _daily = _admin_parse_dates(usage_df).dropna() if (
+        not usage_df.empty and "timestamp" in usage_df.columns) else pd.Series([], dtype=object)
+    if _daily.empty:
+        st.caption("No data yet.")
+    else:
+        by_day = _daily.value_counts().sort_index()
+        chart_df = pd.DataFrame({"Logged events": by_day.values},
+                                index=pd.to_datetime(list(by_day.index)))
+        st.bar_chart(chart_df)
+        st.caption(
+            "Counts interactions, navigations and survey events as well as "
+            "landings, so it moves when the app gains a new event type — it "
+            "stepped up when cross-page `nav:` events were added on 2026-08-03. "
+            "Use the landings chart above for traffic. This one is still bucketed "
+            "by **UTC** date."
+        )
+
+    # (b) App interactions by traffic source (?src= tag)
+    st.markdown("#### 🔗 Traffic by source")
+    st.caption(
+        "From the `?src=` tag on the link visitors arrived through; organic "
+        "visits carry none. **Sorted by pageviews** -- the reach a channel "
+        "actually delivered. *Unique visits* de-duplicates by session; *Logged "
+        "events* counts every row of every kind, so one engaged visitor can "
+        "outweigh several who bounced.\n\n"
+        "**Do not compare `(organic)`'s two columns.** Rows written before "
+        "`session_id` existed cannot be de-duplicated, and almost all of them "
+        "are organic -- so its unique-visit figure counts only the newer rows "
+        "while its pageview figure counts all of them. Tagged sources have no "
+        "such gap; where their two columns differ it is the pre-2026-08-01 "
+        "double-count, which is bounded and now fixed."
+    )
+    if usage_df.empty or "traffic_source" not in usage_df.columns:
+        st.caption("No data yet.")
+    else:
+        _src = usage_df.copy()
+        _src["Source"] = (_src["traffic_source"].astype("object")
+                           .where(_src["traffic_source"].notna(), "(organic)")
+                           .replace("", "(organic)"))
+        _pv_only = (_src[_src["action"].isin(PAGEVIEW_ACTIONS)]
+                if "action" in _src.columns else _src.iloc[0:0])
+        _by_src = pd.DataFrame({
+            "Pageviews": _pv_only.groupby("Source").size(),
+            "Unique visits": (_pv_only.groupby("Source")["session_id"].nunique()
+                               if "session_id" in _pv_only.columns else 0),
+            "Logged events": _src.groupby("Source").size(),
+        }).fillna(0).astype(int)
+        # Sort on pageviews, then unique visits: two channels with equal reach
+        # are not equally good, and the tie-break should favour the one that
+        # brought distinct people rather than repeat loads.
+        _by_src = (_by_src.sort_values(["Pageviews", "Unique visits"], ascending=False)
+                          .reset_index())
+        render_centered_table(_by_src)
+
+    st.divider()
+    st.markdown("#### 🎓 What visitors configured")
+    st.caption(f"One row per distinct visitor ({len(final_df)} sessions with a "
+               "scenario), taking each session's final selection.")
+
+    # (e) Major vs Career
+    st.markdown("**Chose by — Major vs Career**")
+    _admin_count_table(final_df, "dataset_mode", "Mode")
+
+    # (f) National vs California (Career mode only -- the radio is disabled in
+    # Major mode, so a Major-mode row's value is just the inert default)
+    st.markdown("**Wage dataset — National vs California**")
+    st.caption("Career mode only; Major mode has no geography, so those "
+               "sessions are excluded rather than counted as the default.")
+    _career_only = final_df[final_df["dataset_mode"] == DATASET_MODE_CAREER] if (
+        not final_df.empty and "dataset_mode" in final_df.columns) else final_df
+    _admin_count_table(_career_only, "career_data_source", "Dataset")
+
+    # (c) Community-college path
+    st.markdown("**Community-college path**")
+    _admin_count_table(final_df, "cc_mode_a", "CC mode")
+
+    # (d) Loan estimate -- amount ranges AND Simplified/Detailed mode
+    st.markdown("**Loan estimate — amount ranges**")
+    _amounts = pd.to_numeric(final_df["scenario_a_loan_amount"], errors="coerce").dropna() if (
+        not final_df.empty and "scenario_a_loan_amount" in final_df.columns) else pd.Series([], dtype=float)
+    if _amounts.empty:
+        st.caption("No data yet.")
+    else:
+        _bins = [-0.01, 0, 10_000, 25_000, 50_000, 100_000, float("inf")]
+        _labels = ["$0", "≤ $10k", "≤ $25k", "≤ $50k", "≤ $100k", "> $100k"]
+        _buckets = pd.cut(_amounts, bins=_bins, labels=_labels)
+        _table = _buckets.value_counts().reindex(_labels).fillna(0).astype(int).reset_index()
+        _table.columns = ["Loan amount", "Count"]
+        render_centered_table(_table)
+
+    st.markdown("**Loan estimate — Simplified vs Detailed**")
+    _admin_count_table(final_df, "loan_mode", "Loan mode")
+
+    st.divider()
+    st.markdown("#### 🔎 Other breakdowns")
+
+    # Top majors / careers chosen
+    st.markdown("**Top 10 majors / careers chosen**")
+    if final_df.empty or "scenario_a_major" not in final_df.columns or \
+            final_df["scenario_a_major"].dropna().empty:
+        st.caption("No data yet.")
+    else:
+        _top = final_df["scenario_a_major"].dropna().value_counts().head(10).reset_index()
+        _top.columns = ["Major / career", "Count"]
+        render_centered_table(_top)
+
+    # Repayment strategy
+    st.markdown("**Repayment strategy**")
+    _admin_count_table(final_df, "scenario_a_repayment_strategy", "Strategy")
+
+    # ROI horizon
+    st.markdown("**ROI horizon (years)**")
+    _admin_count_table(final_df, "roi_horizon_years", "Horizon (yrs)")
+
+    # Experiment arm (H2 randomised assignment)
+    st.markdown("**Experiment arm (H2 assignment)**")
+    _admin_count_table(final_df, "experiment_arm", "Arm")
+
+    # Engagement funnel -- distinct visitors reaching each stage
+    st.markdown("**Engagement funnel (distinct sessions)**")
+    _funnel = pd.DataFrame({
+        "Stage": ["Visited (pageviews)", "Configured a scenario",
+                  "Committed (PDF / share / survey)"],
+        "Sessions": [_admin_n_sessions(usage_df),
+                     _admin_n_sessions(events_df),
+                     _admin_n_sessions(pdf_downloads_df, scenario_shares_df, survey_df)],
+    })
+    render_centered_table(_funnel)
+
+    st.divider()
+
+
+
 # ?tool=repayment serves the repayment-plan comparison on its own, as a
 # shareable link that is not the college calculator. They answer different
 # questions -- whether to borrow, versus what to do about a balance you already
@@ -13006,6 +13367,25 @@ active_tool = st.session_state.active_tool
 # Kept as its own name because several places below read it and "the repayment
 # page" is a clearer thing to test for than "active_tool == 'repayment'".
 repayment_only = active_tool == "repayment"
+
+# The admin page. Dispatched BEFORE the ?tool= pages and the calculator: a
+# session that presented the admin key is the researcher, and the dashboard
+# is the whole page -- same sidebar-hiding treatment as the standalone
+# tools, for the same reason (the sidebar has executed and defined its
+# names, but describes a scenario this page is not about). Deliberately NOT
+# a STANDALONE_TOOLS entry: that registry feeds PAGEVIEW_ACTIONS,
+# NAV_ORIGINS, the traffic split and the cross-page links, and an admin
+# surface belongs in none of them.
+if st.session_state.admin_revealed:
+    st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>",
+                unsafe_allow_html=True)
+    st.title("📊 Admin Analytics Dashboard")
+    st.caption(
+        "Visible only with the `?admin=` key. This session logs nothing: "
+        "no pageview, no scenario events."
+    )
+    render_admin_dashboard()
+    st.stop()
 
 if active_tool:
     # The sidebar still executes -- it defines names section 5 reads -- but it
@@ -13500,350 +13880,6 @@ top_actions_container = st.container()
 # leaves it empty and shows a per-column verdict in each panel instead, since
 # a single top banner can't answer for two scenarios at once.
 breakeven_banner_container = st.container()
-
-# ---- 5a. Admin Analytics Dashboard: aggregation helpers -------------------
-
-def _admin_parse_dates(df: pd.DataFrame) -> pd.Series:
-    """usage_logs timestamps are ISO strings stamped in the visitor's own
-    timezone (now_local), so offsets vary row to row -- utc=True normalizes
-    them to one axis, errors='coerce' turns anything unparseable into NaT
-    rather than raising. Returns a Series of python dates aligned to df.index."""
-    return pd.to_datetime(df["timestamp"], utc=True, errors="coerce").dt.date
-
-
-def _admin_final_per_session(events_df: pd.DataFrame) -> pd.DataFrame:
-    """One row per session_id -- the visitor's LAST scenario_events row (max
-    event_seq) -- so the breakdowns read as 'what each distinct visitor ended
-    up configuring', not raw event volume (a session that tried five majors
-    would otherwise count five times). Order by event_seq, never timestamp:
-    timestamps come from the visitor's own clock and can tie or run backwards."""
-    if events_df.empty or "session_id" not in events_df.columns:
-        return events_df
-    df = events_df.copy()
-    if "event_seq" in df.columns:
-        df["_seq"] = pd.to_numeric(df["event_seq"], errors="coerce").fillna(-1)
-        df = df.sort_values("_seq")
-    df = df.drop_duplicates(subset="session_id", keep="last")
-    return df.drop(columns=[c for c in ["_seq"] if c in df.columns])
-
-
-def _admin_count_table(df: pd.DataFrame, column: str, label: str,
-                        missing: str = "(none)") -> None:
-    """value_counts on one column, rendered via render_centered_table. NULL or
-    empty values fold into `missing` (newly-logged columns are all-NULL on
-    historical rows, so this is the common case at first). Emits a 'No data
-    yet' caption and returns when the column is absent or the frame is empty."""
-    if df.empty or column not in df.columns:
-        st.caption("No data yet.")
-        return
-    series = df[column].astype("object").where(df[column].notna(), missing)
-    series = series.replace("", missing)
-    counts = series.value_counts().reset_index()
-    counts.columns = [label, "Count"]
-    render_centered_table(counts)
-
-
-def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
-    """Distinct session_ids across the union of the given tables -- the funnel
-    counts visitors, not rows, and a visitor can appear in several tables."""
-    parts = [d["session_id"] for d in dfs if not d.empty and "session_id" in d.columns]
-    if not parts:
-        return 0
-    return int(pd.concat(parts, ignore_index=True).dropna().nunique())
-
-
-# ---- 5a. Admin Analytics Dashboard (hidden behind sidebar checkbox) ------
-
-if admin_enabled:
-    st.subheader("📊 Admin Analytics Dashboard")
-
-    # load_table_safe does select("*"); the columns= list is only the fallback
-    # frame's shape when a table can't be read, so it names what each panel needs.
-    usage_df = load_table_safe(
-        "usage_logs", columns=["timestamp", "action", "traffic_source", "session_id"])
-    events_df = load_table_safe(
-        "scenario_events",
-        columns=["timestamp", "session_id", "event_seq", "dataset_mode",
-                 "career_data_source", "loan_mode", "cc_mode_a", "scenario_a_major",
-                 "scenario_a_loan_amount", "scenario_a_repayment_strategy",
-                 "roi_horizon_years", "experiment_arm"])
-    pdf_downloads_df = load_table_safe("pdf_downloads", columns=["timestamp", "session_id"])
-    scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp", "session_id"])
-    survey_df = load_table_safe("survey_responses", columns=["timestamp", "session_id"])
-
-    # One row per distinct visitor's final configuration -- the basis for every
-    # "what visitors configured" breakdown below.
-    final_df = _admin_final_per_session(events_df)
-
-    # Pageviews and "everything logged" are separate numbers and were being
-    # conflated: the old single "Total App Interactions" was len(usage_df),
-    # i.e. every row of every kind -- pageviews, presurvey_shown, searches and
-    # the interaction: events -- which now reads as if it meant interactions in
-    # the specific sense those events introduced. Split, and both named for
-    # what they actually count.
-    # BOTH pageview actions: this metric answers "how many visits", and a
-    # repayment-page visit is a visit. The split is reported separately below
-    # rather than by quietly dropping one of them here.
-    _pageviews = usage_df[usage_df["action"].isin(PAGEVIEW_ACTIONS)] if (
-        not usage_df.empty and "action" in usage_df.columns) else pd.DataFrame()
-    # Per-tool landings, so a new standalone page shows up here without an edit.
-    # Built from the registry unconditionally -- an empty usage_df must yield
-    # zeros, not an empty dict. It previously yielded {}, which rendered the
-    # caption as "one per standalone tool ()." and reported nothing at all on a
-    # fresh dataset.
-    _have_actions = not usage_df.empty and "action" in usage_df.columns
-    _tool_views = {
-        t["label"]: (int((usage_df["action"] == t["action"]).sum())
-                     if _have_actions else 0)
-        for t in STANDALONE_TOOLS.values()
-    }
-    _calculator_views = int((usage_df["action"] == "pageview").sum()) if _have_actions else 0
-    _visits = (int(_pageviews["session_id"].dropna().nunique())
-               if "session_id" in _pageviews.columns else 0)
-
-    col1, col2, col3, col4, col5 = st.columns(5)
-    # Unique visits as the delta rather than a sixth column: the two numbers
-    # only mean anything read together, and they differ for two reasons worth
-    # seeing side by side (see the caption).
-    col1.metric("Pageviews", len(_pageviews),
-                delta=f"{_visits} unique visits", delta_color="off")
-    col2.metric("Logged Events", len(usage_df))
-    col3.metric("Survey Responses", len(survey_df))
-    col4.metric("PDF Downloads", len(pdf_downloads_df))
-    col5.metric("Scenario Shares", len(scenario_shares_df))
-    # Where each visit LANDED, as its own row. This lived only inside the
-    # caption below, which is the wrong place for a number anyone would want to
-    # read off: it is a number, so it gets a metric.
-    _land_cols = st.columns(1 + len(_tool_views))
-    _land_cols[0].metric("Calculator landings", _calculator_views)
-    for _col, (_label, _n) in zip(_land_cols[1:], _tool_views.items()):
-        _col.metric(f"{_label} landings", _n)
-
-    # Where visits came FROM. Parsed out of the nav: events rather than stored
-    # in columns of their own -- usage_logs has four columns and action is the
-    # only free-text one, which is this codebase's stated convention for new
-    # event types (see migrations.sql).
-    _navs = usage_df[usage_df["action"].astype(str).str.startswith("nav:")] \
-        if _have_actions else pd.DataFrame(columns=["action"])
-    if not _navs.empty:
-        _parsed = _navs["action"].str.extract(
-            r"^nav:from=(?P<From>[^:]+):to=(?P<To>[^:]+)(?P<Inpage>:inpage=1)?$")
-        _parsed = _parsed.dropna(subset=["From", "To"])
-        _parsed["Kind"] = _parsed["Inpage"].notna().map(
-            {True: "In-page handoff", False: "Page navigation"})
-        _table = (_parsed.groupby(["From", "To", "Kind"], as_index=False)
-                          .size().rename(columns={"size": "Count"})
-                          .sort_values("Count", ascending=False))
-        st.markdown("**Where visits came from**")
-        render_centered_table(_table)
-        # Cold = landed on a tool without following one of our own links. The
-        # subtraction uses PAGE navigations only; an in-page handoff produces
-        # no pageview, so counting it here would drive this negative.
-        _page_navs = _parsed[_parsed["Kind"] == "Page navigation"]
-        _cold = []
-        for _key, _t in STANDALONE_TOOLS.items():
-            _landed = int((usage_df["action"] == _t["action"]).sum())
-            _inbound = int((_page_navs["To"] == _key).sum())
-            _cold.append({"Tool": _t["label"], "Landings": _landed,
-                          "From inside the app": _inbound,
-                          "Arrived cold": max(_landed - _inbound, 0)})
-        render_centered_table(pd.DataFrame(_cold))
-        st.caption(
-            "**Arrived cold** is a landing with no `?from=` — a typed URL, a "
-            "shared link, or a search result. It is a subtraction, so it is a "
-            "floor rather than an exact count: a visitor who copies a link out "
-            "of their address bar passes `?from=` on to whoever they send it "
-            "to, and that recipient is counted as internal. Bounded and "
-            "one-directional — it can only understate cold arrivals."
-        )
-    else:
-        st.markdown("**Where visits came from**")
-        st.caption("No navigation between pages recorded yet.")
-
-    st.caption(
-        "**Pageviews** is the total of the landing row above -- the calculator "
-        "plus every standalone tool. Each is logged under its own action because "
-        "they are different populations asking different questions, but a visit "
-        "is a visit, so the total counts all of them. Landings split cleanly "
-        "only from 2026-08-02; before that every tool visit was logged as a "
-        "plain `pageview` (see migrations.sql). "
-        "**Unique visits** de-duplicates "
-        "them by session. They diverge for two reasons, neither of them traffic: "
-        "rows written before `session_id` existed cannot be de-duplicated at all "
-        f"({int(usage_df['session_id'].isna().sum()) if not usage_df.empty and 'session_id' in usage_df.columns else 0} "
-        "of them), and until 2026-08-01 a real browser logged **two** pageviews "
-        "per visit — a race between the write and its guard, since fixed. Both "
-        "inflate the left number only. **Logged Events** is every row of every "
-        "kind, which is what this panel used to call \"App Interactions\"."
-    )
-
-    st.divider()
-
-    # (a) App interactions over time
-    # Trends, from the SAME function the scheduled digest calls -- see
-    # traffic_windows. Two implementations of "yesterday's landings" would
-    # drift, and the place it would surface is a digest disagreeing with this
-    # panel, with no way to tell which is right.
-    _tw = traffic_windows(usage_df)
-    st.markdown(f"#### 📈 Landings per day — calendar days in {_tw['tz']}")
-    if _tw["daily"].empty:
-        st.caption("No landings yet.")
-    else:
-        _chart = _tw["daily"].drop(columns=["total"])
-        _chart.index = pd.to_datetime(list(_chart.index))
-        st.bar_chart(_chart)
-        _w = _tw["windows"]
-        _t1, _t2, _t3 = st.columns(3)
-        _t1.metric("Yesterday", _w["yesterday"]["total"],
-                   delta=_w["yesterday"]["total"] - _w["prior_day"]["total"])
-        _t2.metric("Last 7 days", _w["last7"]["total"],
-                   delta=_w["last7"]["total"] - _w["prior7"]["total"])
-        if _tw["best_day"]:
-            _d, _n = _tw["best_day"]
-            _t3.metric("Best day", _n, delta=f"{_d:%a %d %b}", delta_color="off")
-        st.caption(
-            f"Days are calendar days in **{_tw['tz']}**, not UTC: timestamps are "
-            "correct instants, but bucketing them by UTC date files a 20:00 "
-            "Pacific visit under the next day. Days with no visits are shown as "
-            "zero rather than omitted — a gap would read as missing data rather "
-            "than as a quiet day."
-        )
-
-    # Every row of every kind, kept as its own chart rather than relabelled:
-    # it answers a different question (how much did people DO) and it is what
-    # this panel has always shown. It is not a traffic measure -- nav: events
-    # alone added roughly one row per internal navigation.
-    st.markdown("#### 🧮 Logged events per day — every row, not just landings")
-    _daily = _admin_parse_dates(usage_df).dropna() if (
-        not usage_df.empty and "timestamp" in usage_df.columns) else pd.Series([], dtype=object)
-    if _daily.empty:
-        st.caption("No data yet.")
-    else:
-        by_day = _daily.value_counts().sort_index()
-        chart_df = pd.DataFrame({"Logged events": by_day.values},
-                                index=pd.to_datetime(list(by_day.index)))
-        st.bar_chart(chart_df)
-        st.caption(
-            "Counts interactions, navigations and survey events as well as "
-            "landings, so it moves when the app gains a new event type — it "
-            "stepped up when cross-page `nav:` events were added on 2026-08-03. "
-            "Use the landings chart above for traffic. This one is still bucketed "
-            "by **UTC** date."
-        )
-
-    # (b) App interactions by traffic source (?src= tag)
-    st.markdown("#### 🔗 Traffic by source")
-    st.caption(
-        "From the `?src=` tag on the link visitors arrived through; organic "
-        "visits carry none. **Sorted by pageviews** -- the reach a channel "
-        "actually delivered. *Unique visits* de-duplicates by session; *Logged "
-        "events* counts every row of every kind, so one engaged visitor can "
-        "outweigh several who bounced.\n\n"
-        "**Do not compare `(organic)`'s two columns.** Rows written before "
-        "`session_id` existed cannot be de-duplicated, and almost all of them "
-        "are organic -- so its unique-visit figure counts only the newer rows "
-        "while its pageview figure counts all of them. Tagged sources have no "
-        "such gap; where their two columns differ it is the pre-2026-08-01 "
-        "double-count, which is bounded and now fixed."
-    )
-    if usage_df.empty or "traffic_source" not in usage_df.columns:
-        st.caption("No data yet.")
-    else:
-        _src = usage_df.copy()
-        _src["Source"] = (_src["traffic_source"].astype("object")
-                           .where(_src["traffic_source"].notna(), "(organic)")
-                           .replace("", "(organic)"))
-        _pv_only = (_src[_src["action"].isin(PAGEVIEW_ACTIONS)]
-                if "action" in _src.columns else _src.iloc[0:0])
-        _by_src = pd.DataFrame({
-            "Pageviews": _pv_only.groupby("Source").size(),
-            "Unique visits": (_pv_only.groupby("Source")["session_id"].nunique()
-                               if "session_id" in _pv_only.columns else 0),
-            "Logged events": _src.groupby("Source").size(),
-        }).fillna(0).astype(int)
-        # Sort on pageviews, then unique visits: two channels with equal reach
-        # are not equally good, and the tie-break should favour the one that
-        # brought distinct people rather than repeat loads.
-        _by_src = (_by_src.sort_values(["Pageviews", "Unique visits"], ascending=False)
-                          .reset_index())
-        render_centered_table(_by_src)
-
-    st.divider()
-    st.markdown("#### 🎓 What visitors configured")
-    st.caption(f"One row per distinct visitor ({len(final_df)} sessions with a "
-               "scenario), taking each session's final selection.")
-
-    # (e) Major vs Career
-    st.markdown("**Chose by — Major vs Career**")
-    _admin_count_table(final_df, "dataset_mode", "Mode")
-
-    # (f) National vs California (Career mode only -- the radio is disabled in
-    # Major mode, so a Major-mode row's value is just the inert default)
-    st.markdown("**Wage dataset — National vs California**")
-    st.caption("Career mode only; Major mode has no geography, so those "
-               "sessions are excluded rather than counted as the default.")
-    _career_only = final_df[final_df["dataset_mode"] == DATASET_MODE_CAREER] if (
-        not final_df.empty and "dataset_mode" in final_df.columns) else final_df
-    _admin_count_table(_career_only, "career_data_source", "Dataset")
-
-    # (c) Community-college path
-    st.markdown("**Community-college path**")
-    _admin_count_table(final_df, "cc_mode_a", "CC mode")
-
-    # (d) Loan estimate -- amount ranges AND Simplified/Detailed mode
-    st.markdown("**Loan estimate — amount ranges**")
-    _amounts = pd.to_numeric(final_df["scenario_a_loan_amount"], errors="coerce").dropna() if (
-        not final_df.empty and "scenario_a_loan_amount" in final_df.columns) else pd.Series([], dtype=float)
-    if _amounts.empty:
-        st.caption("No data yet.")
-    else:
-        _bins = [-0.01, 0, 10_000, 25_000, 50_000, 100_000, float("inf")]
-        _labels = ["$0", "≤ $10k", "≤ $25k", "≤ $50k", "≤ $100k", "> $100k"]
-        _buckets = pd.cut(_amounts, bins=_bins, labels=_labels)
-        _table = _buckets.value_counts().reindex(_labels).fillna(0).astype(int).reset_index()
-        _table.columns = ["Loan amount", "Count"]
-        render_centered_table(_table)
-
-    st.markdown("**Loan estimate — Simplified vs Detailed**")
-    _admin_count_table(final_df, "loan_mode", "Loan mode")
-
-    st.divider()
-    st.markdown("#### 🔎 Other breakdowns")
-
-    # Top majors / careers chosen
-    st.markdown("**Top 10 majors / careers chosen**")
-    if final_df.empty or "scenario_a_major" not in final_df.columns or \
-            final_df["scenario_a_major"].dropna().empty:
-        st.caption("No data yet.")
-    else:
-        _top = final_df["scenario_a_major"].dropna().value_counts().head(10).reset_index()
-        _top.columns = ["Major / career", "Count"]
-        render_centered_table(_top)
-
-    # Repayment strategy
-    st.markdown("**Repayment strategy**")
-    _admin_count_table(final_df, "scenario_a_repayment_strategy", "Strategy")
-
-    # ROI horizon
-    st.markdown("**ROI horizon (years)**")
-    _admin_count_table(final_df, "roi_horizon_years", "Horizon (yrs)")
-
-    # Experiment arm (H2 randomised assignment)
-    st.markdown("**Experiment arm (H2 assignment)**")
-    _admin_count_table(final_df, "experiment_arm", "Arm")
-
-    # Engagement funnel -- distinct visitors reaching each stage
-    st.markdown("**Engagement funnel (distinct sessions)**")
-    _funnel = pd.DataFrame({
-        "Stage": ["Visited (pageviews)", "Configured a scenario",
-                  "Committed (PDF / share / survey)"],
-        "Sessions": [_admin_n_sessions(usage_df),
-                     _admin_n_sessions(events_df),
-                     _admin_n_sessions(pdf_downloads_df, scenario_shares_df, survey_df)],
-    })
-    render_centered_table(_funnel)
-
-    st.divider()
 
 # ---- 5b. School Data Lookup (local COA dataset + College Scorecard API) --
 # Cost of Attendance (in/out-of-state) comes from the local dataset built by
