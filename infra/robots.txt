@@ -1,0 +1,49 @@
+# worthmydegree.com — free college-ROI calculator (student project)
+# Canonical host. AI crawlers welcome; see /llms.txt for a dense summary.
+# Reference copy: the served file is the ROBOTS constant in infra/worker.js.
+# Change BOTH in the same PR.
+
+User-agent: *
+Allow: /
+Disallow: /*?*admin=
+Disallow: /*?*test=
+Disallow: /*?*research=
+
+# --- AI / LLM crawlers: explicitly welcome ---
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: meta-externalagent
+Allow: /
+
+Sitemap: https://worthmydegree.com/sitemap.xml

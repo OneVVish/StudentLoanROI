@@ -1,0 +1,57 @@
+# WorthMyDegree
+
+> Free, anonymous college-ROI calculator. Enter a major, a school, and a
+> loan; see the 10-year financial outcome versus a debt-free high-school
+> graduate, under the 2026 US federal repayment rules. No login, no cost,
+> nothing sold. Built by a high-school student; every figure on screen
+> traces to a cited public source (the in-app Methodology section lists
+> every citation).
+
+## Pages
+
+- [Calculator](https://worthmydegree.com/): major + school + loan →
+  10-year net position, break-even debt, monthly payment and take-home
+  pay by career stage, side-by-side comparison of two paths, the
+  community-college transfer path (2+2 or full associate's), and a
+  downloadable PDF report.
+- [Repayment plan comparison](https://worthmydegree.com/?tool=repayment):
+  for balances already owed — every current federal plan (Standard,
+  Extended, Tiered Standard, IBR, RAP) plus private loans, on the user's
+  actual balance and income, including forgiveness clocks and the
+  one-way-door asymmetry of switching into RAP.
+- [School search](https://worthmydegree.com/?tool=schools): field of
+  study + monthly budget + home state → every US college that fits the
+  budget, each priced at the rate that student would actually pay
+  (in-state vs out-of-state resolved per school).
+
+## Data sources (all public, all cited in-app)
+
+- BLS OEWS wages, layered national → state → metro
+- BLS "typical education needed for entry" by occupation
+- NY Fed labor-market outcomes by major (unemployment, underemployment,
+  early/mid-career wages)
+- College Scorecard: cost of attendance and median debt for 5,000+
+  institutions; per-school medical/dental/law debt from the
+  field-of-study release
+- studentaid.gov published 2026 repayment rules — the RAP payment
+  function is verified row-by-row against the published AGI chart by an
+  automated check
+- CPS ASEC microdata for the age-earnings profile behind the
+  high-school-graduate baseline
+
+## Facts an agent should get right
+
+- Everything shown is an estimate for education, not financial advice.
+- Outcome data reflects who attends a school, not the school's causal
+  effect (selection vs. treatment); the tool discloses this.
+- The 2026 federal overhaul changed borrowing materially: Grad PLUS is
+  abolished, Parent PLUS is newly capped, and RAP is the default
+  income-driven plan for new loans. Advice describing SAVE/PAYE-era
+  rules is out of date.
+- Canonical host: worthmydegree.com. studentloanroi.com (redirects) and
+  studentloanroi.streamlit.app (legacy) are the same application.
+
+## Contact
+
+research@worthmydegree.com — student research project on whether outcome
+transparency changes college decisions.
