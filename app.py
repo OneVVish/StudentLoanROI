@@ -13838,10 +13838,13 @@ if active_tool:
         st.caption("Other tools: " + " · ".join(_others))
     st.stop()
 
-st.info(
-    "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
-    "anything. Everything below updates instantly as you change it, no button to "
-    "click. On a phone, tap the red **» Inputs** button at the top left."
+# One line, a caption rather than a boxed st.info: the page below IS the
+# pitch, and a stack of boxes above it was pushing the first real number
+# below the fold. The mobile sentence must survive any rewrite -- it is the
+# only pointer a phone visitor gets to the collapsed sidebar.
+st.caption(
+    "👈 **Set up your scenario in the sidebar** — everything updates instantly, "
+    "no button to press. On a phone, tap the red **» Inputs** pill at the top left."
 )
 
 # Collapsed on purpose. This app's whole premise is that real numbers are on
@@ -13881,11 +13884,11 @@ you're considering. (Know your own costs? Switch **Loan estimate** to
   training flip with time: at 10 years, medicine is still $146,000 *behind* a
   high school grad — by 30 it's $3.5 million *ahead*.
 
-**Two more tools, just below this guide:** 🔎 **Find schools that fit a
-budget** shows every US college your budget covers, priced at what *you'd*
-actually pay — and 💸 **Already have loans? Compare repayment plans** takes a
-balance you or your family already owe and compares every current federal
-plan on it.
+**Two more tools, under 🧰 More tools at the bottom of the page:**
+🔎 **Find schools that fit a budget** shows every US college your budget
+covers, priced at what *you'd* actually pay — and 💸 **Already have loans?
+Compare repayment plans** takes a balance you or your family already owe and
+compares every current federal plan on it.
 
 **Keep in mind.** These are averages, not predictions about you — and "worth it
 financially" isn't the same as "worth it to you." Sources are in
@@ -13893,22 +13896,24 @@ financially" isn't the same as "worth it to you." Sources are in
         """
     ).replace("$", r"\$"))
 
-# Reserved here, at the top of the page, so the Download PDF Report / Share
-# Scenario buttons render in this position even though the code that fills
-# them in runs much later (after the PDF bytes and share params are actually
-# computed) -- st.container() is position-anchored: content written into a
-# container later in the script still renders wherever the container was
-# first created, not wherever that code physically executes.
-top_actions_container = st.container()
-
-# The break-even verdict, anchored high on the page (same position-anchored
-# st.container() trick as top_actions_container above): it's the one output a
-# student can act on -- "is this debt worth it, yes or no" -- so it leads
-# rather than sitting under the ROI chart where it was easy to miss. Filled
-# from the single-scenario branch once the scenario is computed. Compare Mode
-# leaves it empty and shows a per-column verdict in each panel instead, since
-# a single top banner can't answer for two scenarios at once.
+# The break-even verdict, anchored high on the page via a position-anchored
+# st.container(): it's the one output a student can act on -- "is this debt
+# worth it, yes or no" -- so it leads the page, ABOVE the PDF/Share buttons
+# (the verdict is why a visitor is here; the buttons are what they do after
+# reading it). Content written into a container later in the script still
+# renders wherever the container was first created. Filled from the
+# single-scenario branch once the scenario is computed. Compare Mode leaves
+# it empty (an empty container renders nothing) and shows a per-column
+# verdict in each panel instead, since a single top banner can't answer for
+# two scenarios at once.
 breakeven_banner_container = st.container()
+
+# Reserved here so the Download PDF Report / Share Scenario buttons render
+# in this position even though the code that fills them in runs much later
+# (after the PDF bytes and share params are actually computed) -- the same
+# position-anchoring trick as the verdict banner above. Filled by BOTH
+# result branches.
+top_actions_container = st.container()
 
 # ---- 5b. School Data Lookup (local COA dataset + College Scorecard API) --
 # Cost of Attendance (in/out-of-state) comes from the local dataset built by
@@ -13974,16 +13979,13 @@ if not enable_prestige_mode:
     else:
         render_school_lookup(st.container(), school_name_a, "A", unitid=school_unitid_a)
 
-    # Directly under the lookup, which has just printed what the named school
-    # costs -- so the obvious next question ("is there anything cheaper that
-    # teaches this?") is answerable in the same breath. Above the 5c fork, so
-    # no result branch changes.
-    render_school_search()
-    # Also above the 5c fork, so both result branches get it and the H2 arms
-    # cannot differ by it. Placed last because it answers a different question
-    # from everything above -- what to do about debt you already have, rather
-    # than whether to take it on.
-    render_existing_loan_comparison()
+# The school-search and existing-loan expanders used to render right here,
+# stacked between the COA bar and the results. They moved to the "🧰 More
+# tools" zone after the branch rejoin (below Get Your Real Numbers): a
+# first-time visitor's path to the verdict now crosses zero side-quests.
+# Parity-safe in both homes -- shared before the fork, shared after the
+# rejoin -- and the standalone ?tool= pages are unaffected (the dispatch
+# calls the render functions directly).
 
 
 def _npc_link_markdown(school_name: str) -> str:
@@ -15129,6 +15131,17 @@ st.divider()
 # conditional short-circuits so the name isn't looked up in single-scenario mode.
 render_get_accurate_inputs(
     school_name_a, school_name_b if compare_mode else None, compare_mode, enable_prestige_mode)
+
+# The two companion tools, moved down from the pre-results stack (see the
+# comment where they used to live). Shared, after the rejoin, so both
+# experiment arms get them identically. The prestige gate is preserved
+# behavior, not a new decision -- both tools were already hidden in Prestige
+# Mode at their old position.
+if not enable_prestige_mode:
+    st.divider()
+    st.subheader("🧰 More tools")
+    render_school_search()
+    render_existing_loan_comparison()
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------
 
