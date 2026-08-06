@@ -16,6 +16,12 @@ analysis_output/
 # Research paper draft -- kept local, not part of the app codebase
 research_paper_draft.md
 
+# Internal engineering field guide (lessons, constraints, past bugs) --
+# deliberately kept out of the public repo, and purged from git history
+# 2026-08-06 before the repo went public. Code comments still cite it by
+# name; ARCHITECTURE.md is the public map, this is the private manual.
+CLAUDE.md
+
 # Slide deck for counselor/teacher outreach -- kept local, not part of the app codebase
 presentation/
 

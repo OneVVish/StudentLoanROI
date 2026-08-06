@@ -1,10 +1,11 @@
 # Architecture
 
 What runs where, how the pieces talk to each other, and where each number
-on screen comes from. This is the **map**; [CLAUDE.md](CLAUDE.md) is the
-**field guide** — the accumulated lessons about *why* the code is shaped
-the way it is and what breaks when you touch it carelessly. Read this
-first, that one before changing anything.
+on screen comes from. This is the **map**. Code comments throughout the
+repo also cite `CLAUDE.md`, an internal **field guide** of accumulated
+lessons — why the code is shaped the way it is and what breaks when you
+touch it carelessly — which is deliberately not included in this
+repository.
 
 ## The one-paragraph version
 
@@ -232,5 +233,5 @@ check_*.py                 the six guards
 analyze_*.py               local research tools (need local secrets)
 infra/                     Cloudflare Worker + robots/sitemap/llms.txt + runbook
 migrations.sql             every manual Supabase schema/data change
-CLAUDE.md                  the field guide: lessons, constraints, past bugs
+CLAUDE.md                  internal field guide (local only, not in the repo)
 ```
