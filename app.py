@@ -13883,20 +13883,12 @@ if active_tool:
         st.caption("Other tools: " + " · ".join(_others))
     st.stop()
 
-# One line, a caption rather than a boxed st.info: the page below IS the
-# pitch, and a stack of boxes above it was pushing the first real number
-# below the fold. The mobile sentence must survive any rewrite -- it is the
-# only pointer a phone visitor gets to the collapsed sidebar.
-st.caption(
-    "👈 **Set up your scenario in the sidebar** — everything updates instantly, "
-    "no button to press. On a phone, tap the red **» Inputs** pill at the top left."
-)
-
 # Collapsed on purpose. This app's whole premise is that real numbers are on
 # screen before you touch anything -- there is deliberately no "calculate"
 # button -- so a guide that interrupts that is worse than no guide. Costs
 # nothing to a visitor who doesn't want it, one click for one who's lost.
-# The st.info above is the one-second version; this is the sixty-second one.
+# The set-up-your-scenario caption just below is the one-second version;
+# this is the sixty-second one.
 #
 # Aimed at a student landing cold. Before this, a first-time visitor got three
 # lines of orientation (title, disclaimer, the banner above) and everything
@@ -13940,6 +13932,17 @@ financially" isn't the same as "worth it to you." Sources are in
 **📚 Methodology & Sources** at the bottom.
         """
     ).replace("$", r"\$"))
+
+# One line, a caption rather than a boxed st.info: the page below IS the
+# pitch, and a stack of boxes above it was pushing the first real number
+# below the fold. Placed AFTER the New-here guide -- read top to bottom the
+# page now goes what-this-is, then where-to-act. The mobile sentence must
+# survive any rewrite: it is the only pointer a phone visitor gets to the
+# collapsed sidebar.
+st.caption(
+    "👈 **Set up your scenario in the sidebar** — everything updates instantly, "
+    "no button to press. On a phone, tap the red **» Inputs** pill at the top left."
+)
 
 # The break-even verdict, anchored high on the page via a position-anchored
 # st.container(): it's the one output a student can act on -- "is this debt
