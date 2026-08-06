@@ -7699,8 +7699,11 @@ def _density_at(row: dict, x: float) -> float:
 
 # Streamlit Community Cloud doesn't expose the app's own public URL to
 # server-side code, so this is hardcoded -- update it here if the app ever
-# moves to a different URL/custom domain.
-APP_URL = "https://studentloanroi.streamlit.app"
+# moves to a different URL/custom domain. worthmydegree.com became the
+# canonical domain on 2026-08-05 (Railway custom domain; studentloanroi.com
+# and the legacy streamlit.app URL still serve/redirect, so a PDF downloaded
+# from any host correctly points readers at the canonical one).
+APP_URL = "https://worthmydegree.com"
 
 
 # The report's palette, matching the on-screen app so a downloaded PDF looks
@@ -15165,7 +15168,7 @@ to you. Results may be published in aggregate; nothing identifying anyone will a
 **You can stop at any time** by not submitting, or by closing the tab. The survey itself
 saves nothing until you press Submit.
 
-Questions about the research? Contact **research@studentloanroi.com**.
+Questions about the research? Contact **research@worthmydegree.com**.
 
 *By submitting, you agree to take part. You must be {RESEARCH_MIN_AGE} or over.*
 """
