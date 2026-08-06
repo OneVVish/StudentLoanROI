@@ -13377,7 +13377,10 @@ repayment_only = active_tool == "repayment"
 # NAV_ORIGINS, the traffic split and the cross-page links, and an admin
 # surface belongs in none of them.
 if st.session_state.admin_revealed:
-    st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>",
+    # Hide the expand-sidebar button too: the sidebar is display:none, so the
+    # button would open nothing. Same on the ?tool= pages below.
+    st.markdown("<style>section[data-testid='stSidebar'],"
+                "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
                 unsafe_allow_html=True)
     st.title("📊 Admin Analytics Dashboard")
     st.caption(
@@ -13392,7 +13395,8 @@ if active_tool:
     # describes a scenario this page is not about, so it is hidden rather than
     # shown empty. Cheaper and far less invasive than making 2,000 lines of
     # module-level sidebar code conditional.
-    st.markdown("<style>section[data-testid='stSidebar']{display:none;}</style>",
+    st.markdown("<style>section[data-testid='stSidebar'],"
+                "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
                 unsafe_allow_html=True)
     st.title(STANDALONE_TOOLS[active_tool]["title"])
     st.caption(STANDALONE_TOOLS[active_tool]["caption"])
@@ -13401,6 +13405,28 @@ else:
     st.caption(
         "**Free · anonymous · no sign-up** — an educational estimate, not financial "
         "advice. Salary and cost figures are illustrative."
+    )
+    # On a phone Streamlit collapses the sidebar to a bare ">>" arrow in the
+    # corner -- and EVERY input lives in that sidebar, so a mobile visitor sees
+    # a calculator with no visible way to change anything. Dress the collapsed
+    # control up as a labeled pill so it reads as "here are the inputs" instead
+    # of an anonymous chevron. Renders only while the sidebar is collapsed
+    # (Streamlit removes the button otherwise), so on desktop with the sidebar
+    # open nothing changes. Selector is version-specific (Streamlit 1.58,
+    # pinned in requirements.txt) -- re-verify it if the pin ever moves.
+    st.markdown(
+        """<style>
+        button[data-testid='stExpandSidebarButton']{
+            background:#ff4b4b; border-radius:999px;
+            padding:0.3rem 0.95rem 0.3rem 0.55rem;
+            box-shadow:0 2px 8px rgba(0,0,0,0.25);
+        }
+        button[data-testid='stExpandSidebarButton'] span{color:#fff;}
+        button[data-testid='stExpandSidebarButton']::after{
+            content:"Inputs"; color:#fff; font-weight:600; font-size:0.9rem;
+        }
+        </style>""",
+        unsafe_allow_html=True,
     )
 if st.session_state.get("test_mode"):
     st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
@@ -13814,7 +13840,8 @@ if active_tool:
 
 st.info(
     "👈 **Update your profile in the sidebar** -- profession, school, loan terms, "
-    "anything. Everything below updates instantly as you change it, no button to click."
+    "anything. Everything below updates instantly as you change it, no button to "
+    "click. On a phone, tap the red **» Inputs** button at the top left."
 )
 
 # Collapsed on purpose. This app's whole premise is that real numbers are on
