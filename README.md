@@ -16,6 +16,10 @@ earnings begin, instead of pretending a 4-year degree leads straight into
 a doctor's or lawyer's salary. Full sourcing is in the app's "Methodology &
 Sources" section at the bottom of the page.
 
+For how the whole system is put together — hosting topology, data
+pipelines, the financial model's flow, and the research telemetry — see
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Setup
 
 Requires Python 3.9+.
