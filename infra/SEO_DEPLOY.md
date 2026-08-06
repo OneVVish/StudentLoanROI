@@ -36,10 +36,24 @@ Rollback: grey-cloud both records — instant return to direct-to-Railway.
 ## Phase D — Index registration
 
 1. Google Search Console → add **domain property** `worthmydegree.com` →
-   verify via DNS TXT (GSC offers one-click Cloudflare integration) →
-   Sitemaps → submit `https://worthmydegree.com/sitemap.xml` →
-   URL-inspect `/` and both `?tool=` URLs, request indexing.
-2. Bing Webmaster Tools → Import from Search Console.
+   verify via DNS TXT. Done 2026-08-06 using the **manual "Any DNS
+   provider" TXT path**, deliberately NOT the one-click Cloudflare
+   integration (that flow grants Google OAuth access to the Cloudflare
+   account). The record is a root TXT
+   `google-site-verification=...` on worthmydegree.com — **do not delete
+   it**; GSC re-checks it periodically and ownership lapses without it.
+2. Sitemaps → submit `https://worthmydegree.com/sitemap.xml`. A fresh
+   property shows **"Couldn't fetch" with an empty Last-read — that is a
+   placeholder, not a failure** (observed here: URL Inspection already
+   listed the sitemap as the discovery source while the Sitemaps page
+   still said Couldn't fetch). Confirm the sitemap serves in a browser
+   and re-check GSC in a day before debugging anything.
+3. URL-inspect `/` and both `?tool=` URLs → Request indexing (all three
+   queued 2026-08-06). The inspect search box sometimes keeps the prior
+   inspection — check the breadcrumb names the URL you typed before
+   trusting the panel.
+4. Bing Webmaster Tools → sign in → Import from Search Console (an OAuth
+   grant against the Google account — user-performed).
 
 ## Phase E — Verification
 
