@@ -9329,31 +9329,6 @@ st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page
 #
 # The rule this encodes: window.top for BROWSER EVENTS (keystrokes land on the
 # outermost page), the app frame for anything STREAMLIT ITSELF READS.
-FIND_APP_FRAME_JS = """
-    function findAppFrame(buttonLabel) {
-        let w = window;
-        for (let i = 0; i < 6; i++) {
-            try {
-                for (const b of w.document.querySelectorAll("button")) {
-                    if (b.textContent.trim() === buttonLabel) return w;
-                }
-            } catch (e) { /* cross-origin frame -- keep climbing */ }
-            if (w === w.parent) break;
-            w = w.parent;
-        }
-        return null;
-    }
-    function clickAppButton(buttonLabel) {
-        const w = findAppFrame(buttonLabel);
-        if (!w) return false;
-        for (const b of w.document.querySelectorAll("button")) {
-            if (b.textContent.trim() === buttonLabel) { b.click(); return true; }
-        }
-        return false;
-    }
-"""
-
-
 # The visitor's timezone comes from st.context.timezone (see
 # get_user_timezone in section 2). There is no JS round-trip here any more.
 #
@@ -9378,9 +9353,14 @@ FIND_APP_FRAME_JS = """
 # could not solve: the pageview logged below no longer has to land in UTC.
 # ?tz= is still read as a fallback for links that carry it.
 #
-# FIND_APP_FRAME_JS above is still used -- the admin-reveal keydown listener
-# needs it. The frame-climbing rule it encodes remains correct; it was the
-# replaceState half that was doomed.
+# The FIND_APP_FRAME_JS frame-climbing helper that lived here is gone with
+# its last consumer, the admin-reveal keydown listener (the admin panel is
+# now gated on a secret ?admin=<admin_key>, and a keyboard shortcut cannot
+# carry a secret). The rule it encoded remains true and matters to any
+# future components.html() JS: climb to window.top for events, but find
+# Streamlit's widgets one frame down -- Community Cloud wraps components in
+# an extra iframe. It was the replaceState half that was doomed, not the
+# frame-climbing.
 
 # Log exactly one "pageview" per browser session. This check runs before any
 # widgets are drawn, so later reruns triggered by moving a slider or opening
@@ -9390,7 +9370,7 @@ FIND_APP_FRAME_JS = """
 # pageview log below so even that first write is skipped, and made sticky for
 # the whole session -- a later rerun that drops the query param (e.g. after
 # "Share Scenario" rewrites the URL) keeps the flag on. Rides the same
-# get_shared_default query-param mechanism as ?admin=1.
+# get_shared_default query-param mechanism as ?admin=<admin_key>.
 if "test_mode" not in st.session_state:
     st.session_state.test_mode = get_shared_default("test", "0") == "1"
 
@@ -9453,13 +9433,25 @@ for _presurvey_flag in ("presurvey_answered", "presurvey_skipped", "presurvey_sh
     if _presurvey_flag not in st.session_state:
         st.session_state[_presurvey_flag] = False
 
-# Admin Analytics View starts hidden -- Ctrl+Shift+A reveals the checkbox
-# that controls it (see the hidden trigger button + injected JS near the
-# bottom of the sidebar), or visiting the app with ?admin=1 in the URL,
-# for anyone whose OS/browser/extensions already claim that shortcut.
-# Stays revealed for the rest of the session once triggered either way.
+# Admin Analytics View is gated on a SECRET: ?admin=<admin_key>, compared
+# against `admin_key` in secrets.toml. It used to be a plain ?admin=1 plus a
+# Ctrl+Shift+A shortcut -- pure obscurity, and publicly documented obscurity
+# at that, since this repo is public and robots.txt names the param. A
+# shortcut can't carry a secret, so the shortcut (and the hidden trigger
+# button + injected JS it clicked) is gone rather than kept as a bypass.
+# A deployment with no admin_key configured fails CLOSED -- the panel is
+# unreachable, not open to everyone. Latched for the session like test_mode
+# (a share rewrites the URL and drops the param); `admin` still never rides
+# share or cross-page links (check_internal_links.py) and still fails safe
+# when dropped.
 if "admin_revealed" not in st.session_state:
-    st.session_state.admin_revealed = get_shared_default("admin", "0") == "1"
+    try:
+        _admin_key = str(st.secrets.get("admin_key", "") or "")
+    except Exception:  # no secrets file at all (bare local checkout)
+        _admin_key = ""
+    st.session_state.admin_revealed = bool(_admin_key) and (
+        get_shared_default("admin", "") == _admin_key
+    )
 
 
 # ============================================================
@@ -11004,53 +10996,10 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
 
 st.sidebar.divider()
 
-# Admin Analytics View is hidden by default -- a real (but invisible)
-# Streamlit button is the only way to actually flip admin_revealed, since
-# that's what makes the click go through Streamlit's normal widget/rerun
-# machinery instead of trying to fake session state from raw JS. The
-# injected script below just finds this button by its exact text and
-# calls .click() on it when Ctrl+Shift+A is pressed; the CSS block hides
-# its wrapping container so it's never visible or in the way. Listens on
-# window.top, not window.parent -- Streamlit Community Cloud nests this
-# component inside an additional wrapping iframe, so a listener on
-# window.parent.document only ever sees keydown events that occur inside
-# that intermediate frame, never the ones the visitor's browser actually
-# dispatches on the real page. window.top always reaches the real
-# outermost browsing context no matter how many iframe layers exist in
-# between.
-with st.sidebar.container(key="admin_reveal_trigger_wrap"):
-    admin_reveal_clicked = st.button("Reveal Admin Panel", key="admin_reveal_trigger")
-if admin_reveal_clicked:
-    st.session_state.admin_revealed = True
-
-st.markdown(
-    "<style>div.st-key-admin_reveal_trigger_wrap { display: none !important; }</style>",
-    unsafe_allow_html=True,
-)
-components.html(
-    f"""
-    <script>
-    (function() {{
-        {FIND_APP_FRAME_JS}
-        // The listener stays on window.top: keystrokes are dispatched on the
-        // outermost page the visitor is actually focused in, so a listener any
-        // lower never sees them. The BUTTON is a different matter -- it lives
-        // in the Streamlit app's DOM, one frame down from the wrapper, so
-        // looking for it on window.top.document found nothing on the deployed
-        // app and Ctrl+Shift+A silently did nothing there. Same snippet, two
-        // different frames, on purpose.
-        window.top.document.addEventListener("keydown", function (e) {{
-            if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "a") {{
-                e.preventDefault();
-                clickAppButton("Reveal Admin Panel");
-            }}
-        }});
-    }})();
-    </script>
-    """,
-    height=0,
-)
-
+# The Admin Analytics checkbox renders only for a session that arrived with
+# the correct ?admin=<admin_key> secret (latched into admin_revealed near the
+# top of section 3). The Ctrl+Shift+A shortcut and its hidden trigger button
+# used to live here; see the admin_revealed comment for why they're gone.
 admin_enabled = st.sidebar.checkbox("🔐 Admin Analytics View") if st.session_state.admin_revealed else False
 
 # Compare Mode adds a second scenario (Scenario B) rather than hiding the
