@@ -7185,6 +7185,50 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
     return fig
 
 
+# One sentence, three renderers (single arm, compare arm, both PDFs): what
+# the "Varies (IDR)" metric means. Same discipline as
+# WAGE_DISTRIBUTION_CAPTION -- the explanation of how to read a chart should
+# not be maintained in three places.
+PAYMENT_CHART_CAPTION = (
+    "Your payment isn't one number: on an income-driven plan it is a share of "
+    "your income, so it climbs as your salary does. The metric above is the "
+    "first month; this is the whole path."
+)
+
+
+def payment_varies(result: dict) -> bool:
+    """Whether this plan's monthly payment MOVES over the life of the loan.
+
+    Exactly the test the "Varies (IDR)" metric label uses: the income-driven
+    simulators emit a per-month `payment` column because theirs rises with
+    income, while the fixed-payment family carries one scalar
+    `monthly_payment`. Shared so the metric, the chart that explains it and
+    both PDF builders cannot disagree about which case they are in.
+    """
+    return isinstance(result, dict) and "monthly_payment" not in result
+
+
+def render_payment_chart(result: dict, label: str, container=None) -> bool:
+    """The payment-over-time chart, drawn only when the payment varies.
+
+    "Monthly Payment: Varies (IDR)" is the one headline metric on the page
+    that cannot be a number -- the payment is a percentage of income, so it
+    climbs as the salary does and any single figure would be just its first
+    month. This chart is what that word looks like. A fixed plan gets
+    nothing: a flat line repeats the metric and earns none of the space.
+
+    Returns whether it drew, so both PDF builders can mirror the decision
+    rather than re-deriving it (the chart-twin rule).
+    """
+    if not payment_varies(result):
+        return False
+    target = container if container is not None else st
+    target.plotly_chart(build_payment_chart(result, label),
+                        use_container_width=True, config=PLOTLY_CHART_CONFIG)
+    target.caption(PAYMENT_CHART_CAPTION)
+    return True
+
+
 def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
                         roi_window_years: int) -> pd.DataFrame:
     """Tidy {year, Series, Net Position} frame for the net-position chart, from
@@ -7319,6 +7363,43 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
         # Journalists"), and a right-hand legend takes its width out of the
         # plot -- squeezing the curves this chart exists to show, and worst
         # exactly when the two labels are longest.
+        legend=dict(orientation="h", yanchor="bottom", y=-0.35,
+                     xanchor="center", x=0.5, title_text=""),
+        margin=dict(t=60, b=90),
+    )
+    return fig
+
+
+def build_comparison_payment_chart(result_a: dict, label_a: str,
+                                    result_b: dict, label_b: str):
+    """Both scenarios' monthly payment on one chart, the twin of
+    build_comparison_balance_chart.
+
+    One axis is right here even though the two can be on different plans:
+    the quantity is the same (dollars per month for the same borrower in
+    two futures), and overlaying is the whole point -- which path costs
+    more per month, and when each one's payment steps. Drawn only when at
+    least one side actually varies (see payment_varies); a side that is
+    fixed still plots, as the flat line the moving one is measured against.
+    """
+    frames = []
+    for result, label in ((result_a, label_a), (result_b, label_b)):
+        series = payment_series(result)
+        if not series.empty:
+            frames.append(series.assign(Scenario=label))
+    if not frames:
+        return None
+    combined = pd.concat(frames)
+    fig = px.line(
+        combined, x="year", y="payment", color="Scenario",
+        title="Monthly Payment Over Time",
+        labels={"year": "Years", "payment": "Monthly payment ($)"},
+    )
+    fig.update_layout(
+        hovermode="x unified", title_font_size=14,
+        # Legend below, for the same reason build_comparison_balance_chart
+        # puts it there: occupation names run long and a right-hand legend
+        # eats the plot width exactly when the labels are worst.
         legend=dict(orientation="h", yanchor="bottom", y=-0.35,
                      xanchor="center", x=0.5, title_text=""),
         margin=dict(t=60, b=90),
@@ -8254,6 +8335,23 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     return _pdf_image_from_figure(fig)
 
 
+def build_pdf_comparison_payment_chart(result_a: dict, label_a: str,
+                                        result_b: dict, label_b: str) -> Image:
+    """PDF counterpart to build_comparison_payment_chart."""
+    fig, ax = plt.subplots(figsize=(6, 3.0))
+    for result, label in ((result_a, label_a), (result_b, label_b)):
+        series = payment_series(result)
+        if not series.empty:
+            ax.plot(series["year"], series["payment"], linewidth=2.5, label=label)
+    ax.set_title("Monthly Payment Over Time")
+    ax.set_xlabel("Years")
+    ax.set_ylabel("Monthly payment ($)")
+    ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    return _pdf_image_from_figure(fig)
+
+
 def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
                                   baseline_head_start_years: int = 0) -> Image:
     """PDF counterpart to build_net_position_chart. Takes the same prebuilt
@@ -8705,6 +8803,14 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         )),
         Spacer(1, 12),
         build_pdf_balance_chart(repayment_result["schedule"], scenario["strategy_label"]),
+        # The print twin of render_payment_chart: what the "Varies (IDR)" cell
+        # in the table above actually looks like, and drawn on the same
+        # condition (payment_varies), so the report cannot carry a chart the
+        # page withheld or vice versa.
+        *([Spacer(1, 12),
+           build_pdf_payment_chart(repayment_result, scenario["strategy_label"]),
+           Paragraph(_strip_emoji(PAYMENT_CHART_CAPTION), styles["caption"])]
+          if payment_varies(repayment_result) else []),
         # "Get Your Real Numbers" starts its own page (PageBreak lives in
         # _pdf_resources_section) -- placed after the complete Loan Information
         # section so it no longer splits it.
@@ -9143,7 +9249,11 @@ def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
     if not takehome_stages_a or not takehome_stages_b:
         return []
     flowables = [
-        Spacer(1, 12),
+        # Its own page, matching the single report. Begun mid-page it landed
+        # under the side-by-side charts and split A's table from B's. This is
+        # the compare twin of the PageBreak in generate_pdf_report_single --
+        # change one, change the other.
+        PageBreak(),
         Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {city}"),
                   styles["section"]),
     ]
@@ -9288,6 +9398,18 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
             scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
         ),
+        # Print twin of the compare branch's overlaid payment chart, on the
+        # same either-side-varies condition.
+        *([Spacer(1, 12),
+           build_pdf_comparison_payment_chart(
+               scenario_a.get("combined_repayment") or scenario_a["repayment_result"],
+               f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
+               scenario_b.get("combined_repayment") or scenario_b["repayment_result"],
+               f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}"),
+           Paragraph(_strip_emoji(PAYMENT_CHART_CAPTION), styles["caption"])]
+          if (payment_varies(scenario_a.get("combined_repayment") or scenario_a["repayment_result"])
+              or payment_varies(scenario_b.get("combined_repayment") or scenario_b["repayment_result"]))
+          else []),
         Spacer(1, 12),
         build_pdf_net_position_chart(
             net_position_frame(
@@ -14819,6 +14941,22 @@ if compare_mode:
         ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
+    # ONE overlaid chart, like the balance chart above it -- comparing the two
+    # payment paths is the whole point of this arm, and two separate charts
+    # made the reader do that comparison by eye across a gap. Rendered when
+    # EITHER side varies: a fixed plan's flat line is exactly the thing a
+    # climbing one should be read against, so suppressing it would hide half
+    # the comparison.
+    _pay_a = scenario_a.get("combined_repayment") or scenario_a["repayment_result"]
+    _pay_b = scenario_b.get("combined_repayment") or scenario_b["repayment_result"]
+    if payment_varies(_pay_a) or payment_varies(_pay_b):
+        _pay_fig = build_comparison_payment_chart(
+            _pay_a, f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
+            _pay_b, f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}")
+        if _pay_fig is not None:
+            st.plotly_chart(_pay_fig, use_container_width=True,
+                            config=PLOTLY_CHART_CONFIG)
+            st.caption(PAYMENT_CHART_CAPTION)
     st.plotly_chart(
         build_net_position_chart(
             net_position_frame(
@@ -15027,6 +15165,10 @@ else:
         build_balance_chart(repayment_result["schedule"], strategy_label),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
+    # What "Varies (IDR)" above actually looks like. Shared helper, called
+    # from the compare branch too -- a chart in one arm only is an H2
+    # confound, not a cosmetic difference.
+    render_payment_chart(_shown, strategy_label)
 
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
     # Rendered via the shared helper so Compare Mode shows the same figures --
