@@ -48,31 +48,40 @@ import sys
 import pandas as pd
 
 # CREDLEV 7 is "First Professional Degree" -- verified against CREDDESC in the
-# release, alongside 5 Master's and 6 Doctoral. The three programs this app
-# models are all First Professional; a Master's-level path would need its own
-# entry here AND its own program length in app.py, never a silent default.
+# release, alongside 3 Bachelor's, 5 Master's and 6 Doctoral. The three
+# programs this app models are all First Professional; a Master's-level path
+# would need its own entry here AND its own program length in app.py, never a
+# silent default.
 FIRST_PROFESSIONAL = 7
 MASTERS = 5
 DOCTORAL = 6
+BACHELORS = 3
 
-# Master's and doctoral rows are emitted alongside the three professional
-# programs, but keyed differently and for a different purpose.
+# Bachelor's, master's and doctoral rows are emitted alongside the three
+# professional programs, but keyed differently and for a different purpose.
 #
 # The professional block is three exact 4-digit CIP codes mapped to three
-# occupations, because app.py knows those occupations by name. Graduate study
+# occupations, because app.py knows those occupations by name. Degree study
 # spans the whole taxonomy instead -- 220 CIP fields publish a master's median
 # -- so there is no occupation to key on, and app.py has no occupation-to-CIP
 # crosswalk (it explicitly declines to build one: the SOC-CIP crosswalk's own
 # documentation calls itself conceptual rather than empirical).
 #
 # What app.py DOES have is MAJOR_TO_CIP_FAMILY, a hand-checked map from NY Fed
-# major to 2-DIGIT CIP family, used by the school search. So graduate rows are
+# major to 2-DIGIT CIP family, used by the school search. So these rows are
 # aggregated to the 2-digit family, which is the granularity that map can
 # reach. 28 of its 29 families have master's data.
 #
 # Consequence worth stating: this is Major-mode only. Career mode has no
 # bridge and falls back to asking the visitor.
-GRADUATE_CREDENTIALS = {MASTERS: "master", DOCTORAL: "doctoral"}
+#
+# BACHELOR'S is the newest of the three and the only one app.py does not read
+# yet: CREDENTIAL_DATA_KEY maps Master's and Doctoral only, so the graduate
+# school picker cannot reach a "bachelor" row. That is deliberate -- these
+# rows exist for a per-major "what graduates in this field typically borrow"
+# figure, NOT to offer a bachelor's student a graduate-school dropdown. Adding
+# CREDENTIAL_BACHELORS to that map would do exactly that; don't.
+FAMILY_CREDENTIALS = {BACHELORS: "bachelor", MASTERS: "master", DOCTORAL: "doctoral"}
 
 # 4-digit CIP -> the key app.py uses. CIPDESC is carried only to verify the
 # code still means what we think: these are stable, but a silent CIP
@@ -157,12 +166,13 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
         block["credential"] = "professional"
         rows.append(block)
 
-    # Graduate rows: every CIP field, aggregated to the 2-digit family so
-    # app.py's MAJOR_TO_CIP_FAMILY can reach them. One row per
-    # (school, family, credential), taking the MEDIAN of the 4-digit medians
-    # within the family -- a median of medians rather than a true pooled
-    # median, which the app must not present as more precise than it is.
-    for credlev, credential in GRADUATE_CREDENTIALS.items():
+    # Degree rows (bachelor's, master's, doctoral): every CIP field,
+    # aggregated to the 2-digit family so app.py's MAJOR_TO_CIP_FAMILY can
+    # reach them. One row per (school, family, credential), taking the MEDIAN
+    # of the 4-digit medians within the family -- a median of medians rather
+    # than a true pooled median, which the app must not present as more
+    # precise than it is.
+    for credlev, credential in FAMILY_CREDENTIALS.items():
         block = df[df["CREDLEV"] == credlev].copy()
         if block.empty:
             sys.exit(f"ERROR: no CREDLEV {credlev} ({credential}) rows in this file.")
@@ -223,10 +233,17 @@ def main() -> None:
     out = build(raw)
 
     # The federal aggregate a figure is measured against differs by credential
-    # -- $100,000 for graduate study, $200,000 for professional -- so the
-    # "over the cap" column has to know which it is looking at, or it reports a
-    # master's median as comfortably inside a ceiling that does not apply to it.
-    caps = {"master": 100_000, "doctoral": 100_000, "professional": 200_000}
+    # -- $31,000 for a dependent undergraduate, $100,000 for graduate study,
+    # $200,000 for professional -- so the "over the cap" column has to know
+    # which it is looking at, or it reports a master's median as comfortably
+    # inside a ceiling that does not apply to it.
+    #
+    # The bachelor's row uses the DEPENDENT aggregate ($31,000); an
+    # independent undergraduate may borrow $57,500. Over-cap here therefore
+    # means "more than a dependent student could have borrowed federally",
+    # which is a signal about family money and private loans, not an error.
+    caps = {"bachelor": 31_000, "master": 100_000,
+            "doctoral": 100_000, "professional": 200_000}
     print(f"\n  {'credential':13s} {'rows':>6s} {'schools':>8s} {'min':>10s} "
           f"{'median':>10s} {'max':>10s} {'over its cap':>13s}")
     for credential, block in out.groupby("credential"):
