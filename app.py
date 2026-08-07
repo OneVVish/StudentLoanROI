@@ -9143,7 +9143,11 @@ def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
     if not takehome_stages_a or not takehome_stages_b:
         return []
     flowables = [
-        Spacer(1, 12),
+        # Its own page, matching the single report. Begun mid-page it landed
+        # under the side-by-side charts and split A's table from B's. This is
+        # the compare twin of the PageBreak in generate_pdf_report_single --
+        # change one, change the other.
+        PageBreak(),
         Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {city}"),
                   styles["section"]),
     ]
