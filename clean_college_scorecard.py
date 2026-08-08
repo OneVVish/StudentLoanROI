@@ -64,6 +64,32 @@ COLUMNS_TO_LOAD = [
                        # open-admission schools report none -- so it is displayed
                        # where present and never ranked or filtered on. ~36%
                        # overall, but 87% among bachelor's-predominant schools.
+    # ---- Parent PLUS, for disclosure only ----
+    # The student's own median debt is still fetched live (see app.py's note by
+    # COA_DATASET_PATH); this is the PARENT's borrowing for the same school and
+    # has no live equivalent the app already calls, so it rides in the local
+    # dataset where it costs no API request.
+    #
+    # It exists because the student figure alone understates what a family
+    # takes on, and by wildly varying amounts: Berkeley completers borrow a
+    # median $13,000 while Berkeley parents who took PLUS borrowed $29,590,
+    # and at NYU it is $20,500 against $88,733. Student debt across schools
+    # spans $5,858-$40,621 -- Parent PLUS spans $3,182-$164,776, because it
+    # has no aggregate cap.
+    #
+    # THE COMP VARIANT, deliberately: it covers COMPLETERS, matching the
+    # student median the app shows beside it. The plain PLUS_DEBT_INST_MD
+    # mixes completers and dropouts and would not be comparable.
+    #
+    # NEVER add this to a loan amount. It is the parent's debt, is not
+    # income-driven-eligible for the student, and app.py already models
+    # Parent PLUS as a separate non-forgivable pool in split_loan_financing.
+    "PLUS_DEBT_INST_COMP_MD",   # Median Parent PLUS debt, completers
+    "PLUS_DEBT_INST_COMP_N",    # How many families that median describes --
+                                # required, because the median is conditional
+                                # on having borrowed PLUS at all. Showing the
+                                # dollar figure without the count invites
+                                # reading it as "what parents here pay".
 ]
 
 # Credential levels in the CIP flag columns, ordered least to most advanced.
@@ -134,7 +160,7 @@ def load_scorecard_data(csv_path: str) -> pd.DataFrame:
     )
     numeric_columns = ["CONTROL", "COSTT4_A", "COSTT4_P", "TUITIONFEE_IN",
                        "TUITIONFEE_OUT", "UNITID", "CURROPER", "DISTANCEONLY",
-                       "ADM_RATE"]
+                       "ADM_RATE", "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N"]
     for column in numeric_columns:
         # errors="coerce" is a safety net: if any stray non-numeric text
         # slipped past NA_VALUES, it becomes NaN instead of crashing the script.
@@ -246,7 +272,11 @@ def build_clean_dataframe(csv_path: str) -> pd.DataFrame:
         "COSTT4_A", "COSTT4_P", "TUITIONFEE_IN", "TUITIONFEE_OUT",
         "NPCURL",
         "UNITID", "CITY", "CURROPER", "DISTANCEONLY", "ADM_RATE",
-    ] + [f"programs_{level.lower()}" for level in CIP_CREDENTIAL_LEVELS]
+    ] + [f"programs_{level.lower()}" for level in CIP_CREDENTIAL_LEVELS] + [
+        # Appended last, after the program flags, for the same reason the
+        # search columns were appended rather than interleaved.
+        "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N",
+    ]
     return calculated[final_columns].reset_index(drop=True)
 
 

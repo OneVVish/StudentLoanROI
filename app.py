@@ -2575,6 +2575,54 @@ def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
     )
 
 
+def render_parent_plus_note(coa_match, container=None) -> bool:
+    """What the PARENTS of this school's completers borrowed, beside what the
+    student did.
+
+    Every loan figure on this page is the student's own. That is the smaller
+    half of the bill at a lot of schools and there is nothing on screen
+    saying so: Berkeley completers borrow a median $13,000 while Berkeley
+    parents who took PLUS borrowed $29,590, and at NYU it is $20,500 against
+    $88,733. Student borrowing is capped, so it lands in a narrow band
+    ($5,858-$40,621 across schools); Parent PLUS has no aggregate cap and
+    spans $3,182-$164,776. A family reading only the student figure is
+    reading the part that varies least.
+
+    Three things this must never do, all of them tempting:
+
+    - ADD it to the loan. It is the parent's debt, not the student's. It is
+      not IDR-eligible for the student and split_loan_financing already
+      models Parent PLUS as its own non-forgivable pool; folding this in
+      would double-count there and overstate what the student owes.
+    - Imply every family borrows it. The median is conditional on having
+      taken PLUS at all, which is why the count rides in the sentence.
+    - Present it as a current option unqualified. OBBBA capped Parent PLUS
+      on 2026-07-01, so these amounts describe families who borrowed under
+      the old rules.
+
+    Returns whether it drew, so callers can tell "no figure published" from
+    "not rendered". ~2,127 of 5,035 schools in the dataset publish it, so
+    absent is an ordinary case, not an error.
+    """
+    if coa_match is None:
+        return False
+    median = pd.to_numeric(coa_match.get("PLUS_DEBT_INST_COMP_MD"), errors="coerce")
+    count = pd.to_numeric(coa_match.get("PLUS_DEBT_INST_COMP_N"), errors="coerce")
+    if pd.isna(median) or median <= 0:
+        return False
+    target = container if container is not None else st
+    families = (f" ({int(count):,} families)" if pd.notna(count) and count > 0 else "")
+    target.caption(
+        f"**Parents borrowed too.** Families of completers at this school who took "
+        f"Parent PLUS borrowed a median of {fmt_money_md(float(median))}{families} — "
+        "separately from the figure above, which is the student's own loan. Parent "
+        "PLUS is the parent's debt: no income-driven repayment, no forgiveness for "
+        "the student. Congress capped it on July 1, 2026, so these families borrowed "
+        "under the older, uncapped rules."
+    )
+    return True
+
+
 def render_financing_note(financing: dict) -> None:
     """On-screen version of financing_summary_text: the breakdown caption, plus
     a hard error when any of the loan cannot be borrowed federally at all, plus
@@ -14631,7 +14679,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            current_age: int = None,
                            loan_source: str = None, default_loan=None,
                            reported_debt=None, school_name: str = None,
-                           simplified_scale: float = 1.0):
+                           simplified_scale: float = 1.0, coa_match=None):
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -14707,6 +14755,9 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                 .replace("$", chr(92) + "$")
             )
         render_financing_note(scenario.get("financing"))
+        # Same helper the single branch calls: a disclosure in one arm only
+        # is an H2 confound, not a cosmetic gap.
+        render_parent_plus_note(coa_match)
         # The two ABSOLUTE positions, not just their difference. The single
         # branch shows all three side by side; the contrast arm used to see
         # the absolutes only as chart lines, never as numbers. Stacked rather
@@ -14887,7 +14938,7 @@ if compare_mode:
         current_age=st.session_state.get("current_age") if is_returning else None,
         loan_source=loan_source_a, default_loan=default_loan_a,
         reported_debt=reported_debt_a, school_name=school_name_a,
-        simplified_scale=simplified_scale_a,
+        simplified_scale=simplified_scale_a, coa_match=coa_match_a,
     )
     render_scenario_panel(
         col_b, scenario_b, "B", roi_horizon_years,
@@ -14900,7 +14951,7 @@ if compare_mode:
         current_age=st.session_state.get("current_age") if is_returning else None,
         loan_source=loan_source_b, default_loan=default_loan_b,
         reported_debt=reported_debt_b, school_name=school_name_b,
-        simplified_scale=simplified_scale_b,
+        simplified_scale=simplified_scale_b, coa_match=coa_match_b,
     )
 
     # Career mode's underemployment text is national and identical for both
@@ -15158,6 +15209,8 @@ else:
         )
 
     render_financing_note(scenario.get("financing"))
+
+    render_parent_plus_note(coa_match_a)
 
     render_forgiveness_note(repayment_result, strategy_label)
 
