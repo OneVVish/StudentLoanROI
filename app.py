@@ -6461,6 +6461,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                 financing["nonforgivable_principal"], financing["nonforgivable_rate"],
                 roi_window_years=roi_window_years)
             repayment_result = combine_repayment_results(federal_part, nonfederal_part)
+            # Survives the later combine with an existing balance, because
+            # combine_repayment_results copies the primary dict wholesale.
+            repayment_result["tranche_events"] = tranche_payoff_events(
+                federal_part, nonfederal_part)
+            repayment_result["tranches"] = (federal_part, nonfederal_part)
         else:
             repayment_result = simulate_rap_schedule(
                 principal_for_repayment, rate_for_repayment, major_name, dependents,
@@ -6486,6 +6491,9 @@ def compute_scenario_results(major_name: str, loan_amount: float,
             financing["nonforgivable_principal"], financing["nonforgivable_rate"],
             roi_window_years=roi_window_years)
         repayment_result = combine_repayment_results(federal_part, nonfederal_part)
+        repayment_result["tranche_events"] = tranche_payoff_events(
+            federal_part, nonfederal_part)
+        repayment_result["tranches"] = (federal_part, nonfederal_part)
         strategy_label = "Income-Driven Repayment"
     else:
         repayment_result = calculate_idr_repayment(
@@ -6589,6 +6597,14 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                 financing["nonforgivable_principal"], financing["nonforgivable_rate"],
                 roi_window_years=roi_window_years)
             combined_repayment = combine_repayment_results(_joint, _nonfederal)
+            # Same two loan types as the no-existing-debt path, so the charts
+            # split the same way. _joint is the pooled federal side (new
+            # forgivable + existing) rather than the new loan's federal part
+            # alone -- charting repayment_result's tranches here would draw a
+            # federal band smaller than the bill it sits under.
+            combined_repayment["tranche_events"] = tranche_payoff_events(
+                _joint, _nonfederal)
+            combined_repayment["tranches"] = (_joint, _nonfederal)
         else:
             combined_repayment = _joint
 
@@ -7124,7 +7140,76 @@ def balance_split_is_informative(schedule_df: pd.DataFrame) -> bool:
     return interest.max() > 0.02 * max(schedule_df["balance"].max(), 1.0)
 
 
-def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str):
+# The two-loan stack in the CALCULATOR's charts. The pools are
+# split_loan_financing's: the student's own capped federal Direct money, and
+# whatever had to come from Parent PLUS or a private lender once that cap ran
+# out. Naming the cap is the point -- it is why the second band exists.
+TRANCHE_LABELS = ("Federal (capped, income-driven)", "PLUS & private (uncapped)")
+# The same stack in the existing-loan tool, where the split is a fact about the
+# portfolio the visitor typed in rather than about a borrowing cap. Calling
+# that federal side "capped" would assert something the tool never asked.
+REPAYMENT_STACK_LABELS = ("Federal plan", "Private loan")
+STACK_COLORS = ("#4C78A8", "#B279A2")
+
+
+def stack_color_map(labels: tuple) -> dict:
+    """Colour by POSITION in the stack, not by label text -- so the federal
+    band is the same blue whichever wording the caller uses."""
+    return dict(zip(labels, STACK_COLORS))
+
+
+def tranche_balance_frame(tranches, labels: tuple = TRANCHE_LABELS) -> pd.DataFrame:
+    """Tidy {year, component, amount} for stacking two tranches' balances.
+
+    Reindexes both onto the union of their years and fills the finished one
+    with 0 rather than dropping it -- an area chart with a missing series
+    breaks the stack exactly where the shorter loan clears, which is the
+    moment the reader is trying to understand.
+    """
+    if not tranches or len(tranches) != 2:
+        return pd.DataFrame()
+    frames = []
+    for (label, result) in zip(labels, tranches):
+        sched = (result or {}).get("schedule")
+        if sched is None or sched.empty:
+            return pd.DataFrame()
+        frames.append(sched[["year", "balance"]].rename(
+            columns={"balance": label}).groupby("year", as_index=False).last())
+    merged = pd.merge(frames[0], frames[1], on="year", how="outer").sort_values("year")
+    merged[list(labels)] = merged[list(labels)].fillna(0.0)
+    return merged.melt(id_vars="year", value_vars=list(labels),
+                       var_name="component", value_name="amount")
+
+
+def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches=None):
+    # Tranche split takes precedence over the principal/interest one when both
+    # apply. They cannot share a chart, and this is the split that explains the
+    # kink a reader actually asks about: the capped federal part clears first
+    # and the uncapped part is the long tail. The principal/interest view still
+    # runs whenever there is only one tranche, which is where it was designed
+    # to matter (an income-driven payment below the interest).
+    tranche_frame = tranche_balance_frame(tranches)
+    if not tranche_frame.empty:
+        fig = px.area(
+            tranche_frame, x="year", y="amount", color="component",
+            title="Loan Balance Over Time — by loan type",
+            labels={"year": "Years", "amount": "Remaining Balance ($)",
+                    "component": ""},
+            color_discrete_map=stack_color_map(TRANCHE_LABELS),
+        )
+        _tickvals, _ticktext = money_k_ticks(schedule_df["balance"])
+        fig.update_layout(
+            hovermode="x unified", title_font_size=14,
+            yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
+            legend=dict(orientation="h", yanchor="bottom", y=-0.35,
+                         xanchor="center", x=0.5, title_text=""),
+            margin=dict(t=60, b=90),
+        )
+        # Plotly pads the x-range around an area chart, and at narrow widths
+        # that padding puts a "-2" on an axis labelled Years. There is no year
+        # before the loan starts.
+        fig.update_xaxes(rangemode="tozero")
+        return fig
     if balance_split_is_informative(schedule_df):
         stacked = schedule_df.melt(
             id_vars="year", value_vars=["principal_balance", "interest_balance"],
@@ -7188,8 +7273,45 @@ def payment_series(result: dict) -> pd.DataFrame:
     return pd.DataFrame({"year": sched["year"], "payment": flat})
 
 
+def tranche_payoff_events(federal_part: dict, nonfederal_part: dict) -> list:
+    """When the first tranche clears, for annotating the payment chart.
+
+    A combined payment steps DOWN the month one tranche finishes while the
+    other still owes. On screen that is a cliff in the middle of the line with
+    nothing explaining it -- the Santa Monica default drops from ~$1,200 to a
+    fraction of that at 2.4 years, which reads as a glitch until you know the
+    $27,000 federal part just cleared and only the $19,489 of PLUS/private is
+    left. That is also the most useful thing the chart can say: the capped
+    federal money goes first, and the uncapped money is the long tail.
+
+    Only the EARLIER payoff is an event. The later one is where the line ends,
+    which needs no label. Returns [] when the two finish together (nothing to
+    explain) or when either side is missing.
+    """
+    if not federal_part or not nonfederal_part:
+        return []
+    fed = float(federal_part.get("payoff_years") or 0)
+    non = float(nonfederal_part.get("payoff_years") or 0)
+    if fed <= 0 or non <= 0:
+        return []
+    # Under a tenth of a year apart is one payoff, not two: labelling it would
+    # point at a step too small to see.
+    if abs(fed - non) < 0.1:
+        return []
+    # Kept SHORT deliberately. Plotly clips annotation text at the plot-area
+    # edge, not the canvas edge (the same rule the wage chart's p10/p90 money
+    # labels ran into), and at 390px a full sentence anchored to the line loses
+    # its last few characters. It can afford to be short: this only ever draws
+    # on the stacked chart, where "and only the other kind is left" is already
+    # the visible shape of the stack.
+    if fed < non:
+        return [(fed, "Federal loans paid off")]
+    return [(non, "PLUS/private paid off")]
+
+
 def build_payment_chart(result: dict, label: str, federal_result: dict = None,
-                        private_result: dict = None):
+                        private_result: dict = None, events: list = None,
+                        labels: tuple = TRANCHE_LABELS):
     """Monthly payment over time.
 
     The companion to the balance chart, and it shows something the balance
@@ -7202,26 +7324,36 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
     same fact the three-table split states in numbers.
     """
     if federal_result is not None and private_result is not None:
-        fed = payment_series(federal_result).rename(columns={"payment": "Federal plan"})
-        priv = payment_series(private_result).rename(columns={"payment": "Private loan"})
+        fed = payment_series(federal_result).rename(columns={"payment": labels[0]})
+        priv = payment_series(private_result).rename(columns={"payment": labels[1]})
         merged = pd.merge(fed, priv, on="year", how="outer").sort_values("year")
         # A loan that ends leaves the other still running; its payment is then
         # zero, not missing, or the area chart would break the series where the
         # shorter loan finishes.
-        merged[["Federal plan", "Private loan"]] = merged[
-            ["Federal plan", "Private loan"]].fillna(0.0)
-        stacked = merged.melt(id_vars="year",
-                              value_vars=["Federal plan", "Private loan"],
+        merged[list(labels)] = merged[list(labels)].fillna(0.0)
+        stacked = merged.melt(id_vars="year", value_vars=list(labels),
                               var_name="component", value_name="payment")
         fig = px.area(
             stacked, x="year", y="payment", color="component",
             title=f"Monthly Payment Over Time — {label}",
             labels={"year": "Years", "payment": "Monthly payment ($)",
                     "component": ""},
-            color_discrete_map={"Federal plan": "#4C78A8",
-                                "Private loan": "#B279A2"},
+            color_discrete_map=stack_color_map(labels),
         )
-        fig.update_layout(hovermode="x unified", title_font_size=14)
+        fig.update_layout(
+            hovermode="x unified", title_font_size=14,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.35,
+                         xanchor="center", x=0.5, title_text=""),
+            margin=dict(t=60, b=90),
+        )
+        # See the balance chart: negative Years on a padded area x-range.
+        fig.update_xaxes(rangemode="tozero")
+        # The step is visible in the stack itself here, but naming it costs one
+        # line and answers the question directly.
+        for when, text in (events or []):
+            fig.add_vline(x=when, line_dash="dot", line_color="#888",
+                          annotation_text=text, annotation_position="top left",
+                          annotation_font_size=11)
         return fig
 
     series = payment_series(result)
@@ -7230,6 +7362,12 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
                   labels={"year": "Years", "payment": "Monthly payment ($)"})
     fig.update_traces(line=dict(width=3))
     fig.update_layout(hovermode="x unified", title_font_size=14)
+    # Name the cliff. Without this the step reads as a rendering fault; see
+    # tranche_payoff_events. The PDF twin draws the same markers.
+    for when, text in (events or []):
+        fig.add_vline(x=when, line_dash="dot", line_color="#888",
+                      annotation_text=text, annotation_position="top left",
+                      annotation_font_size=11)
     return fig
 
 
@@ -7271,8 +7409,12 @@ def render_payment_chart(result: dict, label: str, container=None) -> bool:
     if not payment_varies(result):
         return False
     target = container if container is not None else st
-    target.plotly_chart(build_payment_chart(result, label),
-                        use_container_width=True, config=PLOTLY_CHART_CONFIG)
+    _tr = result.get("tranches") or (None, None)
+    target.plotly_chart(
+        build_payment_chart(result, label, federal_result=_tr[0],
+                            private_result=_tr[1],
+                            events=result.get("tranche_events")),
+        use_container_width=True, config=PLOTLY_CHART_CONFIG)
     target.caption(PAYMENT_CHART_CAPTION)
     return True
 
@@ -8309,21 +8451,31 @@ def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
     ]
 
 
-def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> Image:
+def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
+                            tranches=None) -> Image:
     """PDF counterpart to build_balance_chart -- simplified redraw for
     print, not required to be pixel-identical to the on-screen interactive
     version.
 
-    Same principal/unpaid-interest split as the on-screen twin, behind the
-    same balance_split_is_informative gate and in the same two colours. The
-    split shipped on the Plotly side alone (2026-08-02), so for the exact
-    case the stacked view exists for -- an income-driven payment below the
-    interest, principal pinned while the interest pool balloons -- the PDF
-    silently flattened the story back to one undifferentiated line. The
-    chart-twin rule in CLAUDE.md is about WHAT a chart shows, and this was a
-    what, not a how."""
+    Both of the on-screen twin's splits, in the same precedence and the same
+    colours: by loan type when two tranches exist, principal vs unpaid
+    interest otherwise. The principal/interest split shipped on the Plotly
+    side alone (2026-08-02), so for the exact case the stacked view exists
+    for -- an income-driven payment below the interest, principal pinned
+    while the interest pool balloons -- the PDF silently flattened the story
+    back to one undifferentiated line. The chart-twin rule in CLAUDE.md is
+    about WHAT a chart shows, and this was a what, not a how."""
     fig, ax = plt.subplots(figsize=(6, 3.5))
-    if balance_split_is_informative(schedule_df):
+    tranche_frame = tranche_balance_frame(tranches)
+    if not tranche_frame.empty:
+        wide = tranche_frame.pivot(index="year", columns="component",
+                                   values="amount").fillna(0.0)
+        ax.stackplot(wide.index,
+                     wide[TRANCHE_LABELS[0]], wide[TRANCHE_LABELS[1]],
+                     labels=list(TRANCHE_LABELS), colors=list(STACK_COLORS))
+        ax.legend(loc="upper right", fontsize=8)
+        ax.set_title("Loan Balance Over Time - by loan type")
+    elif balance_split_is_informative(schedule_df):
         ax.stackplot(schedule_df["year"],
                      schedule_df["principal_balance"],
                      schedule_df["interest_balance"],
@@ -8343,11 +8495,16 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str) -> I
 
 def build_pdf_payment_chart(result: dict, label: str,
                             federal_result: dict = None,
-                            private_result: dict = None) -> Image:
-    """PDF twin of build_payment_chart. Same data, same stacking rule, redrawn
-    for print -- see the chart-twin warning in CLAUDE.md. Not required to be
-    pixel-identical, but a change to what the on-screen version SHOWS needs the
-    same change here."""
+                            private_result: dict = None,
+                            events: list = None,
+                            labels: tuple = TRANCHE_LABELS) -> Image:
+    """PDF twin of build_payment_chart. Same data, same stacking rule, same
+    payoff markers, redrawn for print -- see the chart-twin warning in
+    CLAUDE.md. Not required to be pixel-identical, but a change to what the
+    on-screen version SHOWS needs the same change here. The markers matter
+    MORE in print than on screen, for the reason the net-position chart's
+    head-start annotation does: the report is read away from the app, so an
+    unexplained cliff has no hover and no caption nearby to resolve it."""
     fig, ax = plt.subplots(figsize=(6, 3.0))
     if federal_result is not None and private_result is not None:
         fed = payment_series(federal_result)
@@ -8355,13 +8512,23 @@ def build_pdf_payment_chart(result: dict, label: str,
         merged = pd.merge(fed, priv, on="year", how="outer",
                           suffixes=("_fed", "_priv")).sort_values("year").fillna(0.0)
         ax.stackplot(merged["year"], merged["payment_fed"], merged["payment_priv"],
-                     labels=["Federal plan", "Private loan"],
-                     colors=["#4C78A8", "#B279A2"])
-        ax.legend(loc="upper left", fontsize=8)
+                     labels=list(labels), colors=list(STACK_COLORS))
+        ax.legend(loc="upper right", fontsize=8)
     else:
         series = payment_series(result)
         ax.plot(series["year"], series["payment"], linewidth=2.5)
-    ax.set_title(f"Monthly Payment Over Time - {label}")
+    _xlo, _xhi = ax.get_xlim()
+    for when, text in (events or []):
+        ax.axvline(when, color="#888888", linewidth=1, linestyle=":")
+        # Lean the label toward whichever side has room. The payoff is usually
+        # early in the term, so a left-anchored label would overhang the axis;
+        # a fixed side clips the text on one case or the other.
+        ax.annotate(text.replace("—", "-"), xy=(when, 1.02),
+                    xycoords=("data", "axes fraction"),
+                    ha="right" if when > (_xlo + _xhi) / 2 else "left",
+                    fontsize=7, color="#666666")
+    ax.set_title(f"Monthly Payment Over Time - {label}",
+                 pad=18 if events else None)
     ax.set_xlabel("Years")
     ax.set_ylabel("Monthly payment ($)")
     ax.grid(True, alpha=0.3)
@@ -8759,6 +8926,13 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
     _cf = counterfactual_vocab()
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
+    # The payment chart draws what the visitor actually pays each month, so it
+    # reads combined_repayment exactly as the page and the compare report do --
+    # equal to repayment_result when there is no existing balance. The balance
+    # chart and the table above it stay on repayment_result (new borrowing
+    # only), which is the meaning every other figure in this section carries.
+    _pdf_payment_source = scenario.get("combined_repayment") or repayment_result
+    _pdf_payment_tranches = _pdf_payment_source.get("tranches") or (None, None)
 
     # Decision-3 parity with the on-screen view: the per-year COA->loan table
     # appears only when the cost-based personal calc is the loan in use. With
@@ -8850,15 +9024,22 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
               fmt_money(repayment_result["total_interest"])]]
         )),
         Spacer(1, 12),
-        build_pdf_balance_chart(repayment_result["schedule"], scenario["strategy_label"]),
+        build_pdf_balance_chart(repayment_result["schedule"], scenario["strategy_label"],
+                                tranches=repayment_result.get("tranches")),
         # The print twin of render_payment_chart: what the "Varies (IDR)" cell
         # in the table above actually looks like, and drawn on the same
         # condition (payment_varies), so the report cannot carry a chart the
-        # page withheld or vice versa.
+        # page withheld or vice versa. It reads the same result object the
+        # page does -- combined_repayment, i.e. the bill including any
+        # existing balance -- which is also what the compare report uses.
         *([Spacer(1, 12),
-           build_pdf_payment_chart(repayment_result, scenario["strategy_label"]),
+           build_pdf_payment_chart(
+               _pdf_payment_source, scenario["strategy_label"],
+               federal_result=_pdf_payment_tranches[0],
+               private_result=_pdf_payment_tranches[1],
+               events=_pdf_payment_source.get("tranche_events")),
            Paragraph(_strip_emoji(PAYMENT_CHART_CAPTION), styles["caption"])]
-          if payment_varies(repayment_result) else []),
+          if payment_varies(_pdf_payment_source) else []),
         # "Get Your Real Numbers" starts its own page (PageBreak lives in
         # _pdf_resources_section) -- placed after the complete Loan Information
         # section so it no longer splits it.
@@ -9201,7 +9382,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
             chosen, chart_label,
             federal_result=_fed if private_row is not None else None,
             private_result=(private_row[1] if private_row is not None
-                            and _fed is not None else None)))
+                            and _fed is not None else None),
+            labels=REPAYMENT_STACK_LABELS))
         story.append(Paragraph(
             "Monthly payment over time. An income-driven payment rises with "
             "income, so the table's monthly figure is only its first month.",
@@ -13108,7 +13290,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         st.plotly_chart(
             build_payment_chart(chosen_result, chosen,
                                 federal_result=_fed if _priv is not None else None,
-                                private_result=_priv if _fed is not None else None),
+                                private_result=_priv if _fed is not None else None,
+                                labels=REPAYMENT_STACK_LABELS),
             use_container_width=True, config=PLOTLY_CHART_CONFIG,
             key="existing_payment_chart")
         if "payment" not in chosen_result.get("schedule", pd.DataFrame()).columns:
@@ -15215,7 +15398,8 @@ else:
     render_forgiveness_note(repayment_result, strategy_label)
 
     st.plotly_chart(
-        build_balance_chart(repayment_result["schedule"], strategy_label),
+        build_balance_chart(repayment_result["schedule"], strategy_label,
+                            tranches=repayment_result.get("tranches")),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
     # What "Varies (IDR)" above actually looks like. Shared helper, called
