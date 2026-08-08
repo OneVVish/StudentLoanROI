@@ -854,6 +854,72 @@ def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) ->
     return base
 
 
+# What the evidence says about earning a bachelor's AT a community college
+# rather than at a four-year school, by CIP family, one year after graduation.
+# Source: Acton, Morales, Cortes, Turner & Miller, "Community College
+# Bachelor's Degrees" (NBER WP 34684, January 2026), comparing CCB completers
+# to traditional BA completers in the same state and field.
+#
+# The comparison is deliberately vs. a traditional BA rather than vs. an
+# associate's: a visitor reaches this option having already picked a four-year
+# programme, so a four-year degree elsewhere is the alternative they are
+# actually weighing.
+CCB_MEDIAN_GAP_VS_BA_PCT = 5.5
+CCB_FIELD_EARNINGS_NOTES = {
+    "51": "in health fields such as nursing the study finds no meaningful gap",
+    "43": "in criminal justice the study finds no gap, and higher earners did "
+          "slightly better",
+    "52": "in business the study finds little to no gap",
+    "11": "in computing this is the study's LARGEST gap — around $30,000 a year "
+          "at the median",
+    "15": "in engineering technology the study finds one of its largest gaps",
+    "01": "in agriculture the study finds a meaningful gap",
+    "13": "in education the study finds a meaningful gap",
+    "24": "in liberal arts and general studies the study finds a meaningful gap",
+}
+
+
+def ccb_earnings_disclosure(major_name: str = None, for_pdf: bool = False) -> str:
+    """What is known about CCB earnings -- said in words, never applied to the
+    number.
+
+    This app takes every salary from the occupation or major the visitor picked
+    and NEVER from the school; the school-search caption states that as a
+    commitment. Quietly shaving a CCB scenario's earnings would break it, and on
+    weaker ground than that rule already forbids: the published estimates are
+    descriptive, with no correction for who chooses a CCB in the first place, so
+    treating them as the causal effect of the credential would assert something
+    the authors decline to assert. The cost side is a price and is modelled
+    exactly; the earnings side gets this sentence instead.
+
+    The field clause needs a CIP family, which only Major mode can supply
+    (MAJOR_TO_CIP_FAMILY); app.py deliberately builds no occupation->CIP
+    crosswalk, so Career mode gets the pooled figure alone rather than a guess.
+    """
+    bold = (lambda t: f"<b>{t}</b>") if for_pdf else (lambda t: f"**{t}**")
+    family = MAJOR_TO_CIP_FAMILY.get(major_name) if major_name else None
+    field_clause = CCB_FIELD_EARNINGS_NOTES.get(family)
+    base = (
+        f"{bold('On what CCB graduates earn:')} the first national study of these "
+        f"degrees found their graduates earn about {bold(f'{CCB_MEDIAN_GAP_VS_BA_PCT:.1f}% less')} "
+        "a year than people with the same degree in the same field from a "
+        "four-year school — and clearly more than people who stopped at an "
+        "associate's."
+    )
+    if field_clause:
+        base += f" That average hides a lot: {field_clause}."
+    else:
+        base += (" That average hides a lot — some fields show no gap at all and "
+                 "others show a very large one.")
+    base += (
+        " Those figures are one year after graduation and describe who chose "
+        "each path, not what the choice did to them, so this calculator does "
+        "not apply them to your salary. Treat them as a reason to ask your "
+        "college what its graduates in your field actually earn."
+    )
+    return base
+
+
 def render_major_careers(major_name: str, compact: bool = False) -> None:
     """Render a short "Careers this major commonly leads to" block for the
     selected major, into the current Streamlit container.
@@ -1367,10 +1433,40 @@ COMMUNITY_COLLEGE_COA_DEFAULT = 3890  # national in-district avg (NCES 2025)
 # note, the PDF bundle and the PDF rows), so it lives here rather than being
 # spelled out inline each time -- a mode added to the radio and missed in one
 # of those reads as a straight four-year start in that one surface only.
-CC_PATH_MODES = ("fulltime", "parttime", "associate")
+CC_PATH_MODES = ("fulltime", "parttime", "associate", "ccb")
+
+# The one cc_mode whose community-college years are BORROWED rather than paid
+# out of pocket. Two years at ~$3,890 is plausibly covered by Pell, work and
+# savings; an entire four-year degree is not, and hard-coding "no loan" there
+# would finance $0 and collapse the ROI denominator. Named rather than spelled
+# `cc_mode == "ccb"` inline, because it is read in both scenario blocks.
+CC_FINANCED_MODES = ("ccb",)
+
+# A community college awarding its own bachelor's often prices upper-division
+# courses higher than lower-division ones -- the "escalating" structure in
+# Acton, Morales, Cortes, Turner & Miller (NBER WP 34684), where upper-division
+# runs about 40% more, roughly $1,300 an academic year. The other structure they
+# document ("constant") charges one rate at every level, and is the default
+# here: it is the more common of the two, and it is what a visitor who does not
+# know their own college's pricing should be shown.
+CCB_UPPER_DIVISION_PREMIUM = 0.40
+
+# Offline signature of a community college that has ADDED baccalaureates: it
+# awards bachelor's degrees in no more subject families than it awards
+# associate's degrees in. Used only when the live Scorecard lookup is
+# unavailable and ccb_school falls back to the committed dataset.
+#
+# A ratio rather than a count, because a count gets the famous cases wrong:
+# Miami Dade awards bachelor's in 9 families and Broward in 6, so a "at most
+# four" rule excludes two of the largest CCB institutions in the country. The
+# ratio separates cleanly with room to spare -- every CCB college checked lands
+# at 0.67 or below (Santa Monica 0.04, Broward 0.38, Miami Dade 0.50, St
+# Petersburg 0.67) and every comprehensive public university at 10 or above
+# (Berkeley 23, ASU 10, UW 28). Nothing observed sits between 0.67 and 10.
+CCB_MAX_BACHELORS_TO_ASSOC_RATIO = 1.0
 
 
-def cc_path_options(program_years: int) -> tuple:
+def cc_path_options(program_years: int, ccb_available: bool = False) -> tuple:
     """(options, labels) for the Community college path radio, given how long
     the selected program actually runs.
 
@@ -1386,6 +1482,15 @@ def cc_path_options(program_years: int) -> tuple:
     college years, no university years, no loan. The arithmetic was right and
     the label was a lie, promising a transfer that never happened and a "2+2"
     that was really 2+0. This makes the option say what the model already did.
+
+    `ccb_available` adds the community college BACCALAUREATE -- a bachelor's
+    awarded by the community college itself, no transfer at all. It is a
+    different thing from the 2+2 above, where the four-year school awards the
+    degree, and the difference is exactly why it needed its own option: the
+    other three modes all leave the credential unchanged, and this one does
+    not. Offered only when the selected school actually awards one (see
+    ccb_school) and only for programs longer than an associate's, where the
+    "entire degree here" option already covers the case.
     """
     if program_years <= COMMUNITY_COLLEGE_YEARS:
         return (
@@ -1397,14 +1502,17 @@ def cc_path_options(program_years: int) -> tuple:
                 "parttime": "Part-time community college while working — no transfer",
             },
         )
-    return (
-        ["none", "fulltime", "parttime"],
-        {
-            "none": "None — start at the 4-year school",
-            "fulltime": "Full-time community college, then transfer (2+2)",
-            "parttime": "Part-time community college while working, then transfer",
-        },
-    )
+    options = ["none", "fulltime", "parttime"]
+    labels = {
+        "none": "None — start at the 4-year school",
+        "fulltime": "Full-time community college, then transfer (2+2)",
+        "parttime": "Part-time community college while working, then transfer",
+    }
+    if ccb_available:
+        options.append("ccb")
+        labels["ccb"] = (f"Bachelor's awarded by the community college — all "
+                         f"{program_years} years there, no transfer")
+    return options, labels
 
 
 def reconcile_cc_mode(state_key: str, options: list) -> None:
@@ -1416,6 +1524,13 @@ def reconcile_cc_mode(state_key: str, options: list) -> None:
     among its options. The two mean the same thing to the visitor (full-time
     community college), so they map across rather than silently resetting a
     chosen path back to "none".
+
+    "ccb" deliberately has NO equivalent and falls through to "none". It is
+    tempting to map it to "fulltime" -- both are full-time community college --
+    but they are materially different models (one finances four years there,
+    the other finances two years elsewhere), and a school that awards no
+    bachelor's cannot deliver this path at all. Silently converting it would
+    assert a transfer the visitor never chose.
     """
     current = st.session_state.get(state_key)
     if current in options:
@@ -4051,6 +4166,13 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     if compare_mode and st.session_state.get(
             "prof_school_b", PROFESSIONAL_SCHOOL_NATIONAL) != PROFESSIONAL_SCHOOL_NATIONAL:
         params["prof_school_b"] = st.session_state["prof_school_b"]
+    # The community-college baccalaureate's pricing structure. Rendered only
+    # under cc_mode "ccb", but emitted unconditionally: a widget that stops
+    # rendering keeps its session_state value, and a link that dropped it would
+    # silently re-price a shared scenario at the constant structure.
+    params["cc_esc_a"] = "1" if st.session_state.get("cc_escalating_a") else "0"
+    if compare_mode:
+        params["cc_esc_b"] = "1" if st.session_state.get("cc_escalating_b") else "0"
     params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
     params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
     # In prestige mode the tier REPLACES the school, so ?school= holds a tier
@@ -5876,7 +5998,8 @@ def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per
                                    grants_per_year: float, inflation_rate: float,
                                    years: int = UNDERGRAD_YEARS,
                                    cc_years: int = 0, cc_coa_per_year: float = 0.0,
-                                   finance_cc_years: bool = True) -> list:
+                                   finance_cc_years: bool = True,
+                                   cc_upper_division_premium: float = 0.0) -> list:
     """Per-year loan breakdown across `years` of enrollment, growing Cost of
     Attendance year-over-year by inflation_rate while Personal Contribution
     and Grants & Scholarships both stay flat nominal amounts -- Year 1 uses
@@ -5902,18 +6025,40 @@ def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per
     with their `coa` (for the year-by-year display and for summing the CC
     out-of-pocket cost) -- they just carry loan_amount=0. Keeping the CC years
     in the loop (rather than dropping them) is what positions the university
-    years at the correct inflated year_index."""
+    years at the correct inflated year_index.
+
+    cc_upper_division_premium raises the cost of community-college years at or
+    beyond COMMUNITY_COLLEGE_YEARS -- the "escalating" pricing structure a
+    community college awarding its own bachelor's may use, where junior and
+    senior coursework costs more per credit than freshman and sophomore
+    coursework. It is inert for every other path by construction rather than by
+    a flag: no other mode ever produces cc_years > COMMUNITY_COLLEGE_YEARS, so
+    no year can qualify."""
     schedule = []
     for year_index in range(years):
         is_cc = year_index < cc_years
         base = cc_coa_per_year if is_cc else coa_per_year
+        if is_cc and year_index >= COMMUNITY_COLLEGE_YEARS:
+            base *= (1 + cc_upper_division_premium)
         coa_this_year = base * (1 + inflation_rate) ** year_index
         if is_cc and not finance_cc_years:
             loan_amount = 0.0
         else:
             loan_amount = max(coa_this_year - personal_contribution_per_year - grants_per_year, 0)
         schedule.append({"year": year_index + 1, "coa": coa_this_year, "loan_amount": loan_amount,
-                         "phase": "community_college" if is_cc else "university"})
+                         "phase": "community_college" if is_cc else "university",
+                         # Whether this year may be BORROWED for, which is not
+                         # the same question as where it is spent. It was the
+                         # same question until the CCB path arrived: every
+                         # community-college year was unfinanced, so
+                         # `phase == "university"` was an exact proxy and both
+                         # federal cap functions used it as one. Under a CCB
+                         # every year is a community-college year AND financed,
+                         # and reading the phase there hands the student a
+                         # federal capacity of $0 -- silently pricing an
+                         # ordinary Direct-loan degree entirely as private
+                         # money. Say which question is being asked.
+                         "financed": bool(not is_cc or finance_cc_years)})
     return schedule
 
 
@@ -5921,7 +6066,8 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
                                grants_per_year: float, inflation_rate: float,
                                years: int = UNDERGRAD_YEARS,
                                cc_years: int = 0, cc_coa_per_year: float = 0.0,
-                               finance_cc_years: bool = True) -> float:
+                               finance_cc_years: bool = True,
+                               cc_upper_division_premium: float = 0.0) -> float:
     """Total loan across `years` of enrollment -- see
     compute_loan_schedule_by_year for the year-by-year math this sums (including
     the cc_years/cc_coa_per_year community-college-transfer path and the
@@ -5934,7 +6080,8 @@ def compute_total_loan_amount(coa_per_year: float, personal_contribution_per_yea
     schedule = compute_loan_schedule_by_year(coa_per_year, personal_contribution_per_year,
                                               grants_per_year, inflation_rate, years,
                                               cc_years=cc_years, cc_coa_per_year=cc_coa_per_year,
-                                              finance_cc_years=finance_cc_years)
+                                              finance_cc_years=finance_cc_years,
+                                              cc_upper_division_premium=cc_upper_division_premium)
     return sum(row["loan_amount"] for row in schedule)
 
 
@@ -5970,15 +6117,21 @@ def graduate_direct_cap(graduate_years: int) -> float:
 
 def federal_direct_cap(schedule: list, dependency: str) -> float:
     """Total federal Direct (sub+unsub) a student can borrow across the financed
-    years of `schedule` (the per-year list from compute_loan_schedule_by_year).
-    Community-college years borrow $0 (they're paid out of pocket, phase
-    "community_college"), so only "university" rows count, each at its
-    class-standing annual limit (1st/2nd/3rd/4th year). Bounded by the lifetime
-    aggregate cap. Anything a family needs above this is gap financing."""
+    years of `schedule` (the per-year list from compute_loan_schedule_by_year),
+    each at its class-standing annual limit (1st/2nd/3rd/4th year). Bounded by
+    the lifetime aggregate cap. Anything a family needs above this is gap
+    financing.
+
+    Keyed on `financed`, NOT on the phase. Transfer-path community-college years
+    borrow $0 and so contribute nothing either way, but a community college
+    awarding its own bachelor's produces four financed community-college years,
+    and those carry exactly the same Direct entitlement as any other. Reading
+    the phase there returned $0 of federal capacity and pushed the whole degree
+    into the private tranche. The fallback keeps hand-built row lists working."""
     limits = FEDERAL_DIRECT_ANNUAL_LIMITS.get(dependency, FEDERAL_DIRECT_ANNUAL_LIMITS["dependent"])
     total = 0.0
     for row in schedule:
-        if row.get("phase") == "university":
+        if row.get("financed", row.get("phase") == "university"):
             total += limits[min(row["year"], 4)]
     return min(total, FEDERAL_DIRECT_AGGREGATE_CAP.get(dependency, FEDERAL_DIRECT_AGGREGATE_CAP["dependent"]))
 
@@ -6015,7 +6168,10 @@ def parent_plus_cap(schedule: list, dependency: str, start_year: int = None,
         return 0.0
     total = 0.0
     for row in schedule:
-        if row.get("phase") != "university":
+        # Financed years, not university years -- see federal_direct_cap. A
+        # parent borrowing PLUS for a bachelor's earned at a community college
+        # is borrowing the same loan under the same limit.
+        if not row.get("financed", row.get("phase") == "university"):
             continue
         year = row.get("year", 1)
         calendar_year = (start_year + year - 1) if start_year is not None else None
@@ -6109,9 +6265,85 @@ def simplified_debt_scale(program_years: int, predominant_degree=None,
         # failure mode is understating what a degree costs.
         return 1.0
     span = lambda n: federal_direct_cap(
-        [{"year": i, "phase": "university"} for i in range(1, n + 1)], dependency)
+        [{"year": i, "phase": "university", "financed": True} for i in range(1, n + 1)],
+        dependency)
     full = span(UNDERGRAD_YEARS)
     return span(program_years) / full if full else 1.0
+
+
+def ccb_program_families(coa_row) -> list:
+    """The 2-digit CIP families this school awards BACHELOR'S degrees in.
+
+    `programs_bachl` is a pipe-joined list ("11|26|50|51|52") written by
+    clean_college_scorecard.py's add_program_lists. Returns [] for a school
+    with none, or for a dataset built before those columns existed.
+    """
+    if coa_row is None:
+        return []
+    try:
+        raw = coa_row.get("programs_bachl")
+    except AttributeError:
+        return []
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return []
+    return [f for f in str(raw).split("|") if f]
+
+
+def ccb_school(coa_row, predominant_degree) -> bool:
+    """Whether this school awards its own bachelor's degrees AS a community
+    college -- i.e. whether the community-college baccalaureate is a real
+    option here.
+
+    Two conditions, both already in hand by the time the sidebar's community
+    college radio renders:
+
+      * it predominantly awards credentials BELOW the bachelor's
+        (`predominant_degree < 3`) -- the same Scorecard field
+        simplified_debt_scale keys on, and what makes it a community college
+        rather than a four-year school; and
+      * it awards at least one bachelor's degree (`programs_bachl`).
+
+    That reproduces the identification in NBER WP 34684 closely enough for a
+    per-school gate, and it is a fact about the SCHOOL rather than a state
+    list -- which matters because CCB authorisation is a state law but CCB
+    *availability* is an institutional choice, and 24 states permitting it
+    does not mean every college in them offers one.
+
+    Known blind spot, stated in the UI rather than papered over: Georgia's
+    "state colleges" award mostly bachelor's degrees, so they fail the
+    predominant test and are not flagged here even though they run large CCB
+    programmes.
+
+    `predominant_degree` comes from a LIVE Scorecard call, so it is None
+    whenever the API key is unset, the request fails, or the school isn't
+    found. Failing closed on that would be wrong here: it is not "this school
+    is a four-year college", it is "we didn't ask" -- and it would hide the
+    option from everyone during an outage. So an absent value falls back to the
+    committed dataset, which carries the same shape of evidence: a public
+    college awarding bachelor's degrees across no more subject families than it
+    awards associate's degrees in is a community college that has added a few
+    baccalaureates, not a university -- see
+    CCB_MAX_BACHELORS_TO_ASSOC_RATIO for the margins.
+    """
+    if predominant_degree is not None:
+        try:
+            return int(predominant_degree) < 3 and bool(ccb_program_families(coa_row))
+        except (TypeError, ValueError):
+            pass
+    if coa_row is None:
+        return False
+    bachl = ccb_program_families(coa_row)
+    if not bachl:
+        return False
+    try:                                              # public only
+        if int(coa_row.get("CONTROL")) != 1:
+            return False
+    except (TypeError, ValueError):
+        return False
+    assoc = [f for f in str(coa_row.get("programs_assoc") or "").split("|") if f]
+    if not assoc:
+        return False
+    return len(bachl) / len(assoc) <= CCB_MAX_BACHELORS_TO_ASSOC_RATIO
 
 
 def loan_amount_label(loan_basis: str, program_years: int) -> str:
@@ -7528,6 +7760,8 @@ def cc_chart_label_suffix(cc_mode) -> str:
         return " (comm. college only)"
     if cc_mode == "parttime":
         return " (via comm. college, working)"
+    if cc_mode == "ccb":
+        return " (comm. college bachelor's)"
     return ""
 
 
@@ -8797,9 +9031,15 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
             "fulltime": "Full-time, then transfer",
             "associate": "Full-time, entire degree — no transfer",
             "parttime": "Part-time while working, then transfer",
+            "ccb": "Bachelor's awarded by the community college — no transfer",
         }[cc_info["mode"]]
         rows.append([f"Community College Path ({cc_info['cc_years']} yrs)", _mode_label])
+        # The CCB years are BORROWED, so the out-of-pocket phrasing every other
+        # mode uses would be false here -- and its $0 total would read as an
+        # error rather than as "this is in the loan instead".
         rows.append(["Community College",
+                     f"{cc_info['state_label']} — {fmt_money(cc_info['cost'])}/yr, financed"
+                     if cc_info["mode"] == "ccb" else
                      f"{cc_info['state_label']} — {fmt_money(cc_info['cost'])}/yr, paid out of "
                      f"pocket ({fmt_money(cc_info['oop'])} total, no loan)"])
     # The 4-year-school qualifier only makes sense when there IS a transfer --
@@ -10408,7 +10648,11 @@ if program_years_a == 0 or graduate_years_a > 0:
     st.session_state["cc_mode_a"] = "none"
     cc_mode_a = "none"
 else:
-    _cc_options_a, _cc_labels_a = cc_path_options(program_years_a)
+    # Does THIS school award its own bachelor's? Both inputs resolved far above
+    # (the Scorecard lookup and the COA row), so the option can be offered per
+    # school rather than per state -- see ccb_school.
+    _ccb_ok_a = ccb_school(coa_match_a, predominant_degree_a)
+    _cc_options_a, _cc_labels_a = cc_path_options(program_years_a, ccb_available=_ccb_ok_a)
     reconcile_cc_mode("cc_mode_a", _cc_options_a)
     cc_mode_a = _sb_pay.radio(
         "Community college path",
@@ -10430,17 +10674,58 @@ else:
         "'Part-time while working' means you work full-time during the "
         "community-college years (earning, not foregoing income) -- its "
         "earnings advantage shows up when 'count foregone earnings' is on. "
+        + ("The last option is different from all of these: the community "
+           "college awards the bachelor's ITSELF, so there is no transfer and "
+           "no four-year school -- and because it is a whole degree rather "
+           "than two years, it IS financed. "
+           if _ccb_ok_a else "") +
         "Put a different path in each scenario to compare them. See Methodology.",
     )
+    if _ccb_ok_a:
+        _ccb_fields_a = [CIP_FAMILY_TITLES.get(f) for f in ccb_program_families(coa_match_a)]
+        _ccb_fields_a = [f for f in _ccb_fields_a if f]
+        if _ccb_fields_a:
+            _sb_pay.caption(
+                f"🎓 {school_name_a} awards its own bachelor's in "
+                f"{', '.join(_ccb_fields_a[:4])}"
+                + (" and others" if len(_ccb_fields_a) > 4 else "")
+                + " — check that yours is one of them before choosing that path."
+            )
+    # The escalating price structure: some community colleges charge more for
+    # junior/senior coursework than for freshman/sophomore. Only meaningful for
+    # the CCB path, so it renders only there rather than sitting inert under
+    # every other mode.
+    if cc_mode_a == "ccb":
+        st.session_state.setdefault(
+            "cc_escalating_a", get_shared_default("cc_esc_a", "0") == "1")
+        _sb_pay.checkbox(
+            "Upper-division courses cost more",
+            key="cc_escalating_a", on_change=lambda: mark_interaction("cc_escalating_a"),
+            help="Some community colleges charge a higher per-credit rate for "
+                 "junior and senior coursework than for the first two years -- "
+                 "about 40% more. Others charge one rate throughout, which is "
+                 "the default here. Check your college's tuition page.",
+        )
 cc_transfer_a = cc_mode_a != "none"
 is_parttime_a = cc_mode_a == "parttime"
+# The one mode whose community-college years are borrowed rather than paid out
+# of pocket -- see CC_FINANCED_MODES.
+cc_financed_a = cc_mode_a in CC_FINANCED_MODES
+cc_premium_a = (CCB_UPPER_DIVISION_PREMIUM
+                if cc_mode_a == "ccb" and st.session_state.get("cc_escalating_a")
+                else 0.0)
 # Clamped to the program length: a 2-year program done at a community college
 # is entirely community college, not 2 years of CC plus a negative number of
 # university years.
 # Clamp against the UNDERGRADUATE portion only. Graduate years are never
 # transferable from a community college, so they must not be eligible to be
 # clamped away even if a graduate path ever reaches here.
-cc_years_a = (min(COMMUNITY_COLLEGE_YEARS, program_years_a - graduate_years_a)
+# The CCB path is the whole undergraduate programme at the community college --
+# it awards the bachelor's, so there is no transfer and no university portion.
+# Still clamped against the undergraduate span for the same reason the 2+2 is.
+_cc_span_a = (program_years_a - graduate_years_a if cc_mode_a == "ccb"
+              else COMMUNITY_COLLEGE_YEARS)
+cc_years_a = (min(_cc_span_a, program_years_a - graduate_years_a)
               if cc_transfer_a else 0)
 university_years_a = max(program_years_a - cc_years_a, 0)
 if cc_transfer_a:
@@ -10511,9 +10796,14 @@ effective_cc_coa_per_year_a = cc_coa_per_year_a * (1 + inflation_rate_a) ** year
 _schedule_a = compute_loan_schedule_by_year(
     effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
     years=program_years_a,
-    cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False)
+    cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a,
+    finance_cc_years=cc_financed_a, cc_upper_division_premium=cc_premium_a)
 computed_loan_amount_a = sum(r["loan_amount"] for r in _schedule_a)
-cc_oop_a = sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college")
+# Out-of-pocket ONLY when the CC years aren't borrowed. Counting a financed
+# year here as well would charge it twice -- once inside the loan and again as
+# a personal contribution in the ROI denominator.
+cc_oop_a = (0.0 if cc_financed_a else
+            sum(r["coa"] for r in _schedule_a if r["phase"] == "community_college"))
 # Federal Direct cap for the cap-and-gap split -- summed annual limits over the
 # financed years. Only meaningful in Detailed (Simplified's median debt is
 # already federal-only); None there so compute_scenario_results skips the split.
@@ -10553,10 +10843,13 @@ if is_returning and _foregone_on:
                         if st.session_state.get("returning_enrollment") == RETURNING_KEEP_WORKING
                         else 0)
 # Double-count guard: the per-year family contribution applies only to the
-# financed university years; the CC tuition (cc_oop_a) is a separate additive
+# FINANCED years; unfinanced CC tuition (cc_oop_a) is a separate additive
 # out-of-pocket cost. No CC (university_years=4, cc_oop=0) => pc_per_year*4,
-# exactly the original value.
-personal_contribution = personal_contribution_per_year_a * university_years_a + cc_oop_a
+# exactly the original value. Under the CCB path every year is financed, so the
+# financed span is the whole programme and cc_oop_a is 0 -- the contribution
+# still applies once per year, and only once.
+financed_years_a = university_years_a + (cc_years_a if cc_financed_a else 0)
+personal_contribution = personal_contribution_per_year_a * financed_years_a + cc_oop_a
 if years_until_start_a > 0:
     coa_projection_note = (
         f"Today's Year 1 COA: {fmt_money(coa_per_year_a)} → projected to "
@@ -10565,8 +10858,21 @@ if years_until_start_a > 0:
     )
 else:
     coa_projection_note = ""
-if cc_transfer_a:
-    _work_note_a = "working full-time, " if is_parttime_a else ""
+# Hoisted out of the branch below: the Simplified note further down reads it
+# too, and it was only ever assigned on the transfer path.
+_work_note_a = "working full-time, " if is_parttime_a else ""
+if cc_mode_a == "ccb":
+    # Its own sentence, because every clause of the transfer one is wrong here:
+    # the years ARE financed, there is no four-year school, and the community
+    # college is the degree-granting institution rather than a stopover.
+    cc_note_a = (
+        f"{cc_years_a} yrs at the community college "
+        f"({fmt_money(effective_cc_coa_per_year_a)}/yr"
+        + (f", rising {CCB_UPPER_DIVISION_PREMIUM * 100:.0f}% for upper-division years"
+           if cc_premium_a else "")
+        + ", financed) — it awards the bachelor's itself, so there is no transfer. "
+    )
+elif cc_transfer_a:
     cc_note_a = (
         f"{cc_years_a} yrs community college ({_work_note_a}"
         f"{fmt_money(effective_cc_coa_per_year_a)}/yr, no loan → {fmt_money(cc_oop_a)} out-of-pocket)"
@@ -10588,7 +10894,17 @@ else:
 # The community-college line survives either way: its out-of-pocket total is a
 # real cost that enters total_investment in both modes, so suppressing it would
 # hide money the visitor actually spends.
-if loan_source_a == "personal":
+if loan_source_a == "personal" and cc_mode_a == "ccb":
+    # No "(incl. $X community college)" tail: under this path the community
+    # college years ARE the loan, so there is no separate out-of-pocket half to
+    # add, and printing "incl. $0" invites the reader to hunt for a number that
+    # is correctly absent.
+    _loan_note_a = (
+        f"{coa_projection_note}{cc_note_a}"
+        f"→ **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, "
+        f"**{fmt_money(personal_contribution)}** personal"
+    )
+elif loan_source_a == "personal":
     _loan_note_a = (
         f"{coa_projection_note}"
         f"{cc_note_a}"
@@ -10600,6 +10916,19 @@ if loan_source_a == "personal":
         f"{fmt_money(personal_contribution_per_year_a)} personal "
         f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
         f"→ over {program_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
+    )
+elif cc_mode_a == "ccb":
+    # Simplified at a CCB-granting community college is the one place the
+    # school's reported median debt is knowably too low: institution-wide
+    # median debt at a community college is dominated by associate's
+    # completers, and simplified_debt_scale deliberately does NOT scale a
+    # sub-bachelor's school's figure up. Say so rather than let a four-year
+    # degree wear a two-year school's debt number.
+    _loan_note_a = (
+        f"This school's reported median debt is mostly its **associate's** "
+        f"graduates, so it understates a {program_years_a}-year degree earned here. "
+        f"Switch **Loan estimate** to *Detailed* to price the bachelor's from "
+        f"its own tuition."
     )
 elif cc_transfer_a:
     # Deliberately NOT cc_note_a: that string ends "...then N yrs at the 4-year
@@ -11700,7 +12029,9 @@ if compare_mode:
             st.session_state["cc_mode_b"] = "none"
             cc_mode_b = "none"
         else:
-            _cc_options_b, _cc_labels_b = cc_path_options(program_years_b)
+            _ccb_ok_b = ccb_school(coa_match_b, predominant_degree_b)
+            _cc_options_b, _cc_labels_b = cc_path_options(program_years_b,
+                                                          ccb_available=_ccb_ok_b)
             reconcile_cc_mode("cc_mode_b", _cc_options_b)
             cc_mode_b = st.radio(
                 "Community college path",
@@ -11719,11 +12050,32 @@ if compare_mode:
                 "Community college is assumed paid without loans, "
                 "so it adds nothing to the debt. 'Part-time while working' "
                 "means you work full-time during the community-college years. "
+                + ("The last option is different: the community college awards "
+                   "the bachelor's itself, so there is no transfer -- and being "
+                   "a whole degree rather than two years, it IS financed. "
+                   if _ccb_ok_b else "") +
                 "See Methodology.",
             )
+            if cc_mode_b == "ccb":
+                st.session_state.setdefault(
+                    "cc_escalating_b", get_shared_default("cc_esc_b", "0") == "1")
+                st.checkbox(
+                    "Upper-division courses cost more",
+                    key="cc_escalating_b",
+                    on_change=lambda: mark_interaction("cc_escalating_b"),
+                    help="Some community colleges charge a higher per-credit "
+                         "rate for junior and senior coursework -- about 40% "
+                         "more. Others charge one rate throughout, the default.",
+                )
         cc_transfer_b = cc_mode_b != "none"
         is_parttime_b = cc_mode_b == "parttime"
-        cc_years_b = (min(COMMUNITY_COLLEGE_YEARS, program_years_b - graduate_years_b)
+        cc_financed_b = cc_mode_b in CC_FINANCED_MODES
+        cc_premium_b = (CCB_UPPER_DIVISION_PREMIUM
+                        if cc_mode_b == "ccb" and st.session_state.get("cc_escalating_b")
+                        else 0.0)
+        _cc_span_b = (program_years_b - graduate_years_b if cc_mode_b == "ccb"
+                      else COMMUNITY_COLLEGE_YEARS)
+        cc_years_b = (min(_cc_span_b, program_years_b - graduate_years_b)
                       if cc_transfer_b else 0)
         university_years_b = max(program_years_b - cc_years_b, 0)
         if cc_transfer_b:
@@ -11775,9 +12127,12 @@ if compare_mode:
         _schedule_b = compute_loan_schedule_by_year(
             effective_coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b, inflation_rate_b,
             years=program_years_b,
-            cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b, finance_cc_years=False)
+            cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b,
+            finance_cc_years=cc_financed_b, cc_upper_division_premium=cc_premium_b)
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
-        cc_oop_b = sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college")
+        # Zero when those years are borrowed -- see Scenario A on double-counting.
+        cc_oop_b = (0.0 if cc_financed_b else
+                    sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college"))
         federal_cap_b = (federal_direct_cap(
                              undergraduate_schedule(_schedule_b, graduate_years_b), loan_dependency)
                          + graduate_direct_cap(graduate_years_b)
@@ -11788,7 +12143,9 @@ if compare_mode:
         _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
         enrollment_years_b = (cc_years_b + university_years_b) if _foregone_on_b else 0
         working_years_b = cc_years_b if (is_parttime_b and _foregone_on_b) else 0
-        personal_contribution_b = personal_contribution_per_year_b * university_years_b + cc_oop_b
+        financed_years_b = university_years_b + (cc_years_b if cc_financed_b else 0)
+        personal_contribution_b = (personal_contribution_per_year_b * financed_years_b
+                                   + cc_oop_b)
         if years_until_start_b > 0:
             coa_projection_note_b = (
                 f"Today's Year 1 COA: {fmt_money(coa_per_year_b)} → projected to "
@@ -11797,8 +12154,16 @@ if compare_mode:
             )
         else:
             coa_projection_note_b = ""
-        if cc_transfer_b:
-            _work_note_b = "working full-time, " if is_parttime_b else ""
+        _work_note_b = "working full-time, " if is_parttime_b else ""
+        if cc_mode_b == "ccb":
+            cc_note_b = (
+                f"{cc_years_b} yrs at the community college "
+                f"({fmt_money(effective_cc_coa_per_year_b)}/yr"
+                + (f", rising {CCB_UPPER_DIVISION_PREMIUM * 100:.0f}% for upper-division years"
+                   if cc_premium_b else "")
+                + ", financed) — it awards the bachelor's itself, no transfer. "
+            )
+        elif cc_transfer_b:
             cc_note_b = (
                 f"{cc_years_b} yrs community college ({_work_note_b}"
                 f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan → {fmt_money(cc_oop_b)} out-of-pocket)"
@@ -11809,7 +12174,13 @@ if compare_mode:
         else:
             cc_note_b = ""
         # Same rule as Scenario A -- see there for why.
-        if loan_source_b == "personal":
+        if loan_source_b == "personal" and cc_mode_b == "ccb":
+            _loan_note_b = (
+                f"{coa_projection_note_b}{cc_note_b}"
+                f"→ **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, "
+                f"**{fmt_money(personal_contribution_b)}** personal"
+            )
+        elif loan_source_b == "personal":
             _loan_note_b = (
                 f"{coa_projection_note_b}"
                 f"{cc_note_b}"
@@ -11821,6 +12192,14 @@ if compare_mode:
                 f"{fmt_money(personal_contribution_per_year_b)} personal "
                 f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
                 f"→ over {program_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
+            )
+        elif cc_mode_b == "ccb":
+            # See Scenario A: at a community college the reported median debt is
+            # its associate's completers, and is not scaled up for a bachelor's.
+            _loan_note_b = (
+                f"This school's reported median debt is mostly its **associate's** "
+                f"graduates, so it understates a {program_years_b}-year degree "
+                f"earned here. Switch **Loan estimate** to *Detailed*."
             )
         elif cc_transfer_b:
             # See Scenario A for why this doesn't reuse cc_note_b.
@@ -14721,14 +15100,29 @@ def _render_takehome_stage(figs: dict, major_name: str, verbose: bool = True) ->
         )
 
 
-def render_cc_path_note(cc_mode: str) -> None:
+def render_cc_path_note(cc_mode: str, major_name: str = None) -> None:
     """One-line community-college-path note rendered into the current container.
 
     Called from BOTH the single-scenario Loan Information section and the
     Compare Mode scenario panel, so a 2+2 transfer scenario is visibly labelled
     as one in either arm -- anything one branch shows and the other doesn't is
     an H2 confound. Renders nothing for a straight four-year start ('none'),
-    matching the PDF's _cc_info_for_pdf, which omits the disclosure then too."""
+    matching the PDF's _cc_info_for_pdf, which omits the disclosure then too.
+
+    The CCB branch carries a second caption, because it is the one path where
+    the CREDENTIAL changes rather than only its price -- see
+    ccb_earnings_disclosure for why that is said in words instead of applied to
+    the salary. major_name is optional so the pooled sentence still renders for
+    a Career-mode occupation, which has no CIP family to look up."""
+    if cc_mode == "ccb":
+        st.caption(
+            "🏫 **Community-college path:** the entire bachelor's degree at the "
+            "community college — it awards the degree itself, so there is no "
+            "transfer and no four-year school. Unlike the other paths, these "
+            "years **are** financed."
+        )
+        st.caption(ccb_earnings_disclosure(major_name))
+        return
     if cc_mode == "fulltime":
         st.caption(
             f"🏫 **Community-college path:** {COMMUNITY_COLLEGE_YEARS} years at a "
@@ -14885,7 +15279,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
     """
     with column:
         panel_heading(f"Scenario {label}: {scenario['major']} — {scenario['strategy_label']}")
-        render_cc_path_note(cc_mode)
+        render_cc_path_note(cc_mode, scenario["major"])
 
         for caption in get_investment_captions(scenario):
             st.caption(caption)
@@ -15308,7 +15702,7 @@ else:
 
     st.subheader(f"💳 Loan Information — {strategy_label}")
 
-    render_cc_path_note(cc_mode_a)
+    render_cc_path_note(cc_mode_a, major)
 
     loan_caption = get_loan_principal_caption(scenario)
     if loan_caption:
@@ -15316,10 +15710,16 @@ else:
 
     # Computed unconditionally (it's cheap) so the PDF builder always has it; the
     # on-screen table below is what's shown conditionally.
+    # Every cc_* argument must match the sidebar's own build above. This is the
+    # displayed table; that one is the loan. They are two calls to the same
+    # function and the only thing keeping them equal is passing the same
+    # arguments -- a hard-coded finance_cc_years here would print a schedule
+    # that contradicts the total beside it.
     loan_schedule_a = compute_loan_schedule_by_year(
         effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
         years=program_years_a,
-        cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a, finance_cc_years=False
+        cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a,
+        finance_cc_years=cc_financed_a, cc_upper_division_premium=cc_premium_a
     )
     # The what-this-figure-is prose is shared with the compare panels (see
     # render_loan_basis_disclosure); only the Detailed year-by-year table
@@ -16651,6 +17051,41 @@ is what most people in these fields actually do, and typically brings the loan
 to **$0**. The comparison is still against the same high-school-graduate
 baseline, so this isn't a way to make a career look good by spending less: the
 earnings side is untouched.
+
+**Bachelor's awarded by the community college (CCB).** A fourth option appears
+only when the school you picked actually awards its own bachelor's degrees
+while still granting mostly sub-bachelor's credentials — that is, when it is a
+community college offering a *community college baccalaureate*. Twenty-four
+states now allow this, and the share of community colleges doing it rose from
+about 2% in 2004 to roughly 17% in 2022. It is a genuinely different thing from
+the 2+2 above: there is no transfer and no four-year school, because the
+community college confers the degree.
+
+Two consequences the model takes seriously:
+
+- **These years are financed.** Every other community-college path here assumes
+  the years are covered by Pell, work and savings, which is defensible for two
+  years at a few thousand dollars each. A whole four-year degree is not, so a
+  CCB path builds an ordinary loan — and it carries the same federal Direct and
+  Parent PLUS limits as a degree earned anywhere else.
+- **Pricing may escalate.** Some community colleges charge a higher per-credit
+  rate for junior and senior coursework — about 40% more — while others charge
+  one rate throughout. The default here is one rate; the checkbox models the
+  other. Check your college's tuition page, because it changes the total by
+  roughly $3,000.
+
+**What this does *not* do is change your salary.** The first national study of
+these degrees (Acton, Morales, Cortes, Turner & Miller, NBER Working Paper
+34684, 2026) finds CCB graduates earning about 5.5% less a year than people
+with the same degree in the same field from a four-year school, and clearly
+more than people who stopped at an associate's — with enormous variation by
+field, from no gap at all in nursing and criminal justice to roughly $30,000 a
+year in computing. Those figures are measured one year after graduation and
+describe *who chose each path*, not what the choice did to them. This
+calculator states them where you pick the path and deliberately does not apply
+them to your earnings: every salary here comes from the occupation or major you
+chose and never from the school, and a descriptive gap is not a licence to
+break that.
 
 **Community college is assumed paid without loans.** In both modes the
 community-college years add **$0 to the loan** — most community-college

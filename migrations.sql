@@ -1311,3 +1311,26 @@ alter table scenario_events
 --     had no links to either tool at all -- both were in-page expanders
 --     -- so main->tool navigation did not merely go unrecorded, it could
 --     not happen.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-08 -- cc_mode_a / cc_mode_b gain a fourth value: 'ccb'
+-- ---------------------------------------------------------------------------
+-- NO SCHEMA CHANGE. Both columns store the raw radio string, so a new mode
+-- rides on the existing text column exactly as 'associate' did.
+--
+-- What it means: the visitor modelled a bachelor's degree awarded BY the
+-- community college itself (a community college baccalaureate), rather than a
+-- 2+2 transfer where the four-year school confers the degree. It is offered
+-- only when the selected school predominantly awards sub-bachelor's
+-- credentials AND awards at least one bachelor's (see ccb_school in app.py),
+-- so its presence in a row is also a statement about the school.
+--
+-- Why it matters for analysis: unlike every other cc_mode, this one FINANCES
+-- the community-college years. So within cc_mode != 'none', loan amount and
+-- personal_contribution mean different things for 'ccb' rows than for the
+-- other three -- the others push community-college cost into personal
+-- contribution and out of the loan, and this one does the reverse. Do not
+-- pool 'ccb' with the transfer modes when comparing borrowing.
+--
+-- Rows before this date cannot contain 'ccb'. Its absence in an earlier row is
+-- "the option did not exist", not "the visitor declined it".
