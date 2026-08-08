@@ -101,6 +101,24 @@ PROGRAMS = {
 DEBT_COLUMN = "DEBT_ALL_STGP_EVAL_MDN"
 PAYMENT_COLUMN = "DEBT_ALL_STGP_EVAL_MDN10YRPAY"
 
+# PARENT PLUS, carried alongside. STGP above is the STUDENT's own federal
+# borrowing (Stafford + Grad PLUS); PP is what the PARENT borrowed for the
+# same program. They are different debts owed by different people and must
+# never be summed into one "total": Parent PLUS is the parent's obligation,
+# is not IDR-eligible for the student, and app.py's split_loan_financing
+# already models it as a separate non-forgivable pool.
+#
+# Kept because the two behave completely differently by field. Student
+# borrowing is capped ($31,000 aggregate, dependent) and lands within
+# $6,774 across 31 fields; Parent PLUS has no aggregate cap and spans
+# $25,459. The flat chart and the wide one come from the same release --
+# the difference is the cap, not the field.
+#
+# The median is conditional on having borrowed PLUS at all, and only about
+# a third as many cells report it, so it describes PLUS families rather
+# than all families. Say so wherever it is shown.
+PARENT_PLUS_COLUMN = "DEBT_ALL_PP_EVAL_MDN"
+
 # "PS" is what this file actually uses for a privacy-suppressed cell -- 1,329
 # of them at CREDLEV 7 -- not the "PrivacySuppressed" spelling the institution
 # file uses and clean_college_scorecard.py handles. Getting this wrong does not
@@ -124,13 +142,13 @@ CONTROL_LABELS = {
 OUTPUT_COLUMNS = [
     "UNITID", "INSTNM", "CONTROL", "control_type",
     "CIPCODE", "CREDLEV", "credential", "program_key",
-    "debt_median", "debt_10yr_payment",
+    "debt_median", "debt_10yr_payment", "parent_plus_median",
 ]
 
 
 def load_raw(path: str) -> pd.DataFrame:
     usecols = ["UNITID", "INSTNM", "CONTROL", "CIPCODE", "CIPDESC",
-               "CREDLEV", DEBT_COLUMN, PAYMENT_COLUMN]
+               "CREDLEV", DEBT_COLUMN, PAYMENT_COLUMN, PARENT_PLUS_COLUMN]
     return pd.read_csv(
         path, usecols=usecols,
         # CIPCODE must stay a string: it is zero-padded ("0101"), and reading
@@ -178,11 +196,13 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
             sys.exit(f"ERROR: no CREDLEV {credlev} ({credential}) rows in this file.")
         block["debt_median"] = pd.to_numeric(block[DEBT_COLUMN], errors="coerce")
         block["debt_10yr_payment"] = pd.to_numeric(block[PAYMENT_COLUMN], errors="coerce")
+        block["parent_plus_median"] = pd.to_numeric(block[PARENT_PLUS_COLUMN], errors="coerce")
         block = block[block["debt_median"].notna()]
         block["CIPCODE"] = block["CIPCODE"].str[:2]
         grouped = (block.groupby(["UNITID", "INSTNM", "CONTROL", "CIPCODE"], as_index=False)
                         .agg(debt_median=("debt_median", "median"),
-                             debt_10yr_payment=("debt_10yr_payment", "median")))
+                             debt_10yr_payment=("debt_10yr_payment", "median"),
+                             parent_plus_median=("parent_plus_median", "median")))
         grouped["CREDLEV"] = credlev
         grouped["credential"] = credential
         grouped["program_key"] = grouped["CIPCODE"]
@@ -196,6 +216,8 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
             pd.to_numeric(out[DEBT_COLUMN], errors="coerce"))
         out["debt_10yr_payment"] = out["debt_10yr_payment"].fillna(
             pd.to_numeric(out[PAYMENT_COLUMN], errors="coerce"))
+        out["parent_plus_median"] = out["parent_plus_median"].fillna(
+            pd.to_numeric(out[PARENT_PLUS_COLUMN], errors="coerce"))
 
     # Drop suppressed/missing here rather than in the app. A school with no
     # published figure must fall back to the national constant, and the
