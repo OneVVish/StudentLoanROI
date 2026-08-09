@@ -4973,6 +4973,31 @@ def search_schools_by_budget(cip_family: str, credential: str,
     return matches.reset_index(drop=True)
 
 
+def reconcile_search_pick(stored, picker_ids: list):
+    """Which school the result picker should point at, given what it pointed
+    at before the filters changed.
+
+    Lives here, in section 2, rather than inline in the renderer so that
+    check_school_search_filters.py can test the REAL rule instead of a copy of
+    it -- the same reason returning_baseline_ready() sits beside the vocab it
+    guards. Two copies of a reconcile is how the two come to disagree.
+
+    `stored` is whatever `search_pick` holds, which on a first render is None
+    and after a filter change may be a school that no longer exists in the
+    results. `picker_ids` are the UNITIDs of the current result set, cheapest
+    first. A school that survived keeps the selection; anything else falls
+    back to the cheapest row, which is where a first render would have put it.
+
+    Returns None for an empty result set. The renderer never reaches that
+    case -- it returns on `results.empty` before the picker is built -- but
+    returning None beats raising on picker_ids[0] if that ever stops being
+    true.
+    """
+    if not picker_ids:
+        return None
+    return stored if stored in picker_ids else picker_ids[0]
+
+
 def find_school_coa(school_name: str, coa_df: pd.DataFrame, unitid=None):
     """Case-insensitive lookup by institution name: exact match first, then
     falls back to a substring match. By the time this is called, school_name
@@ -14773,11 +14798,10 @@ def render_school_search(always_open: bool = False) -> None:
         # Reconcile BEFORE the widget exists, the reconcile_cc_mode pattern:
         # Streamlit raises if a keyed widget's stored value is absent from its
         # options, and it refuses an assignment to a key whose widget has
-        # already rendered. A school that survived the filter keeps the
-        # selection; anything else falls back to the cheapest row, which is
-        # where a first render would have put it anyway.
-        if st.session_state.get("search_pick") not in picker_ids:
-            st.session_state["search_pick"] = picker_ids[0]
+        # already rendered. The rule itself is reconcile_search_pick, in
+        # section 2, so a guard can test it directly.
+        st.session_state["search_pick"] = reconcile_search_pick(
+            st.session_state.get("search_pick"), picker_ids)
         choice = st.selectbox(
             "Use one of these as your school",
             picker_ids,
