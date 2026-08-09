@@ -14750,15 +14750,42 @@ def render_school_search(always_open: bool = False) -> None:
 
         # One selectbox and one button, not a button per row: 25 widgets would
         # re-render every pass and need stable keys for no gain.
+        #
+        # The options are UNITIDs, not row positions. `results` is
+        # reset_index'd, so its positions are 0..N-1 on EVERY search -- which
+        # means a stored position stays "valid" against the options of a
+        # completely different result set and silently comes to name a
+        # different school. Changing any filter left this picker offering a
+        # school that was no longer in the table above it: clear the state
+        # filter on a California search and it still read "Bethesda University
+        # -- $13,575/yr" over a list of Puerto Rico schools, and applied it.
+        #
+        # UNITID is the identity the rest of the app already trusts for exactly
+        # this reason -- see find_school_coa, where a pinned UNITID wins
+        # outright because 86 institution NAMES in this dataset are shared by
+        # more than one school. A stale UNITID cannot be mistaken for a valid
+        # one: it is either still in the result set or it is not.
+        picker_ids = [int(uid) for uid in results["UNITID"]]
+        picker_labels = {
+            int(row["UNITID"]): f"{row['INSTNM']} — "
+                                f"{fmt_money(row['coa_per_year'])}/yr"
+            for _, row in results.iterrows()}
+        # Reconcile BEFORE the widget exists, the reconcile_cc_mode pattern:
+        # Streamlit raises if a keyed widget's stored value is absent from its
+        # options, and it refuses an assignment to a key whose widget has
+        # already rendered. A school that survived the filter keeps the
+        # selection; anything else falls back to the cheapest row, which is
+        # where a first render would have put it anyway.
+        if st.session_state.get("search_pick") not in picker_ids:
+            st.session_state["search_pick"] = picker_ids[0]
         choice = st.selectbox(
             "Use one of these as your school",
-            list(results.index),
-            format_func=lambda i: f"{results.at[i, 'INSTNM']} — "
-                                   f"{fmt_money(results.at[i, 'coa_per_year'])}/yr",
+            picker_ids,
+            format_func=lambda uid: picker_labels[uid],
             key="search_pick",
         )
         if st.button("Use this school", type="primary"):
-            picked = results.loc[choice]
+            picked = results.loc[results["UNITID"] == choice].iloc[0]
             # Carries the residency the row was PRICED at. Without it the
             # sidebar would autofill from its own in-state checkbox and could
             # show a different number than the row the visitor just clicked --
