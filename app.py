@@ -14283,8 +14283,21 @@ def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
 
 # The controls that make a search a SEARCH. Touching any of them is what
 # separates "the visitor ran a query" from "the panel rendered".
-SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential", "search_budget",
-                        "search_home_state", "search_states")
+# Every key that mark_interaction() can be called with from inside the search.
+# It must be kept in step with the widgets BY HAND, and the cost of missing one
+# is silent: the control still works, the results still render, and only the
+# LOG quietly stops counting that search.
+#
+# That has already happened once. The budget control was a single "most I could
+# pay" slider keyed `search_budget`; when it became a range its key changed to
+# `search_coa_range` and this tuple was not updated, so from that day a visitor
+# who dragged the cost range and changed nothing else failed
+# search_was_adjusted() and wrote no school_search_run row. Budget is the one
+# control the feature is NAMED for, so the searches most central to it were the
+# ones going unrecorded. See migrations.sql for the affected window.
+SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
+                        "search_coa_range", "search_home_state",
+                        "search_states")
 
 
 def search_was_adjusted() -> bool:

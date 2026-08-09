@@ -1334,3 +1334,54 @@ alter table scenario_events
 --
 -- Rows before this date cannot contain 'ccb'. Its absence in an earlier row is
 -- "the option did not exist", not "the visitor declined it".
+
+
+-- =====================================================================
+-- 2026-08-09  school_search_run undercounts from 2026-08-02 to 2026-08-09
+-- =====================================================================
+-- NO DDL. Nothing to paste into the SQL editor. This records a gap in
+-- usage_logs that no column and no row can show you, because the rows
+-- that would show it are the ones that were never written.
+--
+-- WHAT HAPPENED. render_school_search only logs a search once the visitor
+-- has actually touched a control -- search_was_adjusted() intersects the
+-- set of interacted keys with SEARCH_CONTROL_KEYS. On 2026-08-02 the cost
+-- control changed from a single "most I could pay" slider to a range, and
+-- its widget key changed with it, `search_budget` -> `search_coa_range`.
+-- SEARCH_CONTROL_KEYS kept the old spelling.
+--
+-- So for that window the intersection could never match on the budget:
+-- a visitor who dragged the cost range and changed nothing else was
+-- treated as not having searched, and wrote no school_search_run row.
+-- Nothing else broke. The control worked, the results rendered, the
+-- visitor saw the right schools -- only the log went quiet.
+--
+-- WHAT IT COSTS THE ANALYSIS. The undercount is NOT uniform, so it cannot
+-- be corrected with a scale factor:
+--
+--   * It only ever dropped searches whose ONLY adjustment was the budget.
+--     A visitor who also picked a field, a state or a level still logged,
+--     because those keys stayed correct throughout.
+--
+--   * Budget is the control the feature is named for, so the missing
+--     searches are biased toward the purest use of it -- someone who
+--     accepted the prefilled field of study and moved only the price.
+--     In Major mode the field IS prefilled, which makes budget-only the
+--     natural path rather than an unusual one.
+--
+--   * Direction is one-way: school_search_run in this window is a floor
+--     on searches, never a ceiling. Treat a low count as "at least this
+--     many", and do not compare the window's search RATE against either
+--     side of it.
+--
+-- Sessions are unaffected as sessions -- a dropped search does not drop
+-- the pageview, the scenario_events or anything else that visit wrote.
+-- It is specifically the "did they run a search" flag that is missing,
+-- so a funnel built on it has a broken middle step and intact ends.
+--
+-- The window is bounded on both sides. Before 2026-08-02 the key matched
+-- and budget drags logged; from 2026-08-09 it matches again. Note the
+-- earlier boundary too: the adjusted-search gate itself only landed on
+-- 2026-08-01 (before that every session logged a search on page load, so
+-- school_search_run meant "loaded the page" -- see the note on that date).
+-- Three regimes in nine days; cut on both dates, not just one.

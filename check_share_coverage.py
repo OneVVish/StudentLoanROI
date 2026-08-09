@@ -62,7 +62,6 @@ SHARE_EXEMPT = {
     # Transient search UI. The budget-first search is a way of ARRIVING at a
     # school; once one is picked, `school` carries the result and re-running
     # someone else's search on their budget is not what a shared link is for.
-    "search_budget": "transient school-search input; ?school= carries the result",
     "search_coa_range": "transient school-search input; ?school= carries the result",
     "search_credential": "transient school-search input",
     "search_states": "transient school-search input",
