@@ -100,9 +100,11 @@ that pipeline or deliberately exempted.
                                5d take-home  5e survey  5f methodology
 ```
 
-**The section banners are load-bearing.** `analyze_model.py` and all six
-guard scripts `exec` everything above the section-3 banner to get the
-constants and math without the UI. That contract — sections 1–2 contain
+**The section banners are load-bearing.** `analyze_model.py` and the seven
+guard scripts that test the MODEL `exec` everything above the section-3
+banner to get the constants and math without the UI. (`check_graduate_tuition.py`
+is the exception: it checks a committed dataset, not the app, so it never
+loads `app.py`.) That contract — sections 1–2 contain
 no module-level Streamlit *calls* — is why the research paper's numbers
 and the app's numbers cannot drift apart: they run the same code, not a
 reimplementation. (One wart: the "2m" repayment-comparison functions
@@ -121,11 +123,21 @@ flowchart TD
     ED["BLS occupation.xlsx<br/>(typical entry education)"] -->|add_education_field.py| C1
     SC["College Scorecard<br/>institution file"] -->|clean_college_scorecard.py| C2["data/college_coa_clean.csv"]
     FOS["College Scorecard<br/>field-of-study file"] -->|build_professional_debt.py| C3["data/professional_debt_clean.csv<br/>data/graduate_debt_clean.csv"]
+    IPEDS["IPEDS<br/>IC_AY charges + HD directory"] -->|build_graduate_tuition.py| C6["data/graduate_tuition_clean.csv"]
     CPS["CPS ASEC microdata"] -->|build_hs_age_profile.py| C4["data/hs_age_profile.csv"]
     NYF["NY Fed labor-market<br/>outcomes by major"] -->|nyfed_pipeline.py| C5["data/nyfed_majors_clean.csv"]
 
     C1 & C2 & C3 & C4 & C5 --> APP["app.py<br/>(reads at startup, cached)"]
+    C6 -.not read yet.-> APP
 ```
+
+`data/graduate_tuition_clean.csv` is the one committed dataset `app.py` does
+not read. It is the prerequisite for a graduate school selector — Scorecard
+publishes no graduate cost of any kind, so the search has never been able to
+offer a graduate level — and it ships ahead of that UI so its coverage can be
+judged before anything is built on it. IPEDS is the only federal source, and
+it publishes **tuition and fees only**: there are no graduate living costs
+anywhere in it, which is why nothing here is called a cost of attendance.
 
 Two rules that keep the CSVs honest:
 

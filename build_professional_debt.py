@@ -38,9 +38,41 @@ average that hides it. It is also pooled across award years and is a few years
 old, so treat it as a reliable RELATIVE signal between schools and a rough
 absolute one.
 
+THE MBA IS PRICED TWO WAYS, AND NEITHER IS A PRICE ON ITS OWN. No federal
+source publishes what an MBA costs. IPEDS graduate tuition is an
+institution-wide average across every graduate programme at the school, so an
+MBA and an MEd collapse into one number, and IPEDS's per-programme tuition
+fields cover chiropractic, dentistry, medicine, optometry, osteopathic
+medicine, pharmacy, podiatry, veterinary medicine and law -- business is not
+among them. The only MBA-specific federal figure is DEBT, which is what CIP
+5202 at CREDLEV 5 gives here, for 837 schools.
+
+So a consumer showing an MBA figure shows this debt median alongside the
+school's average graduate tuition from data/graduate_tuition_clean.csv, and
+labels them as the different things they are. Never add them and never average
+them: one is cumulative borrowing at graduation, already net of scholarships
+and family money, and the other is an annual sticker price for the average
+master's student at that institution. Business schools also commonly charge
+differential tuition above their institution's average, so the average is a
+floor for an MBA, not an estimate of one.
+
+OVERLAP -- MBA rows and family "52" rows describe the same students. The
+2-digit rollup below medians every business master's together, including the
+MBAs broken out above. Both are emitted because they answer different
+questions. A consumer picks one and never sums them.
+
 Source: collegescorecard.ed.gov/data -> "Most Recent Data by Field of Study".
 The download host is ed-public-download.scorecard.network (the older
 app.cloud.gov host now 404s), and the filename carries the release date.
+
+USE THE DATED FILENAME. The undated
+`Most-Recent-Cohorts-Field-of-Study.zip` at that host serves an OLDER release
+than the dated `..._06102026.zip` -- verified: it yields 22,012 rows with
+medical debt spanning $28,083-$272,823 and Harvard at $83,975, where the dated
+file yields 20,868 rows, $47,503-$330,479 and Harvard at $99,160, reproducing
+the committed CSV exactly. Rebuilding from the undated file silently rolls
+every graduate and professional debt figure in the app back several years, and
+nothing about the output looks wrong.
 """
 import argparse
 import sys
@@ -83,15 +115,41 @@ BACHELORS = 3
 # CREDENTIAL_BACHELORS to that map would do exactly that; don't.
 FAMILY_CREDENTIALS = {BACHELORS: "bachelor", MASTERS: "master", DOCTORAL: "doctoral"}
 
-# 4-digit CIP -> the key app.py uses. CIPDESC is carried only to verify the
-# code still means what we think: these are stable, but a silent CIP
-# reassignment between releases would otherwise swap medicine for something
-# else without anything failing.
+# 4-digit CIP -> (the key app.py uses, expected CIPDESC, credential level).
+# CIPDESC is carried only to verify the code still means what we think: these
+# are stable, but a silent CIP reassignment between releases would otherwise
+# swap medicine for something else without anything failing.
+#
+# The credential level is per-programme rather than a single constant because
+# the MBA is a MASTER'S, not a First Professional degree. Keying it at
+# CREDLEV 7 would find nothing; forcing it to credential "professional" would
+# be worse -- it would put an MBA in professional_schools_for() beside
+# medicine and law, and inherit the "first professional" framing that the
+# federal aggregate limits and the app's own disclosures are built around.
+#
+# WHY THE MBA IS HERE RATHER THAN IN THE 2-DIGIT ROLLUP BELOW. An MBA lands in
+# CIP family 52, Business -- pooled with accounting, finance, marketing and
+# every other business master's into one median-of-medians. That is the right
+# granularity for "what does a business master's borrow" and the wrong one for
+# pricing an MBA, which is the single most-asked graduate question this app
+# gets. The exact 4-digit code gives 837 schools publishing an MBA-specific
+# median, so the precision is available and only the aggregation was hiding it.
+#
+# These rows are ADDITIVE: the 2-digit "52" master rows are untouched and
+# still include the same students. The two overlap by construction. A consumer
+# picks one or the other and must never sum them -- see OVERLAP note in the
+# module docstring.
 PROGRAMS = {
-    "5112": ("medicine", "Medicine."),
-    "2201": ("law", "Law."),
-    "5104": ("dentistry", "Dentistry."),
+    "5112": ("medicine", "Medicine.", FIRST_PROFESSIONAL),
+    "2201": ("law", "Law.", FIRST_PROFESSIONAL),
+    "5104": ("dentistry", "Dentistry.", FIRST_PROFESSIONAL),
+    "5202": ("mba", "Business Administration, Management and Operations.", MASTERS),
 }
+
+# What each exact-CIP programme is called in the `credential` column. The three
+# First Professional programmes share one label because app.py's picker filters
+# on it; the MBA gets the master's label because that is what it is.
+PROGRAM_CREDENTIAL = {FIRST_PROFESSIONAL: "professional", MASTERS: "master"}
 
 # Median cumulative debt for Direct Subsidized/Unsubsidized plus Grad PLUS,
 # counting only loans originated AT the evaluated institution (EVAL). The ANY
@@ -162,13 +220,15 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
     # A row with no UNITID cannot be looked up by the app, so it cannot be
     # offered in the picker.
     df = df[df["UNITID"].notna()]
-    professional = df[df["CREDLEV"] == FIRST_PROFESSIONAL]
     rows = []
-    for cip, (program_key, expected_desc) in PROGRAMS.items():
-        block = professional[professional["CIPCODE"] == cip].copy()
+    for cip, (program_key, expected_desc, credlev) in PROGRAMS.items():
+        # Filtered per-programme, not once outside the loop: the MBA sits at
+        # CREDLEV 5 while the other three sit at 7, and a single pre-filter
+        # would silently return nothing for it.
+        block = df[(df["CREDLEV"] == credlev) & (df["CIPCODE"] == cip)].copy()
         if block.empty:
             sys.exit(
-                f"ERROR: CIP {cip} ({program_key}) has no First Professional rows in "
+                f"ERROR: CIP {cip} ({program_key}) has no CREDLEV {credlev} rows in "
                 f"this file.\nEither the release changed its CIP taxonomy or the wrong "
                 f"file was passed. Refusing to write a dataset missing a program the "
                 f"app charges debt for."
@@ -181,7 +241,7 @@ def build(df: pd.DataFrame) -> pd.DataFrame:
                 f"describes it as {found}.\nRefusing to map it to {program_key!r}."
             )
         block["program_key"] = program_key
-        block["credential"] = "professional"
+        block["credential"] = PROGRAM_CREDENTIAL[credlev]
         rows.append(block)
 
     # Degree rows (bachelor's, master's, doctoral): every CIP field,
