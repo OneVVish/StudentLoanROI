@@ -48,19 +48,31 @@ import sys
 
 import pandas as pd
 
+# Imported, never mirrored. A guard that keeps its own copy of the rule it
+# checks stops checking the real one the moment the two drift: change the
+# builder to 12 credits and a mirrored 9 here would go on passing, while
+# testing a threshold nothing uses. Same reasoning that puts
+# reconcile_search_pick and returning_baseline_ready in one place each.
+from build_graduate_tuition import FULL_TIME_GRAD_CREDITS
+
 TUITION_PATH = "data/graduate_tuition_clean.csv"
 DEBT_PATH = "data/graduate_debt_clean.csv"
 UNDERGRAD_PATH = "data/college_coa_clean.csv"
 
-MONEY_COLUMNS = [
-    "grad_tuition_in", "grad_tuition_out", "grad_fees_in", "grad_fees_out",
+# Columns where a zero cannot mean anything real, so a zero is a defect: IPEDS
+# writes 0 for "this charge does not apply", and a school priced at nothing
+# sorts above every real one.
+#
+# FEES ARE DELIBERATELY NOT HERE. 337 institutions report FEE6 == 0 and none
+# leave it blank, so a zero there is a fact -- this school charges no required
+# fees -- not an absence. Listing it would assert the opposite and force the
+# builder to relabel 329 true zeros as missing data. The priced totals below
+# are what a consumer sorts on, and they are covered.
+NONZERO_COLUMNS = [
+    "grad_tuition_in", "grad_tuition_out",
     "grad_tuition_fees_in", "grad_tuition_fees_out",
     "grad_hrchg_in", "grad_hrchg_out",
 ]
-
-# IPEDS's own definition of a full-time graduate student, mirrored from
-# build_graduate_tuition.FULL_TIME_GRAD_CREDITS.
-FULL_TIME_GRAD_CREDITS = 9
 
 # Coverage floor against the schools the app already knows award a graduate
 # degree. Set well below the 96% observed so ordinary release drift does not
@@ -83,9 +95,13 @@ def check_identity(tuition) -> list:
 
 
 def check_no_free_schools(tuition) -> list:
-    """Zero is IPEDS for 'not applicable', and it sorts to the top."""
+    """Zero is IPEDS for 'not applicable', and it sorts to the top.
+
+    Scoped to NONZERO_COLUMNS: fees are excluded because a zero fee is a real
+    answer, not a missing one. See the constant for the evidence.
+    """
     problems = []
-    for column in MONEY_COLUMNS:
+    for column in NONZERO_COLUMNS:
         bad = tuition[tuition[column].notna() & (tuition[column] <= 0)]
         if not bad.empty:
             problems.append(

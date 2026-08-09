@@ -100,9 +100,11 @@ that pipeline or deliberately exempted.
                                5d take-home  5e survey  5f methodology
 ```
 
-**The section banners are load-bearing.** `analyze_model.py` and all six
-guard scripts `exec` everything above the section-3 banner to get the
-constants and math without the UI. That contract — sections 1–2 contain
+**The section banners are load-bearing.** `analyze_model.py` and the seven
+guard scripts that test the MODEL `exec` everything above the section-3
+banner to get the constants and math without the UI. (`check_graduate_tuition.py`
+is the exception: it checks a committed dataset, not the app, so it never
+loads `app.py`.) That contract — sections 1–2 contain
 no module-level Streamlit *calls* — is why the research paper's numbers
 and the app's numbers cannot drift apart: they run the same code, not a
 reimplementation. (One wart: the "2m" repayment-comparison functions

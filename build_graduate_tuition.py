@@ -46,12 +46,20 @@ build_professional_debt.py rather than being priced from this file.
 (the per-credit-hour charge, reported by 92% of these schools) ride along for
 a consumer that needs to price a part-time or per-credit programme honestly.
 
-THE REPORTING FLAG IS NOT OPTIONAL. Missingness in TUITION6 is structural, not
-random: of 3,825 institutions in the 2023-24 file, 2,019 report a graduate
-figure and 1,806 are flagged 'A' for "not applicable" because they have no
-graduate programmes at all. Reading the value without XTUIT6 conflates "this
-school has no graduate school" with "we don't know", and both would arrive as
-a gap. Every row written here was flagged 'R'.
+THE REPORTING FLAG, AND WHY IT LOOKS REDUNDANT. Missingness in TUITION6 is
+structural, not random: of 3,825 institutions in the 2023-24 file, 2,019
+report a graduate figure and 1,806 are flagged 'A' for "not applicable"
+because they have no graduate programmes at all. Every row written here was
+flagged 'R'.
+
+On THIS release the gate removes nothing the zero rule would not have removed
+anyway -- every 'A' row also reports 0, so deleting the gate yields a
+byte-identical dataset. Verified by deleting it. The gate stays regardless,
+because the two facts agreeing is a property of the current release and not a
+guarantee, and because 'A' and 0 mean different things: one is "no graduate
+school", the other is "this particular charge does not apply".
+assert_flag_is_load_bearing() fails the build the day they diverge, which is
+the only moment at which the difference becomes visible.
 """
 import argparse
 import re
@@ -182,8 +190,44 @@ def load_directory(path: str) -> pd.DataFrame:
                        usecols=HD_COLUMNS)
 
 
+def assert_flag_is_load_bearing(charges: pd.DataFrame) -> None:
+    """Fail if an unreported row carries a real charge.
+
+    The XTUIT gate and the zero-coercion below currently remove the SAME rows:
+    every institution flagged 'A' ("not applicable -- no graduate programmes")
+    also reports its tuition as 0, so deleting the gate produces a
+    byte-identical dataset. That was found by deleting it and diffing.
+
+    Which makes the gate untestable from the output, and this is where it can
+    be tested instead: at the only point that can still see the flag. If a
+    future release ever files a positive tuition against an 'A' row, the two
+    mechanisms stop agreeing, the gate starts doing real work, and the
+    assumption written all over this file -- that unreported means "no
+    graduate school" rather than "unknown" -- needs re-examining by a person.
+
+    Loud rather than silent because the silent version is indistinguishable
+    from correct: the rows would simply be included, priced, and sorted.
+    """
+    for side, flag in RESIDENCY_FLAGS.items():
+        tuition = pd.to_numeric(charges[GRAD_CHARGE_COLUMNS[f"grad_tuition_{side}"]],
+                                errors="coerce")
+        contradictory = charges[(charges[flag] != "R") & (tuition > 0)]
+        if not contradictory.empty:
+            sys.exit(
+                f"ERROR: {len(contradictory)} institution(s) carry a positive "
+                f"{side}-state graduate tuition while {flag} says it was not "
+                f"reported.\n"
+                "Until now those two facts have always agreed, so the gate and "
+                "the zero rule removed identical rows. They no longer do. Decide "
+                "deliberately whether an unreported-but-priced row belongs in "
+                "this dataset before removing this check -- it is the only place "
+                "the flag is still visible."
+            )
+
+
 def clean_charges(charges: pd.DataFrame) -> pd.DataFrame:
     """Numeric charges, gated on the reporting flag, with zero read as absent."""
+    assert_flag_is_load_bearing(charges)
     out = pd.DataFrame({"UNITID": charges["UNITID"]})
     for name, source in GRAD_CHARGE_COLUMNS.items():
         side = "in" if name.endswith("_in") else "out"
@@ -191,7 +235,15 @@ def clean_charges(charges: pd.DataFrame) -> pd.DataFrame:
         # A 0 in IPEDS means the charge does not apply, not that the programme
         # is free. Left as 0 it would sort to the top of any cheapest-first
         # list as the most affordable graduate school in the country.
-        value = value.where(value > 0)
+        #
+        # Applied to TUITION and the per-credit rate, where 0 genuinely means
+        # not-applicable. NOT to fees: 337 institutions report FEE6 == 0 and
+        # none leave it blank, so a zero there means "no required fees", which
+        # is a real answer. Coercing it would relabel a fact as an absence.
+        # The sum below is unaffected either way -- it treats a missing fee as
+        # zero -- so this only decides what the component column can say.
+        if not name.startswith("grad_fees_"):
+            value = value.where(value > 0)
         # And a figure the institution never reported is not a figure. The
         # flag is per-residency, so out-of-state is gated independently -- a
         # school can report in-state and leave out-of-state blank.
@@ -243,18 +295,20 @@ def build(charges_path: str, directory_path: str) -> tuple:
     misfiled = (out["grad_hrchg_in"].notna()
                 & (out["grad_tuition_in"] < out["grad_hrchg_in"] * FULL_TIME_GRAD_CREDITS))
     out = out[~misfiled].copy()
-    out.attrs["misfiled_dropped"] = int(misfiled.sum())
     # 177834.0 does not join 177834.
     out["UNITID"] = out["UNITID"].astype("Int64")
     out = out.sort_values("UNITID").reset_index(drop=True)
-    return out[OUTPUT_COLUMNS], merged
+    # Returned explicitly rather than stashed on out.attrs: attrs propagation
+    # is experimental in pandas and does not survive a CSV round trip, so a
+    # future refactor could silently turn the dropped count into 0 -- which
+    # reads as "nothing was wrong with the data".
+    return out[OUTPUT_COLUMNS], merged, int(misfiled.sum())
 
 
-def summarise(out: pd.DataFrame, merged: pd.DataFrame) -> None:
+def summarise(out: pd.DataFrame, merged: pd.DataFrame, dropped: int) -> None:
     """What the run actually found. This summary is the deliverable -- it is
     the evidence for whether a graduate school search is worth building."""
     print(f"\ngraduate tuition {out['ipeds_year'].iloc[0]}: {len(out):,} schools written")
-    dropped = out.attrs.get("misfiled_dropped", 0)
     if dropped:
         print(f"  dropped, annual figure below {FULL_TIME_GRAD_CREDITS} x their own "
               f"per-credit rate: {dropped}")
@@ -310,11 +364,11 @@ def main() -> int:
     parser.add_argument("-o", "--output", default="data/graduate_tuition_clean.csv")
     args = parser.parse_args()
 
-    out, merged = build(args.charges, args.directory)
+    out, merged, dropped = build(args.charges, args.directory)
     if out.empty:
         sys.exit("ERROR: no school reported a graduate tuition. Wrong file?")
     out.to_csv(args.output, index=False)
-    summarise(out, merged)
+    summarise(out, merged, dropped)
     print(f"wrote {args.output}")
     return 0
 
