@@ -75,6 +75,8 @@ SHARE_EXEMPT = {
                              "on admit rate and no school attribute it touches "
                              "survives into the scenario ?school= carries",
     "search_pick": "transient school-search result picker",
+    "grad_search_pick": "transient graduate school-search result picker; "
+                        "?grad_school= carries the resolved name",
     "search_home_state": "transient school-search input; drives in-state pricing "
                          "for the search only, and ?in_state= carries the result",
     "school_search_a": "raw search text; ?school= carries the resolved name",

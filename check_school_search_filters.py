@@ -307,6 +307,66 @@ def check_credential_gate(ns) -> list:
     return problems
 
 
+def check_graduate_search(ns) -> list:
+    """The graduate half: its own registry, its own price source, and a picker
+    name that the sidebar can actually accept."""
+    problems = []
+    grad_levels = ns["GRADUATE_CREDENTIAL_LEVELS"]
+    undergrad = set(ns["CREDENTIAL_LEVELS"])
+
+    # The two registries must not overlap. A label in both would dispatch on
+    # whichever check ran first, and the two searches read different files.
+    both = undergrad & set(grad_levels)
+    if both:
+        problems.append(
+            f"  {sorted(both)} appear in BOTH credential registries\n"
+            "    the search dispatches on which one a label came from, so a "
+            "label in both resolves to whichever test runs first")
+    for label in grad_levels:
+        if not ns["is_graduate_credential"](label):
+            problems.append(f"  is_graduate_credential({label!r}) is False")
+        if label not in ns["GRADUATE_SEARCH_TO_CREDENTIAL"]:
+            problems.append(
+                f"  {label!r} has no sidebar credential to hand off to\n"
+                "    applying a result would set a credential the radio has no "
+                "option for, and Streamlit raises on that")
+    for label in undergrad:
+        if ns["is_graduate_credential"](label):
+            problems.append(f"  is_graduate_credential({label!r}) is True")
+
+    # The years must be the ADDITIONAL graduate ones. PROGRAM_YEARS_BY_EDUCATION
+    # holds the totals including the bachelor's -- 6 and 9 -- and pricing a
+    # master's over six years of graduate tuition treble-counts it.
+    additional = ns["GRADUATE_ADDITIONAL_YEARS"]
+    for label, (_, years) in grad_levels.items():
+        if years >= ns["UNDERGRAD_YEARS"] + 1 and years not in additional.values():
+            problems.append(
+                f"  {label!r} prices {years} years, which looks like a TOTAL "
+                f"rather than the graduate years alone ({sorted(set(additional.values()))})")
+
+    # And the handoff name must be one the sidebar picker will accept.
+    for family, credential in [("52", "master"), ("11", "master")]:
+        results = ns["search_graduate_schools_by_budget"](
+            family, credential, 500_000, "CA", limit=10_000)
+        if results.empty:
+            problems.append(f"  no graduate results at all for CIP {family}")
+            continue
+        if "picker_name" not in results.columns:
+            problems.append("  results carry no picker_name for the handoff")
+            continue
+        options = set(ns["graduate_schools_for"](family, credential))
+        stray = set(results["picker_name"]) - options
+        if stray:
+            problems.append(
+                f"  {len(stray)} result(s) carry a picker_name the sidebar has "
+                f"no option for (e.g. {sorted(stray)[0]!r})\n"
+                "    the picker resets to the national default on an unknown "
+                "name, silently discarding the school just applied")
+        if not results["price_per_year"].is_monotonic_increasing:
+            problems.append(f"  CIP {family} graduate results are not price-sorted")
+    return problems
+
+
 def check_picker_identity(ns, base) -> list:
     """The picker keys on UNITID, so UNITID must be a real key -- and the
     reconcile must keep a survivor while replacing an evicted selection."""
@@ -363,6 +423,7 @@ def main() -> int:
         ("order and subset", lambda: check_order_and_subset(ns, base)),
         ("filter before cap", lambda: check_filter_before_cap(ns, base)),
         ("credential gate", lambda: check_credential_gate(ns)),
+        ("graduate search", lambda: check_graduate_search(ns)),
         ("picker identity", lambda: check_picker_identity(ns, base)),
     ]:
         found = fn()
@@ -377,7 +438,8 @@ def main() -> int:
     print(f"school search filters OK -- {len(checks)} properties over "
           f"{len(base)} schools ({unrated} unrated): wide-open means no filter, "
           f"narrowing excludes unrated, edges inclusive, sectors partition, "
-          f"order preserved, cap applied last, admit rate gated to "
+          f"order preserved, cap applied last, graduate levels dispatch "
+          f"separately, admit rate gated to "
           f"{'/'.join(ns['ADM_RATE_CREDENTIALS'])}, picker keyed on UNITID.")
     return 0
 
