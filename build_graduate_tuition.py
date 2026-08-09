@@ -110,6 +110,59 @@ POSTBACC_HLOFFER = 6
 # catch schools that filed a per-credit rate in the annual field -- see build().
 FULL_TIME_GRAD_CREDITS = 9
 
+# ---------------------------------------------------------------------------
+# Professional-practice programmes, the second output of this script.
+#
+# TUITION6 above is an institution-wide average across every graduate
+# programme, which is exactly wrong for a medical or law degree: those are the
+# most expensive and most differentially-priced things a university sells, and
+# averaging them with an MEd hides it. IPEDS prices them separately, and this
+# is the only federal source that does -- Scorecard has debt and no cost.
+#
+# It matters for what the app already shows. Medicine, dentistry and law each
+# have a per-school picker driven by DEBT, a figure that includes Grad PLUS
+# and therefore describes borrowing a 2026 student cannot replicate. A
+# published price alongside it is a different and more actionable fact.
+#
+# The index is IPEDS's, fixed by the survey form. Names are the app's where it
+# has one (medicine / dentistry / law key PROFESSIONAL_PROGRAM_BY_OCCUPATION)
+# and plain otherwise. All nine are emitted: the parse is identical, the file
+# is small, and "should we model pharmacy" becomes a question the data can
+# answer rather than another release to download.
+#
+# NOTE medicine is index 3 (allopathic, MD) and osteopathic is 5 (DO). They
+# are NOT merged: the app's medicine picker comes from CIP 5112, which is MD
+# only, so folding DO schools in would price a path the app does not model.
+PROFESSIONAL_PROGRAMS = {
+    1: "chiropractic",
+    2: "dentistry",
+    3: "medicine",
+    4: "optometry",
+    5: "osteopathic",
+    6: "pharmacy",
+    7: "podiatry",
+    8: "veterinary",
+    9: "law",
+}
+
+# Per-programme charge columns, by residency, plus the reporting flag. Same
+# 'R' convention as XTUIT6.
+PROFESSIONAL_COLUMNS = {
+    "prof_tuition_in": "ISPROF{i}",
+    "prof_tuition_out": "OSPROF{i}",
+    "prof_fees_in": "ISPFEE{i}",
+    "prof_fees_out": "OSPFEE{i}",
+}
+PROFESSIONAL_FLAGS = {"in": "XISPRO{i}", "out": "XOSPRO{i}"}
+
+PROFESSIONAL_OUTPUT_COLUMNS = [
+    "UNITID", "INSTNM", "CITY", "STABBR", "control_type", "program_key",
+    "prof_tuition_in", "prof_tuition_out",
+    "prof_fees_in", "prof_fees_out",
+    "prof_tuition_fees_in", "prof_tuition_fees_out",
+    "ipeds_year",
+]
+
 OUTPUT_COLUMNS = [
     "UNITID", "INSTNM", "CITY", "STABBR", "control_type",
     "grad_tuition_in", "grad_tuition_out",
@@ -261,10 +314,59 @@ def clean_charges(charges: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def build_professional(charges_path: str, directory: pd.DataFrame,
+                        year: int) -> pd.DataFrame:
+    """One row per (institution, professional programme) that publishes a price.
+
+    LONG rather than wide -- nine programmes x four charges would be 36 columns
+    of which any given school fills four, and every consumer would then have to
+    know the index-to-programme mapping to read it. Long means a consumer
+    filters on `program_key`, which is the same string the app already uses for
+    medicine, dentistry and law.
+    """
+    header = pd.read_csv(charges_path, nrows=0, encoding=ENCODING).columns
+    needed = ["UNITID"]
+    for index in PROFESSIONAL_PROGRAMS:
+        needed += [pattern.format(i=index) for pattern in PROFESSIONAL_COLUMNS.values()]
+        needed += [pattern.format(i=index) for pattern in PROFESSIONAL_FLAGS.values()]
+    require_columns(header, needed, charges_path, "professional-programme charges")
+    charges = pd.read_csv(charges_path, encoding=ENCODING, low_memory=False,
+                          usecols=needed)
+
+    blocks = []
+    for index, program_key in PROFESSIONAL_PROGRAMS.items():
+        block = pd.DataFrame({"UNITID": charges["UNITID"], "program_key": program_key})
+        for name, pattern in PROFESSIONAL_COLUMNS.items():
+            side = "in" if name.endswith("_in") else "out"
+            value = pd.to_numeric(charges[pattern.format(i=index)], errors="coerce")
+            # Same rules as the graduate side: 0 is "does not apply", and each
+            # programme has 6-12 of them, so a free law school is reachable
+            # without this. Fees keep their zeros -- a programme with no
+            # required fees is a real answer, not a missing one.
+            if not name.startswith("prof_fees_"):
+                value = value.where(value > 0)
+            reported = charges[PROFESSIONAL_FLAGS[side].format(i=index)] == "R"
+            block[name] = value.where(reported)
+        for side in ("in", "out"):
+            tuition = block[f"prof_tuition_{side}"]
+            fees = block[f"prof_fees_{side}"].fillna(0)
+            block[f"prof_tuition_fees_{side}"] = (tuition + fees).where(tuition.notna())
+        blocks.append(block[block["prof_tuition_in"].notna()])
+
+    out = pd.concat(blocks, ignore_index=True)
+    out = out.merge(directory, on="UNITID", how="left")
+    out["control_type"] = out["CONTROL"].map(CONTROL_LABELS).fillna("Unknown")
+    out["ipeds_year"] = year
+    out["UNITID"] = out["UNITID"].astype("Int64")
+    out = out.sort_values(["program_key", "UNITID"]).reset_index(drop=True)
+    return out[PROFESSIONAL_OUTPUT_COLUMNS]
+
+
 def build(charges_path: str, directory_path: str) -> tuple:
     year = release_year(charges_path)
     charges = clean_charges(load_charges(charges_path))
     directory = load_directory(directory_path)
+    professional = build_professional(charges_path, directory, year)
 
     merged = directory.merge(charges, on="UNITID", how="left")
     merged["control_type"] = merged["CONTROL"].map(CONTROL_LABELS).fillna("Unknown")
@@ -302,10 +404,11 @@ def build(charges_path: str, directory_path: str) -> tuple:
     # is experimental in pandas and does not survive a CSV round trip, so a
     # future refactor could silently turn the dropped count into 0 -- which
     # reads as "nothing was wrong with the data".
-    return out[OUTPUT_COLUMNS], merged, int(misfiled.sum())
+    return out[OUTPUT_COLUMNS], merged, int(misfiled.sum()), professional
 
 
-def summarise(out: pd.DataFrame, merged: pd.DataFrame, dropped: int) -> None:
+def summarise(out: pd.DataFrame, merged: pd.DataFrame, dropped: int,
+               professional: pd.DataFrame) -> None:
     """What the run actually found. This summary is the deliverable -- it is
     the evidence for whether a graduate school search is worth building."""
     print(f"\ngraduate tuition {out['ipeds_year'].iloc[0]}: {len(out):,} schools written")
@@ -354,6 +457,30 @@ def summarise(out: pd.DataFrame, merged: pd.DataFrame, dropped: int) -> None:
               f"({len(priced) / max(len(grad_schools), 1):.0%})")
     except (FileNotFoundError, KeyError):
         pass
+
+    print(f"\nprofessional programmes: {len(professional):,} school-programme rows")
+    for program_key in PROFESSIONAL_PROGRAMS.values():
+        block = professional[professional["program_key"] == program_key]
+        if block.empty:
+            print(f"  {program_key:<14} none reported")
+            continue
+        priced = block["prof_tuition_fees_in"]
+        line = (f"  {program_key:<14} {len(block):>4} schools   "
+                f"median ${priced.median():>8,.0f}")
+        # What the app gains: these three already have a per-school picker
+        # driven by debt alone.
+        try:
+            debt = pd.read_csv("data/graduate_debt_clean.csv",
+                               dtype={"program_key": str})
+            known = set(debt[(debt["credential"] == "professional")
+                             & (debt["program_key"] == program_key)]["UNITID"])
+            if known:
+                gained = known & set(block["UNITID"].dropna().astype(int))
+                line += (f"   -> prices {len(gained)}/{len(known)} "
+                         f"({len(gained) / len(known):.0%}) of the app's picker")
+        except (FileNotFoundError, KeyError):
+            pass
+        print(line)
     print()
 
 
@@ -362,14 +489,25 @@ def main() -> int:
     parser.add_argument("charges", help="IC{YYYY}_AY.csv from IPEDS")
     parser.add_argument("directory", help="HD{YYYY}.csv from IPEDS, same year")
     parser.add_argument("-o", "--output", default="data/graduate_tuition_clean.csv")
+    # Written ALONGSIDE, from the same source file, the way data_pipeline.py
+    # --metros emits its wage index beside the metro wages. One parse of one
+    # release makes a vintage mismatch between the two structurally impossible,
+    # which is the failure the OEWS files taught this repo about.
+    parser.add_argument("--professional-output",
+                        default="data/professional_tuition_clean.csv")
     args = parser.parse_args()
 
-    out, merged, dropped = build(args.charges, args.directory)
+    out, merged, dropped, professional = build(args.charges, args.directory)
     if out.empty:
         sys.exit("ERROR: no school reported a graduate tuition. Wrong file?")
+    if professional.empty:
+        sys.exit("ERROR: no school reported a professional-programme tuition. "
+                 "Wrong file?")
     out.to_csv(args.output, index=False)
-    summarise(out, merged, dropped)
+    professional.to_csv(args.professional_output, index=False)
+    summarise(out, merged, dropped, professional)
     print(f"wrote {args.output}")
+    print(f"wrote {args.professional_output}")
     return 0
 
 

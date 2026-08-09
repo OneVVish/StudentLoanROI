@@ -2,7 +2,7 @@
 """Per-school professional-school debt, from College Scorecard field-of-study data.
 
     python3 build_professional_debt.py Most-Recent-Cohorts-Field-of-Study.csv \\
-        -o data/professional_debt_clean.csv
+        -o data/graduate_debt_clean.csv
 
 app.py charges medical, dental and law school as ONE national figure each --
 $205,000 / $293,900 / $130,000 -- so every doctor costs the same to train
@@ -72,7 +72,14 @@ medical debt spanning $28,083-$272,823 and Harvard at $83,975, where the dated
 file yields 20,868 rows, $47,503-$330,479 and Harvard at $99,160, reproducing
 the committed CSV exactly. Rebuilding from the undated file silently rolls
 every graduate and professional debt figure in the app back several years, and
-nothing about the output looks wrong.
+nothing about the output looks wrong. That is the one trap here that cannot
+be fixed in code -- the correct filename is a fact about the download, not
+about this script.
+
+(The second trap IS fixed: -o used to default to
+data/professional_debt_clean.csv, which app.py never read, so the documented
+command wrote a dead file and appeared to succeed. The default is now the
+file the app actually loads, and the dead one is deleted.)
 """
 import argparse
 import sys
@@ -305,7 +312,12 @@ def main() -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("field_of_study_csv",
                     help="Most-Recent-Cohorts-Field-of-Study.csv from the Scorecard zip")
-    ap.add_argument("-o", "--output", default="data/professional_debt_clean.csv")
+    # app.py reads PROFESSIONAL_DEBT_PATH = "data/graduate_debt_clean.csv", so
+    # that is the default. It used to be professional_debt_clean.csv, a file
+    # nothing loaded: running the documented command appeared to succeed and
+    # changed nothing the app could see. That file is now deleted rather than
+    # left to be rebuilt by accident.
+    ap.add_argument("-o", "--output", default="data/graduate_debt_clean.csv")
     args = ap.parse_args()
 
     print(f"Reading {args.field_of_study_csv} ...")
