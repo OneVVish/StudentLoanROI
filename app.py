@@ -14554,6 +14554,17 @@ def render_school_search(always_open: bool = False) -> None:
                   "stays cheapest-first.",
         )
         adm_filtered = (adm_low, adm_high) != ADM_RATE_FULL_RANGE
+
+        family = st.session_state.get("search_cip_family")
+        if not family:
+            st.info("Pick a field of study to search.")
+            return
+
+        # Below the field-of-study guard, not above it: this describes what is
+        # missing from a LIST, so it must not fire on a screen showing no list
+        # at all -- "pick a field of study" with a warning above it about
+        # omitted schools is a warning about nothing.
+        #
         # Named on screen, not left to the help text, because the two
         # directions cost different things and only one of them is intuitive.
         # Raising the floor is how someone looks for schools they are likely to
@@ -14568,11 +14579,6 @@ def render_school_search(always_open: bool = False) -> None:
                 "the very schools that are easiest to get into. Drop the left "
                 "handle back to 0% to see them again."
             )
-
-        family = st.session_state.get("search_cip_family")
-        if not family:
-            st.info("Pick a field of study to search.")
-            return
 
         home_state = st.session_state.get("search_home_state")
         if not home_state:
@@ -14664,8 +14670,17 @@ def render_school_search(always_open: bool = False) -> None:
             "Rate": rate_label,
             "Per year": results["coa_per_year"].map(fmt_money),
             "Whole program": results["total_program_cost"].map(fmt_money),
+            # A dash, not "open / not reported". Nine columns share the width
+            # that seven used to, and the two longest strings in the table were
+            # both placeholders for absent data -- at 1457px this cell clipped
+            # to "open / not reporte", which is the failure the count-back
+            # warning already taught this codebase about (Streamlit clips a
+            # table cell rather than wrapping it, so anything that must be READ
+            # cannot live in one). Both captions below already say a dash means
+            # the school reports none, so the short form is also the one the
+            # prose was describing.
             "Admits": results["ADM_RATE"].map(
-                lambda rate: f"{rate:.0%}" if pd.notna(rate) else "open / not reported"),
+                lambda rate: f"{rate:.0%}" if pd.notna(rate) else "—"),
             # The PARENT's borrowing, beside the student's cost. Same figure
             # render_parent_plus_note puts under a named school, and it earns a
             # column here for the same reason it earns a caption there: student
@@ -14680,7 +14695,7 @@ def render_school_search(always_open: bool = False) -> None:
             # other people's decisions and read as a recommendation.
             "Parents borrowed": results["PLUS_DEBT_INST_COMP_MD"].map(
                 lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0
-                else "not reported"),
+                else "—"),
             # Scorecard publishes a per-school calculator for all but one row,
             # and the caption above has always told visitors to go check one.
             # Until now the only one the page could reach was for the school
@@ -14690,12 +14705,17 @@ def render_school_search(always_open: bool = False) -> None:
         st.dataframe(
             table, use_container_width=True, hide_index=True,
             column_config={
+                # School names are the one genuinely long field and the one
+                # nothing else identifies a row by, so it gets the width the
+                # placeholders gave back. "California Polytechnic State
+                # University-San Luis Obispo" is 57 characters.
+                "School": st.column_config.Column("School", width="large"),
                 # A fixed display_text, so the column is a row of identical
                 # links rather than 25 raw URLs of wildly different lengths --
                 # Scorecard stores everything from a bare domain to a 120-char
                 # query string, and the widest one sets the column width.
                 "Net price": st.column_config.LinkColumn(
-                    "Net price", display_text="Calculate ↗",
+                    "Net price", display_text="Calculate ↗", width="small",
                     help="The school's own net price calculator — what someone "
                           "with your family's finances actually pays, as opposed "
                           "to the sticker price in this table."),
@@ -14705,7 +14725,7 @@ def render_school_search(always_open: bool = False) -> None:
             + (f", based on living in {home_state}. " if home_state else ". ")
             + "*Same either way* means the school charges one price regardless — "
             "true of most private schools. **Admits** is the share of applicants "
-            "accepted; blank means the school reports none, usually because it "
+            "accepted; **—** means the school reports none, usually because it "
             "admits nearly everyone."
             + (f" You've limited this to {adm_low}–{adm_high}%, so every row "
                "reports a rate and any school that reports none is excluded. "
@@ -14725,7 +14745,7 @@ def render_school_search(always_open: bool = False) -> None:
             "app models for the student. It is not what a typical family borrows: "
             "families who borrowed nothing are not in it. Congress capped Parent "
             "PLUS on July 1, 2026, so these are amounts borrowed under the older, "
-            "uncapped rules. Blank means the school reports none."
+            "uncapped rules. **—** means the school reports none."
         )
 
         # One selectbox and one button, not a button per row: 25 widgets would
