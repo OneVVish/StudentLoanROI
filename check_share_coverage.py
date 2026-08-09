@@ -68,6 +68,9 @@ SHARE_EXEMPT = {
     "search_control_types": "transient school-search filter; narrows which "
                             "sectors are listed and the chosen school's own "
                             "control_type rides with ?school=",
+    "search_adm_rate_on": "transient school-search filter switch; bachelor's "
+                          "only, and neutralised rather than shared at other "
+                          "credential levels",
     "search_adm_rate_range": "transient school-search filter; narrows the list "
                              "on admit rate and no school attribute it touches "
                              "survives into the scenario ?school= carries",
