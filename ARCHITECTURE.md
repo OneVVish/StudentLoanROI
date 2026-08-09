@@ -122,8 +122,8 @@ flowchart TD
     OEWS["BLS OEWS release<br/>(national / state / metro workbooks)"] -->|data_pipeline.py| C1["cleaned_careers.csv<br/>data/state_careers_clean.csv<br/>data/metro_careers_clean.csv + wage index"]
     ED["BLS occupation.xlsx<br/>(typical entry education)"] -->|add_education_field.py| C1
     SC["College Scorecard<br/>institution file"] -->|clean_college_scorecard.py| C2["data/college_coa_clean.csv"]
-    FOS["College Scorecard<br/>field-of-study file"] -->|build_professional_debt.py| C3["data/professional_debt_clean.csv<br/>data/graduate_debt_clean.csv"]
-    IPEDS["IPEDS<br/>IC_AY charges + HD directory"] -->|build_graduate_tuition.py| C6["data/graduate_tuition_clean.csv"]
+    FOS["College Scorecard<br/>field-of-study file"] -->|build_professional_debt.py| C3["data/graduate_debt_clean.csv"]
+    IPEDS["IPEDS<br/>IC_AY charges + HD directory"] -->|build_graduate_tuition.py| C6["data/graduate_tuition_clean.csv<br/>data/professional_tuition_clean.csv"]
     CPS["CPS ASEC microdata"] -->|build_hs_age_profile.py| C4["data/hs_age_profile.csv"]
     NYF["NY Fed labor-market<br/>outcomes by major"] -->|nyfed_pipeline.py| C5["data/nyfed_majors_clean.csv"]
 

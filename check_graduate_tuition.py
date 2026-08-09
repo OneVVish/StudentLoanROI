@@ -58,6 +58,14 @@ from build_graduate_tuition import FULL_TIME_GRAD_CREDITS
 TUITION_PATH = "data/graduate_tuition_clean.csv"
 DEBT_PATH = "data/graduate_debt_clean.csv"
 UNDERGRAD_PATH = "data/college_coa_clean.csv"
+PROFESSIONAL_PATH = "data/professional_tuition_clean.csv"
+
+# The three professional programmes the app models, each with a floor on how
+# much of its existing per-school picker must still get a price. Set below the
+# observed 92/78/96% so ordinary release drift does not trip them, but high
+# enough that a release which stops reporting one fails loudly instead of
+# quietly reverting that picker to debt-only.
+APP_PROFESSIONAL_PROGRAMS = {"medicine": 0.60, "dentistry": 0.75, "law": 0.80}
 
 # Columns where a zero cannot mean anything real, so a zero is a defect: IPEDS
 # writes 0 for "this charge does not apply", and a school priced at nothing
@@ -255,6 +263,82 @@ def check_mba_rows() -> list:
     return problems
 
 
+def check_professional_tuition() -> list:
+    """The per-programme prices are shaped right, and still reach the three
+    programmes the app has a picker for.
+
+    A separate grain from the graduate file -- one row per (school, programme)
+    rather than per school -- so identity has to be checked on the pair. The
+    coverage assertion is the one that matters: this dataset's whole reason for
+    existing is to put a published price next to the debt figure those three
+    pickers already show, and a release that stopped reporting them would
+    otherwise just quietly show debt alone again.
+    """
+    problems = []
+    try:
+        prof = pd.read_csv(PROFESSIONAL_PATH)
+    except FileNotFoundError:
+        return [f"  {PROFESSIONAL_PATH} not found -- run build_graduate_tuition.py"]
+    if prof.empty:
+        return ["  the professional tuition dataset is empty"]
+
+    if prof.duplicated(subset=["UNITID", "program_key"]).any():
+        dupes = int(prof.duplicated(subset=["UNITID", "program_key"]).sum())
+        problems.append(
+            f"  {dupes} duplicate (UNITID, program_key) pair(s)\n"
+            "    the grain is one row per school per programme; a duplicate "
+            "multiplies any join")
+    if prof["UNITID"].isna().any():
+        problems.append("  a professional row has no UNITID")
+
+    for column in ["prof_tuition_in", "prof_tuition_out",
+                   "prof_tuition_fees_in", "prof_tuition_fees_out"]:
+        bad = prof[prof[column].notna() & (prof[column] <= 0)]
+        if not bad.empty:
+            problems.append(
+                f"  {column} has {len(bad)} row(s) at or below zero "
+                f"(e.g. {bad.iloc[0]['INSTNM']}, {bad.iloc[0]['program_key']})\n"
+                "    every programme here carries 6-12 IPEDS zeros meaning 'does "
+                "not apply'; a free law school sorts first")
+
+    both = prof[prof["prof_tuition_fees_in"].notna()
+                & prof["prof_tuition_fees_out"].notna()]
+    wrong = both[both["prof_tuition_fees_out"] < both["prof_tuition_fees_in"]]
+    if not wrong.empty:
+        problems.append(
+            f"  {len(wrong)} row(s) charge out-of-state less than in-state "
+            f"(e.g. {wrong.iloc[0]['INSTNM']})")
+
+    years = prof["ipeds_year"].dropna().unique()
+    if len(years) != 1:
+        problems.append(f"  ipeds_year is not uniform: {sorted(years.tolist())}")
+
+    # The three the app already models. Their absence is the failure this
+    # dataset exists to prevent, so it is named rather than counted.
+    try:
+        debt = pd.read_csv(DEBT_PATH, dtype={"program_key": str})
+    except FileNotFoundError:
+        return problems
+    for program_key, floor in APP_PROFESSIONAL_PROGRAMS.items():
+        block = prof[prof["program_key"] == program_key]
+        if block.empty:
+            problems.append(
+                f"  no {program_key} rows at all\n"
+                "    the app has a per-school picker for it, which would silently "
+                "go back to showing debt with no price beside it")
+            continue
+        known = set(debt[(debt["credential"] == "professional")
+                         & (debt["program_key"] == program_key)]["UNITID"])
+        if not known:
+            continue
+        share = len(known & set(block["UNITID"].dropna().astype(int))) / len(known)
+        if share < floor:
+            problems.append(
+                f"  {program_key} prices only {share:.0%} of the {len(known)} "
+                f"schools in the app's picker (floor {floor:.0%})")
+    return problems
+
+
 def main() -> int:
     try:
         tuition = pd.read_csv(TUITION_PATH)
@@ -276,6 +360,7 @@ def main() -> int:
         ("vintage", check_vintage(tuition)),
         ("coverage", check_coverage(tuition)),
         ("mba rows", check_mba_rows()),
+        ("professional tuition", check_professional_tuition()),
     ]:
         checks.append(name)
         problems += [f"[{name}]\n{p}" for p in found]
@@ -292,11 +377,16 @@ def main() -> int:
         mba_count = int((debt["program_key"] == "mba").sum())
     except FileNotFoundError:
         pass
+    try:
+        prof_rows = len(pd.read_csv(PROFESSIONAL_PATH))
+    except FileNotFoundError:
+        prof_rows = 0
     print(f"graduate tuition OK -- {len(checks)} properties over "
           f"{len(tuition):,} schools (IPEDS {year}): none free, none priced "
           f"per-credit-as-annual, out-of-state never cheaper, sum resolved "
           f"once, one vintage, graduate-only schools reached, "
-          f"{mba_count:,} MBA rows separable from the '52' rollup.")
+          f"{mba_count:,} MBA rows separable from the '52' rollup, "
+          f"{prof_rows:,} professional school-programme prices.")
     return 0
 
 

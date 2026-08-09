@@ -198,7 +198,7 @@ for _title in DENTIST_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_DENTIST_TRAINING)
 
 # Which professional program each of these paths attends, keying
-# data/professional_debt_clean.csv. Built from the same title lists above
+# data/graduate_debt_clean.csv. Built from the same title lists above
 # rather than retyped, so a title added there cannot be forgotten here.
 #
 # The debt figures in CURATED_MAJOR_DATA and the two overlays above are now
