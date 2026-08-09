@@ -1605,6 +1605,17 @@ CATEGORY_COA_INFLATION_RATES = {
 }
 DEFAULT_COA_INFLATION_RATE = 0.027  # Public rate, used when control type is unknown
 
+# The school-type vocabulary, for the school search's filter. DERIVED from the
+# map above rather than typed out again: both describe the same `control_type`
+# field of the COA dataset, and a filter that offers "Private Nonprofit" where
+# the data says "Private Non-Profit" matches nothing and reports it as an empty
+# result -- a wrong ANSWER, not an error. Deriving makes that unspellable.
+#
+# Dict order is the presentation order (Public first, for-profit last), and the
+# caller intersects this with the control types actually present in the loaded
+# file, so a drift in either direction just narrows the offered options.
+CONTROL_TYPE_ORDER = tuple(CATEGORY_COA_INFLATION_RATES)
+
 # Federal income tax, 2024, single filer. Source: IRS Rev. Proc. 2023-34.
 # Brackets are (upper bound of bracket, marginal rate on income up to that
 # bound). Scope: single filer only, no dependents, no itemized deductions or
@@ -1991,6 +2002,18 @@ CIP_FAMILY_TITLES = {
 # total. They are deliberately NOT program_years_for_major: a bachelor's
 # result list is four years regardless of which occupation the visitor has
 # selected in the sidebar.
+# The full sweep of the school search's admit-rate slider, in whole percent.
+# Sitting at both ends means "no constraint", which is the ONLY value that
+# keeps schools reporting no admit rate in the results -- an unknown rate
+# cannot be shown to fall inside a band. So this is not merely the widget's
+# default, it is the value the filter tests against to decide whether to run
+# at all, and both the widget and that test must read it from here.
+#
+# Scorecard publishes no selectivity tier, so the app names no cut point of
+# its own: the visitor picks the band and the numbers are their own school's
+# published rate. Nothing here ranks, scores or prices a school by it.
+ADM_RATE_FULL_RANGE = (0, 100)
+
 CREDENTIAL_LEVELS = {
     "Bachelor's degree": ("bachl", 4),
     "Associate's degree": ("assoc", 2),
@@ -4616,6 +4639,8 @@ def load_coa_dataset() -> pd.DataFrame:
         return pd.DataFrame(columns=[
             "INSTNM", "STABBR", "control_type", "in_state_coa", "out_of_state_coa",
             "NPCURL", "UNITID", "CITY", "CURROPER", "DISTANCEONLY", "ADM_RATE",
+            # Read by render_parent_plus_note and by the search's results table.
+            "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N",
         ] + [f"programs_{suffix}" for suffix, _ in CREDENTIAL_LEVELS.values()])
 
 
@@ -4826,7 +4851,8 @@ def search_schools_by_budget(cip_family: str, credential: str,
                               max_coa_per_year: float, home_state: str = None,
                               states: tuple = None, control_types: tuple = None,
                               limit: int = 50,
-                              min_coa_per_year: float = 0.0) -> pd.DataFrame:
+                              min_coa_per_year: float = 0.0,
+                              adm_rate_range: tuple = None) -> pd.DataFrame:
     """Schools that teach `cip_family` at `credential` for at most
     `max_coa_per_year`, cheapest first. The inverse of the app's normal
     question: not "what does the school I named cost" but "what could I attend
@@ -4856,6 +4882,12 @@ def search_schools_by_budget(cip_family: str, credential: str,
     institution as somewhere a 17-year-old could enrol is this feature's worst
     failure mode, and it is not something the visitor could be expected to
     check.
+
+    `adm_rate_range` is an inclusive (low, high) band of admit rates as
+    fractions, or None for no constraint. Narrowing it requires a school to
+    REPORT a rate inside the band -- see the filter itself, where the cost of
+    that falls unevenly on the two directions. It never reorders anything: the
+    sort stays cost-only whether it is set or not.
 
     Returns an empty frame when nothing matches, which is a real and useful
     answer -- "your budget admits nothing in this field" is the finding, not an
@@ -4907,10 +4939,63 @@ def search_schools_by_budget(cip_family: str, credential: str,
         matches = matches[matches["STABBR"].isin(states)]
     if control_types:
         matches = matches[matches["control_type"].isin(control_types)]
+    if adm_rate_range is not None:
+        # A blank ADM_RATE DROPS OUT. An unknown rate cannot be placed inside a
+        # band, so constraining the rate at all means requiring a reported one
+        # -- and Scorecard leaves this field empty for 3,204 of 5,035 rows,
+        # overwhelmingly open-admission schools.
+        #
+        # That exclusion is NOT symmetric in its effects, which is why the
+        # caller has to say so on screen rather than leave the band to speak
+        # for itself:
+        #
+        #   Lowering the CEILING ("admits under half") loses nothing a visitor
+        #   wanted. A school reporting no rate is not a selective school we
+        #   failed to identify.
+        #
+        #   Raising the FLOOR ("admits at least 60%") drops precisely the
+        #   schools most likely to belong in the answer -- the open-admission
+        #   ones, which admit nearly everyone and report nothing. The band is
+        #   honest about what it can prove and silent about what it discards,
+        #   so render_school_search warns on this direction specifically.
+        #
+        # notna() is written out rather than left to the comparisons. Every
+        # comparison against NaN is already False, so this changes no
+        # behaviour -- it states the assumption where a reader of the filter
+        # can see it, instead of hiding it in NaN's comparison rules.
+        low, high = adm_rate_range
+        matches = matches[matches["ADM_RATE"].notna()
+                          & (matches["ADM_RATE"] >= low)
+                          & (matches["ADM_RATE"] <= high)]
 
     matches = matches.sort_values("coa_per_year").head(limit).copy()
     matches["total_program_cost"] = matches["coa_per_year"] * nominal_years
     return matches.reset_index(drop=True)
+
+
+def reconcile_search_pick(stored, picker_ids: list):
+    """Which school the result picker should point at, given what it pointed
+    at before the filters changed.
+
+    Lives here, in section 2, rather than inline in the renderer so that
+    check_school_search_filters.py can test the REAL rule instead of a copy of
+    it -- the same reason returning_baseline_ready() sits beside the vocab it
+    guards. Two copies of a reconcile is how the two come to disagree.
+
+    `stored` is whatever `search_pick` holds, which on a first render is None
+    and after a filter change may be a school that no longer exists in the
+    results. `picker_ids` are the UNITIDs of the current result set, cheapest
+    first. A school that survived keeps the selection; anything else falls
+    back to the cheapest row, which is where a first render would have put it.
+
+    Returns None for an empty result set. The renderer never reaches that
+    case -- it returns on `results.empty` before the picker is built -- but
+    returning None beats raising on picker_ids[0] if that ever stops being
+    true.
+    """
+    if not picker_ids:
+        return None
+    return stored if stored in picker_ids else picker_ids[0]
 
 
 def find_school_coa(school_name: str, coa_df: pd.DataFrame, unitid=None):
@@ -14297,7 +14382,8 @@ def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
 # ones going unrecorded. See migrations.sql for the affected window.
 SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
                         "search_coa_range", "search_home_state",
-                        "search_states")
+                        "search_states", "search_adm_rate_range",
+                        "search_control_types")
 
 
 def search_was_adjusted() -> bool:
@@ -14414,7 +14500,7 @@ def render_school_search(always_open: bool = False) -> None:
         )
         budget = max_coa
         all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
-        home_col, states_col = st.columns([2, 3])
+        home_col, states_col, type_col = st.columns([2, 3, 3])
 
         # Asked once, here, rather than inherited from the sidebar's in-state
         # checkbox: that checkbox is one fact about the visitor and the ONE
@@ -14452,10 +14538,72 @@ def render_school_search(always_open: bool = False) -> None:
                   "results are the cheapest matches, so a national search "
                   "surfaces low-cost schools rather than well-known ones.")
 
+        # The one filter the search function could already apply and nothing
+        # ever asked it for -- control_types has been a parameter since this
+        # feature shipped, with no control wired to it.
+        #
+        # It earns a place because of what cheapest-first does without it.
+        # Private For-Profit is the LARGEST of the three categories in the
+        # dataset (1,884 of 5,035 rows, more than Public's 1,797) and its
+        # short-programme pricing sorts high, so the top of a price-driven
+        # list is exactly where those schools concentrate -- and a price-driven
+        # list is the only kind this tool makes.
+        #
+        # Empty means no filter, matching the states control beside it. There
+        # is deliberately no default: which sectors a visitor will consider is
+        # not something their home state or their major implies, and seeding
+        # one would silently hide two thirds of the dataset.
+        all_control_types = [t for t in CONTROL_TYPE_ORDER
+                             if t in set(coa_df["control_type"].dropna())]
+        control_types = type_col.multiselect(
+            "School type (optional)", all_control_types, key="search_control_types",
+            on_change=lambda: mark_interaction("search_control_types"),
+            help="Public, private non-profit, private for-profit. Leave it empty "
+                  "to include all three. For-profit schools are the largest group "
+                  "in this dataset and their prices sort near the top, so this is "
+                  "how you look past them.")
+
+        # Wide open by default, so a visitor who never touches it sees the same
+        # list they always did -- including every school that reports no admit
+        # rate. Moving either handle is what turns the filter on.
+        adm_low, adm_high = st.slider(
+            "Share of applicants admitted",
+            min_value=ADM_RATE_FULL_RANGE[0], max_value=ADM_RATE_FULL_RANGE[1],
+            value=ADM_RATE_FULL_RANGE, step=5, format="%d%%",
+            key="search_adm_rate_range",
+            on_change=lambda: mark_interaction("search_adm_rate_range"),
+            help="Drag either handle to limit how selective the schools are. "
+                  "Leaving it wide open applies no filter at all. Narrowing it "
+                  "drops schools that report no admit rate — most of those "
+                  "admit nearly everyone. It never changes the order: the list "
+                  "stays cheapest-first.",
+        )
+        adm_filtered = (adm_low, adm_high) != ADM_RATE_FULL_RANGE
+
         family = st.session_state.get("search_cip_family")
         if not family:
             st.info("Pick a field of study to search.")
             return
+
+        # Below the field-of-study guard, not above it: this describes what is
+        # missing from a LIST, so it must not fire on a screen showing no list
+        # at all -- "pick a field of study" with a warning above it about
+        # omitted schools is a warning about nothing.
+        #
+        # Named on screen, not left to the help text, because the two
+        # directions cost different things and only one of them is intuitive.
+        # Raising the floor is how someone looks for schools they are likely to
+        # get into -- and it is exactly the move that hides the open-admission
+        # schools, which admit nearly everyone and report no rate at all. A
+        # visitor doing that would otherwise conclude those schools do not
+        # teach their field.
+        if adm_low > ADM_RATE_FULL_RANGE[0]:
+            st.caption(
+                "⚠️ Schools that report no admit rate are **not** in this list, "
+                "and most of them admit nearly everyone — so a high floor hides "
+                "the very schools that are easiest to get into. Drop the left "
+                "handle back to 0% to see them again."
+            )
 
         home_state = st.session_state.get("search_home_state")
         if not home_state:
@@ -14472,7 +14620,10 @@ def render_school_search(always_open: bool = False) -> None:
         credential = st.session_state.get("search_credential", "Bachelor's degree")
         results = search_schools_by_budget(
             family, credential, budget, home_state,
-            states=tuple(states) or None, limit=25, min_coa_per_year=min_coa)
+            states=tuple(states) or None, limit=25, min_coa_per_year=min_coa,
+            control_types=tuple(control_types) or None,
+            # Percent on screen, fraction in the data.
+            adm_rate_range=(adm_low / 100, adm_high / 100) if adm_filtered else None)
 
         # Only once the visitor has actually adjusted something -- see
         # search_was_adjusted. The results above still render either way; this
@@ -14484,19 +14635,41 @@ def render_school_search(always_open: bool = False) -> None:
         if search_was_adjusted():
             mark_interaction("module_school_search")
             _log_school_search(family, budget, states, len(results), home_state,
-                                level=CREDENTIAL_LEVELS.get(credential, (None,))[0])
+                                level=CREDENTIAL_LEVELS.get(credential, (None,))[0],
+                                adm_band=(adm_low, adm_high) if adm_filtered else None,
+                                control_types=control_types)
 
         if results.empty:
             # A real answer, not an error state. "Your budget admits nothing in
             # this field" is the finding this feature exists to surface, and
             # hiding it would turn the most decision-relevant result into a
             # blank panel.
+            # Every active narrowing has to be NAMED here or the sentence is
+            # false. Unqualified, this reads "no schools teach X for $Y" when
+            # the truthful finding may be "none of the public ones do" -- and
+            # the visitor goes off raising a budget that was never the binding
+            # constraint. Built as a list rather than nested conditionals
+            # because there are now three of these and they combine freely.
+            # Each clause is a bare modifier phrase, never a relative clause,
+            # so any subset of them concatenates into a readable sentence.
+            # "that are X" + "that admit Y" stacks two `that`s the moment both
+            # filters are on, which is precisely when this message matters most.
+            narrowings = []
+            if states:
+                narrowings.append(f"in {', '.join(states)}")
+            if control_types:
+                narrowings.append(f"at {' or '.join(control_types)} schools")
+            if adm_filtered:
+                narrowings.append(f"admitting {adm_low}–{adm_high}% of applicants")
             st.warning(
                 f"No schools teach **{CIP_FAMILY_TITLES[family]}** at that level "
                 f"for {fmt_money(budget)}/year"
-                + (f" in {', '.join(states)}" if states else "")
-                + ". Raising the budget or widening the states will find some — "
-                "and the fact that this combination has none is itself worth knowing."
+                + (" " + " ".join(narrowings) if narrowings else "")
+                + ". "
+                + ("Widening those filters or raising"
+                    if narrowings else "Raising")
+                + " the budget will find some — and the fact that this "
+                "combination has none is itself worth knowing."
             )
             return
 
@@ -14504,7 +14677,7 @@ def render_school_search(always_open: bool = False) -> None:
             f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
             "These are **sticker prices before aid** — a pricier school can end up "
             "cheaper once grants are applied, so treat this as a starting list and "
-            "check each one's net price calculator below."
+            "run the **Net price** calculator on any school you're serious about."
         )
         # Shown per row because it varies per row -- the visitor is resident in
         # one of these states and a visitor state elsewhere. Naming the rate is
@@ -14522,31 +14695,121 @@ def render_school_search(always_open: bool = False) -> None:
             "Rate": rate_label,
             "Per year": results["coa_per_year"].map(fmt_money),
             "Whole program": results["total_program_cost"].map(fmt_money),
+            # A dash, not "open / not reported". Nine columns share the width
+            # that seven used to, and the two longest strings in the table were
+            # both placeholders for absent data -- at 1457px this cell clipped
+            # to "open / not reporte", which is the failure the count-back
+            # warning already taught this codebase about (Streamlit clips a
+            # table cell rather than wrapping it, so anything that must be READ
+            # cannot live in one). Both captions below already say a dash means
+            # the school reports none, so the short form is also the one the
+            # prose was describing.
             "Admits": results["ADM_RATE"].map(
-                lambda rate: f"{rate:.0%}" if pd.notna(rate) else "open / not reported"),
+                lambda rate: f"{rate:.0%}" if pd.notna(rate) else "—"),
+            # The PARENT's borrowing, beside the student's cost. Same figure
+            # render_parent_plus_note puts under a named school, and it earns a
+            # column here for the same reason it earns a caption there: student
+            # borrowing is federally capped and lands in a narrow band, while
+            # Parent PLUS has no aggregate cap and runs $3,182-$164,776 across
+            # this dataset. A family reading only the cost columns is reading
+            # the part that varies least.
+            #
+            # Blank at ~58% of schools, which is ordinary rather than an error.
+            # It is NOT filterable and NOT sortable-on: it describes families
+            # who already borrowed, so ranking by it would rank schools by
+            # other people's decisions and read as a recommendation.
+            "Parents borrowed": results["PLUS_DEBT_INST_COMP_MD"].map(
+                lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0
+                else "—"),
+            # Scorecard publishes a per-school calculator for all but one row,
+            # and the caption above has always told visitors to go check one.
+            # Until now the only one the page could reach was for the school
+            # they had already NAMED -- the opposite of what this tool is for.
+            "Net price": results["NPCURL"].map(normalize_npc_url),
         })
-        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.dataframe(
+            table, use_container_width=True, hide_index=True,
+            column_config={
+                # School names are the one genuinely long field and the one
+                # nothing else identifies a row by, so it gets the width the
+                # placeholders gave back. "California Polytechnic State
+                # University-San Luis Obispo" is 57 characters.
+                "School": st.column_config.Column("School", width="large"),
+                # A fixed display_text, so the column is a row of identical
+                # links rather than 25 raw URLs of wildly different lengths --
+                # Scorecard stores everything from a bare domain to a 120-char
+                # query string, and the widest one sets the column width.
+                "Net price": st.column_config.LinkColumn(
+                    "Net price", display_text="Calculate ↗", width="small",
+                    help="The school's own net price calculator — what someone "
+                          "with your family's finances actually pays, as opposed "
+                          "to the sticker price in this table."),
+            })
         st.caption(
             "**Rate** is which price you'd be charged"
             + (f", based on living in {home_state}. " if home_state else ". ")
             + "*Same either way* means the school charges one price regardless — "
             "true of most private schools. **Admits** is the share of applicants "
-            "accepted; blank means the school reports none, usually because it "
-            "admits nearly everyone. It is shown for context and is never what "
-            "the list is sorted by."
+            "accepted; **—** means the school reports none, usually because it "
+            "admits nearly everyone."
+            + (f" You've limited this to {adm_low}–{adm_high}%, so every row "
+               "reports a rate and any school that reports none is excluded. "
+               if adm_filtered else " ")
+            + "It is never what the list is sorted by — the order is cost, always."
+        )
+        # The three things render_parent_plus_note's docstring forbids doing
+        # with this figure, said once below the table rather than 25 times
+        # inside it: it is the parent's separate debt and not part of any cost
+        # column above, it is conditional on having borrowed at all, and it
+        # describes families who borrowed before OBBBA capped the programme.
+        # A bare money column would silently assert the opposite of all three.
+        st.caption(
+            "**Parents borrowed** is what families of *completers* at that school "
+            "who took Parent PLUS borrowed in total, at the median — the parent's "
+            "own debt, separate from every cost column here and from any loan this "
+            "app models for the student. It is not what a typical family borrows: "
+            "families who borrowed nothing are not in it. Congress capped Parent "
+            "PLUS on July 1, 2026, so these are amounts borrowed under the older, "
+            "uncapped rules. **—** means the school reports none."
         )
 
         # One selectbox and one button, not a button per row: 25 widgets would
         # re-render every pass and need stable keys for no gain.
+        #
+        # The options are UNITIDs, not row positions. `results` is
+        # reset_index'd, so its positions are 0..N-1 on EVERY search -- which
+        # means a stored position stays "valid" against the options of a
+        # completely different result set and silently comes to name a
+        # different school. Changing any filter left this picker offering a
+        # school that was no longer in the table above it: clear the state
+        # filter on a California search and it still read "Bethesda University
+        # -- $13,575/yr" over a list of Puerto Rico schools, and applied it.
+        #
+        # UNITID is the identity the rest of the app already trusts for exactly
+        # this reason -- see find_school_coa, where a pinned UNITID wins
+        # outright because 86 institution NAMES in this dataset are shared by
+        # more than one school. A stale UNITID cannot be mistaken for a valid
+        # one: it is either still in the result set or it is not.
+        picker_ids = [int(uid) for uid in results["UNITID"]]
+        picker_labels = {
+            int(row["UNITID"]): f"{row['INSTNM']} — "
+                                f"{fmt_money(row['coa_per_year'])}/yr"
+            for _, row in results.iterrows()}
+        # Reconcile BEFORE the widget exists, the reconcile_cc_mode pattern:
+        # Streamlit raises if a keyed widget's stored value is absent from its
+        # options, and it refuses an assignment to a key whose widget has
+        # already rendered. The rule itself is reconcile_search_pick, in
+        # section 2, so a guard can test it directly.
+        st.session_state["search_pick"] = reconcile_search_pick(
+            st.session_state.get("search_pick"), picker_ids)
         choice = st.selectbox(
             "Use one of these as your school",
-            list(results.index),
-            format_func=lambda i: f"{results.at[i, 'INSTNM']} — "
-                                   f"{fmt_money(results.at[i, 'coa_per_year'])}/yr",
+            picker_ids,
+            format_func=lambda uid: picker_labels[uid],
             key="search_pick",
         )
         if st.button("Use this school", type="primary"):
-            picked = results.loc[choice]
+            picked = results.loc[results["UNITID"] == choice].iloc[0]
             # Carries the residency the row was PRICED at. Without it the
             # sidebar would autofill from its own in-state checkbox and could
             # show a different number than the row the visitor just clicked --
@@ -14603,7 +14866,9 @@ def render_school_search(always_open: bool = False) -> None:
 
 
 def _log_school_search(family: str, budget: int, states: list, hit_count: int,
-                        home_state: str = None, level: str = None) -> None:
+                        home_state: str = None, level: str = None,
+                        adm_band: tuple = None,
+                        control_types: list = None) -> None:
     """Record a search, once per distinct query rather than once per rerun.
 
     This runs on every pass of the script, so without the dedupe a slider drag
@@ -14615,7 +14880,14 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
     # home_state is part of the signature because it changes the PRICES, and
     # therefore which schools clear the budget -- two searches identical but
     # for residency are different searches with different answers.
-    signature = (family, budget, tuple(states), hit_count, home_state, level)
+    # `adm_band` belongs in the signature and in the action for the same
+    # reason home_state does: it changes which schools come back, so two
+    # searches identical but for the tick are different searches. Without it in
+    # the ACTION a zero-result row cannot be read -- "budget admits nothing in
+    # this field" is the finding this log exists to capture, and it is a
+    # different finding from "nothing in that admit band does".
+    signature = (family, budget, tuple(states), hit_count, home_state, level,
+                 adm_band, tuple(control_types or ()))
     if st.session_state.get("_last_school_search") == signature:
         return
     st.session_state["_last_school_search"] = signature
@@ -14627,7 +14899,12 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
     log_usage_event(
         f"school_search_run:cip={family}:level={level or 'unset'}:budget={budget}"
         f":home={home_state or 'unset'}"
-        f":states={'+'.join(states) if states else 'any'}:n={hit_count}")
+        f":states={'+'.join(states) if states else 'any'}"
+        f":adm={'%d-%d' % adm_band if adm_band else 'any'}"
+        # Abbreviated to first letters (Public / Non-profit / For-profit) so
+        # the action string stays short, the same treatment `level` gets.
+        f":types={'+'.join(t.split()[-1][0] for t in control_types) if control_types else 'any'}"
+        f":n={hit_count}")
 
 
 

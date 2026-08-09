@@ -65,6 +65,12 @@ SHARE_EXEMPT = {
     "search_coa_range": "transient school-search input; ?school= carries the result",
     "search_credential": "transient school-search input",
     "search_states": "transient school-search input",
+    "search_control_types": "transient school-search filter; narrows which "
+                            "sectors are listed and the chosen school's own "
+                            "control_type rides with ?school=",
+    "search_adm_rate_range": "transient school-search filter; narrows the list "
+                             "on admit rate and no school attribute it touches "
+                             "survives into the scenario ?school= carries",
     "search_pick": "transient school-search result picker",
     "search_home_state": "transient school-search input; drives in-state pricing "
                          "for the search only, and ?in_state= carries the result",
