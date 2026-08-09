@@ -42,7 +42,17 @@ paper_*.md
 Most-Recent-Cohorts-Institution.csv
 # 153 MB raw field-of-study release; build_professional_debt.py reads it and
 # the cleaned output (data/graduate_debt_clean.csv) is what ships.
+# Download the DATED filename -- the undated one serves an older release, see
+# the note in build_professional_debt.py's docstring.
 Most-Recent-Cohorts-Field-of-Study.csv
+# Raw IPEDS releases for build_graduate_tuition.py; the cleaned output
+# (data/graduate_tuition_clean.csv) is what ships. Both the zips as downloaded
+# and the CSVs they unpack to.
+IC[0-9][0-9][0-9][0-9]_AY.zip
+ic[0-9][0-9][0-9][0-9]_ay.csv
+HD[0-9][0-9][0-9][0-9].zip
+HD[0-9][0-9][0-9][0-9].csv
+fos*.zip
 national_M2025_dl.xlsx
 state_M2025_dl.xlsx
 MSA_M2025_dl.xlsx
