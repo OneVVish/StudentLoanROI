@@ -2014,6 +2014,22 @@ CIP_FAMILY_TITLES = {
 # published rate. Nothing here ranks, scores or prices a school by it.
 ADM_RATE_FULL_RANGE = (0, 100)
 
+# Which credential levels the admit-rate filter is offered for. ADM_RATE is an
+# institution's UNDERGRADUATE admission rate and Scorecard's coverage of it
+# collapses below a bachelor's: 74% of schools awarding one report a rate,
+# against 35% at associate's and 14-24% across the three certificate levels.
+#
+# Below a bachelor's the filter therefore stops measuring selectivity and
+# starts measuring who files the field. A health-professions certificate search
+# returns 1,853 schools and only 257 report a rate, so switching the filter on
+# would discard 1,596 of them -- not because they admit everyone, which is
+# mostly true and is fine, but because open-admission colleges have no rate to
+# publish. The list left behind would look like an answer.
+#
+# A tuple rather than a bare comparison so the reason lives in one place: if a
+# future release brings another level's coverage up, this is the edit.
+ADM_RATE_CREDENTIALS = ("Bachelor's degree",)
+
 CREDENTIAL_LEVELS = {
     "Bachelor's degree": ("bachl", 4),
     "Associate's degree": ("assoc", 2),
@@ -4971,6 +4987,20 @@ def search_schools_by_budget(cip_family: str, credential: str,
     matches = matches.sort_values("coa_per_year").head(limit).copy()
     matches["total_program_cost"] = matches["coa_per_year"] * nominal_years
     return matches.reset_index(drop=True)
+
+
+def adm_filter_applies(credential: str) -> bool:
+    """Whether the admit-rate filter is meaningful at this credential level.
+
+    In section 2, beside the search it gates, so a guard can test the rule
+    directly rather than a copy of it -- see reconcile_search_pick for the same
+    reasoning. See ADM_RATE_CREDENTIALS for why the answer is bachelor's-only.
+
+    An unknown credential returns False. This gates a filter that can only ever
+    REMOVE schools, so the safe answer for "we don't recognise this level" is
+    to leave the list alone.
+    """
+    return credential in ADM_RATE_CREDENTIALS
 
 
 def reconcile_search_pick(stored, picker_ids: list):
@@ -14382,8 +14412,8 @@ def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
 # ones going unrecorded. See migrations.sql for the affected window.
 SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
                         "search_coa_range", "search_home_state",
-                        "search_states", "search_adm_rate_range",
-                        "search_control_types")
+                        "search_states", "search_adm_rate_on",
+                        "search_adm_rate_range", "search_control_types")
 
 
 def search_was_adjusted() -> bool:
@@ -14563,22 +14593,62 @@ def render_school_search(always_open: bool = False) -> None:
                   "in this dataset and their prices sort near the top, so this is "
                   "how you look past them.")
 
-        # Wide open by default, so a visitor who never touches it sees the same
-        # list they always did -- including every school that reports no admit
-        # rate. Moving either handle is what turns the filter on.
-        adm_low, adm_high = st.slider(
-            "Share of applicants admitted",
-            min_value=ADM_RATE_FULL_RANGE[0], max_value=ADM_RATE_FULL_RANGE[1],
-            value=ADM_RATE_FULL_RANGE, step=5, format="%d%%",
-            key="search_adm_rate_range",
-            on_change=lambda: mark_interaction("search_adm_rate_range"),
-            help="Drag either handle to limit how selective the schools are. "
-                  "Leaving it wide open applies no filter at all. Narrowing it "
-                  "drops schools that report no admit rate — most of those "
-                  "admit nearly everyone. It never changes the order: the list "
-                  "stays cheapest-first.",
-        )
-        adm_filtered = (adm_low, adm_high) != ADM_RATE_FULL_RANGE
+        # Read before the control is drawn, the sidebar's own pattern: the
+        # credential selectbox is rendered above, so session_state already
+        # holds it, and the admit-rate filter's availability depends on it.
+        credential = st.session_state.get("search_credential", "Bachelor's degree")
+        adm_available = adm_filter_applies(credential)
+
+        # An explicit switch rather than "wide open means off". The band alone
+        # cannot express the difference between "I am not filtering on this"
+        # and "I am filtering, and every rate qualifies" -- and those differ by
+        # 3,204 schools, because a school reporting no rate cannot sit inside a
+        # band however wide. The switch makes the visitor's answer to that
+        # unambiguous instead of inferring it from handle positions.
+        #
+        # It is also what makes the level gate legible: a control that is
+        # visibly unavailable, with a reason, beats one that silently vanishes
+        # when someone switches from Bachelor's to Associate's.
+        adm_on = st.checkbox(
+            "Filter by admit rate", key="search_adm_rate_on",
+            disabled=not adm_available,
+            on_change=lambda: mark_interaction("search_adm_rate_on"),
+            help="Narrow the list by how selective a school is. Available for "
+                  "bachelor's degrees only — see the note when it is greyed out.")
+        # NOT a read of the checkbox. Streamlit keeps a widget's value in
+        # session_state after it stops being rendered OR becomes disabled, so a
+        # visitor who ticks this on a bachelor's search and switches to
+        # Associate's would otherwise carry a hidden filter that removes four
+        # schools in five with nothing on screen explaining it. Same discipline
+        # as the repayment tool's private-loan opt-in: hiding a control must
+        # also neutralise it. The stored tick is deliberately left alone, so
+        # switching back to Bachelor's restores what they chose.
+        adm_enabled = bool(adm_on) and adm_available
+        adm_low, adm_high = ADM_RATE_FULL_RANGE
+        if not adm_available:
+            st.caption(
+                f"Admit rate is a **bachelor's-only** filter here. It comes from "
+                f"each school's undergraduate admission rate, and below a "
+                f"bachelor's most schools publish none — 74% of bachelor's "
+                f"institutions report one against 35% at associate's and under a "
+                f"quarter for certificates. Filtering on it at this level would "
+                f"drop most of the list for having nothing on file rather than "
+                f"for being selective."
+            )
+        elif adm_enabled:
+            adm_low, adm_high = st.slider(
+                "Share of applicants admitted",
+                min_value=ADM_RATE_FULL_RANGE[0], max_value=ADM_RATE_FULL_RANGE[1],
+                value=ADM_RATE_FULL_RANGE, step=5, format="%d%%",
+                key="search_adm_rate_range",
+                on_change=lambda: mark_interaction("search_adm_rate_range"),
+                help="Drag either handle to limit how selective the schools are. "
+                      "While this filter is on, schools that report no admit rate "
+                      "are excluded at any width — an unknown rate cannot be shown "
+                      "to fall inside a band. It never changes the order: the list "
+                      "stays cheapest-first.",
+            )
+        adm_filtered = adm_enabled
 
         family = st.session_state.get("search_cip_family")
         if not family:
@@ -14597,7 +14667,7 @@ def render_school_search(always_open: bool = False) -> None:
         # schools, which admit nearly everyone and report no rate at all. A
         # visitor doing that would otherwise conclude those schools do not
         # teach their field.
-        if adm_low > ADM_RATE_FULL_RANGE[0]:
+        if adm_enabled and adm_low > ADM_RATE_FULL_RANGE[0]:
             st.caption(
                 "⚠️ Schools that report no admit rate are **not** in this list, "
                 "and most of them admit nearly everyone — so a high floor hides "
@@ -14614,10 +14684,10 @@ def render_school_search(always_open: bool = False) -> None:
                 "a year."
             )
 
-        # Read once into a local: the search and the log must agree on which
-        # credential was asked for, and reading session_state twice invites
-        # them to disagree.
-        credential = st.session_state.get("search_credential", "Bachelor's degree")
+        # `credential` was read once, above the admit-rate control that gates on
+        # it. Deliberately not re-read here: the search, the log and the level
+        # gate must agree on which credential was asked for, and a second read
+        # is how they come to disagree.
         results = search_schools_by_budget(
             family, credential, budget, home_state,
             states=tuple(states) or None, limit=25, min_coa_per_year=min_coa,

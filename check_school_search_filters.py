@@ -19,7 +19,7 @@ sign of the ones that stopped being eligible, and "no school teaches your field
 at that price" is exactly the answer this feature exists to produce. Nothing
 raises, so only an assertion about the row COUNT can catch it.
 
-Six properties, each aimed at a distinct way this can regress:
+Seven properties, each aimed at a distinct way this can regress:
 
 1. **The sentinel.** None is bit-identical to no filter and keeps unrated
    schools; an explicit full band is NOT, and drops them. Asserting both
@@ -39,6 +39,13 @@ Six properties, each aimed at a distinct way this can regress:
 6. **Filter before cap.** Results are the cheapest `limit` MATCHES, not the
    matches among the cheapest `limit`. Filtering after the cap turns a 25-row
    answer into a 2-row one while looking entirely plausible.
+7. **The credential gate.** The admit-rate filter is bachelor's-only, because
+   ADM_RATE is an UNDERGRADUATE rate whose coverage collapses below one: 74% of
+   bachelor's institutions publish it against 35% at associate's and 14-24% for
+   certificates. Below a bachelor's the filter measures who files the field
+   rather than who is selective. The check asserts the gate AND the coverage
+   gap it rests on, so a Scorecard release that closed that gap surfaces as a
+   decision to make rather than a stale constant nobody rereads.
 
 Plus the picker's identity rule (`reconcile_search_pick`), which is why the
 options are UNITIDs: the result frame is reset_index'd, so row positions are
@@ -47,13 +54,14 @@ different result set. The reconcile is tested through the real function rather
 than a copy, and the UNITID uniqueness it depends on is asserted separately --
 a duplicate key would make "is my school still here" ambiguous.
 
-NEGATIVE CONTROL. Five deliberate breakages were run against a copy of app.py,
+NEGATIVE CONTROL. Six deliberate breakages were run against a copy of app.py,
 and each was caught by the property aimed at it -- not merely by something:
 
     None treated as a full band          -> [sentinel]
     `>=` becomes `>` on the low edge     -> [inclusive edges]
     admit filter moved below head(limit) -> [filter before cap]
     reconcile always returns row 0       -> [picker identity]
+    filter offered at every credential   -> [credential gate]
     "Private Non-Profit" renamed         -> [sectors partition]
 
 The third is worth the reminder of what it costs: with the filter applied
@@ -240,6 +248,65 @@ def check_filter_before_cap(ns, base) -> list:
     return problems
 
 
+def check_credential_gate(ns) -> list:
+    """The admit-rate filter is offered only where the field has the coverage
+    to mean something, and the fact that gate rests on is still true."""
+    problems = []
+    applies = ns["adm_filter_applies"]
+    allowed = set(ns["ADM_RATE_CREDENTIALS"])
+
+    for credential in ns["CREDENTIAL_LEVELS"]:
+        want = credential in allowed
+        if applies(credential) is not want:
+            problems.append(f"  adm_filter_applies({credential!r}) != {want}")
+    if applies("Some credential that does not exist"):
+        problems.append(
+            "  an unrecognised credential enabled the filter\n"
+            "    this gates something that can only REMOVE schools, so the safe "
+            "answer to 'we don't know this level' is to leave the list alone")
+
+    if not allowed:
+        problems.append(
+            "  ADM_RATE_CREDENTIALS is empty, so the admit-rate filter is now "
+            "unreachable at every level -- a feature removed by a constant")
+
+    # The gate is a claim about Scorecard's coverage, so assert the CLAIM.
+    #
+    # This is deliberately an absolute floor per allowed credential, not a
+    # comparison between allowed and gated ones. The relative version was the
+    # first thing written here and it was worthless: it skipped every
+    # credential inside the allowed set, so widening the tuple to all five
+    # levels made the whole check vacuous and the guard passed on exactly the
+    # change it exists to stop. The negative control is what found that.
+    #
+    # 60% sits well below bachelor's 74% -- room for ordinary release drift --
+    # and well above associate's 35%, so nothing currently gated could slip in
+    # without a real change in what Scorecard publishes.
+    floor = 0.60
+    coa = ns["load_coa_dataset"]()
+    for credential in sorted(allowed):
+        entry = ns["CREDENTIAL_LEVELS"].get(credential)
+        if entry is None:
+            problems.append(
+                f"  ADM_RATE_CREDENTIALS names {credential!r}, which is not a "
+                f"credential the search offers")
+            continue
+        column = f"programs_{entry[0]}"
+        offers = coa[coa[column].notna() & (coa[column].astype(str).str.len() > 0)]
+        if not len(offers):
+            problems.append(f"  no schools award {credential}; coverage is undefined")
+            continue
+        share = offers["ADM_RATE"].notna().mean()
+        if share < floor:
+            problems.append(
+                f"  the filter is offered for {credential}, where only "
+                f"{share:.0%} of schools report an admit rate (floor {floor:.0%})\n"
+                f"    below that the filter stops measuring selectivity and "
+                f"starts measuring who files the field -- switching it on would "
+                f"drop {1 - share:.0%} of the list for having nothing on file")
+    return problems
+
+
 def check_picker_identity(ns, base) -> list:
     """The picker keys on UNITID, so UNITID must be a real key -- and the
     reconcile must keep a survivor while replacing an evicted selection."""
@@ -295,6 +362,7 @@ def main() -> int:
         ("sectors partition", lambda: check_sectors_partition(ns, base)),
         ("order and subset", lambda: check_order_and_subset(ns, base)),
         ("filter before cap", lambda: check_filter_before_cap(ns, base)),
+        ("credential gate", lambda: check_credential_gate(ns)),
         ("picker identity", lambda: check_picker_identity(ns, base)),
     ]:
         found = fn()
@@ -309,7 +377,8 @@ def main() -> int:
     print(f"school search filters OK -- {len(checks)} properties over "
           f"{len(base)} schools ({unrated} unrated): wide-open means no filter, "
           f"narrowing excludes unrated, edges inclusive, sectors partition, "
-          f"order preserved, cap applied last, picker keyed on UNITID.")
+          f"order preserved, cap applied last, admit rate gated to "
+          f"{'/'.join(ns['ADM_RATE_CREDENTIALS'])}, picker keyed on UNITID.")
     return 0
 
 
