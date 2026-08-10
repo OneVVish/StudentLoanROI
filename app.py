@@ -4869,6 +4869,19 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
         return ""
     national = national_professional_debt(major_name)
     if not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL:
+        # A price carried from the graduate search displaces the national
+        # average -- see resolve_professional_debt. Said here too, because this
+        # caption is shared by both result branches: without it the results
+        # page would name the national figure while the model used the price,
+        # and the reader has no way to tell which built the number above.
+        carried = applied_program_price(professional_program_for(major_name))
+        if carried:
+            school = applied_program_price_school(
+                professional_program_for(major_name))
+            return (f"Using {fmt_money(carried)} — the published tuition and fees "
+                    f"for {school} across the programme, not a debt figure. That "
+                    f"school publishes no borrowing median, so this is a sticker "
+                    f"price before any aid and reads high.")
         return (f"Using the national average of {fmt_money(national)} for "
                 f"{'medical' if professional_program_for(major_name) == 'medicine' else 'this'} "
                 "school debt. Pick your school to use its own figure.")
@@ -4943,6 +4956,26 @@ def resolve_professional_debt(major_name: str, school_name: str = None) -> float
     """
     national = national_professional_debt(major_name)
     program_key = professional_program_for(major_name)
+    # Before falling back to a national median of OTHER schools: a price the
+    # visitor carried over from the graduate search for a school this dataset
+    # does not cover. 44 of the 156 medical schools IPEDS prices publish no
+    # debt, so they cannot be named in the picker at all and every one of them
+    # lands on the national figure today.
+    #
+    # Resolved HERE because this function is the single source the model reads
+    # three times over -- get_effective_principal, professional_debt_cap and
+    # split_loan_financing's professional_principal. Substituting the price
+    # anywhere else would let the principal carry one number while the cap and
+    # the tranche were sized from another, which is the silent mismatch this
+    # function's docstring already warns about.
+    #
+    # It is a sticker before aid where the rest of this function returns debt
+    # after it, so it reads HIGH -- which pushes more of the loan past the
+    # federal cap into private money and makes the estimate pessimistic rather
+    # than flattering. Wherever it is shown, it is named as a price.
+    carried = applied_program_price(program_key)
+    if carried and (not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL):
+        return float(carried)
     if not program_key or not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL:
         return national
     df = load_professional_debt()
@@ -5308,6 +5341,52 @@ def search_professional_schools_by_budget(program_key: str,
     return matches.reset_index(drop=True)
 
 
+def applied_program_price(program_key: str):
+    """Whole-programme PRICE carried over from the graduate school search for
+    a professional programme, or None.
+
+    Exists for one case, and only that case: 44 of the 156 medical schools
+    IPEDS prices publish no debt figure, so they are absent from the sidebar's
+    professional picker and the app falls back to a NATIONAL average for them
+    -- a number about different schools entirely. The visitor has just picked
+    one of those schools out of a list, by price. Its own sticker is a better
+    estimate of that school than the national median of others.
+
+    Keyed on the PROGRAMME rather than the school, because a school with no
+    debt row cannot be selected in the picker at all; the caption names which
+    school it came from.
+
+    NOT used for master's or doctoral study. That search inner-joins the debt
+    file, so every result it can produce already has a published debt figure
+    -- verified across 3,643 rows -- and debt is the better number wherever it
+    exists.
+
+    A price, not a debt, and the two are not interchangeable: Scorecard's debt
+    is what people actually borrowed, already net of scholarships,
+    assistantships and family money, while this is the published sticker
+    before any of that. So it is used ONLY where there is no debt figure at
+    all; wherever both exist the debt wins, because it is the better estimate
+    of what someone ends up owing. Every surface that shows it says which of
+    the two it is.
+
+    Keyed on the school NAME rather than stored loose, so that changing the
+    graduate school in the sidebar drops it. A carried figure that outlives
+    the school it came from would quietly price a different institution.
+    """
+    if not program_key:
+        return None
+    applied = st.session_state.get("_applied_prof_price")
+    if not applied or applied[0] != program_key:
+        return None
+    return int(applied[2]) or None
+
+
+def applied_program_price_school(program_key: str):
+    """Which school the carried price came from, for the caption to name."""
+    applied = st.session_state.get("_applied_prof_price")
+    return applied[1] if applied and applied[0] == program_key else None
+
+
 def graduate_search_universe(cip_family: str, credential: str) -> tuple:
     """(schools teaching it, how many of those can be priced).
 
@@ -5604,8 +5683,19 @@ def _apply_pending_grad_school() -> None:
     pending = st.session_state.pop("_pending_grad_school", None)
     if not pending:
         return
-    key, school_name, extra = pending
+    key, school_name, extra, price = pending
+    if key is None:
+        # A professional school with a price and no published debt. Nothing to
+        # select in the picker; the price is what carries, keyed by programme.
+        st.session_state["_applied_prof_price"] = (extra, school_name, int(price))
+        return
+    # Any previously carried price stops applying the moment a school that
+    # HAS a debt figure is chosen: that figure is the better number, and a
+    # stale price sitting behind it would quietly outrank nothing while
+    # confusing the caption.
+    st.session_state.pop("_applied_prof_price", None)
     if key == "prof_school_a":
+        _ = price   # the school has its own published debt; the price is not used
         # Medicine, dentistry and law: their own picker, keyed by programme.
         # The credential comes from the occupation rather than from here, so
         # this sets only the school -- and clears the guard key, or the
@@ -12045,8 +12135,25 @@ if _program_key_a:
              "don't know yet. See Methodology.",
     )
     professional_debt_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
-    render_professional_debt_caption(major, st.session_state["prof_school_a"],
-                                      professional_debt_a, _sb_study)
+    # A carried PRICE standing in for a debt has to say so, and say it instead
+    # of the usual caption rather than beside it: that one describes what
+    # graduates borrowed, which is the opposite end of the aid question from a
+    # sticker. Two explanations of one number is how a reader picks the wrong
+    # one.
+    _carried_price_a = applied_program_price(_program_key_a)
+    _carried_school_a = applied_program_price_school(_program_key_a)
+    if _carried_price_a and st.session_state["prof_school_a"] == PROFESSIONAL_SCHOOL_NATIONAL:
+        _sb_study.caption(
+            f"Using {fmt_money_md(_carried_price_a)} — the published tuition and "
+            f"fees for **{_carried_school_a}** across the programme, which you "
+            f"picked in the graduate search. That school publishes no borrowing "
+            f"figure, so it is not in the list above; this is a **sticker price "
+            f"before any aid**, not what its graduates owed. It counts no "
+            f"scholarship or family money, so treat it as a ceiling."
+        )
+    else:
+        render_professional_debt_caption(major, st.session_state["prof_school_a"],
+                                          professional_debt_a, _sb_study)
 
 # Returning students only. Placed here because it needs the chosen major to
 # pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
@@ -15286,13 +15393,15 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
                     f"field to fill. Set the major or occupation to a "
                     f"{level_key} path first, then apply a school.")
             elif picked["picker_name"] not in professional_schools_for(level_key):
-                blocked = (
-                    f"**{picked['INSTNM']}** publishes a price but no borrowing "
-                    f"figure, and the sidebar's picker lists only schools that "
-                    f"publish one. Its price is still above; enter it as your "
-                    f"own cost.")
+                # No debt row, so the picker cannot name it -- but its PRICE
+                # can still drive the loan, and doing that beats the national
+                # median of other schools that the sidebar would otherwise
+                # use. The school is carried by programme rather than selected.
+                target = (None, picked["INSTNM"], level_key,
+                          int(picked["total_program_cost"]))
             else:
-                target = ("prof_school_a", picked["picker_name"], level_key)
+                target = ("prof_school_a", picked["picker_name"], level_key,
+                          int(picked["total_program_cost"]))
         else:
             if MAJOR_TO_CIP_FAMILY.get(major) != family:
                 blocked = (
@@ -15302,7 +15411,8 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
                     f"field. Change the major first, then apply a school.")
             else:
                 target = ("grad_school_a", picked["picker_name"],
-                          GRADUATE_SEARCH_TO_CREDENTIAL[credential])
+                          GRADUATE_SEARCH_TO_CREDENTIAL[credential],
+                          int(picked["total_program_cost"]))
 
         if blocked:
             # Said out loud rather than applied-and-lost. The whole reason this
