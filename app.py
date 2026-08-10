@@ -2376,6 +2376,44 @@ def level_supplies_its_own_field(credential: str) -> bool:
             or is_fixed_field_graduate(credential))
 
 
+def search_level_catalog() -> dict:
+    """Every `level` a school_search_run can carry -> (tool, human label).
+
+    DERIVED from the four level registries rather than typed out, so a level
+    added to any of them shows up in the admin breakdown without an edit --
+    which is the whole reason those registries exist. The undergraduate search
+    logs CREDENTIAL_LEVELS' suffix ("bachl"), the graduate one logs the key
+    ("master", "mba", "medicine"), and both emit the SAME event name with
+    `level` as the only discriminator, so this map is what tells the two apart
+    after the fact.
+
+    Beside the registries and in section 2 so a guard can assert the coverage
+    is total: a level with no entry here renders as "unknown" in the admin
+    table, which is indistinguishable from a parsing bug.
+    """
+    catalog = {}
+    for label, (suffix, _years) in CREDENTIAL_LEVELS.items():
+        catalog[suffix] = ("Undergraduate", label)
+    for label, (key, _years) in GRADUATE_CREDENTIAL_LEVELS.items():
+        catalog[key] = ("Graduate", label)
+    for label, (key, _cred, _years, _family) in FIXED_FIELD_GRADUATE_LEVELS.items():
+        catalog[key] = ("Graduate", label)
+    for label, (key, _years) in PROFESSIONAL_SEARCH_LEVELS.items():
+        catalog[key] = ("Professional", label)
+    return catalog
+
+
+def search_level_label(level_key: str) -> tuple:
+    """(tool, label) for one logged level. Unknown keys are reported as such
+    rather than silently bucketed: rows predating a registry change carry
+    levels that no longer exist, and quietly folding them into a neighbour
+    would overstate whichever bucket absorbed them."""
+    if not level_key or level_key == "unset":
+        return ("Undergraduate", "(no level recorded)")
+    return search_level_catalog().get(
+        level_key, ("Unknown", f"retired or unrecognised: {level_key}"))
+
+
 def is_professional_credential(credential: str) -> bool:
     """Whether the search's Level is a professional programme rather than a
     field-plus-credential. Beside its registry so a guard can test it."""
@@ -15318,6 +15356,60 @@ def _admin_count_table(df: pd.DataFrame, column: str, label: str,
     render_centered_table(counts)
 
 
+def _admin_search_runs(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """school_search_run rows, parsed into one row per level searched.
+
+    Both search tools emit the SAME event with `level` separating them (see
+    migrations.sql on why a second event name was refused), so this is the only
+    way to tell an undergraduate search from a graduate or professional one --
+    and, since the graduate tool exists to answer "does anyone want this", the
+    only way to answer it.
+
+    ZERO-RESULT RATE is the column worth reading. "No school teaches this" and
+    "none is this cheap" render identically to a visitor, and a level that
+    returns nothing most of the time is either mispriced against the shared
+    default budget or has a coverage gap -- both of which are fixable, and
+    neither of which shows up in a landing count.
+
+    Empty frame in, empty frame out: the admin page renders on a fresh dataset
+    and must not raise there.
+    """
+    columns = ["Tool", "Level", "Searches", "Sessions", "Zero-result", "Median results"]
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame(columns=columns)
+    runs = usage_df[usage_df["action"].astype(str).str.startswith("school_search_run:")]
+    if runs.empty:
+        return pd.DataFrame(columns=columns)
+
+    parsed = runs["action"].str.extract(
+        r"level=(?P<level>[^:]*).*?:n=(?P<hits>\d+)$")
+    parsed = parsed.dropna(subset=["level"]).copy()
+    if parsed.empty:
+        return pd.DataFrame(columns=columns)
+    parsed["hits"] = pd.to_numeric(parsed["hits"], errors="coerce")
+    parsed["session_id"] = runs.loc[parsed.index, "session_id"] \
+        if "session_id" in runs.columns else None
+
+    rows = []
+    for level, block in parsed.groupby("level"):
+        tool, label = search_level_label(level)
+        hits = block["hits"].dropna()
+        rows.append({
+            "Tool": tool,
+            "Level": label,
+            "Searches": len(block),
+            "Sessions": int(block["session_id"].dropna().nunique())
+                        if block["session_id"].notna().any() else 0,
+            # Share of searches that came back with nothing, which is the
+            # actionable number here rather than a curiosity.
+            "Zero-result": (f"{(hits == 0).mean():.0%}" if len(hits) else "—"),
+            "Median results": (int(hits.median()) if len(hits) else 0),
+        })
+    return (pd.DataFrame(rows, columns=columns)
+              .sort_values(["Tool", "Searches"], ascending=[True, False])
+              .reset_index(drop=True))
+
+
 def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
     """Distinct session_ids across the union of the given tables -- the funnel
     counts visitors, not rows, and a visitor can appear in several tables."""
@@ -15422,6 +15514,39 @@ def render_admin_dashboard() -> None:
     _land_cols[0].metric("Calculator landings", _calculator_views)
     for _col, (_label, _n) in zip(_land_cols[1:], _tool_views.items()):
         _col.metric(f"{_label} landings", _n)
+
+    # What visitors actually SEARCHED, split by level.
+    #
+    # Landings above answer "did anyone open the tool"; this answers "did they
+    # use it, and for what" -- and for the graduate tool that is the question
+    # the whole separate-page decision was made to settle. Both tools emit one
+    # school_search_run event with `level` as the only discriminator, so this
+    # table is the only place the two can be told apart.
+    _search_runs = _admin_search_runs(usage_df)
+    if not _search_runs.empty:
+        st.markdown("#### Searches by level")
+        st.dataframe(_search_runs, use_container_width=True, hide_index=True)
+        st.caption(
+            "One row per level searched, from the `school_search_run` events. "
+            "**Searches** counts events and **Sessions** counts distinct "
+            "visitors, so a visitor refining a query several times shows up "
+            "once in the second column — the gap between them is how much "
+            "iterating the tool invites. **Zero-result** is the share that came "
+            "back with nothing: a high rate is usually a level priced above "
+            "the shared default budget rather than a field nobody teaches, "
+            "which is a fixable thing and invisible in a landing count. Only "
+            "searches where a visitor TOUCHED a control are logged at all "
+            "(see `search_was_adjusted`), so a prefilled query nobody adjusted "
+            "is absent by design."
+        )
+        _unknown = _search_runs[_search_runs["Tool"] == "Unknown"]
+        if not _unknown.empty:
+            st.caption(
+                f"⚠️ {len(_unknown)} level(s) here are not in any current "
+                f"registry — rows written before a level was renamed or "
+                f"removed. They are shown rather than folded into a neighbour, "
+                f"which would overstate whichever bucket absorbed them."
+            )
 
     # Where visits came FROM. Parsed out of the nav: events rather than stored
     # in columns of their own -- usage_logs has four columns and action is the
