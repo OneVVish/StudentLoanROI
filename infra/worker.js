@@ -273,6 +273,21 @@ from the edge and is always available.</p>
 // health endpoint Railway checks.
 const PASSTHROUGH = ["/_stcore", "/static", "/component", "/media", "/vendor", "/favicon"];
 
+// Of those, the prefixes safe to CACHE at the edge. /static is Streamlit's
+// bundle directory and its filenames are content-hashed, so a day of TTL can
+// never serve a stale byte -- a redeploy mints new names and the uncached
+// HTML shell points at them. This is the single biggest origin-load cut a
+// spike can get: without it every new visitor pulled every JS/CSS bundle
+// from the origin, which is exactly the multiplication a traffic spike is.
+//
+// /_stcore must NEVER join this list (websocket + health check), and the
+// shell stays uncached for the same version-skew reason the hashes make
+// /static safe. /component, /media, /vendor and /favicon are left alone
+// until someone verifies their names are immutable too -- caching them on
+// an assumption is how a stale asset would outlive a deploy.
+const EDGE_CACHED = ["/static"];
+const EDGE_CACHE_SECONDS = 86400;
+
 function busyResponse() {
   return new Response(BUSY_PAGE, {
     status: 503,
@@ -308,9 +323,38 @@ export default {
       });
     }
 
-    // 3. Streamlit internals: untouched passthrough.
+    // 3. Streamlit internals: passthrough, cached at the edge where safe.
     if (PASSTHROUGH.some((p) => url.pathname.startsWith(p))) {
-      return fetch(request);
+      // The websocket must stay a bare fetch: wrapping it or buffering its
+      // response is how you hang every session at once, per the note on
+      // step 5. Everything else gets a guard so a dead origin during a spike
+      // degrades to a clean 503 instead of Cloudflare's own 1101 error page.
+      // A bare 503, not BUSY_PAGE -- these are asset requests, and an HTML
+      // apology where a script was expected is a second error, not a message.
+      if (url.pathname.startsWith("/_stcore")) {
+        return fetch(request);
+      }
+      const cached = EDGE_CACHED.some((p) => url.pathname.startsWith(p));
+      try {
+        const resp = await fetch(request, cached ? {
+          cf: { cacheEverything: true, cacheTtl: EDGE_CACHE_SECONDS },
+        } : undefined);
+        if (cached && resp.ok) {
+          // Assert the policy on the response too, so the browser holds the
+          // bundle as long as the edge does. Only on 2xx: caching an origin
+          // error for a day would outlive the outage that caused it.
+          const out = new Response(resp.body, resp);
+          out.headers.set("cache-control",
+            `public, max-age=${EDGE_CACHE_SECONDS}, immutable`);
+          return out;
+        }
+        return resp;
+      } catch (err) {
+        return new Response(null, {
+          status: 503,
+          headers: { "retry-after": "60", "cache-control": "no-store" },
+        });
+      }
     }
 
     // 4. The app has exactly one route; fold stray paths into it.

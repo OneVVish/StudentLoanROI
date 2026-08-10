@@ -37,8 +37,14 @@ import certifi
 # set an explicit write timeout -- see SUPABASE_TIMEOUT_SECONDS.
 import httpx
 import matplotlib
-matplotlib.use("Agg")  # must precede importing pyplot -- no display/browser needed
-import matplotlib.pyplot as plt
+matplotlib.use("Agg")  # headless: no display or browser in the server container
+# The OO pair every PDF/share-card figure is built from -- and deliberately NO
+# `import matplotlib.pyplot`. pyplot's global figure registry is not
+# thread-safe and Streamlit sessions are threads; with the module absent, the
+# unsafe API cannot be reached by accident, which is a stronger guarantee than
+# a guard that greps for it (the guard exists too, as the backstop).
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 import matplotlib.ticker as mticker
 import pandas as pd
 import plotly.express as px
@@ -10498,18 +10504,104 @@ _PDF_MONEY_FORMATTER = mticker.FuncFormatter(lambda value, _pos: f"${value:,.0f}
 _PDF_MONEY_K_FORMATTER = mticker.FuncFormatter(lambda value, _pos: fmt_money_k(value))
 
 
+def pdf_memo_signature(params: dict, *extras) -> str:
+    """One string naming every input a PDF can see.
+
+    `params` is the tool's own share-param dict -- build_share_params /
+    build_repayment_share_params / build_search_share_params -- because that
+    is the one serialisation of the inputs this codebase already GUARDS:
+    check_share_coverage fails when a sidebar input reaches neither the
+    emitter nor an exemption, so an input that can change a PDF cannot
+    silently stay out of this signature either. Inventing a second
+    serialisation here would mean maintaining two lists of "everything",
+    and the second one would have no guard.
+
+    `extras` exist because the share guard walks SIDEBAR widgets, and two
+    main-page widgets change what a PDF contains without being shareable
+    state: the take-home Annual/Monthly toggle, and the repayment tool's
+    chart-row selector. Anything of that shape must be passed here by its
+    caller -- the staleness that misses one is the failure mode this whole
+    mechanism trades against.
+    """
+    return "&".join(f"{k}={params[k]}" for k in sorted(params)) + \
+        "|" + "|".join(str(e) for e in extras)
+
+
+def memoized_pdf(kind: str, signature: str, build):
+    """Build a PDF/PNG only when its inputs changed; else the cached bytes.
+
+    Every download_button on this app passes `data=` eagerly, so before this
+    each RERUN -- every slider tick, every widget touch -- re-rasterised five
+    to nine matplotlib figures and a full reportlab document per result page.
+    The bytes went to the same button either way. At peak that is the
+    difference between a rerun costing milliseconds and costing seconds of
+    CPU per visitor interaction.
+
+    st.session_state rather than st.cache_data, deliberately: the natural
+    cache key (the arguments) contains schedule DataFrames whose hashing
+    costs a good share of what the cache would save, and a global cache
+    would share PDF bytes across sessions keyed on hashes of visitor
+    financial inputs. Per-session, one entry per kind, replaced on change:
+    bounded by construction at ~5 entries x ~200 KB.
+
+    The signature must come from pdf_memo_signature -- see its docstring for
+    why. A stale PDF is silent (the button downloads happily), so the guard
+    checks the memo's discrimination, not just its speed.
+    """
+    slot = st.session_state.setdefault("_pdf_memo", {})
+    cached = slot.get(kind)
+    if cached is None or cached[0] != signature:
+        slot[kind] = (signature, build())
+    return slot[kind][1]
+
+
+def _pdf_figure(figsize, dpi=None):
+    """A matplotlib Figure OUTSIDE pyplot's global registry.
+
+    Streamlit runs every session in its own thread, and pyplot's figure
+    manager (`Gcf`) is module-global state with no locking -- so two visitors
+    generating PDFs at the same moment raced on it through eight
+    plt.subplots/plt.figure call sites, a crash that only appears under
+    concurrent load and never in single-user testing. An OO Figure with an
+    Agg canvas never touches that registry: the race ceases to exist
+    structurally rather than being locked around.
+
+    It also ends the leak-on-exception: a pyplot figure had to be plt.close'd
+    or it stayed pinned in Gcf forever, and none of the ten create/close spans
+    was try/finally-guarded. An OO figure is just an object -- when a build
+    raises, the figure is garbage-collected with the stack frame.
+
+    Every figure this file rasterises must come from here. The guard
+    (check_pdf_concurrency.py) fails on any plt.* call inside the builders,
+    because the natural way to add a chart twin is to copy an old one -- which
+    is exactly how pyplot would creep back in.
+    """
+    fig = Figure(figsize=figsize, dpi=dpi)
+    FigureCanvasAgg(fig)   # attaches itself as fig.canvas
+    return fig
+
+
+def _pdf_subplots(figsize):
+    """The `fig, ax = plt.subplots(...)` shape, off pyplot."""
+    fig = _pdf_figure(figsize)
+    return fig, fig.subplots()
+
+
 def _pdf_image_from_figure(fig, max_width: float = PDF_CONTENT_WIDTH) -> Image:
     """Rasterize a matplotlib figure to a reportlab Image flowable, scaled
-    to fit the PDF's content width while preserving aspect ratio. Always
-    closes the figure afterward -- this runs inside a long-lived Streamlit
-    server process, so leaked open figures would accumulate across every
-    PDF download instead of being garbage collected like a short-lived
-    script's would."""
+    to fit the PDF's content width while preserving aspect ratio.
+
+    No plt.close: figures come from _pdf_figure, which never registers them
+    with pyplot, so there is nothing to unregister and ordinary garbage
+    collection reclaims them -- including on the exception paths that used to
+    leak. PIL reads the SAME buffer the PNG was written to (seek, read, seek
+    back) rather than copying it into a second BytesIO; at 150dpi each chart
+    is a few hundred KB and the copy was pure waste."""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
     buf.seek(0)
-    width_px, height_px = PILImage.open(io.BytesIO(buf.getvalue())).size
+    width_px, height_px = PILImage.open(buf).size
+    buf.seek(0)
     return Image(buf, width=max_width, height=max_width * height_px / width_px)
 
 
@@ -10555,7 +10647,7 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
     exists to prevent, in the one place nobody would notice it.
     """
     vocab = counterfactual_vocab()
-    fig = plt.figure(figsize=SHARE_CARD_SIZE, dpi=SHARE_CARD_DPI)
+    fig = _pdf_figure(figsize=SHARE_CARD_SIZE, dpi=SHARE_CARD_DPI)
     fig.patch.set_facecolor("white")
 
     # Headline and deck, top-left. Left-aligned and large: this is the first
@@ -10721,7 +10813,8 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
     buffer = io.BytesIO()
     fig.savefig(buffer, format="png", dpi=SHARE_CARD_DPI,
                 facecolor=fig.get_facecolor())
-    plt.close(fig)
+    # No plt.close: the figure comes from _pdf_figure and was never in
+    # pyplot's registry, so there is nothing to unregister.
     return buffer.getvalue()
 
 
@@ -10792,7 +10885,7 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
     colors = ([PANEL_WAGE_LOCAL_COLOR, PANEL_WAGE_NATIONAL_COLOR] if len(rows) > 1
               else [PANEL_WAGE_NATIONAL_COLOR])
 
-    fig, ax = plt.subplots(figsize=(6, 2.1 + 1.15 * slots))
+    fig, ax = _pdf_subplots(figsize=(6, 2.1 + 1.15 * slots))
     for i, row in enumerate(reversed(rows)):
         base = i * row_height
         color = colors[len(rows) - 1 - i]
@@ -10919,7 +11012,7 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
     while the interest pool balloons -- the PDF silently flattened the story
     back to one undifferentiated line. The chart-twin rule in CLAUDE.md is
     about WHAT a chart shows, and this was a what, not a how."""
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+    fig, ax = _pdf_subplots(figsize=(6, 3.5))
     tranche_frame = tranche_balance_frame(tranches)
     if not tranche_frame.empty:
         wide = tranche_frame.pivot(index="year", columns="component",
@@ -10964,7 +11057,7 @@ def build_pdf_payment_chart(result: dict, label: str,
     MORE in print than on screen, for the reason the net-position chart's
     head-start annotation does: the report is read away from the app, so an
     unexplained cliff has no hover and no caption nearby to resolve it."""
-    fig, ax = plt.subplots(figsize=(6, 3.0))
+    fig, ax = _pdf_subplots(figsize=(6, 3.0))
     if federal_result is not None and private_result is not None:
         fed = payment_series(federal_result)
         priv = payment_series(private_result)
@@ -11000,7 +11093,7 @@ def build_pdf_payment_chart(result: dict, label: str,
 def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
                                         schedule_b: pd.DataFrame, label_b: str) -> Image:
     """PDF counterpart to build_comparison_balance_chart."""
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+    fig, ax = _pdf_subplots(figsize=(6, 3.5))
     ax.plot(schedule_a["year"], schedule_a["balance"], linewidth=2.5, label=label_a)
     ax.plot(schedule_b["year"], schedule_b["balance"], linewidth=2.5, label=label_b)
     # The ticks are chosen from BOTH schedules, not the axis limits: matplotlib
@@ -11020,7 +11113,7 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
 def build_pdf_comparison_payment_chart(result_a: dict, label_a: str,
                                         result_b: dict, label_b: str) -> Image:
     """PDF counterpart to build_comparison_payment_chart."""
-    fig, ax = plt.subplots(figsize=(6, 3.0))
+    fig, ax = _pdf_subplots(figsize=(6, 3.0))
     _spans = []
     for result, label in ((result_a, label_a), (result_b, label_b)):
         series = payment_series(result)
@@ -11046,7 +11139,7 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     screen: the report is read detached from the app, so a baseline that
     opens several years of wages ahead has no sidebar option nearby to
     explain it and reads as a modelling error."""
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+    fig, ax = _pdf_subplots(figsize=(6, 3.5))
     for label, group in frame.groupby("Series", sort=False):
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
                 linewidth=2, label=label)
@@ -11101,7 +11194,7 @@ def build_pdf_salary_flow_chart(take_home: dict, monthly_payment: float,
     segments = salary_flow_segments(take_home, monthly_payment, divisor)
     if not segments:
         return None
-    fig, ax = plt.subplots(figsize=(9.0, 2.1))
+    fig, ax = _pdf_subplots(figsize=(9.0, 2.1))
     total = sum(amount for _, amount, _, _ in segments)
     left = 0.0
     placed = []
@@ -12889,10 +12982,17 @@ else:
         # carries "(City, ST)" only for names that are actually shared, which
         # is what makes two "Southwestern College" entries distinguishable
         # instead of identical.
+        #
+        # The frame is resolved ONCE, outside the lambda. st.cache_data
+        # returns a defensive COPY of the 5,035-row frame on every call, and
+        # format_func runs once per option -- so the inline call allocated up
+        # to 25 full copies per rerun for one selectbox. Closing over a local
+        # makes it one.
+        _coa_frame_a = load_coa_dataset()
         _sb_where.selectbox(
             f"Multiple schools matched \"{school_search_a}\" -- pick yours:",
             matching_schools_a, key="school_pick_a",
-            format_func=lambda u: school_option_label(u, load_coa_dataset()),
+            format_func=lambda u: school_option_label(u, _coa_frame_a),
             on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         )
@@ -14427,12 +14527,15 @@ if compare_mode:
                      "your school isn't found, just enter Cost of Attendance "
                      "yourself.",
             )
-            matching_schools_b = find_matching_schools(school_search_b, load_coa_dataset())
+            # One resolved frame for the search and every option label -- the
+            # same one-copy-not-25 reasoning as the Scenario A picker above.
+            _coa_frame_b = load_coa_dataset()
+            matching_schools_b = find_matching_schools(school_search_b, _coa_frame_b)
             if len(matching_schools_b) >= 2:
                 st.selectbox(
                     f"Multiple schools matched \"{school_search_b}\" -- pick yours:",
                     matching_schools_b, key="school_pick_b",
-                    format_func=lambda u: school_option_label(u, load_coa_dataset()),
+                    format_func=lambda u: school_option_label(u, _coa_frame_b),
                     on_change=lambda: (mark_interaction("school_b"),
                                     _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 )
@@ -15623,11 +15726,16 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
 
     pdf_col.download_button(
         "📄 Download PDF Report",
-        data=generate_pdf_repayment_report(
-            rows, balance, rate, income, deps, accrued, prior_payments,
-            forgivable, pslf, chart_label=chart_label,
-            federal_loans=federal_loans, private_loans=private_loans,
-            age=age, strategy=strategy, old_ibr=old_ibr),
+        # chart_label is the extra: the chart-row selector is a main-page
+        # widget the share guard cannot see, and it decides which plan's
+        # charts the report carries.
+        data=memoized_pdf("repayment", pdf_memo_signature(
+            build_repayment_share_params(), chart_label),
+            lambda: generate_pdf_repayment_report(
+                rows, balance, rate, income, deps, accrued, prior_payments,
+                forgivable, pslf, chart_label=chart_label,
+                federal_loans=federal_loans, private_loans=private_loans,
+                age=age, strategy=strategy, old_ibr=old_ibr)),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -17795,15 +17903,21 @@ def _search_actions(results, table, captions, is_graduate: bool,
 
     pdf_col.download_button(
         "📄 Download this list (PDF)",
-        data=generate_pdf_search_report(
-            results, table, captions,
-            title=("Graduate schools that fit this budget" if is_graduate
-                   else "Schools that fit this budget"),
-            subtitle=(f"{len(results)} schools, cheapest first — "
-                      f"{CIP_FAMILY_TITLES.get(family, level or 'all fields')}"),
-            is_graduate=is_graduate,
-            filters=(_search_filter_summary(controls, is_graduate)
-                     if controls else None)),
+        # The stamp rides the signature as a belt-and-braces extra: the search
+        # params determine the results, but the stamp records what the results
+        # actually WERE, so a dataset change mid-session cannot serve a list
+        # the controls no longer produce.
+        data=memoized_pdf(f"search_{tool}", pdf_memo_signature(
+            build_search_share_params(is_graduate), stamp),
+            lambda: generate_pdf_search_report(
+                results, table, captions,
+                title=("Graduate schools that fit this budget" if is_graduate
+                       else "Schools that fit this budget"),
+                subtitle=(f"{len(results)} schools, cheapest first — "
+                          f"{CIP_FAMILY_TITLES.get(family, level or 'all fields')}"),
+                is_graduate=is_graduate,
+                filters=(_search_filter_summary(controls, is_graduate)
+                         if controls else None))),
         file_name=f"{tool}_shortlist.pdf", mime="application/pdf",
         use_container_width=True, key=f"{tool}_pdf",
         on_click=lambda: log_usage_event(f"search_pdf:{tool}:{stamp}"),
@@ -18402,7 +18516,8 @@ top_actions_container = st.container()
 def render_share_card_button(scenario_pairs: list, verdict: dict,
                               school_name: str, strategy_label: str,
                               roi_window_years: int, col_index: float,
-                              hs_wage_index: float, key: str) -> None:
+                              hs_wage_index: float, key: str,
+                              signature: str = "") -> None:
     """The Download-image button, rendered by BOTH result branches.
 
     Both, without exception. Compare Mode is the randomly-assigned contrast arm
@@ -18415,13 +18530,21 @@ def render_share_card_button(scenario_pairs: list, verdict: dict,
     take the results page with it: the visitor came for the numbers, and the
     numbers are already on screen above this button.
     """
-    try:
+    def _build():
         frame = net_position_frame(scenario_pairs, col_index, hs_wage_index,
                                     roi_window_years)
-        png = build_share_card(
+        return build_share_card(
             scenario_pairs, frame, verdict,
             " vs ".join(label for label, _ in scenario_pairs),
             school_name, strategy_label, roi_window_years)
+
+    try:
+        # Memoized on the same signature as the branch's PDF (the caller
+        # passes it): an unchanged rerun rasterises nothing. An empty
+        # signature -- a caller that has none -- falls back to building every
+        # time, which is only the old behaviour, never a stale card.
+        png = (memoized_pdf(f"card_{key}", signature, _build)
+               if signature else _build())
     except Exception as error:                                # pragma: no cover
         report_write_failure("share card render", error)
         st.caption("The shareable image could not be generated for this "
@@ -19422,7 +19545,21 @@ if compare_mode:
         scenario_b=scenario_b, start_year_a=start_year_a, start_year_b=start_year_b,
     ), **module_context})
 
-    compare_pdf_bytes = generate_pdf_report_compare(
+    _pdf_sig = pdf_memo_signature(build_share_params(
+        career_data_source, major, city, school_name_a, in_state_a,
+        coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+        interest_rate, repayment_strategy, True,
+        major_b=major_b, school_name_b=school_name_b, in_state_b=in_state_b,
+        coa_per_year_b=coa_per_year_b,
+        personal_contribution_per_year_b=personal_contribution_per_year_b,
+        grants_per_year_b=grants_per_year_b, interest_rate_b=interest_rate_b,
+        repayment_strategy_b=repayment_strategy_b,
+        start_year_a=start_year_a, start_year_b=start_year_b,
+        roi_horizon_years=roi_horizon_years,
+        cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+        cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
+    ), selected_salary_flow_period(), loan_amount, loan_amount_b)
+    compare_pdf_bytes = memoized_pdf("compare", _pdf_sig, lambda: generate_pdf_report_compare(
         city, major, school_name_a, in_state_a, coa_per_year_a, personal_contribution_per_year_a,
         grants_per_year_a, interest_rate, repayment_strategy, scenario_a,
         major_b, school_name_b, in_state_b, coa_per_year_b, personal_contribution_per_year_b,
@@ -19437,7 +19574,7 @@ if compare_mode:
         federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'),
         federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, professional_school_b=st.session_state.get('prof_school_b'), include_fees=True,
         takehome_stages_a=_th_a["stages"], takehome_stages_b=_th_b["stages"],
-    )
+    ))
     with top_actions_container:
         compare_pdf_col, compare_share_col, compare_card_col = st.columns(3)
         compare_pdf_col.download_button(
@@ -19496,7 +19633,7 @@ if compare_mode:
                 [(major, scenario_a), (major_b, scenario_b)], None,
                 school_name_a, repayment_strategy, roi_horizon_years,
                 city_info["col_index"], get_metro_wage_index(city),
-                key="share_card_compare")
+                key="share_card_compare", signature=_pdf_sig)
 else:
     scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                          personal_contribution, city_info["col_index"],
@@ -19749,7 +19886,23 @@ else:
         start_year_a=start_year_a,
     ), **module_context})
 
-    single_pdf_bytes = generate_pdf_report_single(
+    # The same params the Share button below emits, plus the inputs a PDF can
+    # see that shares cannot. Two kinds live in the extras:
+    #   - the Annual/Monthly toggle, a main-page widget the share guard's
+    #     sidebar sweep never visits;
+    #   - loan_amount, because a manual override of the Total Loan Amount
+    #     field does NOT ride a share link (a recipient re-derives the
+    #     school's default), so it is absent from the params by design -- and
+    #     it moves every figure in the report. Found live: changing $13,000 to
+    #     $77,000 re-rendered the page and served the $13,000 PDF.
+    _pdf_sig = pdf_memo_signature(build_share_params(
+        career_data_source, major, city, school_name_a, in_state_a,
+        coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+        interest_rate, repayment_strategy, False, start_year_a=start_year_a,
+        roi_horizon_years=roi_horizon_years,
+        cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+    ), selected_salary_flow_period(), loan_amount)
+    single_pdf_bytes = memoized_pdf("single", _pdf_sig, lambda: generate_pdf_report_single(
         major, city, school_name_a, in_state_a, takehome_stages,
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
         interest_rate, repayment_strategy, loan_amount, loan_schedule_a,
@@ -19760,7 +19913,7 @@ else:
         loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
         federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'), include_fees=True,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
-    )
+    ))
     with top_actions_container:
         single_pdf_col, single_share_col, single_card_col = st.columns(3)
         single_pdf_col.download_button(
@@ -19795,7 +19948,7 @@ else:
                 [(major, scenario)], breakeven, school_name_a,
                 repayment_strategy, roi_horizon_years,
                 city_info["col_index"], get_metro_wage_index(city),
-                key="share_card_single")
+                key="share_card_single", signature=_pdf_sig)
 
 st.divider()
 
