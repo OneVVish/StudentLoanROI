@@ -170,9 +170,16 @@ ADVANCED_TRAINING_OVERLAY = {}
 # across residency), the same figures and structure the curated "Medicine"
 # entry above already cites.
 # aamc.org/data-reports/students-residents
+# One resident stipend, shared by every path that has a residency, so a
+# refresh moves them together. AAMC's 2024 preliminary median first-post-MD-year
+# stipend. The 2025 survey puts PGY-1 at a $66,986 median / $68,166 mean, so
+# this is mildly conservative rather than stale-in-a-flattering-direction; a
+# refresh should move the citation and this number in the same commit.
+RESIDENT_STIPEND = 65000
+
 _PHYSICIAN_TRAINING = {
     "unpaid_training_years": 4, "stipend_training_years": 3,
-    "stipend_salary": 65000, "additional_training_debt": 205000,
+    "stipend_salary": RESIDENT_STIPEND, "additional_training_debt": 205000,
 }
 PHYSICIAN_TITLES = [
     "Anesthesiologists", "Cardiologists", "Emergency Medicine Physicians",
@@ -196,6 +203,60 @@ DENTIST_TITLES = ["Oral and Maxillofacial Surgeons", "Prosthodontists",
                   "Dentists, All Other Specialists"]
 for _title in DENTIST_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_DENTIST_TRAINING)
+
+# The other six professional-degree paths. Until this existed they had NO
+# training structure at all, which was wrong twice over and both silently:
+#
+#   1. They earned a full pharmacist's/vet's salary the year after a
+#      bachelor's, while the cost model charged them nine years of school.
+#   2. professional_debt_cap keys on `unpaid_training_years`, so at 0 it
+#      returned a cap of ZERO -- pricing an ordinary federal professional
+#      loan entirely as private money at the higher rate. The same
+#      wrong-in-two-directions failure resolve_professional_debt's docstring
+#      describes for a missing debt, reached by a different route.
+#
+# The cap can be applied to all of them unconditionally for the same reason it
+# can to medicine, dentistry and law: Pharmacy (Pharm.D.), Veterinary Medicine
+# (D.V.M.), Chiropractic (D.C.), Optometry (O.D.) and Podiatry (D.P.M.) are
+# each named in 34 CFR 668.2's own examples of a professional degree -- the
+# ORIGINAL list, not the one the 2026-06-24 stay temporarily expanded, so they
+# do not depend on how that litigation ends.
+# [ecfr.gov/current/title-34/subtitle-B/chapter-VI/part-668/subpart-A/section-668.2]
+#
+# No additional_training_debt here: unlike the physicians and dentists, these
+# read their debt from Scorecard through resolve_professional_debt, per
+# programme and per school. See dataset_professional_debt.
+#
+# Lengths are the standard first-professional ones, four years each. The one
+# with a caveat is chiropractic: CCE requires about 4,200 hours over 10-12
+# trimesters, which a year-round schedule finishes in 3.3 years. Four is the
+# common description and the common enrollment span, and it is also the
+# conservative choice for the earnings side; note it lifts the federal cap to
+# the $200,000 aggregate, where 3.3 years would cap at $165,000 and push about
+# $28,000 of the median chiropractic debt into private money.
+_PROFESSIONAL_SCHOOL_YEARS = 4
+
+# PODIATRY IS THE ONE WITH A REQUIRED RESIDENCY. CPME standardised podiatric
+# postgraduate training as a single 36-month Podiatric Medicine and Surgery
+# Residency in 2011, and the American Board of Podiatric Medicine certifies
+# only its completers -- so unlike the four below, this is not a choice a
+# graduate makes. Podiatric residents are hospital house staff paid on the
+# institution's own scale, which is why they take the same stipend constant as
+# physicians rather than one of their own: published 2025-26 podiatric PGY-1
+# salaries run $67,358 (Tower Health) to $86,923 (Scripps), so RESIDENT_STIPEND
+# sits at or below the bottom of that range.
+# [cpme.org/residencies/cpme-faqs-residency-programs/, podiatryboard.org]
+ADVANCED_TRAINING_OVERLAY["Podiatrists"] = {
+    "unpaid_training_years": _PROFESSIONAL_SCHOOL_YEARS,
+    "stipend_training_years": 3, "stipend_salary": RESIDENT_STIPEND,
+}
+# The rest go straight into practice. Where a residency exists it is optional
+# and a minority path, so charging every graduate for one would misprice the
+# median -- see OPTIONAL_RESIDENCY, which discloses it instead.
+for _title in ("Pharmacists", "Veterinarians", "Optometrists", "Chiropractors"):
+    ADVANCED_TRAINING_OVERLAY[_title] = {
+        "unpaid_training_years": _PROFESSIONAL_SCHOOL_YEARS,
+    }
 
 # Which professional program each of these paths attends, keying
 # data/graduate_debt_clean.csv. Built from the same title lists above
@@ -5053,6 +5114,66 @@ def render_professional_debt_caption(major_name, school_name, debt, container=No
     text = professional_debt_caption(major_name, school_name, debt)
     if text:
         (container or st).caption(text.replace("$", chr(92) + "$"))
+
+
+# Residencies that exist but are NOT required, with what they pay and how many
+# graduates take one. Keyed by occupation title, value is
+# (years, stipend, share sentence).
+#
+# These are disclosed, never charged. The app's model has one earnings path per
+# occupation, so folding in a residency would apply it to every graduate --
+# and at these participation rates that misprices the median person, in the
+# direction of making the degree look worse than it is for the majority who
+# skip it. It is the same call the underemployment figure gets, and for the
+# same reason: a real number about a subgroup, shown as a disclosure rather
+# than folded into arithmetic that cannot represent the subgroup.
+#
+# Podiatry is deliberately absent: its residency IS required, so it lives in
+# ADVANCED_TRAINING_OVERLAY where it changes the numbers.
+OPTIONAL_RESIDENCY = {
+    "Pharmacists": (
+        1, 60000,
+        "about 6,000 PGY-1 places were filled in the 2025 ASHP match against "
+        "11,386 PharmD degrees conferred, so roughly half of graduates take "
+        "one — it is required for most hospital and clinical roles, and for "
+        "almost no community-pharmacy ones"),
+    # The money in these sentences is written {money:...} and formatted through
+    # fmt_money_md below. Two raw dollar signs in one markdown string are a
+    # LaTeX expression to Streamlit, which eats both and italicises whatever is
+    # between them -- and every sentence here already ends with a stipend
+    # figure, so any second one collides with it.
+    "Veterinarians": (
+        1, 58874,
+        "28% of 2025 graduates accepted advanced-education offers, at a mean "
+        "{money:58874} against the {money:129000} mean starting salary for "
+        "those going straight into practice (AVMA)"),
+    "Optometrists": (
+        1, 47274,
+        "538 funded residency places existed in 2024-25 against 1,712 OD "
+        "graduates, at an average stipend of {money:47274} (ASCO) — under a "
+        "third, and concentrated in hospital and specialty practice"),
+}
+
+
+def optional_residency_disclosure(major_name: str) -> str:
+    """One sentence naming a residency the model does NOT charge for.
+
+    Returns "" for paths with no optional residency, so a caller can print it
+    unconditionally. Chiropractic has none to disclose at all -- there is no
+    accredited post-graduate residency requirement in the field, which is a
+    fact about the profession rather than a gap in this data.
+    """
+    entry = OPTIONAL_RESIDENCY.get(major_name)
+    if not entry:
+        return ""
+    years, stipend, share = entry
+    share = re.sub(r"\{money:(\d+)\}",
+                   lambda m: fmt_money_md(int(m.group(1))), share)
+    return (f"**This path is modelled with no residency.** {major_name} can do "
+            f"a {years}-year postgraduate residency and this calculator does "
+            f"not charge anyone for one: {share}. If you intend to do one, "
+            f"expect roughly {fmt_money_md(stipend)} instead of the salary "
+            f"below for that year, and everything here to arrive a year late.")
 
 
 def professional_program_for(major_name: str):
@@ -12484,6 +12605,13 @@ if _program_key_a:
     else:
         render_professional_debt_caption(major, st.session_state["prof_school_a"],
                                           professional_debt_a, _sb_study)
+    # In the SIDEBAR, not the results: the sidebar renders once whichever
+    # result branch runs, so a disclosure placed here cannot become a
+    # difference between the randomly-assigned arms. Same reasoning that keeps
+    # the school search at module level.
+    _optional_residency_a = optional_residency_disclosure(major)
+    if _optional_residency_a:
+        _sb_study.caption(_optional_residency_a)
 
 # Returning students only. Placed here because it needs the chosen major to
 # pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
@@ -18104,24 +18232,62 @@ right away:
   ([source](https://www.americanbar.org/groups/young_lawyers/resources/after-the-bar/personal-financial/young-lawyers-significantly-impacted-by-high-debt-burdens/)).
 
 - **Pharmacy, veterinary medicine, optometry, podiatry and chiropractic**:
-  BLS files all five as needing a doctoral or professional degree, so they
-  are charged the same 4 + 5 years of school as medicine, and now the same
-  way for debt — your school's median where the sidebar lets you name one,
-  otherwise a national figure. Those national figures are **not** an
-  association average like the two above: no such figure is curated here, so
-  each is the **median of the per-school medians College Scorecard
-  publishes** for that programme — pharmacy $142,122 across 88 schools,
-  veterinary $162,726 across 26, optometry $172,132 across 16, chiropractic
-  $193,488 across 10
-  ([source](https://collegescorecard.ed.gov/data/)). Two caveats. **Podiatry
-  has no figure of its own anywhere in federal data** — Scorecard publishes
-  no CIP for it at any level, so its students are counted under *Medicine*;
-  the $239,574 shown is the median at the schools that teach podiatry, which
-  at a school with no MD programme is these graduates and at one with both is
-  a mix. And **none of the five is modelled with a residency**: podiatric
-  medicine in particular normally requires three more years at a resident's
-  pay, which this calculator does not deduct, so its early years read better
-  than they will be.
+  four years of school with no income, then the real salary from the table
+  above — except podiatry, below. Debt is your school's median where the
+  sidebar lets you name one, otherwise a national figure. Those national
+  figures are **not** an association average like the two above: no such figure
+  is curated here, so each is the **median of the per-school medians College
+  Scorecard publishes** for that programme — pharmacy $142,122 across 88
+  schools, veterinary $162,726 across 26, optometry $172,132 across 16,
+  chiropractic $193,488 across 10
+  ([source](https://collegescorecard.ed.gov/data/)). **Podiatry has no figure
+  of its own anywhere in federal data** — Scorecard publishes no CIP for it at
+  any level, so its students are counted under *Medicine*; the $239,574 shown
+  is the median at the schools that teach podiatry, which at a school with no
+  MD programme is these graduates and at one with both is a mix.
+- **Podiatry adds 3 years of residency at $65,000**, on the same footing as
+  medicine, because it is the one of these five that is **required**: the
+  Council on Podiatric Medical Education standardised podiatric postgraduate
+  training as a single 36-month Podiatric Medicine and Surgery Residency in
+  2011, and the American Board of Podiatric Medicine certifies only its
+  completers
+  ([CPME](https://www.cpme.org/residencies/cpme-faqs-residency-programs/),
+  [ABPM](https://podiatryboard.org/ufaq/)). Podiatric residents are hospital
+  house staff paid on the institution's own scale, so they take the same
+  stipend this calculator uses for medical residents — AAMC's 2024 median
+  first-post-MD-year figure. Published 2025-26 podiatric PGY-1 salaries run
+  from about $67,400 to $86,900, so $65,000 is at or below the bottom of that
+  range rather than a flattering estimate.
+- **Pharmacy, veterinary medicine and optometry have residencies too, and this
+  calculator charges nobody for one.** All three are optional and none is a
+  majority path, so folding one in would misprice the typical graduate — the
+  same call the underemployment figure gets, and for the same reason. What
+  they cost if you do one:
+  **Pharmacy** — about 6,000 PGY-1 places were filled in the 2025 ASHP match
+  against 11,386 PharmD degrees conferred in 2024, so roughly half of
+  graduates take one; it is required for most hospital and clinical roles and
+  for almost no community-pharmacy ones.
+  **Veterinary** — 28% of 2025 graduates accepted advanced-education offers, at
+  a mean $58,874 against the $129,000 mean starting salary for classmates going
+  straight into practice
+  ([AVMA](https://www.avma.org/news/inflation-continues-dampen-gains-veterinarian-salaries-fewer-new-grads-entering-full-time)).
+  **Optometry** — 538 funded places existed in 2024-25 against 1,712 OD
+  graduates in 2025, at an average stipend of $47,274
+  ([ASCO](https://optometriceducation.org/wp-content/uploads/2025/04/ASCOResFundingPromotionsSur24-25.pdf)).
+  **Chiropractic has none to disclose**: the field has no accredited
+  postgraduate residency requirement.
+- **All five qualify for the federal professional loan limit** — $50,000 a year
+  up to a $200,000 aggregate — because Pharmacy (Pharm.D.), Veterinary Medicine
+  (D.V.M.), Chiropractic (D.C.), Optometry (O.D.) and Podiatry (D.P.M.) are each
+  named in the Department of Education's own examples of a professional degree,
+  on the original list rather than the one a June 2026 court stay temporarily
+  expanded
+  ([34 CFR 668.2](https://www.ecfr.gov/current/title-34/subtitle-B/chapter-VI/part-668/subpart-A/section-668.2)).
+  Chiropractic carries one caveat: its programmes are about 4,200 hours over
+  10-12 trimesters, which a year-round schedule finishes in 3.3 years. Four
+  years is the common description and gives the full $200,000 cap; on a 3.3-year
+  reading the cap would be $165,000 and about $28,000 of the median debt would
+  be private borrowing instead.
 
 During those unpaid years, this calculator shows $0 income — and any loan
 you've taken out is still quietly racking up interest the whole time,

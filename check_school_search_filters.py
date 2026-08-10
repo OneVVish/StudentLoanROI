@@ -579,6 +579,27 @@ def check_professional_paths(ns) -> list:
                 f"  {occ!r} ({programme}) resolves a national debt of 0\n"
                 f"    professional_debt_cap reads that as a cap, not as unset: "
                 f"the whole tranche goes private and the debt vanishes")
+        # The federal professional cap keys on unpaid_training_years, so a
+        # path with no training structure gets a cap of ZERO -- and
+        # split_loan_financing reads that as a real cap, pricing an ordinary
+        # federal professional loan entirely as private money at the higher
+        # rate. It is invisible: the page renders, the total is right, and only
+        # the tranche split is wrong. All five occupations shipped that way.
+        cap = ns["professional_debt_cap"](occ, national)
+        if not cap:
+            problems.append(
+                f"  {occ!r} has a federal professional cap of 0\n"
+                f"    every dollar of its {ns['fmt_money'](national)} debt is "
+                f"priced as private borrowing; check unpaid_training_years")
+        # And a path that attends school must not earn a full salary while in
+        # it. Year 0 is the first year after a bachelor's, which for every
+        # programme here is the first year OF the professional degree.
+        first_year = ns["get_annual_salary_for_year"](occ, 0)
+        if first_year:
+            problems.append(
+                f"  {occ!r} earns {ns['fmt_money'](first_year)} in its first "
+                f"year of professional school\n    it is being charged the "
+                f"tuition and paid the salary at the same time")
         listed = ns["professional_schools_for"](programme)
         if not listed and programme not in ns["PROGRAMMES_WITHOUT_OWN_DEBT"]:
             problems.append(
@@ -590,6 +611,62 @@ def check_professional_paths(ns) -> list:
             if not school_debt:
                 problems.append(
                     f"  naming {listed[0]!r} for {occ!r} resolves no debt at all")
+    return problems
+
+
+def check_residency_modelling(ns) -> list:
+    """Charged residencies and disclosed ones must be different sets.
+
+    Two registries make one claim between them: ADVANCED_TRAINING_OVERLAY's
+    stipend years say "every graduate of this path serves this", and
+    OPTIONAL_RESIDENCY says "some do, and we are not charging for it". A path
+    in both charges everyone for something the caption calls optional; a path
+    in neither, that should be in one, is silent either way -- deleting
+    podiatry's residency moves its earnings four years earlier and raises no
+    error anywhere.
+
+    Podiatry is named here rather than derived, deliberately, and the same way
+    check_rap_payment_table names the published chart: CPME standardised
+    podiatric postgraduate training as a single 36-month residency in 2011 and
+    the ABPM certifies only its completers, so 3 years is an external fact this
+    file can hold the code to. Deriving it from the overlay would only assert
+    that the overlay equals itself.
+    """
+    problems = []
+    overlay = ns["ADVANCED_TRAINING_OVERLAY"]
+    optional = ns["OPTIONAL_RESIDENCY"]
+
+    REQUIRED_YEARS = {"Podiatrists": 3}
+    for occ, years in REQUIRED_YEARS.items():
+        entry = overlay.get(occ, {})
+        if entry.get("stipend_training_years") != years:
+            problems.append(
+                f"  {occ!r} must serve a required {years}-year residency "
+                f"(CPME 36-month PMSR); the overlay says "
+                f"{entry.get('stipend_training_years', 0)}")
+        if not entry.get("stipend_salary"):
+            problems.append(
+                f"  {occ!r} serves a residency at a stipend of 0 -- residents "
+                f"are salaried house staff, not unpaid")
+
+    both = set(optional) & {o for o, e in overlay.items()
+                            if e.get("stipend_training_years")}
+    for occ in sorted(both):
+        problems.append(
+            f"  {occ!r} is charged a residency AND disclosed as not charged "
+            f"for one\n    the sidebar caption and the earnings curve now "
+            f"contradict each other")
+
+    # A disclosed residency must be genuinely absent from the arithmetic, and
+    # the sentence must actually name a figure -- an empty disclosure is worse
+    # than none, since the path then looks like it has no residency at all.
+    for occ in optional:
+        if overlay.get(occ, {}).get("stipend_training_years"):
+            continue                       # already reported above
+        text = ns["optional_residency_disclosure"](occ)
+        if not text or "$" not in text:
+            problems.append(
+                f"  {occ!r} discloses no stipend figure: {text!r}")
     return problems
 
 
@@ -740,6 +817,7 @@ def main() -> int:
         ("apply target", lambda: check_apply_target(ns)),
         ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
         ("professional paths", lambda: check_professional_paths(ns)),
+        ("residency modelling", lambda: check_residency_modelling(ns)),
         ("programmes without debt", lambda: check_programmes_without_debt(ns)),
     ]:
         found = fn()
