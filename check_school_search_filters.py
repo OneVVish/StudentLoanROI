@@ -424,6 +424,111 @@ def check_graduate_search(ns) -> list:
     return problems
 
 
+def check_fixed_field_levels(ns) -> list:
+    """The MBA is a third shape, and every place that assumed two must know.
+
+    Its controls behave like a professional programme (the level IS the field,
+    so no field selector) while its search behaves like a master's (the debt
+    file is the universe, the price is the school's institution-wide graduate
+    average, because IPEDS publishes no MBA price). Every predicate below
+    exists because conflating the two halves breaks something silently: a field
+    selector whose value the search ignores, an empty frame read as "no school
+    teaches this", or a KeyError on the apply button of a level that searched
+    and rendered perfectly.
+    """
+    problems = []
+    fixed = ns["FIXED_FIELD_GRADUATE_LEVELS"]
+    prof = ns["PROFESSIONAL_SEARCH_LEVELS"]
+    grad = ns["GRADUATE_CREDENTIAL_LEVELS"]
+
+    for label in fixed:
+        if label in prof or label in grad:
+            problems.append(f"  {label!r} is in two level registries; the "
+                            f"dispatch would pick whichever it tests first")
+        if ns["is_professional_credential"](label):
+            problems.append(
+                f"  is_professional_credential({label!r}) is True, so it would "
+                f"be priced from the per-programme file -- which has no MBA")
+        if not ns["level_supplies_its_own_field"](label):
+            problems.append(
+                f"  {label!r} would render a field selector whose value its "
+                f"search then ignores")
+        if label not in ns["GRADUATE_SEARCH_TO_CREDENTIAL"]:
+            problems.append(
+                f"  {label!r} has no GRADUATE_SEARCH_TO_CREDENTIAL row, so "
+                f"applying a school raises a KeyError -- after the level has "
+                f"searched and rendered perfectly")
+
+    # The divergence itself: own-field is the union, and a plain degree level
+    # is in neither half of it.
+    for label in prof:
+        if not ns["level_supplies_its_own_field"](label):
+            problems.append(f"  {label!r} lost its own-field status")
+    for label in grad:
+        if ns["level_supplies_its_own_field"](label):
+            problems.append(
+                f"  {label!r} is a degree level and must ASK for a field")
+
+    for label, (program_key, credential, years, picker_family) in fixed.items():
+        results = ns["search_graduate_schools_by_budget"](
+            program_key, credential, 500_000, "CA", limit=10_000)
+        if results.empty:
+            problems.append(f"  {label} returns no schools at any price")
+            continue
+        missing = [c for c in SHARED_RESULT_COLUMNS if c not in results.columns]
+        if missing:
+            problems.append(f"  {label} results are missing {missing}")
+        if not results["price_per_year"].is_monotonic_increasing:
+            problems.append(f"  {label} results are not price-sorted")
+        # The hand-off aims at the FAMILY picker, since no per-programme option
+        # list exists. Every result must be in it or the apply silently resets.
+        options = set(ns["graduate_schools_for"](picker_family, credential))
+        stray = set(results["picker_name"]) - options
+        if stray:
+            problems.append(
+                f"  {len(stray)} {label} school(s) are absent from the family "
+                f"{picker_family} picker (e.g. {sorted(stray)[0]!r})\n"
+                f"    the picker resets to the national default on a name it "
+                f"does not have, discarding the school just applied")
+        # The programme median and the family rollup describe the same students
+        # and must stay separately readable -- they disagree by a lot.
+        rollup = ns["graduate_schools_for"](picker_family, credential)
+        if not rollup:
+            problems.append(f"  family {picker_family} has no rollup rows, so "
+                            f"{label} has nothing to be distinguished FROM")
+    return problems
+
+
+def check_programmes_without_debt(ns) -> list:
+    """PROGRAMMES_WITHOUT_OWN_DEBT must name exactly the programmes with none.
+
+    The caption on those levels tells the visitor the borrowing column is not
+    programme-specific. If a future release gave one of them its own CIP the
+    caption would become a lie in the safe direction; if a programme fell OUT
+    of the debt file without being listed here, the table would present a
+    medicine median as that programme's own. Both are silent, so both are
+    checked -- against the data, not against the tuple.
+    """
+    problems = []
+    debt = ns["load_professional_debt"]()
+    if debt.empty or "credential" not in debt.columns:
+        return ["  no professional debt data to check against"]
+    prof = debt[debt["credential"] == "professional"]
+    listed = set(ns["PROGRAMMES_WITHOUT_OWN_DEBT"])
+    for label, (program_key, _years) in ns["PROFESSIONAL_SEARCH_LEVELS"].items():
+        rows = len(prof[prof["program_key"] == program_key])
+        if program_key in listed and rows:
+            problems.append(
+                f"  {program_key!r} is listed as having no debt of its own but "
+                f"has {rows} rows -- the caption disclaiming it is now false")
+        if program_key not in listed and not rows:
+            problems.append(
+                f"  {program_key!r} has no debt rows and is not listed, so its "
+                f"results show a borrowing column built from another programme "
+                f"with nothing saying so")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -569,6 +674,8 @@ def main() -> int:
         ("graduate search", lambda: check_graduate_search(ns)),
         ("picker identity", lambda: check_picker_identity(ns, base)),
         ("apply target", lambda: check_apply_target(ns)),
+        ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
+        ("programmes without debt", lambda: check_programmes_without_debt(ns)),
     ]:
         found = fn()
         checks.append(name)

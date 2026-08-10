@@ -151,7 +151,39 @@ PROGRAMS = {
     "2201": ("law", "Law.", FIRST_PROFESSIONAL),
     "5104": ("dentistry", "Dentistry.", FIRST_PROFESSIONAL),
     "5202": ("mba", "Business Administration, Management and Operations.", MASTERS),
+    # Four more First Professional programmes IPEDS already prices. The keys
+    # match data/professional_tuition_clean.csv's, so a price and a debt for
+    # the same programme join on (UNITID, program_key) with nothing to map.
+    "5120": ("pharmacy",
+             "Pharmacy, Pharmaceutical Sciences, and Administration.",
+             FIRST_PROFESSIONAL),
+    # VETERINARY IS 0180, NOT 51xx. It sits in the AGRICULTURE family, not
+    # Health Professions, which is the one CIP here nobody guesses right --
+    # 5124 looks obvious, exists in the taxonomy, and returns zero rows in this
+    # file. The desc check below is what turns that into a build failure rather
+    # than a programme silently missing from the app.
+    "0180": ("veterinary", "Veterinary Medicine.", FIRST_PROFESSIONAL),
+    "5117": ("optometry", "Optometry.", FIRST_PROFESSIONAL),
+    "5101": ("chiropractic", "Chiropractic.", FIRST_PROFESSIONAL),
 }
+
+# The two IPEDS prices with NO Scorecard debt anywhere, and why that is a fact
+# about the taxonomy rather than a gap to fill later.
+#
+# Scorecard has no CIP for osteopathic medicine or podiatric medicine at any
+# credential level -- searching every CIPDESC in the release for "osteopath"
+# or "podiatr" returns nothing. Those students are reported under 5112
+# "Medicine." instead, which is verifiable rather than inferred: 36 of the 37
+# IPEDS-priced DO schools and all 11 podiatry schools appear there, and 22
+# DO-only and 7 podiatry-only schools are already IN the app's medicine
+# picker, carrying what are really DO and DPM medians.
+#
+# So `medicine` here is NOT allopathic-only, whatever its CIPDESC says, and
+# nothing may claim it is. The consequence for the app is small and specific:
+# a DO or DPM school usually has a debt figure already, and where it does not,
+# its IPEDS price is the only number available -- which is exactly the carried
+# -price path resolve_professional_debt already takes.
+PRICED_WITHOUT_SCORECARD_DEBT = ("osteopathic", "podiatry")
 
 # What each exact-CIP programme is called in the `credential` column. The three
 # First Professional programmes share one label because app.py's picker filters
