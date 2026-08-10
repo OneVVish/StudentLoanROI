@@ -59,3 +59,8 @@ MSA_M2025_dl.xlsx
 occupation.xlsx
 # CPS ASEC person file for build_hs_age_profile.py -- ~280MB unzipped
 pppub*.csv
+
+# Wrangler's local state (build cache, deploy metadata, login token pointer).
+# Never contains the token itself -- that lives in ~/.wrangler -- but it is
+# per-machine and has no business in the repo.
+.wrangler/
