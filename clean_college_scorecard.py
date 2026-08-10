@@ -84,6 +84,40 @@ COLUMNS_TO_LOAD = [
     # NEVER add this to a loan amount. It is the parent's debt, is not
     # income-driven-eligible for the student, and app.py already models
     # Parent PLUS as a separate non-forgivable pool in split_loan_financing.
+    # ---- What people actually pay, and whether they finish ----
+    #
+    # Both are DISPLAY-ONLY, like Parent PLUS above. The search filters and
+    # sorts on the STICKER cost and must keep doing so: net price below is an
+    # average for AIDED students only, so using it as the affordability test
+    # would quietly promise a discount not everyone gets. Sticker is the honest
+    # ceiling; these two sit beside it and say what usually happens.
+    #
+    # NET PRICE is the biggest single correction this dataset can make to the
+    # app's headline number. Sticker runs a median $7,063/yr above it, and at
+    # 1,388 of 5,035 schools the net price is less than HALF the sticker. The
+    # app has always told visitors to go and run a net price calculator; the
+    # figure was in this file's source all along.
+    #
+    # Two columns because Scorecard splits them by sector and never populates
+    # both: NPT4_PUB for public institutions, NPT4_PRIV for private. The app
+    # coalesces them.
+    "NPT4_PUB",        # Avg annual net price, public, Title IV aid recipients
+    "NPT4_PRIV",       # Avg annual net price, private, same basis
+    #
+    # COMPLETION is the assumption the ROI model never states. It charges a
+    # full programme and pays out a graduate's salary; a school where 28% of
+    # students finish is a different financial proposition from one where 90%
+    # do, and until now the two rendered identically. 578 schools in this file
+    # graduate under 30%.
+    #
+    # C150 is "completed within 150% of normal time" -- six years for a
+    # four-year degree, three for a two-year one -- for FIRST-TIME, FULL-TIME
+    # students only. A student who transfers in, or out and finishes elsewhere,
+    # counts against the school here. That undercounts real completion and the
+    # caption has to say so. Two columns again, by institution length, never
+    # both populated.
+    "C150_4",          # Completion rate, 4-year institutions
+    "C150_L4",         # Completion rate, less-than-4-year institutions
     "PLUS_DEBT_INST_COMP_MD",   # Median Parent PLUS debt, completers
     "PLUS_DEBT_INST_COMP_N",    # How many families that median describes --
                                 # required, because the median is conditional
@@ -160,7 +194,8 @@ def load_scorecard_data(csv_path: str) -> pd.DataFrame:
     )
     numeric_columns = ["CONTROL", "COSTT4_A", "COSTT4_P", "TUITIONFEE_IN",
                        "TUITIONFEE_OUT", "UNITID", "CURROPER", "DISTANCEONLY",
-                       "ADM_RATE", "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N"]
+                       "ADM_RATE", "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N",
+                       "NPT4_PUB", "NPT4_PRIV", "C150_4", "C150_L4"]
     for column in numeric_columns:
         # errors="coerce" is a safety net: if any stray non-numeric text
         # slipped past NA_VALUES, it becomes NaN instead of crashing the script.
@@ -240,6 +275,17 @@ def calculate_coa(df: pd.DataFrame) -> pd.DataFrame:
     # ---- Step 4: human-readable control type ----
     df["control_type"] = df["CONTROL"].map(CONTROL_LABELS).fillna("Unknown")
 
+    # ---- Step 5: coalesce the two sector/length pairs ----
+    #
+    # Scorecard splits both by institution type and never populates both sides,
+    # so a consumer that reads only one silently loses half the dataset:
+    # NPT4_PUB is blank at every private school, C150_4 at every two-year one.
+    # Coalesced HERE rather than in the app for the same reason in_state_coa is
+    # -- one rule, in the pipeline, so every reader gets the same answer and
+    # the derivation is visible beside the raw columns it came from.
+    df["net_price"] = df["NPT4_PUB"].fillna(df["NPT4_PRIV"])
+    df["completion_rate"] = df["C150_4"].fillna(df["C150_L4"])
+
     return df
 
 
@@ -276,6 +322,11 @@ def build_clean_dataframe(csv_path: str) -> pd.DataFrame:
         # Appended last, after the program flags, for the same reason the
         # search columns were appended rather than interleaved.
         "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N",
+        # Appended after those, same rule again. The raw halves ride along
+        # beside the coalesced value so the derivation can be checked without
+        # re-reading a 100MB source file.
+        "net_price", "NPT4_PUB", "NPT4_PRIV",
+        "completion_rate", "C150_4", "C150_L4",
     ]
     return calculated[final_columns].reset_index(drop=True)
 

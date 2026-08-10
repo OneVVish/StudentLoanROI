@@ -935,6 +935,68 @@ def check_search_level_catalog(ns) -> list:
     return problems
 
 
+def check_net_price_and_completion(ns, base) -> list:
+    """The two display-only columns, and the sector split that hides in them.
+
+    Scorecard reports net price as NPT4_PUB or NPT4_PRIV and completion as
+    C150_4 or C150_L4, never both sides of either pair. A consumer reading only
+    one loses half the dataset in a way that looks like missing data rather
+    than a bug: every private school reports no NPT4_PUB, every two-year school
+    no C150_4. The pipeline coalesces them; this asserts the coalescing
+    actually happened on BOTH sides.
+
+    They are DISPLAY ONLY. Net price is an average over aided students, so
+    filtering or sorting on it would promise a discount not everyone gets --
+    the sticker stays the affordability test, and the ordering must not move.
+    """
+    problems = []
+    coa = ns["load_coa_dataset"]()
+    for column in ("net_price", "completion_rate"):
+        if column not in coa.columns:
+            problems.append(
+                f"  {column} is missing from the dataset -- rebuild it with "
+                f"clean_college_scorecard.py")
+    if problems:
+        return problems
+
+    # Coverage, per sector and per length. A one-sided coalesce shows up here
+    # as a whole category reporting nothing.
+    for label, mask in (("public", coa["control_type"] == "Public"),
+                        ("private", coa["control_type"].str.startswith("Private"))):
+        share = coa.loc[mask, "net_price"].notna().mean()
+        if share < 0.5:
+            problems.append(
+                f"  only {share:.0%} of {label} schools have a net price\n"
+                f"    Scorecard splits this column by sector; a coalesce that "
+                f"missed one side looks exactly like missing data")
+    if coa["completion_rate"].notna().mean() < 0.8:
+        problems.append(
+            f"  only {coa['completion_rate'].notna().mean():.0%} of schools "
+            f"have a completion rate; both C150 columns should be coalesced")
+
+    # Rates are rates, not percentages. A 58 where 0.58 belongs renders as
+    # "5800%" and nothing else would catch it.
+    rates = coa["completion_rate"].dropna()
+    if len(rates) and (rates.max() > 1.0 or rates.min() < 0.0):
+        problems.append(
+            f"  completion_rate ranges {rates.min():.2f}-{rates.max():.2f}; "
+            f"it must be a 0-1 fraction, which the display formats as a %")
+
+    # Display-only: the ordering is cost and nothing else.
+    if not base["coa_per_year"].is_monotonic_increasing:
+        problems.append("  the result set is no longer cost-ordered")
+    # And net price must NOT have become the filter: a search whose ceiling is
+    # below a school's sticker but above its net price must still exclude it.
+    ceiling = 20_000
+    rows = ns["search_schools_by_budget"]("11", "Bachelor's degree", ceiling,
+                                          home_state="CA", limit=200)
+    if not rows.empty and (rows["coa_per_year"] > ceiling).any():
+        problems.append(
+            "  a school priced above the ceiling came back -- the budget "
+            "filter is reading something other than the sticker")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -1085,6 +1147,8 @@ def main() -> int:
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
         ("field debt column", lambda: check_field_debt_column(ns, base)),
+        ("net price and completion",
+         lambda: check_net_price_and_completion(ns, base)),
         ("search level catalog", lambda: check_search_level_catalog(ns)),
         ("per-tool widget keys",
          lambda: check_shared_controls_have_per_tool_keys(ns)),
