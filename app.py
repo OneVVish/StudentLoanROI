@@ -2038,6 +2038,79 @@ CREDENTIAL_LEVELS = {
     "Certificate (under 1 year)": ("cert1", 1),
 }
 
+# The graduate half of the school search's Level control -- a SEPARATE registry
+# because a graduate level cannot be an entry in the map above.
+#
+# CREDENTIAL_LEVELS keys a `programs_{suffix}` column in college_coa_clean.csv,
+# and no such column exists for a master's: College Scorecard's institution
+# file publishes CIP program flags at CERT1/CERT2/ASSOC/CERT4/BACHL and nothing
+# beyond. Adding "Master's degree": ("master", 2) there would build a
+# `programs_master` lookup against a column that is not in the file, and
+# search_schools_by_budget returns an EMPTY FRAME on a missing column -- which
+# the page renders as "no school teaches this", a wrong answer rather than an
+# error. So the two registries stay apart and the search dispatches on which
+# one the label came from.
+#
+# Value is (credential key in data/graduate_debt_clean.csv, years of GRADUATE
+# study). The years are the ADDITIONAL ones, taken from GRADUATE_ADDITIONAL_YEARS
+# rather than PROGRAM_YEARS_BY_EDUCATION: that map holds 6 and 9, the total
+# including the bachelor's, and a graduate result list is pricing the graduate
+# years only. Charging a master's six years of graduate tuition would treble it.
+GRADUATE_CREDENTIAL_LEVELS = {
+    "Master's degree": ("master", GRADUATE_ADDITIONAL_YEARS["Master's degree"]),
+    "Doctoral degree": ("doctoral",
+                        GRADUATE_ADDITIONAL_YEARS["Doctoral or professional degree"]),
+}
+
+
+# The search's level label -> the sidebar's own credential value. Not the same
+# strings: the sidebar follows BLS and says "Doctoral or professional degree",
+# while the search says "Doctoral degree" because it is listing schools rather
+# than describing an occupation's entry requirement. Mapped explicitly so the
+# difference cannot be papered over with a string comparison that happens to
+# work for master's and silently fails for doctorates.
+GRADUATE_SEARCH_TO_CREDENTIAL = {
+    "Master's degree": CREDENTIAL_MASTERS,
+    "Doctoral degree": CREDENTIAL_DOCTORAL,
+}
+
+
+# The three professional-practice programmes the app already models, offered as
+# their own levels in the graduate search. Value is (program_key in both
+# professional datasets, years).
+#
+# These are keyed by PROGRAMME, not by CIP family, which is what makes them a
+# different shape from the two levels above: a master's needs a field of study
+# to be a question at all, while "medicine" already is one. The search hides
+# the field selector when one of these is chosen -- see render_search_controls.
+#
+# The lengths are the standard US ones and are used only for the "whole
+# programme" column here. The CALCULATOR still prices a professional path at
+# GRADUATE_ADDITIONAL_YEARS' 5 years, which its own comment calls a placeholder
+# and which its sidebar lets a visitor change; a search listing 213 law schools
+# can afford to be exact where a single default cannot.
+PROFESSIONAL_SEARCH_LEVELS = {
+    "Medicine (MD)": ("medicine", 4),
+    "Dentistry (DDS/DMD)": ("dentistry", 4),
+    "Law (JD)": ("law", 3),
+}
+
+
+def is_professional_credential(credential: str) -> bool:
+    """Whether the search's Level is a professional programme rather than a
+    field-plus-credential. Beside its registry so a guard can test it."""
+    return credential in PROFESSIONAL_SEARCH_LEVELS
+
+
+def is_graduate_credential(credential: str) -> bool:
+    """Whether the search's Level selection is a graduate one.
+
+    The single place that decides which of the two registries -- and which of
+    the two searches, two price sources and two result tables -- a credential
+    belongs to. In section 1 beside the registry so a guard can test it.
+    """
+    return credential in GRADUATE_CREDENTIAL_LEVELS
+
 # NY Fed major -> CIP family, for prefilling the search when the visitor is in
 # Major mode. A major and a CIP family are both fields of STUDY, so this is a
 # direct correspondence rather than a crosswalk.
@@ -3454,6 +3527,27 @@ STANDALONE_TOOLS = {
                    "you live.",
         "label": "Find schools that fit a budget",
     },
+    "gradschools": {
+        # Its own page rather than a level inside the schools search, for two
+        # reasons that are both about reach. A dropdown option has no URL, so
+        # infra/worker.js cannot list it in the sitemap or llms.txt and "what
+        # does a master's cost" -- a different search intent from undergraduate
+        # college shopping -- can never land on it. And a page gets its
+        # pageview action, traffic split, cold-vs-internal derivation and admin
+        # row from this registry for free, which is the only way to answer
+        # whether anyone wants it.
+        #
+        # The copy also stops fighting itself: the undergraduate page promises
+        # sticker prices before aid and points at net price calculators, and
+        # every one of those sentences is wrong for a graduate programme.
+        "action": "pageview_gradschools",
+        "title": "🎓 Find Graduate Schools That Fit a Budget",
+        "caption": "**Free · anonymous · no sign-up** — published graduate "
+                   "tuition from IPEDS beside what graduates in your field "
+                   "actually borrowed. Tuition and fees only: no federal "
+                   "source publishes graduate living costs.",
+        "label": "Find graduate schools",
+    },
 }
 
 # Where a visit can have navigated FROM. Validated against this set before any
@@ -4205,6 +4299,23 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     if compare_mode and st.session_state.get(
             "prof_school_b", PROFESSIONAL_SCHOOL_NATIONAL) != PROFESSIONAL_SCHOOL_NATIONAL:
         params["prof_school_b"] = st.session_state["prof_school_b"]
+    # A price carried over from the graduate search for a school with no
+    # published debt. It is not a widget, so nothing else in this pipeline
+    # would emit it -- and it moves the whole loan: Cal Northern's $54,450
+    # against the $130,000 national law figure is 12.2 years to payoff instead
+    # of 23.9. A link that dropped it would rebuild the scenario at a debt the
+    # sharer had explicitly displaced, silently, which is the returning-student
+    # failure this guard exists for.
+    #
+    # The programme is NOT emitted: the seeder derives it from the shared major,
+    # which is the same derivation that produced it here. That makes the pair
+    # self-validating -- a link whose major is not on this path cannot seed a
+    # price for one.
+    _carried = applied_program_price(professional_program_for(major))
+    if _carried:
+        params["pp"] = str(int(_carried))
+        params["pps"] = applied_program_price_school(
+            professional_program_for(major)) or ""
     # The community-college baccalaureate's pricing structure. Rendered only
     # under cc_mode "ccb", but emitted unconditionally: a widget that stops
     # rendering keeps its session_state value, and a link that dropped it would
@@ -4775,6 +4886,19 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
         return ""
     national = national_professional_debt(major_name)
     if not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL:
+        # A price carried from the graduate search displaces the national
+        # average -- see resolve_professional_debt. Said here too, because this
+        # caption is shared by both result branches: without it the results
+        # page would name the national figure while the model used the price,
+        # and the reader has no way to tell which built the number above.
+        carried = applied_program_price(professional_program_for(major_name))
+        if carried:
+            school = applied_program_price_school(
+                professional_program_for(major_name))
+            return (f"Using {fmt_money(carried)} — the published tuition and fees "
+                    f"for {school} across the programme, not a debt figure. That "
+                    f"school publishes no borrowing median, so this is a sticker "
+                    f"price before any aid and reads high.")
         return (f"Using the national average of {fmt_money(national)} for "
                 f"{'medical' if professional_program_for(major_name) == 'medicine' else 'this'} "
                 "school debt. Pick your school to use its own figure.")
@@ -4849,6 +4973,26 @@ def resolve_professional_debt(major_name: str, school_name: str = None) -> float
     """
     national = national_professional_debt(major_name)
     program_key = professional_program_for(major_name)
+    # Before falling back to a national median of OTHER schools: a price the
+    # visitor carried over from the graduate search for a school this dataset
+    # does not cover. 44 of the 156 medical schools IPEDS prices publish no
+    # debt, so they cannot be named in the picker at all and every one of them
+    # lands on the national figure today.
+    #
+    # Resolved HERE because this function is the single source the model reads
+    # three times over -- get_effective_principal, professional_debt_cap and
+    # split_loan_financing's professional_principal. Substituting the price
+    # anywhere else would let the principal carry one number while the cap and
+    # the tranche were sized from another, which is the silent mismatch this
+    # function's docstring already warns about.
+    #
+    # It is a sticker before aid where the rest of this function returns debt
+    # after it, so it reads HIGH -- which pushes more of the loan past the
+    # federal cap into private money and makes the estimate pessimistic rather
+    # than flattering. Wherever it is shown, it is named as a price.
+    carried = applied_program_price(program_key)
+    if carried and (not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL):
+        return float(carried)
     if not program_key or not school_name or school_name == PROFESSIONAL_SCHOOL_NATIONAL:
         return national
     df = load_professional_debt()
@@ -5001,6 +5145,335 @@ def adm_filter_applies(credential: str) -> bool:
     to leave the list alone.
     """
     return credential in ADM_RATE_CREDENTIALS
+
+
+GRADUATE_TUITION_PATH = "data/graduate_tuition_clean.csv"
+PROFESSIONAL_TUITION_PATH = "data/professional_tuition_clean.csv"
+
+
+@st.cache_data(show_spinner=False)
+def load_graduate_tuition() -> pd.DataFrame:
+    """Per-school graduate tuition (build_graduate_tuition.py, from IPEDS).
+
+    A THIRD school dataset, and it has to be: college_coa_clean.csv is
+    undergraduate cost and drops every graduate-only institution, while
+    graduate_debt_clean.csv is debt and has no price at all. Same empty-frame
+    contract as the other two, so a deploy without the file loses the graduate
+    search rather than the page.
+    """
+    try:
+        return pd.read_csv(GRADUATE_TUITION_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=[
+            "UNITID", "INSTNM", "CITY", "STABBR", "control_type",
+            "grad_tuition_in", "grad_tuition_out",
+            "grad_tuition_fees_in", "grad_tuition_fees_out", "ipeds_year"])
+
+
+def search_graduate_schools_by_budget(cip_family: str, credential: str,
+                                       max_price_per_year: float,
+                                       home_state: str = None,
+                                       states: tuple = None,
+                                       control_types: tuple = None,
+                                       limit: int = 25,
+                                       min_price_per_year: float = 0.0) -> pd.DataFrame:
+    """Graduate schools teaching `cip_family` at `credential`, cheapest first.
+
+    The graduate twin of search_schools_by_budget, and a separate function
+    because both halves of the question have different answers at this level:
+
+      WHO TEACHES IT comes from data/graduate_debt_clean.csv, not from a
+      `programs_*` column -- Scorecard publishes no graduate program flags.
+      That file lists schools publishing a DEBT median for the field, which is
+      a coverage-limited proxy for "offers it": roughly a fifth of school x
+      field cells publish a master's median and a sixteenth a doctoral one. The
+      caller must say so, because a school missing from this list has usually
+      not stopped teaching the subject.
+
+      WHAT IT COSTS comes from data/graduate_tuition_clean.csv, which is
+      IPEDS and is priced per INSTITUTION, not per programme. Every graduate
+      programme at a school shares one figure here.
+
+    Both facts are kept in the returned frame: `price_per_year` is what the
+    school charges and `debt_median` is what its graduates in this field
+    borrowed. They are different measures and must never be summed -- see the
+    caption in render_school_search.
+
+    Sorted by price and nothing else, the same rule the undergraduate search
+    follows for the same reason.
+    """
+    offerings = load_professional_debt()
+    tuition = load_graduate_tuition()
+    if (offerings.empty or tuition.empty or not cip_family
+            or credential not in {key for key, _ in GRADUATE_CREDENTIAL_LEVELS.values()}):
+        return pd.DataFrame()
+    if "credential" not in offerings.columns:
+        return pd.DataFrame()
+
+    _, years = next(value for value in GRADUATE_CREDENTIAL_LEVELS.values()
+                    if value[0] == credential)
+    teaches = offerings[(offerings["credential"] == credential)
+                        & (offerings["program_key"] == cip_family)]
+    if teaches.empty:
+        return pd.DataFrame()
+
+    # The tuition file supplies name, place and sector: it comes from IPEDS's
+    # own directory, so it covers the graduate-only institutions the
+    # undergraduate dataset drops entirely.
+    # `picker_name` is the institution's name AS THE DEBT FILE SPELLS IT, and
+    # it has to travel with the row. The sidebar's graduate picker builds its
+    # options from that file (graduate_schools_for -> INSTNM), while INSTNM
+    # here comes from IPEDS's directory, and the two disagree for 27 of the
+    # 1,316 schools in both -- "Marist College" against "Marist University",
+    # "Edgewood College" against "Edgewood University". Handing the picker a
+    # name it does not have does not raise: its own reconcile resets the
+    # selection to the national default, silently discarding the school the
+    # visitor just chose.
+    merged = tuition.merge(
+        teaches[["UNITID", "debt_median", "INSTNM"]]
+            .drop_duplicates(subset=["UNITID"])
+            .rename(columns={"INSTNM": "picker_name"}),
+        on="UNITID", how="inner")
+    if merged.empty:
+        return pd.DataFrame()
+
+    merged = merged.copy()
+    at_home = (merged["STABBR"] == home_state) if home_state else False
+    merged["is_home_state"] = at_home
+    # Same conservative default as the undergraduate search: unknown residency
+    # is priced out-of-state, which can only overstate.
+    merged["price_per_year"] = merged["grad_tuition_fees_out"].where(
+        ~merged["is_home_state"], merged["grad_tuition_fees_in"])
+    merged["price_per_year"] = merged["price_per_year"].fillna(
+        merged["grad_tuition_fees_in"])
+
+    affordable = (merged["price_per_year"].notna()
+                  & (merged["price_per_year"] <= max_price_per_year)
+                  & (merged["price_per_year"] >= min_price_per_year))
+    matches = merged[affordable]
+    if states:
+        matches = matches[matches["STABBR"].isin(states)]
+    if control_types:
+        matches = matches[matches["control_type"].isin(control_types)]
+
+    matches = matches.sort_values("price_per_year").head(limit).copy()
+    matches["total_program_cost"] = matches["price_per_year"] * years
+    return matches.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_professional_tuition() -> pd.DataFrame:
+    """Per-school, per-programme professional tuition (build_graduate_tuition.py).
+
+    Distinct from load_graduate_tuition: that one is one row per institution
+    and averages every graduate programme at it, which is exactly wrong for the
+    programmes that charge most above their school's average. This is the
+    per-programme figure IPEDS publishes separately for medicine, dentistry,
+    law and six others.
+    """
+    try:
+        return pd.read_csv(PROFESSIONAL_TUITION_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=[
+            "UNITID", "INSTNM", "CITY", "STABBR", "control_type", "program_key",
+            "prof_tuition_in", "prof_tuition_out",
+            "prof_tuition_fees_in", "prof_tuition_fees_out", "ipeds_year"])
+
+
+def search_professional_schools_by_budget(program_key: str,
+                                           max_price_per_year: float,
+                                           home_state: str = None,
+                                           states: tuple = None,
+                                           control_types: tuple = None,
+                                           limit: int = 25,
+                                           min_price_per_year: float = 0.0
+                                           ) -> pd.DataFrame:
+    """Medical, dental or law schools by price, cheapest first.
+
+    The universe is the TUITION file, not the debt file -- the reverse of
+    search_graduate_schools_by_budget, and deliberately. There, "who teaches
+    this" had to come from schools publishing a debt median because Scorecard
+    has no graduate program flags. Here a school reporting a medicine tuition
+    is a school with a medical school, so the price file answers both halves
+    and answers them better: 156 medical, 69 dental and 213 law schools against
+    143, 60 and 178 in the debt data.
+
+    Debt rides along where it exists, as the second column, and is left-joined
+    for that reason -- a school with a published price and no published debt
+    belongs in the list, with the debt cell empty.
+    """
+    tuition = load_professional_tuition()
+    if tuition.empty or program_key not in {key for key, _ in
+                                            PROFESSIONAL_SEARCH_LEVELS.values()}:
+        return pd.DataFrame()
+    matches = tuition[tuition["program_key"] == program_key].copy()
+    if matches.empty:
+        return pd.DataFrame()
+
+    debt = load_professional_debt()
+    if not debt.empty and "credential" in debt.columns:
+        rows = debt[(debt["credential"] == "professional")
+                    & (debt["program_key"] == program_key)]
+        matches = matches.merge(
+            rows[["UNITID", "debt_median", "INSTNM"]]
+                .drop_duplicates(subset=["UNITID"])
+                .rename(columns={"INSTNM": "picker_name"}),
+            on="UNITID", how="left")
+    else:
+        matches["debt_median"] = pd.NA
+        matches["picker_name"] = matches["INSTNM"]
+    # A school with a price but no debt row has no name in the picker's option
+    # list, so it falls back to its own. The apply hand-off reconciles against
+    # the list and will drop back to the national default for those -- correct,
+    # because there is no per-school debt figure for it to carry.
+    matches["picker_name"] = matches["picker_name"].fillna(matches["INSTNM"])
+
+    at_home = (matches["STABBR"] == home_state) if home_state else False
+    matches["is_home_state"] = at_home
+    matches["price_per_year"] = matches["prof_tuition_fees_out"].where(
+        ~matches["is_home_state"], matches["prof_tuition_fees_in"])
+    matches["price_per_year"] = matches["price_per_year"].fillna(
+        matches["prof_tuition_fees_in"])
+
+    affordable = (matches["price_per_year"].notna()
+                  & (matches["price_per_year"] <= max_price_per_year)
+                  & (matches["price_per_year"] >= min_price_per_year))
+    matches = matches[affordable]
+    if states:
+        matches = matches[matches["STABBR"].isin(states)]
+    if control_types:
+        matches = matches[matches["control_type"].isin(control_types)]
+
+    matches = matches.sort_values("price_per_year").head(limit).copy()
+    # Every column the shared results table reads, named as it expects them.
+    # The table is deliberately one renderer for both searches, so anything it
+    # touches has to exist on both frames -- a missing one is a KeyError at
+    # render time rather than anything a type or a test would catch, which is
+    # exactly how total_program_cost was found.
+    years = next(y for key, y in PROFESSIONAL_SEARCH_LEVELS.values()
+                 if key == program_key)
+    matches["total_program_cost"] = matches["price_per_year"] * years
+    matches["grad_tuition_fees_in"] = matches["prof_tuition_fees_in"]
+    matches["grad_tuition_fees_out"] = matches["prof_tuition_fees_out"]
+    return matches.reset_index(drop=True)
+
+
+def applied_program_price(program_key: str):
+    """Whole-programme PRICE carried over from the graduate school search for
+    a professional programme, or None.
+
+    Exists for one case, and only that case: 44 of the 156 medical schools
+    IPEDS prices publish no debt figure, so they are absent from the sidebar's
+    professional picker and the app falls back to a NATIONAL average for them
+    -- a number about different schools entirely. The visitor has just picked
+    one of those schools out of a list, by price. Its own sticker is a better
+    estimate of that school than the national median of others.
+
+    Keyed on the PROGRAMME rather than the school, because a school with no
+    debt row cannot be selected in the picker at all; the caption names which
+    school it came from.
+
+    NOT used for master's or doctoral study. That search inner-joins the debt
+    file, so every result it can produce already has a published debt figure
+    -- verified across 3,643 rows -- and debt is the better number wherever it
+    exists.
+
+    A price, not a debt, and the two are not interchangeable: Scorecard's debt
+    is what people actually borrowed, already net of scholarships,
+    assistantships and family money, while this is the published sticker
+    before any of that. So it is used ONLY where there is no debt figure at
+    all; wherever both exist the debt wins, because it is the better estimate
+    of what someone ends up owing. Every surface that shows it says which of
+    the two it is.
+
+    Keyed on the school NAME rather than stored loose, so that changing the
+    graduate school in the sidebar drops it. A carried figure that outlives
+    the school it came from would quietly price a different institution.
+    """
+    if not program_key:
+        return None
+    applied = st.session_state.get("_applied_prof_price")
+    if not applied or applied[0] != program_key:
+        return None
+    return int(applied[2]) or None
+
+
+def applied_program_price_school(program_key: str):
+    """Which school the carried price came from, for the caption to name."""
+    applied = st.session_state.get("_applied_prof_price")
+    return applied[1] if applied and applied[0] == program_key else None
+
+
+def graduate_search_universe(cip_family: str, credential: str) -> tuple:
+    """(schools teaching it, how many of those can be priced).
+
+    Reported to the visitor rather than left implicit. A budget search can only
+    list schools it can price, so the ones with no IPEDS tuition figure vanish
+    -- and a list that silently omits schools reads as a complete answer. This
+    is what lets the caption say how many are missing and why.
+    """
+    offerings = load_professional_debt()
+    tuition = load_graduate_tuition()
+    if offerings.empty or "credential" not in offerings.columns:
+        return 0, 0
+    teaches = offerings[(offerings["credential"] == credential)
+                        & (offerings["program_key"] == cip_family)]
+    known = set(teaches["UNITID"].dropna())
+    priced = known & set(tuition["UNITID"].dropna())
+    return len(known), len(priced)
+
+
+def graduate_apply_target(professional: bool, level_key: str, family: str,
+                           credential: str, school_name: str, display_name: str,
+                           total_cost: int, major_name: str) -> tuple:
+    """Where a searched school can land in the sidebar, or why it cannot.
+
+    Returns `(target, blocked)` -- exactly one of which is set. `target` is the
+    `_pending_grad_school` payload; `blocked` is the sentence to show instead.
+
+    In section 2, and pure, because this is the decision that shipped wrong.
+    Both sidebar pickers build their options from one slice of the debt file --
+    grad_school_a by CIP family, prof_school_a by programme -- and both RESET a
+    value they do not recognise back to the national default. So aiming at the
+    wrong picker, or the right one for a different subject, does not raise: the
+    school is silently discarded and the sidebar looks like it ignored the
+    click. That is what "only the school is populated" turned out to mean, and
+    it was invisible to every guard because it lived inside a section-5
+    renderer. Same reasoning that moved reconcile_search_pick,
+    adm_filter_applies and is_graduate_credential down here.
+
+    `major_name` is passed rather than read off the module global so this stays
+    callable from a test.
+
+    The three outcomes:
+
+      medicine/dentistry/law WITH a debt row -> prof_school_a, selectable
+      medicine/dentistry/law WITHOUT one     -> carried by programme instead,
+          because its price still beats the national median of other schools
+          the sidebar would otherwise use, and 44 of 156 medical schools are
+          in this position
+      master's / doctoral                    -> grad_school_a, but only when
+          the searched field IS the scenario's field; that picker stocks one
+          field's schools and nothing else
+    """
+    if professional:
+        if professional_program_for(major_name) != level_key:
+            return None, (
+                f"Your scenario is studying **{major_name}**, so the sidebar has "
+                f"no {PROFESSIONAL_SCHOOL_LABEL.get(level_key, level_key)} field "
+                f"to fill. Set the major or occupation to a {level_key} path "
+                f"first, then apply a school.")
+        if school_name not in professional_schools_for(level_key):
+            return (None, display_name, level_key, int(total_cost)), None
+        return ("prof_school_a", school_name, level_key, int(total_cost)), None
+    if MAJOR_TO_CIP_FAMILY.get(major_name) != family:
+        return None, (
+            f"Your scenario is studying **{major_name}**, which is a different "
+            f"field from the one you searched — the sidebar's Graduate school "
+            f"picker only lists schools for your own field. Change the major "
+            f"first, then apply a school.")
+    return ("grad_school_a", school_name,
+            GRADUATE_SEARCH_TO_CREDENTIAL[credential], int(total_cost)), None
 
 
 def reconcile_search_pick(stored, picker_ids: list):
@@ -5256,6 +5729,76 @@ def get_suggested_coa_per_year(school_name: str, in_state: bool, unitid=None):
     if match is None:
         return None
     return float(match["in_state_coa"] if in_state else match["out_of_state_coa"])
+
+
+def _on_prof_school_change() -> None:
+    """Touching this picker drops any price carried from the graduate search.
+
+    Without it the carried price outranks the picker on the one value the
+    picker can still express -- the national average. Selecting "National
+    average (no specific school)" deliberately would keep returning the price
+    of a school the visitor looked at earlier, with no way back to the national
+    figure short of choosing some other school. Disclosed by the caption, but
+    still a deliberate choice being overruled.
+
+    Changing the picker at all is that choice being made, so the carried value
+    goes. Any school with its own published debt is in the list anyway, and
+    resolve_professional_debt prefers that over both.
+    """
+    mark_interaction("prof_school_a")
+    st.session_state.pop("_applied_prof_price", None)
+
+
+def _apply_pending_grad_school() -> None:
+    """Move a graduate school chosen in the search into the sidebar's state.
+
+    Same section-5-cannot-write-section-4 contract as _apply_pending_school
+    below, and called beside it.
+
+    It also sets the CREDENTIAL, which is not overreach but the thing that
+    makes the choice visible at all: the sidebar's graduate picker only renders
+    when "What are you studying for?" is already a graduate level, so applying
+    a master's school while that radio says Bachelor's would store the school
+    and show the visitor nothing. Someone who just picked a master's programme
+    out of a list of master's programmes is modelling a master's.
+
+    What it deliberately does NOT do is switch Major/Career mode. The graduate
+    picker is Major-mode only -- it is keyed on MAJOR_TO_CIP_FAMILY and this
+    app declines to build an occupation-to-CIP crosswalk -- and flipping a
+    visitor's whole analysis mode to make one field appear would change every
+    number on the page. The caption by the button says so instead.
+    """
+    pending = st.session_state.pop("_pending_grad_school", None)
+    if not pending:
+        return
+    key, school_name, extra, price = pending
+    if key is None:
+        # A professional school with a price and no published debt. Nothing to
+        # select in the picker; the price is what carries, keyed by programme.
+        st.session_state["_applied_prof_price"] = (extra, school_name, int(price))
+        return
+    # Any previously carried price stops applying the moment a school that
+    # HAS a debt figure is chosen: that figure is the better number, and a
+    # stale price sitting behind it would quietly outrank nothing while
+    # confusing the caption.
+    st.session_state.pop("_applied_prof_price", None)
+    if key == "prof_school_a":
+        # Medicine, dentistry and law: their own picker, keyed by programme.
+        # The credential comes from the occupation rather than from here, so
+        # this sets only the school -- and clears the guard key, or the
+        # picker's own reconcile sees a changed programme and resets the
+        # selection straight back to the national average.
+        st.session_state["prof_school_a"] = school_name
+        st.session_state.pop("_prof_program_a", None)
+        return
+    # Credential first: it is what decides whether the graduate picker exists
+    # at all, and it is read further down the sidebar than this runs.
+    st.session_state["credential_a"] = extra
+    st.session_state["grad_school_a"] = school_name
+    # The guard key the picker reconciles against. Left stale, it would see a
+    # changed (family, credential) pair and reset the selection straight back
+    # to the national default -- discarding the school just applied.
+    st.session_state.pop("_grad_key_a", None)
 
 
 def _apply_pending_school() -> None:
@@ -6959,6 +7502,15 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         "major": major_name,
         "strategy_label": strategy_label,
         "effective_principal": effective_principal,
+        # The professional-school debt that actually went into the principal
+        # above. Stamped rather than re-derived: it is a per-SCHOOL figure now
+        # (and can be a price carried from the graduate search), so a reader
+        # that goes back to MAJOR_DATA for it names the national average over a
+        # total built from something else -- which is what
+        # get_loan_principal_caption did, printing "$130,000 est. average
+        # professional-school debt: $244,450" on a $54,450 school. Same rule as
+        # the three consumers inside this function: resolve once, pass it.
+        "professional_debt": _professional_debt,
         "personal_contribution": personal_contribution,
         "total_investment": total_investment,
         # Stamp the enrollment-cost assumptions onto the scenario so every
@@ -10457,6 +11009,17 @@ def resolve_typical_education(selection_key: str, fallback: str,
 # BLS entry level: someone going back for an MBA to move into a bachelor's-level
 # job is describing their SCHOOLING, and BLS describes the JOB. In first-time
 # mode the BLS level is the better answer and the radio is not shown.
+# BEFORE anything reads credential_a, which starts on the next line. The
+# graduate-search handoff SETS that credential, and _typical_education_a is
+# derived from it a few lines below and then decides whether the graduate
+# picker renders at all. Applied any later -- it first sat beside
+# _apply_pending_school, 60 lines down -- the value lands after the derivation
+# that needed it, so the run that was supposed to show the visitor their chosen
+# school renders the sidebar without the field, and it only appears once
+# something else forces another rerun. Nothing errors; the click just looks
+# ignored.
+_apply_pending_grad_school()
+
 # Reads the link directly when session_state has nothing: the credential radio
 # is seeded in the Career section, ~800 lines below this, so on the first render
 # of a shared link ?cred= has not landed yet -- the same trap ?mode= and
@@ -11654,13 +12217,26 @@ if _program_key_a:
     # "no change" -- otherwise the re-pin below fires on the first render and
     # discards ?prof_school=, the trap _salary_override_major closes for ?sso=.
     st.session_state.setdefault("_prof_program_a", _program_key_a)
+    # ?pp= / ?pps=: a price the sharer carried over from the graduate search.
+    # Seeded once per session rather than per rerun, and never over a value
+    # already present: _apply_pending_grad_school runs ~1,500 lines above this
+    # and may have just set one, and clearing it (the picker's on_change, or
+    # the button under the caption) must stay cleared rather than being reset
+    # by the link on the next rerun. Same first-render-only discipline as
+    # seed_repayment_from_share.
+    if not st.session_state.get("_prof_price_seeded"):
+        st.session_state["_prof_price_seeded"] = True
+        _shared_price = get_shared_int("pp", 0)
+        if _shared_price > 0 and "_applied_prof_price" not in st.session_state:
+            st.session_state["_applied_prof_price"] = (
+                _program_key_a, get_shared_default("pps", ""), _shared_price)
     if (st.session_state["_prof_program_a"] != _program_key_a
             or st.session_state["prof_school_a"] not in _prof_options_a):
         st.session_state["prof_school_a"] = PROFESSIONAL_SCHOOL_NATIONAL
     st.session_state["_prof_program_a"] = _program_key_a
     _sb_study.selectbox(
         PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
-        key="prof_school_a", on_change=lambda: mark_interaction("prof_school_a"),
+        key="prof_school_a", on_change=_on_prof_school_change,
         help="Median debt that this school's graduates leave with, from College "
              "Scorecard. It replaces the national average, and the spread is "
              "wide -- medical school debt runs from about $48,000 to $330,000 "
@@ -11668,8 +12244,37 @@ if _program_key_a:
              "don't know yet. See Methodology.",
     )
     professional_debt_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
-    render_professional_debt_caption(major, st.session_state["prof_school_a"],
-                                      professional_debt_a, _sb_study)
+    # A carried PRICE standing in for a debt has to say so, and say it instead
+    # of the usual caption rather than beside it: that one describes what
+    # graduates borrowed, which is the opposite end of the aid question from a
+    # sticker. Two explanations of one number is how a reader picks the wrong
+    # one.
+    _carried_price_a = applied_program_price(_program_key_a)
+    _carried_school_a = applied_program_price_school(_program_key_a)
+    if _carried_price_a and st.session_state["prof_school_a"] == PROFESSIONAL_SCHOOL_NATIONAL:
+        _sb_study.caption(
+            f"Using {fmt_money_md(_carried_price_a)} — the published tuition and "
+            f"fees for **{_carried_school_a}** across the programme, which you "
+            f"picked in the graduate search. That school publishes no borrowing "
+            f"figure, so it is not in the list above; this is a **sticker price "
+            f"before any aid**, not what its graduates owed. It counts no "
+            f"scholarship or family money, so treat it as a ceiling."
+        )
+        # The one state the picker cannot express. Its own on_change drops the
+        # carried price, so choosing any school -- including the national
+        # average -- overrides it; but the average is what is already SHOWING
+        # here, and re-selecting the current value fires no change event.
+        # Without this the only way back to the national figure is to pick some
+        # other school and then pick this one again.
+        _sb_study.button(
+            "Use the national average instead", key="clear_carried_prof_price",
+            on_click=lambda: st.session_state.pop("_applied_prof_price", None),
+            help=f"Go back to {fmt_money(national_professional_debt(major))}, "
+                 f"what {PROFESSIONAL_SCHOOL_LABEL.get(_program_key_a, 'these')} "
+                 f"graduates owe nationally on average.")
+    else:
+        render_professional_debt_caption(major, st.session_state["prof_school_a"],
+                                          professional_debt_a, _sb_study)
 
 # Returning students only. Placed here because it needs the chosen major to
 # pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
@@ -14413,7 +15018,13 @@ def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
 SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
                         "search_coa_range", "search_home_state",
                         "search_states", "search_adm_rate_on",
-                        "search_adm_rate_range", "search_control_types")
+                        "search_adm_rate_range", "search_control_types",
+                        # The graduate tool's own two. Field, state and sector
+                        # are shared with the undergraduate page and already
+                        # above; only the level and the budget are per-tool,
+                        # because one key over two option lists raises and the
+                        # two budgets are different quantities.
+                        "grad_search_credential", "grad_search_coa_range")
 
 
 def search_was_adjusted() -> bool:
@@ -14444,159 +15055,200 @@ def search_was_adjusted() -> bool:
 
 
 
-def render_school_search(always_open: bool = False) -> None:
-    """Budget-first school search: what could I attend, for this field, at this price?
+def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
+    """The filter controls both school searches share, rendered once.
 
-    The inverse of everything else on this page. Every other surface starts
-    from a school the visitor already named; this one starts from what they
-    can pay. A seventeen-year-old knows a handful of school names, and the
-    dataset holds 5,035.
+    The undergraduate and graduate searches are separate tools with separate
+    price sources, result tables and hand-offs -- but they ask the same six
+    questions to get there: field, level, budget, where you live, which states,
+    which sectors. Those ~130 lines live here rather than in each tool, because
+    two copies of a control block is the failure this codebase has recorded more
+    times than any other (the Plotly/matplotlib chart twins, reconcile_cc_mode,
+    FULL_TIME_GRAD_CREDITS mirrored into a guard).
 
-    Rendered at MODULE LEVEL, after the school lookup and before the
-    single/compare fork. That placement is the whole H2 story: nothing inside
-    either result branch changes, so this cannot become a difference between
-    the randomly-assigned arms. render_get_accurate_inputs documents the same
-    reasoning for the same reason.
+    `is_graduate` changes exactly three things and must not grow a fourth
+    without a reason written down: which credential registry the Level control
+    offers, what the cost slider calls itself (an undergraduate cost of
+    attendance includes housing and a graduate figure does not -- a $13,214/yr
+    difference in the median), and whether the admit-rate block exists at all.
 
-    Applies to Scenario A only. An "apply to A or B" control would render just
-    in Compare Mode, reintroducing exactly the arm-dependent difference the
-    placement avoids.
+    The KEYS differ per tool for the credential and the budget, and both are
+    forced rather than chosen. One `search_credential` key over two different
+    option lists raises the moment a stored graduate level meets the
+    undergraduate list -- Streamlit rejects a keyed widget whose value is not
+    among its options, which is the same trap reconcile_search_pick exists for.
+    And the two budgets are different quantities, so sharing the number would
+    silently carry a housing-inclusive figure onto a tuition-only page.
+
+    Everything else IS shared on purpose: field of study, home state, states and
+    sector all mean the same thing on both pages, so a visitor crossing between
+    them keeps their context and the cross-link is worth clicking.
+
+    Returns the resolved values; the caller decides what to do with an empty
+    field of study, because the two tools say different things about it.
     """
-    coa_df = load_coa_dataset()
-    if coa_df.empty or "programs_bachl" not in coa_df.columns:
-        return                      # dataset predates the program columns
+    # The graduate page offers degree levels and the three professional
+    # programmes; the undergraduate page offers only its own.
+    levels = ({**GRADUATE_CREDENTIAL_LEVELS, **PROFESSIONAL_SEARCH_LEVELS}
+              if is_graduate else CREDENTIAL_LEVELS)
+    default_credential = next(iter(levels))
+    credential_key = "grad_search_credential" if is_graduate else "search_credential"
+    budget_key = "grad_search_coa_range" if is_graduate else "search_coa_range"
 
-    # Open by default on its own page: a visitor who followed a link TO this
-    # tool should not have to click to reach it. Same treatment as
-    # render_existing_loan_comparison.
-    with st.expander("🔎 Find schools that fit a budget", expanded=always_open):
-        if not always_open:
-            st.caption(
-                "Searching by budget is a question of its own — "
-                f"[open this as its own page]({internal_tool_url('schools')})."
-            )
-        st.caption(
-            "Sorted by cost, and by nothing else. Every salary in this app comes "
-            "from the occupation or major you picked — never from the school — so "
-            "this can't tell you which of these leads to higher pay. What it can "
-            "tell you is which ones teach your field at a price you could cover."
-        )
+    # Read BEFORE the Level widget renders, which is the sidebar's own
+    # before-the-widget pattern, because it decides whether there is a field of
+    # study to ask about at all. A professional programme IS the field --
+    # "medicine" is not a subject you pick within, and CIP_FAMILY_TITLES has no
+    # entry that means it -- so leaving the selector on screen would offer a
+    # choice that changes nothing and imply the results were filtered by it.
+    professional = is_professional_credential(
+        st.session_state.get(credential_key, default_credential))
 
-        # Prefilled from the major ONLY in Major mode. A major and a CIP family
-        # are both fields of study, so that is a correspondence. An occupation
-        # is not, and mapping one to a field of study is the crosswalk this
-        # codebase already declined to trust.
-        default_family = (MAJOR_TO_CIP_FAMILY.get(major)
-                           if dataset_mode == DATASET_MODE_MAJOR else None)
-        families = sorted(CIP_FAMILY_TITLES, key=lambda code: CIP_FAMILY_TITLES[code])
-        st.session_state.setdefault(
-            "search_cip_family",
-            default_family if default_family in CIP_FAMILY_TITLES else None)
+    # Prefilled from the major ONLY in Major mode. A major and a CIP family
+    # are both fields of study, so that is a correspondence. An occupation
+    # is not, and mapping one to a field of study is the crosswalk this
+    # codebase already declined to trust.
+    default_family = (MAJOR_TO_CIP_FAMILY.get(major)
+                       if dataset_mode == DATASET_MODE_MAJOR else None)
+    families = sorted(CIP_FAMILY_TITLES, key=lambda code: CIP_FAMILY_TITLES[code])
+    st.session_state.setdefault(
+        "search_cip_family",
+        default_family if default_family in CIP_FAMILY_TITLES else None)
 
-        row_one, row_two = st.columns([3, 2])
+    row_one, row_two = st.columns([3, 2])
+    if not professional:
         row_one.selectbox(
             "Field of study", families, key="search_cip_family",
             on_change=lambda: mark_interaction("search_cip_family"),
-            index=None if st.session_state.get("search_cip_family") is None else None,
+            index=(None if st.session_state.get("search_cip_family") is None
+                   else None),
             format_func=lambda code: CIP_FAMILY_TITLES[code],
             placeholder="Pick a field",
-            help="Fields come from the federal CIP classification, which is broader "
-                  "than a major -- 'Business, Management & Marketing' covers "
-                  "accounting, finance and marketing alike, so those return the "
-                  "same schools.",
+            help="Fields come from the federal CIP classification, which is "
+                  "broader than a major -- 'Business, Management & Marketing' "
+                  "covers accounting, finance and marketing alike, so those "
+                  "return the same schools.",
         )
-        row_two.selectbox("Level", list(CREDENTIAL_LEVELS), key="search_credential",
-                           on_change=lambda: mark_interaction("search_credential"))
-
-        # A range, not a ceiling. The old control only asked "most I could pay",
-        # which cannot express "what does this actually cost" -- and because
-        # results are the cheapest `limit` matches, an expensive school stayed
-        # invisible however high the ceiling went. Raising the FLOOR is what
-        # surfaces them.
-        #
-        # New key: search_budget holds an int in any session already open, and
-        # handing a range slider a stored int raises at render time.
-        _seed_high = int(st.session_state.get("coa_per_year_a", 25_000))
-        min_coa, max_coa = st.slider(
-            "School Cost of Attendance (COA) — tuition, housing, everything",
-            min_value=0, max_value=100_000,
-            value=(0, min(max(_seed_high, 1_000), 100_000)), step=1_000,
-            format="$%d", key="search_coa_range",
-            on_change=lambda: mark_interaction("search_coa_range"),
-            help="The whole yearly cost, not just tuition. Drag the LEFT handle "
-                 "up to hide the cheapest schools — results are the cheapest "
-                 "matches, so raising the floor is how you surface pricier ones "
-                 "rather than raising the ceiling.",
+    else:
+        row_one.caption(
+            "The programme is the field here, so there is nothing to narrow: "
+            "every school below runs this one."
         )
-        budget = max_coa
-        all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
-        home_col, states_col, type_col = st.columns([2, 3, 3])
+    # Undergraduate levels then graduate ones, from the two registries
+    # rather than a hand-written list, so a level cannot exist in the
+    # dropdown without a search that knows how to answer it.
+    row_two.selectbox("Level", list(levels), key=credential_key,
+                       on_change=lambda: mark_interaction(credential_key))
 
-        # Asked once, here, rather than inherited from the sidebar's in-state
-        # checkbox: that checkbox is one fact about the visitor and the ONE
-        # school they named, and these results span many states. See
-        # search_schools_by_budget for what pricing them all alike costs.
-        st.session_state.setdefault(
-            "search_home_state", suggested_home_state(coa_df, city))
-        home_col.selectbox(
-            "Where do you live?", all_states, key="search_home_state",
-            on_change=lambda: mark_interaction("search_home_state"),
-            index=None if st.session_state.get("search_home_state") is None else None,
-            placeholder="Pick your state",
-            help="Public schools charge residents far less. Without this, every "
-                  "school is priced at its higher out-of-state rate.",
-        )
-        # Default the state filter to where the visitor lives. Without it the
-        # search spans every state, and since results are the CHEAPEST 50 of
-        # however many match, an expensive-but-obvious school could never
-        # appear: 751 US schools award an engineering bachelor's, the 50
-        # cheapest all cost under $24,602, and a Californian searching
-        # engineering therefore never saw a single UC campus -- all nine are in
-        # the data and all nine offer it. Scoping to one state takes 751 to
-        # about 40 and the cap stops binding at all.
-        #
-        # setdefault, not a forced value: it seeds the first render and then
-        # leaves the control alone, so clearing it to search nationally sticks.
-        _home = st.session_state.get("search_home_state")
-        if _home:
-            st.session_state.setdefault("search_states", [_home])
-        states = states_col.multiselect(
-            "Limit to states (optional)", all_states, key="search_states",
-            on_change=lambda: mark_interaction("search_states"),
-            help="Defaults to your home state, where public schools charge you "
-                  "the resident rate. Clear it to search the whole country -- "
-                  "results are the cheapest matches, so a national search "
-                  "surfaces low-cost schools rather than well-known ones.")
+    # Read after its own widget, which has already rendered: the cost slider
+    # below needs the level to label itself.
+    credential = st.session_state.get(credential_key, default_credential)
 
-        # The one filter the search function could already apply and nothing
-        # ever asked it for -- control_types has been a parameter since this
-        # feature shipped, with no control wired to it.
-        #
-        # It earns a place because of what cheapest-first does without it.
-        # Private For-Profit is the LARGEST of the three categories in the
-        # dataset (1,884 of 5,035 rows, more than Public's 1,797) and its
-        # short-programme pricing sorts high, so the top of a price-driven
-        # list is exactly where those schools concentrate -- and a price-driven
-        # list is the only kind this tool makes.
-        #
-        # Empty means no filter, matching the states control beside it. There
-        # is deliberately no default: which sectors a visitor will consider is
-        # not something their home state or their major implies, and seeding
-        # one would silently hide two thirds of the dataset.
-        all_control_types = [t for t in CONTROL_TYPE_ORDER
-                             if t in set(coa_df["control_type"].dropna())]
-        control_types = type_col.multiselect(
-            "School type (optional)", all_control_types, key="search_control_types",
-            on_change=lambda: mark_interaction("search_control_types"),
-            help="Public, private non-profit, private for-profit. Leave it empty "
-                  "to include all three. For-profit schools are the largest group "
-                  "in this dataset and their prices sort near the top, so this is "
-                  "how you look past them.")
+    # A range, not a ceiling. The old control only asked "most I could pay",
+    # which cannot express "what does this actually cost" -- and because
+    # results are the cheapest `limit` matches, an expensive school stayed
+    # invisible however high the ceiling went. Raising the FLOOR is what
+    # surfaces them.
+    #
+    # New key: search_budget holds an int in any session already open, and
+    # handing a range slider a stored int raises at render time.
+    _seed_high = int(st.session_state.get("coa_per_year_a", 25_000))
+    min_coa, max_coa = st.slider(
+        ("Graduate tuition and fees per year" if is_graduate
+         else "School Cost of Attendance (COA) — tuition, housing, everything"),
+        min_value=0, max_value=100_000,
+        value=(0, min(max(_seed_high, 1_000), 100_000)), step=1_000,
+        format="$%d", key=budget_key,
+        on_change=lambda: mark_interaction(budget_key),
+        help=("Tuition and required fees only -- no federal source publishes "
+              "graduate living costs, so housing and food are on top. "
+              if is_graduate else
+              "The whole yearly cost, not just tuition. ")
+             + "Drag the LEFT handle up to hide the cheapest schools — "
+               "results are the cheapest matches, so raising the floor is "
+               "how you surface pricier ones rather than raising the ceiling.",
+    )
+    budget = max_coa
+    all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
+    home_col, states_col, type_col = st.columns([2, 3, 3])
 
+    # Asked once, here, rather than inherited from the sidebar's in-state
+    # checkbox: that checkbox is one fact about the visitor and the ONE
+    # school they named, and these results span many states. See
+    # search_schools_by_budget for what pricing them all alike costs.
+    st.session_state.setdefault(
+        "search_home_state", suggested_home_state(coa_df, city))
+    home_col.selectbox(
+        "Where do you live?", all_states, key="search_home_state",
+        on_change=lambda: mark_interaction("search_home_state"),
+        index=None if st.session_state.get("search_home_state") is None else None,
+        placeholder="Pick your state",
+        help="Public schools charge residents far less. Without this, every "
+              "school is priced at its higher out-of-state rate.",
+    )
+    # Default the state filter to where the visitor lives. Without it the
+    # search spans every state, and since results are the CHEAPEST 50 of
+    # however many match, an expensive-but-obvious school could never
+    # appear: 751 US schools award an engineering bachelor's, the 50
+    # cheapest all cost under $24,602, and a Californian searching
+    # engineering therefore never saw a single UC campus -- all nine are in
+    # the data and all nine offer it. Scoping to one state takes 751 to
+    # about 40 and the cap stops binding at all.
+    #
+    # setdefault, not a forced value: it seeds the first render and then
+    # leaves the control alone, so clearing it to search nationally sticks.
+    _home = st.session_state.get("search_home_state")
+    if _home:
+        st.session_state.setdefault("search_states", [_home])
+    states = states_col.multiselect(
+        "Limit to states (optional)", all_states, key="search_states",
+        on_change=lambda: mark_interaction("search_states"),
+        help="Defaults to your home state, where public schools charge you "
+              "the resident rate. Clear it to search the whole country -- "
+              "results are the cheapest matches, so a national search "
+              "surfaces low-cost schools rather than well-known ones.")
+
+    # The one filter the search function could already apply and nothing
+    # ever asked it for -- control_types has been a parameter since this
+    # feature shipped, with no control wired to it.
+    #
+    # It earns a place because of what cheapest-first does without it.
+    # Private For-Profit is the LARGEST of the three categories in the
+    # dataset (1,884 of 5,035 rows, more than Public's 1,797) and its
+    # short-programme pricing sorts high, so the top of a price-driven
+    # list is exactly where those schools concentrate -- and a price-driven
+    # list is the only kind this tool makes.
+    #
+    # Empty means no filter, matching the states control beside it. There
+    # is deliberately no default: which sectors a visitor will consider is
+    # not something their home state or their major implies, and seeding
+    # one would silently hide two thirds of the dataset.
+    all_control_types = [t for t in CONTROL_TYPE_ORDER
+                         if t in set(coa_df["control_type"].dropna())]
+    control_types = type_col.multiselect(
+        "School type (optional)", all_control_types, key="search_control_types",
+        on_change=lambda: mark_interaction("search_control_types"),
+        help="Public, private non-profit, private for-profit. Leave it empty "
+              "to include all three. For-profit schools are the largest group "
+              "in this dataset and their prices sort near the top, so this is "
+              "how you look past them.")
+
+    # UNDERGRADUATE ONLY, and absent rather than disabled here.
+    # adm_filter_applies() already refuses every non-bachelor's
+    # level, so on a graduate page this whole block could only ever
+    # render a greyed-out control above a paragraph explaining that
+    # it is greyed out. That explanation is worth showing when a
+    # visitor switches level inside ONE page; it is noise on a page
+    # where the level was never available.
+    adm_filtered, adm_low, adm_high = False, *ADM_RATE_FULL_RANGE
+    if not is_graduate:
         # Read before the control is drawn, the sidebar's own pattern: the
         # credential selectbox is rendered above, so session_state already
         # holds it, and the admit-rate filter's availability depends on it.
-        credential = st.session_state.get("search_credential", "Bachelor's degree")
+        # Graduate levels fall out of this for free: ADM_RATE_CREDENTIALS is
+        # bachelor's-only, and an undergraduate admission rate says nothing
+        # about admission to a master's programme, which is decided per
+        # department.
         adm_available = adm_filter_applies(credential)
 
         # An explicit switch rather than "wide open means off". The band alone
@@ -14650,30 +15302,413 @@ def render_school_search(always_open: bool = False) -> None:
             )
         adm_filtered = adm_enabled
 
-        family = st.session_state.get("search_cip_family")
-        if not family:
+
+    # Named on screen, not left to the help text, because the two
+    # directions cost different things and only one of them is intuitive.
+    # Raising the floor is how someone looks for schools they are likely to
+    # get into -- and it is exactly the move that hides the open-admission
+    # schools, which admit nearly everyone and report no rate at all. A
+    # visitor doing that would otherwise conclude those schools do not
+    # teach their field.
+    # Still gated on a chosen field: this describes what is missing from a
+    # LIST, and before a field is picked there is no list. That gating used to
+    # come from sitting below the caller's `if not family: return`; extracting
+    # these controls moved it above that guard, so the condition has to carry
+    # it explicitly or the warning fires over an empty screen again.
+    if (adm_filtered and adm_low > ADM_RATE_FULL_RANGE[0]
+            and st.session_state.get("search_cip_family")):
+        st.caption(
+            "⚠️ Schools that report no admit rate are **not** in this list, "
+            "and most of them admit nearly everyone — so a high floor hides "
+            "the very schools that are easiest to get into. Drop the left "
+            "handle back to 0% to see them again."
+        )
+
+    return {
+        # None when the programme IS the field: the caller must not run its
+        # "pick a field of study" guard against a search that does not have one.
+        "family": (None if professional
+                   else st.session_state.get("search_cip_family")),
+        "professional": professional,
+        "credential": credential,
+        "min_budget": min_coa,
+        "max_budget": max_coa,
+        "home_state": st.session_state.get("search_home_state"),
+        "states": states,
+        "control_types": control_types,
+        "adm_filtered": adm_filtered,
+        "adm_low": adm_low,
+        "adm_high": adm_high,
+    }
+
+
+def render_graduate_results(results: pd.DataFrame, credential: str,
+                             family: str, home_state: str, years: int,
+                             level_key: str, coverage: tuple = None,
+                             professional: bool = False) -> None:
+    """The graduate half of the results panel.
+
+    A separate renderer rather than more branches inside the undergraduate one,
+    because four of that table's seven columns mean nothing here and the
+    captions under it would each need an exception:
+
+      Admits           an UNDERGRADUATE admission rate; graduate admission is
+                       decided per department and IPEDS does not publish it
+      Parents borrowed Parent PLUS exists only for dependent undergraduates,
+                       and Grad PLUS -- which used to fill that gap -- was
+                       abolished by OBBBA on 2026-07-01
+      Net price        the federally mandated calculators are for first-time
+                       full-time UNDERGRADUATES; pointing a prospective
+                       master's student at one would answer a different
+                       question in a tone of authority
+      Whole program    priced over GRADUATE years only, not the 6 or 9 that
+                       PROGRAM_YEARS_BY_EDUCATION carries
+
+    What replaces them is the pairing this dataset makes possible: the price
+    the school charges, beside what its graduates in this field actually
+    borrowed. Two federal sources, two different questions.
+    """
+    # Passed in rather than derived: a professional level has no CIP family to
+    # look a universe up by, and its list comes from the price file rather than
+    # the debt file, so the coverage question does not even mean the same thing.
+    known, priced = coverage or (0, 0)
+    st.caption(
+        f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
+        f"**Per year** is tuition and required fees — *not* a full cost of "
+        f"attendance. No federal source publishes graduate living costs, so "
+        f"housing, food and books are on top of every figure here, and this is "
+        f"not comparable with the undergraduate cost the sidebar uses."
+    )
+    rate_label = results.apply(
+        lambda row: "in-state" if row["is_home_state"] else
+        ("out-of-state"
+         if row["grad_tuition_fees_out"] != row["grad_tuition_fees_in"]
+         else "same either way"), axis=1)
+    table = pd.DataFrame({
+        "School": results["INSTNM"],
+        "Where": results["CITY"].fillna("") + ", " + results["STABBR"].fillna(""),
+        "Type": results["control_type"],
+        "Rate": rate_label,
+        "Per year": results["coa_per_year"].map(fmt_money),
+        f"{years} years": results["total_program_cost"].map(fmt_money),
+        # The second federal source, and the reason this table is worth more
+        # than a price list. NOT sortable-on and never combined with the price.
+        "Graduates borrowed": results["debt_median"].map(
+            lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0 else "—"),
+    })
+    st.dataframe(
+        table, use_container_width=True, hide_index=True,
+        column_config={"School": st.column_config.Column("School", width="large")})
+
+    st.caption(
+        "**Rate** is which price you'd be charged"
+        + (f", based on living in {home_state}. " if home_state else ". ")
+        + f"**{years} years** is the per-year price times the standard length of "
+        + (f"{credential} " if professional
+           else f"a {credential.lower()} ")
+        + "— real programmes vary, and part-time study changes it completely."
+    )
+    # The three qualifications that stop this table being read as one number.
+    st.caption(
+        "**Graduates borrowed** is a different measure from the price beside it, "
+        "not a check on it: it is what people who finished this field at this "
+        "school owed at graduation, already net of scholarships and family money, "
+        "and it includes living costs they borrowed for. **Never add the two.** "
+        "Across medicine, dentistry and law the ratio between them runs from 0.82 "
+        "to 1.24, so neither predicts the other. It also includes Grad PLUS, which "
+        "Congress abolished on July 1, 2026, so it describes borrowing a student "
+        "starting now cannot repeat federally."
+    )
+    if professional:
+        st.caption(
+            "**Per year is this programme's own price**, not the school's "
+            "graduate average — IPEDS publishes medicine, dentistry and law "
+            "separately, and they charge well above the average their "
+            "university reports for graduate study as a whole."
+        )
+    else:
+        st.caption(
+            "**Per year is an institution-wide average.** IPEDS publishes one "
+            "graduate tuition per school, so an MBA and a teaching master's at "
+            "the same university show the same figure — and the professional "
+            "schools charge well above it."
+        )
+    if known and priced < known:
+        st.caption(
+            f"⚠️ {known - priced} of the {known} schools that publish a figure for "
+            f"this field are missing above, because no graduate tuition is on file "
+            f"for them. They have not stopped teaching it."
+        )
+    if professional:
+        st.caption(
+            "This list is every school that publishes a price for the programme, "
+            "so it is more complete than the borrowing column beside it: a school "
+            "showing **—** has a published price and no published debt figure, "
+            "not the other way round."
+        )
+    else:
+        st.caption(
+            "And this list is schools that publish a **debt** figure for this "
+            "field — roughly a fifth of school-and-field combinations at master's "
+            "level and a sixteenth at doctoral. Absence here is usually missing "
+            "data, not a missing programme."
+        )
+
+    picker_ids = [int(uid) for uid in results["UNITID"]]
+    picker_labels = {
+        int(row["UNITID"]): f"{row['INSTNM']} — {fmt_money(row['coa_per_year'])}/yr"
+        for _, row in results.iterrows()}
+    st.session_state["grad_search_pick"] = reconcile_search_pick(
+        st.session_state.get("grad_search_pick"), picker_ids)
+    choice = st.selectbox(
+        "Use one of these as your graduate school", picker_ids,
+        format_func=lambda uid: picker_labels[uid], key="grad_search_pick")
+    # Names the picker this actually fills, which differs by level: a
+    # professional programme goes to its own Medical/Dental/Law school field,
+    # not to Graduate school. Saying the wrong one is how a visitor concludes
+    # the button did nothing when it filled a field they were not looking at.
+    _target_label = (PROFESSIONAL_SCHOOL_LABEL.get(level_key, "Graduate school")
+                     if professional else "Graduate school")
+    st.caption(
+        f"This fills the sidebar's **{_target_label}** picker, not the college "
+        "field above it — that one is your undergraduate school. It only exists "
+        "when your scenario is already on this path, so set the major first if "
+        "you have not."
+    )
+    if st.button("Use this graduate school", type="primary",
+                  key="grad_search_apply"):
+        picked = results.loc[results["UNITID"] == choice].iloc[0]
+        # PARKED, not assigned. This runs in section 5; the sidebar's
+        # grad_school_a widget is created in section 4, which Streamlit has
+        # already executed by now, and assigning to an instantiated widget's
+        # key raises. _apply_pending_grad_school does it at the top of the next
+        # run instead -- the same contract _pending_school has, and its
+        # docstring records the same lesson.
+        #
+        # It went unnoticed at first because the graduate picker only renders
+        # when the sidebar's credential is already a graduate one, so the
+        # assignment happened to be legal in exactly the case where it did
+        # nothing visible, and would have raised in the case that mattered.
+        #
+        # The name is the debt file's spelling: that is what the picker's
+        # options are built from. See picker_name in
+        # search_graduate_schools_by_budget.
+        # WHICH picker this school belongs in, and whether it can land there
+        # at all. Both sidebar pickers build their options from a specific
+        # (field or programme) slice of the debt file and RESET to the national
+        # default when handed a name that is not in their own list -- so an
+        # apply that targets the wrong one, or the right one for a different
+        # subject, does not raise. It silently discards the school and leaves
+        # the visitor looking at a sidebar that ignored their click.
+        #
+        # Medicine, dentistry and law belong to prof_school_a, not
+        # grad_school_a: they are keyed by programme rather than by CIP family,
+        # and only 7 of the 13 California medical rows here are even options in
+        # that picker. Sending them to the graduate one applied nothing at all.
+        target, blocked = graduate_apply_target(
+            professional, level_key, family, credential,
+            picked["picker_name"], picked["INSTNM"],
+            int(picked["total_program_cost"]), major)
+
+        if blocked:
+            # Said out loud rather than applied-and-lost. The whole reason this
+            # button hands off to the calculator is that a silent apply looks
+            # broken; an apply that cannot work has to say so for the same
+            # reason.
+            st.warning(blocked)
+            return
+        st.session_state["_pending_grad_school"] = target
+        log_usage_event(
+            f"grad_school_search_apply:unitid={picked['UNITID']}"
+            f":cip={family or level_key}:level={level_key}"
+            f":price={int(picked['coa_per_year'])}")
+        # Whichever standalone page we are on, not a hard-coded key. This block
+        # was copied from the undergraduate search while the graduate results
+        # still lived inside ?tool=schools, and it tested for that key by name
+        # -- so once this moved to its own page the condition was false, the
+        # hand-off never ran, and applying a school parked the value and left
+        # the visitor staring at the same list. Nothing errored; the button
+        # simply did nothing visible, which is the exact failure the hand-off
+        # exists to prevent.
+        _origin = st.session_state.get("active_tool")
+        if _origin:
+            st.session_state.active_tool = ""
+            _handoff = dict(session_query_params())
+            _src = get_traffic_source()
+            if _src:
+                _handoff["src"] = _src
+            st.query_params.from_dict(_handoff)
+            _nav = nav_action(_origin, NAV_CALCULATOR, inpage=True)
+            if _nav:
+                log_usage_event(_nav)
+        st.rerun()
+
+
+def render_graduate_school_search(always_open: bool = False) -> None:
+    """Budget-first search for a master's or doctorate — its own tool.
+
+    Defined HERE, above the standalone-tool dispatch, for the same reason
+    render_school_search is: module-level defs execute in order and the
+    dispatch sits well above where the calculator flow would otherwise define
+    these. A def below its caller is a NameError at runtime that py_compile
+    cannot see.
+
+    Shares its filter controls with the undergraduate search through
+    render_search_controls and shares nothing else, because nothing else is
+    the same: who teaches a field comes from the debt file rather than
+    Scorecard's program flags, what it costs comes from IPEDS rather than a
+    cost of attendance, and four of the undergraduate table's columns are
+    undergraduate-only facts (see render_graduate_results).
+    """
+    # Both datasets, because this tool needs both halves of the question and
+    # either being absent means it cannot answer. Same empty-frame contract as
+    # the other loaders: a deploy without them loses the page, not the app.
+    if load_graduate_tuition().empty or load_professional_debt().empty:
+        return
+    coa_df = load_coa_dataset()
+    if coa_df.empty:
+        return
+
+    with st.expander("🎓 Find graduate schools that fit a budget",
+                      expanded=always_open):
+        if not always_open:
+            st.caption(
+                "Graduate cost is its own question — "
+                f"[open this as its own page]({internal_tool_url('gradschools')})."
+            )
+        st.caption(
+            "Sorted by price, and by nothing else. Every salary in this app comes "
+            "from the occupation or major you picked — never from the school — so "
+            "this cannot tell you which of these leads to higher pay."
+        )
+        # coa_df supplies the state and sector option lists on both pages. It
+        # is the superset, and suggested_home_state is written against it; a
+        # state with no graduate schools simply returns nothing, which the
+        # empty-result message below explains.
+        controls = render_search_controls(coa_df, is_graduate=True)
+        family = controls["family"]
+        if not family and not controls["professional"]:
             st.info("Pick a field of study to search.")
             return
 
-        # Below the field-of-study guard, not above it: this describes what is
-        # missing from a LIST, so it must not fire on a screen showing no list
-        # at all -- "pick a field of study" with a warning above it about
-        # omitted schools is a warning about nothing.
-        #
-        # Named on screen, not left to the help text, because the two
-        # directions cost different things and only one of them is intuitive.
-        # Raising the floor is how someone looks for schools they are likely to
-        # get into -- and it is exactly the move that hides the open-admission
-        # schools, which admit nearly everyone and report no rate at all. A
-        # visitor doing that would otherwise conclude those schools do not
-        # teach their field.
-        if adm_enabled and adm_low > ADM_RATE_FULL_RANGE[0]:
-            st.caption(
-                "⚠️ Schools that report no admit rate are **not** in this list, "
-                "and most of them admit nearly everyone — so a high floor hides "
-                "the very schools that are easiest to get into. Drop the left "
-                "handle back to 0% to see them again."
+        credential = controls["credential"]
+        professional = controls["professional"]
+        if professional:
+            grad_key, grad_years = PROFESSIONAL_SEARCH_LEVELS[credential]
+            coverage = None
+            results = search_professional_schools_by_budget(
+                grad_key, controls["max_budget"], controls["home_state"],
+                states=tuple(controls["states"]) or None, limit=25,
+                min_price_per_year=controls["min_budget"],
+                control_types=tuple(controls["control_types"]) or None)
+        else:
+            grad_key, grad_years = GRADUATE_CREDENTIAL_LEVELS[credential]
+            coverage = graduate_search_universe(family, grad_key)
+            results = search_graduate_schools_by_budget(
+                family, grad_key, controls["max_budget"], controls["home_state"],
+                states=tuple(controls["states"]) or None, limit=25,
+                min_price_per_year=controls["min_budget"],
+                control_types=tuple(controls["control_types"]) or None)
+        # One name for "the yearly price" downstream, so the table, the picker
+        # and the apply button do not each have to know which search ran.
+        if not results.empty:
+            results = results.rename(columns={"price_per_year": "coa_per_year"})
+
+        # The SAME event as the undergraduate search, with `level` separating
+        # them. A second event name would create a fourth regime on top of the
+        # three school_search_run already has (see migrations.sql), and
+        # analyze_survey.py already groups runs by level.
+        if search_was_adjusted():
+            mark_interaction("module_grad_school_search")
+            _log_school_search(family, controls["max_budget"], controls["states"],
+                                len(results), controls["home_state"],
+                                level=grad_key,
+                                control_types=controls["control_types"])
+
+        if results.empty:
+            narrowings = []
+            if controls["states"]:
+                narrowings.append(f"in {', '.join(controls['states'])}")
+            if controls["control_types"]:
+                narrowings.append(
+                    f"at {' or '.join(controls['control_types'])} schools")
+            st.warning(
+                f"No graduate schools teach "
+                f"**{CIP_FAMILY_TITLES[family] if family else credential}** at "
+                f"that level for {fmt_money(controls['max_budget'])}/year"
+                + (" " + " ".join(narrowings) if narrowings else "")
+                + "."
             )
+            # Said separately from the warning because it contradicts the
+            # obvious reading of it. The undergraduate list comes from
+            # Scorecard's program flags, which say what a school teaches; this
+            # one comes from schools that publish a DEBT median, which about a
+            # fifth do at master's and a sixteenth at doctoral. "None" here is
+            # usually a data gap, and at doctoral level it almost always is.
+            if not professional:
+                st.caption(
+                    "At graduate level an empty result is usually missing data "
+                    "rather than a missing programme: this list can only include "
+                    "schools that publish borrowing figures for the field, which is "
+                    "about a fifth of them at master's level and a sixteenth at "
+                    "doctoral. Plenty of schools teach it and report nothing."
+                )
+            return
+
+        render_graduate_results(results, credential, family,
+                                 controls["home_state"], grad_years,
+                                 level_key=grad_key, coverage=coverage,
+                                 professional=professional)
+
+
+def render_school_search(always_open: bool = False) -> None:
+    """Budget-first school search: what could I attend, for this field, at this price?
+
+    The inverse of everything else on this page. Every other surface starts
+    from a school the visitor already named; this one starts from what they
+    can pay. A seventeen-year-old knows a handful of school names, and the
+    dataset holds 5,035.
+
+    Rendered at MODULE LEVEL, after the school lookup and before the
+    single/compare fork. That placement is the whole H2 story: nothing inside
+    either result branch changes, so this cannot become a difference between
+    the randomly-assigned arms. render_get_accurate_inputs documents the same
+    reasoning for the same reason.
+
+    Applies to Scenario A only. An "apply to A or B" control would render just
+    in Compare Mode, reintroducing exactly the arm-dependent difference the
+    placement avoids.
+    """
+    coa_df = load_coa_dataset()
+    if coa_df.empty or "programs_bachl" not in coa_df.columns:
+        return                      # dataset predates the program columns
+
+    # Open by default on its own page: a visitor who followed a link TO this
+    # tool should not have to click to reach it. Same treatment as
+    # render_existing_loan_comparison.
+    with st.expander("🔎 Find schools that fit a budget", expanded=always_open):
+        if not always_open:
+            st.caption(
+                "Searching by budget is a question of its own — "
+                f"[open this as its own page]({internal_tool_url('schools')})."
+            )
+        st.caption(
+            "Sorted by cost, and by nothing else. Every salary in this app comes "
+            "from the occupation or major you picked — never from the school — so "
+            "this can't tell you which of these leads to higher pay. What it can "
+            "tell you is which ones teach your field at a price you could cover."
+        )
+
+        controls = render_search_controls(coa_df, is_graduate=False)
+        family = controls["family"]
+        if not family:
+            st.info("Pick a field of study to search.")
+            return
+        credential = controls["credential"]
+        min_coa, budget = controls["min_budget"], controls["max_budget"]
+        states, control_types = controls["states"], controls["control_types"]
+        adm_filtered = controls["adm_filtered"]
+        adm_low, adm_high = controls["adm_low"], controls["adm_high"]
 
         home_state = st.session_state.get("search_home_state")
         if not home_state:
@@ -14988,6 +16023,8 @@ if active_tool == "repayment":
     render_existing_loan_comparison(always_open=True)
 elif active_tool == "schools":
     render_school_search(always_open=True)
+elif active_tool == "gradschools":
+    render_graduate_school_search(always_open=True)
 if active_tool:
     st.caption(
         "Looking at whether a degree is worth borrowing for instead? "
@@ -15223,12 +16260,20 @@ def get_loan_principal_caption(scenario: dict) -> str:
     """Explains what actually feeds the loan repayment simulation, when it
     differs from the raw loan slider (professional-school debt on top of
     it). Returns None if there's nothing extra to explain."""
-    additional_debt = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    # The debt this scenario was actually computed with -- a school's own
+    # median, or a price carried from the graduate search, or the national
+    # average. MAJOR_DATA is the fallback for callers predating the stamp.
+    additional_debt = scenario.get(
+        "professional_debt",
+        MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0))
     if additional_debt <= 0:
         return None
+    national = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    basis = ("est. average professional-school debt" if additional_debt == national
+             else "professional-school debt for the school you picked")
     return (
         f"Effective loan principal including {fmt_money(additional_debt)} "
-        f"est. average professional-school debt: **{fmt_money(scenario['effective_principal'])}**"
+        f"{basis}: **{fmt_money(scenario['effective_principal'])}**"
     ).replace("$", r"\$")
 
 
@@ -16356,6 +17401,7 @@ if not enable_prestige_mode:
     st.divider()
     st.subheader("🧰 More tools")
     render_school_search()
+    render_graduate_school_search()
     render_existing_loan_comparison()
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------

@@ -74,7 +74,8 @@ The app has exactly one route; query params select the page:
 |---|---|
 | `/` | The calculator (sidebar + results) |
 | `/?tool=repayment` | Repayment-plan comparison, standalone (`STANDALONE_TOOLS`) |
-| `/?tool=schools` | Budget school search, standalone (`STANDALONE_TOOLS`) |
+| `/?tool=schools` | Budget school search, undergraduate, standalone (`STANDALONE_TOOLS`) |
+| `/?tool=gradschools` | Graduate school search — IPEDS tuition beside field-level borrowing (`STANDALONE_TOOLS`) |
 | `/?admin=<admin_key>` | Admin analytics dashboard, its own page — key lives in secrets.toml, fails closed, session logs nothing. Deliberately **not** in `STANDALONE_TOOLS` (that registry feeds pageview actions, traffic splits, and cross-links) |
 | `/?test=1` | Any page, with all Supabase writers disabled (developer/test sessions) |
 

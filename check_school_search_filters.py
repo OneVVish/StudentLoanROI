@@ -75,6 +75,17 @@ import sys
 
 import pandas as pd
 
+# Every column render_graduate_results reads. ONE renderer serves both the
+# graduate and the professional search, so a column present on only one frame
+# is a KeyError at render time -- nothing types it, nothing imports it, and the
+# page simply breaks for one level while working for the other.
+# total_program_cost went missing from the professional frame exactly this way.
+SHARED_RESULT_COLUMNS = [
+    "INSTNM", "CITY", "STABBR", "control_type", "UNITID", "picker_name",
+    "is_home_state", "total_program_cost", "debt_median",
+    "grad_tuition_fees_in", "grad_tuition_fees_out", "price_per_year",
+]
+
 # Chosen for size and spread rather than realism: CIP 11 (Computer & Information
 # Sciences) at bachelor's is the largest family in the dataset, spans all three
 # sectors, and has both rated and unrated schools -- so every property below has
@@ -307,6 +318,198 @@ def check_credential_gate(ns) -> list:
     return problems
 
 
+def check_graduate_search(ns) -> list:
+    """The graduate half: its own registry, its own price source, and a picker
+    name that the sidebar can actually accept."""
+    problems = []
+    grad_levels = ns["GRADUATE_CREDENTIAL_LEVELS"]
+    undergrad = set(ns["CREDENTIAL_LEVELS"])
+
+    # The two registries must not overlap. A label in both would dispatch on
+    # whichever check ran first, and the two searches read different files.
+    both = undergrad & set(grad_levels)
+    if both:
+        problems.append(
+            f"  {sorted(both)} appear in BOTH credential registries\n"
+            "    the search dispatches on which one a label came from, so a "
+            "label in both resolves to whichever test runs first")
+    for label in grad_levels:
+        if not ns["is_graduate_credential"](label):
+            problems.append(f"  is_graduate_credential({label!r}) is False")
+        if label not in ns["GRADUATE_SEARCH_TO_CREDENTIAL"]:
+            problems.append(
+                f"  {label!r} has no sidebar credential to hand off to\n"
+                "    applying a result would set a credential the radio has no "
+                "option for, and Streamlit raises on that")
+    for label in undergrad:
+        if ns["is_graduate_credential"](label):
+            problems.append(f"  is_graduate_credential({label!r}) is True")
+
+    # The years must be the ADDITIONAL graduate ones. PROGRAM_YEARS_BY_EDUCATION
+    # holds the totals including the bachelor's -- 6 and 9 -- and pricing a
+    # master's over six years of graduate tuition treble-counts it.
+    additional = ns["GRADUATE_ADDITIONAL_YEARS"]
+    for label, (_, years) in grad_levels.items():
+        if years >= ns["UNDERGRAD_YEARS"] + 1 and years not in additional.values():
+            problems.append(
+                f"  {label!r} prices {years} years, which looks like a TOTAL "
+                f"rather than the graduate years alone ({sorted(set(additional.values()))})")
+
+    # And the handoff name must be one the sidebar picker will accept.
+    for family, credential in [("52", "master"), ("11", "master")]:
+        results = ns["search_graduate_schools_by_budget"](
+            family, credential, 500_000, "CA", limit=10_000)
+        if results.empty:
+            problems.append(f"  no graduate results at all for CIP {family}")
+            continue
+        if "picker_name" not in results.columns:
+            problems.append("  results carry no picker_name for the handoff")
+            continue
+        missing = [c for c in SHARED_RESULT_COLUMNS if c not in results.columns]
+        if missing:
+            problems.append(
+                f"  graduate results for CIP {family} are missing {missing}, "
+                f"which the shared results table reads")
+        options = set(ns["graduate_schools_for"](family, credential))
+        stray = set(results["picker_name"]) - options
+        if stray:
+            problems.append(
+                f"  {len(stray)} result(s) carry a picker_name the sidebar has "
+                f"no option for (e.g. {sorted(stray)[0]!r})\n"
+                "    the picker resets to the national default on an unknown "
+                "name, silently discarding the school just applied")
+        if not results["price_per_year"].is_monotonic_increasing:
+            problems.append(f"  CIP {family} graduate results are not price-sorted")
+    # The professional programmes are a THIRD shape: keyed by programme rather
+    # than by field-plus-credential, and priced from the per-programme file.
+    prof_levels = ns["PROFESSIONAL_SEARCH_LEVELS"]
+    if set(prof_levels) & set(grad_levels):
+        problems.append("  a label is in both the graduate and professional registries")
+    for label in prof_levels:
+        if not ns["is_professional_credential"](label):
+            problems.append(f"  is_professional_credential({label!r}) is False")
+        if ns["is_graduate_credential"](label):
+            problems.append(
+                f"  {label!r} answers True to BOTH predicates\n"
+                "    the controls hide the field selector on one and require it "
+                "on the other, so a level in both renders an impossible page")
+
+    # Every column the shared results table reads must exist on the
+    # professional frame too. The table is one renderer for two searches, so a
+    # column present on only one is a KeyError at render time -- which is
+    # exactly how total_program_cost was found missing.
+    for label, (program_key, years) in prof_levels.items():
+        priced = ns["search_professional_schools_by_budget"](
+            program_key, 500_000, "CA", limit=10_000)
+        if priced.empty:
+            problems.append(f"  no {label} schools priced at all")
+            continue
+        missing = [c for c in SHARED_RESULT_COLUMNS if c not in priced.columns]
+        if missing:
+            problems.append(
+                f"  {label} results are missing {missing}, which the shared "
+                f"results table reads")
+        if not priced["price_per_year"].is_monotonic_increasing:
+            problems.append(f"  {label} results are not price-sorted")
+        # The price file is the universe here, and it must stay the larger one
+        # -- that is the reason this search reads it rather than the debt file.
+        debt = ns["load_professional_debt"]()
+        known = debt[(debt["credential"] == "professional")
+                     & (debt["program_key"] == program_key)]
+        if len(priced) < len(known):
+            problems.append(
+                f"  {label} prices {len(priced)} schools but {len(known)} publish "
+                f"debt\n    the price file is supposed to be the wider universe; "
+                f"if it is not, the search is reading the wrong source")
+    return problems
+
+
+def check_apply_target(ns) -> list:
+    """Where an applied school lands, and when it must refuse instead.
+
+    This is the property the user reported broken: "when i click use graduate
+    school, only the school is populated". Both sidebar pickers RESET a value
+    they do not recognise back to their default, so aiming at the wrong one
+    fails silently -- no exception, no message, a sidebar that looks like it
+    ignored the click. Nothing here can be caught by reading a stack trace.
+
+    The whole reason graduate_apply_target is a pure section-2 function is so
+    this can run at all: it used to be ~30 lines inline in a section-5
+    renderer, unreachable by any guard.
+    """
+    problems = []
+    target = ns["graduate_apply_target"]
+    med = next(k for k, v in ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"].items()
+               if v == "medicine")
+    priced = ns["search_professional_schools_by_budget"]("medicine", 1_000_000,
+                                                         limit=400)
+    listed = set(ns["professional_schools_for"]("medicine"))
+    named = next((n for n in priced["picker_name"] if n in listed), None)
+    unlisted = next((n for n in priced["picker_name"] if n not in listed), None)
+    if named is None or unlisted is None:
+        problems.append(
+            "  fixture: medicine has no school of one of the two kinds, so the "
+            "listed/unlisted split discriminates nothing")
+        return problems
+
+    # 1. A professional school the picker CAN name goes to prof_school_a.
+    got, blocked = target(True, "medicine", None, None, named, named,
+                          300_000, med)
+    if blocked or got is None or got[0] != "prof_school_a":
+        problems.append(
+            f"  a medical school went to {got and got[0]!r}, not prof_school_a\n"
+            f"    the graduate picker stocks CIP families and would drop it")
+
+    # 2. One it cannot name is carried by price instead, never dropped and
+    #    never aimed at a picker that has no such option.
+    got, blocked = target(True, "medicine", None, None, unlisted, unlisted,
+                          300_000, med)
+    if blocked or got is None or got[0] is not None or got[3] != 300_000:
+        problems.append(
+            f"  {unlisted!r} has no debt row, so its PRICE must be carried; "
+            f"got {got!r} / {blocked!r}")
+
+    # 3. A subject the sidebar has no field for must SAY so, not apply.
+    got, blocked = target(True, "medicine", None, None, named, named,
+                          300_000, "Accounting")
+    if got is not None or not blocked:
+        problems.append(
+            "  applying a medical school to an accounting scenario was not "
+            "refused -- prof_school_a would reset and nothing would say why")
+
+    # 4. Graduate: right field applies, wrong field refuses. Both from the
+    #    real crosswalk, so a rewrite of it re-tests this.
+    major, family = next(iter(sorted(ns["MAJOR_TO_CIP_FAMILY"].items())))
+    other = next(m for m, f in ns["MAJOR_TO_CIP_FAMILY"].items() if f != family)
+    got, blocked = target(False, None, family, "Master's degree",
+                          "Some University", "Some University", 60_000, major)
+    if blocked or got is None or got[0] != "grad_school_a":
+        problems.append(f"  a same-field master's did not reach grad_school_a: "
+                        f"{got!r} / {blocked!r}")
+    elif got[2] != ns["GRADUATE_SEARCH_TO_CREDENTIAL"]["Master's degree"]:
+        problems.append(f"  the applied credential is {got[2]!r}, which is not "
+                        f"what the Level control searched")
+    got, blocked = target(False, None, family, "Master's degree",
+                          "Some University", "Some University", 60_000, other)
+    if got is not None or not blocked:
+        problems.append(
+            f"  a {ns['MAJOR_TO_CIP_FAMILY'][other]} scenario accepted a CIP "
+            f"{family} school; that picker does not stock it")
+
+    # 5. Exactly one of the two is ever set. A renderer reading the pair would
+    #    otherwise both apply and complain, or do neither.
+    for case in [(True, "medicine", None, None, named, named, 1, med),
+                 (True, "medicine", None, None, unlisted, unlisted, 1, med),
+                 (True, "medicine", None, None, named, named, 1, "Accounting"),
+                 (False, None, family, "Master's degree", "S", "S", 1, major),
+                 (False, None, family, "Master's degree", "S", "S", 1, other)]:
+        got, blocked = target(*case)
+        if bool(got) == bool(blocked):
+            problems.append(f"  {case[7]!r}: target and blocked are both "
+                            f"{'set' if got else 'empty'}")
+    return problems
+
+
 def check_picker_identity(ns, base) -> list:
     """The picker keys on UNITID, so UNITID must be a real key -- and the
     reconcile must keep a survivor while replacing an evicted selection."""
@@ -363,7 +566,9 @@ def main() -> int:
         ("order and subset", lambda: check_order_and_subset(ns, base)),
         ("filter before cap", lambda: check_filter_before_cap(ns, base)),
         ("credential gate", lambda: check_credential_gate(ns)),
+        ("graduate search", lambda: check_graduate_search(ns)),
         ("picker identity", lambda: check_picker_identity(ns, base)),
+        ("apply target", lambda: check_apply_target(ns)),
     ]:
         found = fn()
         checks.append(name)
@@ -377,7 +582,9 @@ def main() -> int:
     print(f"school search filters OK -- {len(checks)} properties over "
           f"{len(base)} schools ({unrated} unrated): wide-open means no filter, "
           f"narrowing excludes unrated, edges inclusive, sectors partition, "
-          f"order preserved, cap applied last, admit rate gated to "
+          f"order preserved, cap applied last, graduate levels dispatch "
+          f"separately, applies reach the picker that stocks them, "
+          f"admit rate gated to "
           f"{'/'.join(ns['ADM_RATE_CREDENTIALS'])}, picker keyed on UNITID.")
     return 0
 

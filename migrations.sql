@@ -1385,3 +1385,49 @@ alter table scenario_events
 -- 2026-08-01 (before that every session logged a search on page load, so
 -- school_search_run meant "loaded the page" -- see the note on that date).
 -- Three regimes in nine days; cut on both dates, not just one.
+
+
+-- =====================================================================
+-- 2026-08-09  A THIRD standalone page: pageview_gradschools
+-- =====================================================================
+-- NO DDL. usage_logs.action is free text and a new event type goes there
+-- rather than into a column -- the convention this file has followed since
+-- the repayment page.
+--
+-- WHAT CHANGED. The graduate school search moved out of the schools page
+-- into its own tool, so landings are now FOUR actions:
+--
+--     pageview               the calculator, and only the calculator
+--     pageview_repayment     ?tool=repayment
+--     pageview_schools       ?tool=schools   (undergraduate only from today)
+--     pageview_gradschools   ?tool=gradschools
+--
+-- Use a prefix match -- action like 'pageview%' -- for total traffic. The
+-- 2026-08-02 entry above already asked for this so that a future tool would
+-- be counted without anyone remembering to update a query; this is that
+-- future tool, and any enumerated list written before today is now short by
+-- one.
+--
+-- The survey rate still divides by bare "pageview" alone, deliberately: no
+-- standalone tool renders the survey, so including these visits would divide
+-- by people who were never asked.
+--
+-- CUT DATES NOW STACK. The admin caption's "landings split cleanly only from
+-- 2026-08-02" gains a second boundary here. Before today there was no
+-- gradschools page at all, so its absence in an earlier row is "the page did
+-- not exist", not "nobody visited it" -- the same reading the ccb entry above
+-- asks for.
+--
+-- school_search_run IS UNCHANGED, AND THAT IS DELIBERATE. Both tools still
+-- emit that one event; `level` separates them (bachl/assoc/cert* against
+-- master/doctoral), exactly as it did while the graduate levels lived inside
+-- the schools page. A separate event name would have created a FOURTH regime
+-- on top of the three that series already has (see the 2026-08-09 entry on
+-- the budget-only undercount), and analyze_survey.py already groups runs by
+-- level. So a search is comparable across today's split; only where the
+-- visitor was standing changed.
+--
+-- One asymmetry worth knowing before comparing the two halves: a graduate
+-- search can now be reached WITHOUT a schools pageview, and before today it
+-- could not. Any funnel that used pageview_schools as the denominator for
+-- graduate searches is measuring something that stopped existing.

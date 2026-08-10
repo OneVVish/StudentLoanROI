@@ -48,7 +48,7 @@ Rollback: grey-cloud both records — instant return to direct-to-Railway.
    listed the sitemap as the discovery source while the Sitemaps page
    still said Couldn't fetch). Confirm the sitemap serves in a browser
    and re-check GSC in a day before debugging anything.
-3. URL-inspect `/` and both `?tool=` URLs → Request indexing (all three
+3. URL-inspect `/` and all three `?tool=` URLs → Request indexing (all three
    queued 2026-08-06). The inspect search box sometimes keeps the prior
    inspection — check the breadcrumb names the URL you typed before
    trusting the panel.
