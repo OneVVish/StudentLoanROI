@@ -8925,7 +8925,62 @@ TRANCHE_LABELS = ("Federal (capped, income-driven)", "PLUS & private (uncapped)"
 # portfolio the visitor typed in rather than about a borrowing cap. Calling
 # that federal side "capped" would assert something the tool never asked.
 REPAYMENT_STACK_LABELS = ("Federal plan", "Private loan")
-STACK_COLORS = ("#4C78A8", "#B279A2")
+# CATEGORICAL SLOTS, and they are validated rather than chosen by eye.
+#
+# The pair these replaced -- #4C78A8 blue against #B279A2 purple -- separated by
+# ΔE 5.0 under protanopia (OKLab x100, 8 is the target and 6 the floor). The two
+# bands they coloured are "Federal (capped, income-driven)" against "PLUS &
+# private (uncapped)", which is the entire reason that chart stacks: a
+# red-green-colourblind reader could not see the distinction the chart exists to
+# make. They also sat below the chroma floor, i.e. read as grey to everyone, and
+# at ΔE 14.9 normal-vision they were under the 15 hard floor as well.
+#
+# These are slots 1 and 2 of a validated categorical order. Adjacent CVD ΔE 24.7
+# light / 26.8 dark, every check passing in both modes. check_chart_palette.py
+# re-runs that check, so this cannot silently regress -- the failure above
+# shipped precisely because nothing could catch it.
+#
+# Both modes are stepped, not flipped: the dark values are the same two hues
+# re-stepped for Streamlit's #0E1117 surface.
+SERIES_BLUE = "#2a78d6"
+SERIES_ORANGE = "#eb6834"
+SERIES_AQUA = "#1baf7a"
+SERIES_RED = "#e34948"
+SERIES_BLUE_DARK = "#3987e5"
+SERIES_ORANGE_DARK = "#d95926"
+SERIES_AQUA_DARK = "#199e70"
+SERIES_RED_DARK = "#e66767"
+
+STACK_COLORS = (SERIES_BLUE, SERIES_ORANGE)
+
+
+# A 2px separator between stacked fills, in the surface colour, so adjacent
+# bands are divided by a gap rather than by a drawn border. The dataviz rule is
+# specific about which: a border AROUND marks reads as chrome, while a gap reads
+# as separation and keeps the fills' own colours uncontaminated.
+#
+# Plotly has no "gap" for a stacked area, so this is the equivalent: a hairline
+# stroke in the surface colour along each band's upper edge. It is theme-blind
+# on purpose -- Streamlit gives no server-side way to know which theme the
+# visitor is in (nothing in this file reads it), and a stroke that guessed wrong
+# would be a visible line in the wrong colour. Semi-transparent white sits
+# between the two surfaces and disappears against either.
+STACK_SEPARATOR = "rgba(255,255,255,0.55)"
+STACK_SEPARATOR_WIDTH = 2
+# The print equivalent. matplotlib linewidths are points, not pixels, and a PDF
+# page is white rather than a themed surface.
+PDF_STACK_SEPARATOR_WIDTH = 1.2
+
+
+def apply_stack_separator(fig):
+    """Give every filled band in a stacked area a 2px surface-coloured edge."""
+    fig.update_traces(
+        line=dict(width=STACK_SEPARATOR_WIDTH, color=STACK_SEPARATOR),
+        selector=dict(type="scatter", fill="tonexty"))
+    fig.update_traces(
+        line=dict(width=STACK_SEPARATOR_WIDTH, color=STACK_SEPARATOR),
+        selector=dict(type="scatter", fill="tozeroy"))
+    return fig
 
 
 def stack_color_map(labels: tuple) -> dict:
@@ -8973,6 +9028,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
                     "component": ""},
             color_discrete_map=stack_color_map(TRANCHE_LABELS),
         )
+        apply_stack_separator(fig)
         _tickvals, _ticktext = money_k_ticks(schedule_df["balance"])
         fig.update_layout(
             hovermode="x unified", title_font_size=14,
@@ -8997,8 +9053,10 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
             title="Loan Balance Over Time — principal vs unpaid interest",
             labels={"year": "Years", "amount": "Remaining Balance ($)",
                     "component": ""},
-            color_discrete_map={"Principal": "#4C78A8", "Unpaid interest": "#E45756"},
+            color_discrete_map={"Principal": SERIES_BLUE,
+                                "Unpaid interest": SERIES_RED},
         )
+        apply_stack_separator(fig)
         _tickvals, _ticktext = money_k_ticks(schedule_df["balance"])
         fig.update_layout(
             hovermode="x unified", title_font_size=14,
@@ -9116,6 +9174,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
                     "component": ""},
             color_discrete_map=stack_color_map(labels),
         )
+        apply_stack_separator(fig)
         fig.update_layout(
             hovermode="x unified", title_font_size=14,
             legend=dict(orientation="h", yanchor="bottom", y=-0.35,
@@ -9555,8 +9614,11 @@ def wage_distribution_tail_notes(percentiles: dict) -> tuple:
     )
 
 
-PANEL_WAGE_LOCAL_COLOR = "#E8843C"      # local geography, warm -- reads as "yours"
-PANEL_WAGE_NATIONAL_COLOR = "#4C78A8"   # national, the app's existing chart blue
+# Local warm / national cool, the same two validated slots the stack uses. The
+# previous local orange (#E8843C) sat at 2.62:1 against the light surface, below
+# the 3:1 floor; slot 2 clears it.
+PANEL_WAGE_LOCAL_COLOR = SERIES_ORANGE      # local geography, warm -- reads as "yours"
+PANEL_WAGE_NATIONAL_COLOR = SERIES_BLUE     # national, the app's chart blue
 
 
 def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
@@ -9672,7 +9734,7 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
                             font=dict(size=12, color=color), xshift=-8)
 
     if modelled_start:
-        fig.add_vline(x=modelled_start, line=dict(color="#E45756", width=2, dash="dash"))
+        fig.add_vline(x=modelled_start, line=dict(color=SERIES_RED, width=2, dash="dash"))
         # Sits low in the top row's band, deliberately below every median
         # label. Those sit at each curve's apex, and at equal height the two
         # read as the same kind of marker -- which they are not: the median is
@@ -9681,7 +9743,7 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
         fig.add_annotation(x=modelled_start, y=(len(rows) - 1) * row_height + 0.05, yref="y",
                             showarrow=False, yanchor="bottom",
                             text=f"Starting salary {fmt_money(modelled_start)}",
-                            font=dict(size=11, color="#E45756"),
+                            font=dict(size=11, color=SERIES_RED),
                             # Sitting low in the band puts this on top of the
                             # fill, where red on orange is hard to read.
                             bgcolor="rgba(255,255,255,0.78)", borderpad=2)
@@ -10095,6 +10157,258 @@ def _pdf_image_from_figure(fig, max_width: float = PDF_CONTENT_WIDTH) -> Image:
     return Image(buf, width=max_width, height=max_width * height_px / width_px)
 
 
+# ---- The shareable result card -------------------------------------------
+#
+# EDITORIAL, not dashboard. The difference is not decoration: a chart on the
+# page sits under a heading, beside its captions, with a sidebar explaining
+# every input. This one is read with none of that -- forwarded to a parent,
+# posted, screenshotted out of a thread -- so it has to carry its own headline,
+# its own labels and its own sources or it says nothing.
+#
+# Which is also why the headline is the FINDING and not the variable: "Yes --
+# comfortably worth your $190,000 loan" rather than "Net position over time".
+#
+# matplotlib is not a preference here, it is the only option: kaleido, the
+# Plotly PNG exporter, was removed after it segfaulted the whole server on
+# Community Cloud (see the PDF section's note), so Plotly cannot rasterise in
+# this process at all.
+SHARE_CARD_SIZE = (12.0, 6.75)          # 1200x675 at dpi 100 -- 16:9
+SHARE_CARD_DPI = 100
+SHARE_CARD_SOURCES = ("Sources: BLS OEWS · NY Fed · College Scorecard · IPEDS")
+SHARE_CARD_URL = "worthmydegree.com"
+SHARE_CARD_DISCLAIMER = ("An educational estimate, not financial advice. "
+                          "Figures are averages and will differ from any "
+                          "individual's actual outcome.")
+
+
+def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
+                      major_name: str, school_name: str, strategy_label: str,
+                      roi_window_years: int) -> bytes:
+    """One 16:9 PNG of this scenario's verdict, for sharing.
+
+    A THIRD consumer of the same two objects the screen and the PDF already
+    read -- `verdict` from breakeven_summary, `frame` from net_position_frame --
+    never a re-derivation. breakeven_summary's own docstring says it is shared
+    "so the two can't drift"; this makes it three, on the same terms. A card
+    that recomputed its own headline would be the one artifact that leaves the
+    session carrying a number the page never showed.
+
+    Every word naming the counterfactual comes from counterfactual_vocab().
+    Writing "high school graduate" here would be wrong for a returning student,
+    whose baseline is their own current salary -- the exact bug that function
+    exists to prevent, in the one place nobody would notice it.
+    """
+    vocab = counterfactual_vocab()
+    fig = plt.figure(figsize=SHARE_CARD_SIZE, dpi=SHARE_CARD_DPI)
+    fig.patch.set_facecolor("white")
+
+    # Headline and deck, top-left. Left-aligned and large: this is the first
+    # thing read and usually the only thing read.
+    headline = (verdict or {}).get("headline") or "Your 10-year position"
+    fig.text(0.055, 0.90, headline, fontsize=25, fontweight="bold",
+             color="#111111", va="top", ha="left", wrap=True)
+    deck = " · ".join(part for part in (major_name, school_name, strategy_label)
+                      if part)
+    fig.text(0.055, 0.815, deck, fontsize=13, color="#52514e",
+             va="top", ha="left")
+
+    # The plot. Recessive chrome, thin marks, direct labels at both ends -- a
+    # legend as well, because there are two series and identity must never ride
+    # on colour alone.
+    ax = fig.add_axes([0.055, 0.30, 0.60, 0.44])
+    ax.set_facecolor("white")
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color("#d8d8d4")
+        ax.spines[spine].set_linewidth(1)
+    ax.grid(True, axis="y", color="#ececea", linewidth=1)
+    ax.set_axisbelow(True)
+    ax.tick_params(colors="#52514e", labelsize=10, length=0)
+
+    # Three slots because Compare Mode charts two paths against one baseline.
+    # Validated ALL-PAIRS (not merely adjacent) in both modes -- on this card
+    # the series are lines that cross, so any two can end up side by side.
+    # Past three the skill's own guidance is to fold or facet, and this card
+    # never has a fourth: two scenarios is the app's maximum.
+    slots = (SERIES_BLUE, SERIES_ORANGE, SERIES_AQUA)
+    for index, (series_name, block) in enumerate(frame.groupby("Series", sort=False)):
+        colour = slots[index % len(slots)]
+        ax.plot(block["year"], block["Net Position"], linewidth=2.4,
+                color=colour, label=series_name, solid_capstyle="round")
+        # Direct label at the endpoint, INSIDE the axes and right-aligned.
+        # Outside-and-left-aligned ran it straight through the stat column on
+        # the right of the card -- the labels and the figures overlapped, which
+        # no colour check can see and which only looking at the PNG revealed.
+        last = block.iloc[-1]
+        ax.annotate(fmt_money(last["Net Position"]),
+                    xy=(last["year"], last["Net Position"]),
+                    xytext=(-4, 8), textcoords="offset points",
+                    fontsize=11, fontweight="bold", color=colour,
+                    va="bottom", ha="right")
+    ax.axhline(0, color="#b8b8b4", linewidth=1, linestyle=(0, (2, 3)))
+    # Read off the FIRST scenario: with foregone earnings counted the timeline
+    # starts at enrolment, otherwise at graduation, and both scenarios on a
+    # comparison card share that setting.
+    _counts_enrolment = bool(scenario_pairs[0][1].get("enrollment_years"))
+    ax.set_xlabel(f"Years after {'starting' if _counts_enrolment else 'graduating'}",
+                  fontsize=10, color="#52514e")
+    ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
+    ax.legend(loc="lower right", fontsize=9, frameon=False)
+    # A hair of right padding: a crossing in the final year puts its marker on
+    # the boundary, where half of it is clipped away.
+    _span = float(frame["year"].max()) - float(frame["year"].min())
+    ax.set_xlim(left=frame["year"].min(),
+                right=float(frame["year"].max()) + _span * 0.02)
+    # Headroom so the endpoint labels sit inside the axes rather than clipping
+    # against the top spine.
+    _lo, _hi = ax.get_ylim()
+    ax.set_ylim(_lo, _hi + (_hi - _lo) * 0.12)
+
+    # THE ONE ANNOTATION: where this path passes the counterfactual. It is the
+    # single fact the whole model exists to produce, and on a card read out of
+    # context it has to be said in words rather than inferred from a crossing.
+    crossing = _share_card_crossing(frame)
+    first_year = float(frame["year"].min())
+    if crossing is not None and crossing > first_year:
+        # A real crossing: mark it and name the year. Annotated ABOVE the
+        # point -- below ran it into the x-axis label.
+        _cross_y = float(frame[frame["year"] == crossing]["Net Position"].max())
+        ax.plot([crossing], [_cross_y], marker="o", markersize=8,
+                markerfacecolor="white", markeredgecolor="#111111",
+                markeredgewidth=2, zorder=5)
+        # The TEXT sits in a fixed slot; only the marker floats.
+        #
+        # Anchoring the label to the point was tried twice and collided twice:
+        # offset right, it ran through the stat column; leaned left, it ran
+        # through the endpoint labels. A crossing can land anywhere in the plot,
+        # so any offset from it is a collision waiting for the right scenario --
+        # while the top-left corner is empty in every case (the legend sits
+        # bottom-right for exactly this reason), and it is where the other two
+        # branches already put their sentence, so the three read alike.
+        ax.annotate(f"ahead of {vocab['baseline_noun']} from year {crossing:.0f}",
+                    xy=(0.02, 0.94), xycoords="axes fraction",
+                    fontsize=10.5, fontweight="bold", color="#111111",
+                    ha="left", va="top")
+    elif crossing is not None:
+        # Ahead from the first year on, so there is no crossing to point at.
+        # "Ahead from year 1" is true and says nothing; a marker on the axis
+        # edge would point at a moment that never happened. The claim worth
+        # making is that it never trails.
+        ax.annotate(f"ahead of {vocab['baseline_noun']} the whole way",
+                    xy=(0.02, 0.94), xycoords="axes fraction",
+                    fontsize=10.5, fontweight="bold", color="#111111",
+                    ha="left", va="top")
+    else:
+        # Never catches up inside the window, which is the finding -- and the
+        # one a card must not quietly omit.
+        ax.annotate(f"still behind {vocab['baseline_noun']} "
+                    f"at {int(roi_window_years)} years",
+                    xy=(0.02, 0.94), xycoords="axes fraction",
+                    fontsize=10.5, fontweight="bold", color=SERIES_RED,
+                    ha="left", va="top")
+
+    # Figures in the right-hand column. Stat tiles rather than more chart:
+    # these are single numbers, and a single number is not improved by a plot.
+    #
+    # PER SCENARIO, which the first version got wrong. It read the borrowing off
+    # scenario A and the position off the LAST row of the frame -- scenario B --
+    # so a comparison card showed one path's debt beside the other path's
+    # outcome, with nothing on it saying so. Two scenarios means two blocks.
+    stats = []
+    for label, scenario in scenario_pairs:
+        own_end = frame[frame["Series"] == label]["Net Position"]
+        stats.append((
+            label if len(scenario_pairs) > 1 else None,
+            [("Total borrowed",
+              fmt_money(scenario.get("effective_principal", 0))),
+             ("Interest paid",
+              fmt_money((scenario.get("repayment_result") or {})
+                        .get("total_interest", 0))),
+             (f"Position at {int(roi_window_years)} years",
+              fmt_money(own_end.iloc[-1]) if not own_end.empty else "—")],
+        ))
+
+    # One column of three when there is one scenario; two columns of three when
+    # there are two, each under its own name.
+    columns = len(stats)
+    for column, (heading, rows) in enumerate(stats):
+        x = 0.71 + column * 0.145 if columns > 1 else 0.71
+        top = 0.72
+        if heading:
+            # Truncated to the column, because "Family Medicine Physicians"
+            # ran straight over "Lawyers" in the next one. The colour beside
+            # the name is the same slot as its line, so a shortened name is
+            # still unambiguous -- and the legend under the plot carries it in
+            # full.
+            shown = heading if len(heading) <= 17 else heading[:16] + "…"
+            fig.text(x, top, shown, fontsize=10.5, fontweight="bold",
+                     color=slots[column % len(slots)], va="top", ha="left")
+            top -= 0.055
+        for label, value in rows:
+            fig.text(x, top, label.upper(), fontsize=8.5, color="#7a7a75",
+                     va="top", ha="left")
+            fig.text(x, top - 0.042,
+                     value, fontsize=18 if columns > 1 else 21,
+                     fontweight="bold", color="#111111", va="top", ha="left")
+            top -= 0.125
+
+    # Footer: sources, URL, disclaimer. Always present -- a graphic read out of
+    # context with no source is an assertion rather than a finding.
+    fig.text(0.055, 0.135, SHARE_CARD_SOURCES, fontsize=9.5, color="#7a7a75",
+             va="top", ha="left")
+    fig.text(0.055, 0.088, SHARE_CARD_DISCLAIMER, fontsize=9, color="#9a9a95",
+             va="top", ha="left")
+    fig.text(0.945, 0.135, SHARE_CARD_URL, fontsize=11, fontweight="bold",
+             color=PANEL_HEADING_COLOR, va="top", ha="right")
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format="png", dpi=SHARE_CARD_DPI,
+                facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return buffer.getvalue()
+
+
+def _share_card_series(frame: pd.DataFrame):
+    """(own series name, baseline series name) out of the net-position frame.
+
+    The baseline is whichever series is named by counterfactual_vocab, so this
+    follows the returning-student switch automatically instead of matching on
+    the words "high school".
+    """
+    names = list(dict.fromkeys(frame["Series"]))
+    baseline_name = counterfactual_vocab()["legend_label"]
+    baseline = next((n for n in names if n == baseline_name), None)
+    own = next((n for n in names if n != baseline), names[0] if names else None)
+    return own, baseline
+
+
+def _share_card_crossing(frame: pd.DataFrame):
+    """The year this path first passes THE COUNTERFACTUAL, or None.
+
+    Not the year it passes zero. The first version of this card annotated
+    "ahead from year 1" over a chart whose two lines did not meet until year 6,
+    because a positive net position is not the same claim as being ahead of the
+    person who skipped the degree -- and being ahead of that person is the only
+    thing this whole model computes.
+
+    None is a real answer the caller must handle: a path that never catches up
+    inside the window has no crossing, and annotating one at the window's edge
+    would assert something the model did not.
+    """
+    if frame.empty or "Net Position" not in frame.columns:
+        return None
+    own_name, baseline_name = _share_card_series(frame)
+    if baseline_name is None or own_name is None:
+        return None
+    wide = frame.pivot_table(index="year", columns="Series",
+                             values="Net Position", aggfunc="first")
+    if own_name not in wide.columns or baseline_name not in wide.columns:
+        return None
+    ahead = wide[wide[own_name] > wide[baseline_name]]
+    return float(ahead.index.min()) if not ahead.empty else None
+
+
 def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
                                        modelled_start: float = None,
                                        geography_label: str = None,
@@ -10157,12 +10471,12 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
                      annotation_clip=False, parse_math=False)
 
     if modelled_start:
-        ax.axvline(modelled_start, color="#E45756", linewidth=1.6, linestyle="--")
+        ax.axvline(modelled_start, color=SERIES_RED, linewidth=1.6, linestyle="--")
         # Same placement reasoning as the Plotly twin: low in the top row's
         # band, below every median label.
         ax.annotate(f"Starting salary {fmt_money(modelled_start)}",
                      xy=(modelled_start, (len(rows) - 1) * row_height + 0.05), ha="center",
-                     va="bottom", fontsize=7.5, color="#E45756", parse_math=False,
+                     va="bottom", fontsize=7.5, color=SERIES_RED, parse_math=False,
                      # Same reason as the Plotly twin: the label now overlaps
                      # the fill it used to sit above.
                      bbox=dict(facecolor="white", edgecolor="none", alpha=0.78, pad=1.4))
@@ -10256,7 +10570,11 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
                                    values="amount").fillna(0.0)
         ax.stackplot(wide.index,
                      wide[TRANCHE_LABELS[0]], wide[TRANCHE_LABELS[1]],
-                     labels=list(TRANCHE_LABELS), colors=list(STACK_COLORS))
+                     labels=list(TRANCHE_LABELS), colors=list(STACK_COLORS),
+                     # The twin of apply_stack_separator: a gap between bands,
+                     # never a border around them. White here rather than the
+                     # translucent screen value -- a PDF page is white.
+                     edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper right", fontsize=8)
         ax.set_title("Loan Balance Over Time - by loan type")
     elif balance_split_is_informative(schedule_df):
@@ -10264,7 +10582,8 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
                      schedule_df["principal_balance"],
                      schedule_df["interest_balance"],
                      labels=["Principal", "Unpaid interest"],
-                     colors=["#4C78A8", "#E45756"])
+                     colors=[SERIES_BLUE, SERIES_RED],
+                     edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper left", fontsize=8)
         ax.set_title("Loan Balance Over Time — principal vs unpaid interest")
     else:
@@ -10296,7 +10615,8 @@ def build_pdf_payment_chart(result: dict, label: str,
         merged = pd.merge(fed, priv, on="year", how="outer",
                           suffixes=("_fed", "_priv")).sort_values("year").fillna(0.0)
         ax.stackplot(merged["year"], merged["payment_fed"], merged["payment_priv"],
-                     labels=list(labels), colors=list(STACK_COLORS))
+                     labels=list(labels), colors=list(STACK_COLORS),
+                     edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper right", fontsize=8)
     else:
         series = payment_series(result)
@@ -17621,6 +17941,46 @@ top_actions_container = st.container()
 # per-year Cost of Attendance field (in-state or out-of-state, per the
 # In-State Student? checkbox) -- see _autofill_coa in section 2c.
 
+def render_share_card_button(scenario_pairs: list, verdict: dict,
+                              school_name: str, strategy_label: str,
+                              roi_window_years: int, col_index: float,
+                              hs_wage_index: float, key: str) -> None:
+    """The Download-image button, rendered by BOTH result branches.
+
+    Both, without exception. Compare Mode is the randomly-assigned contrast arm
+    of the paper's H2, so a button that appeared in one branch and not the other
+    would be an arm difference the study never intended -- the failure CLAUDE.md
+    records for the break-even, the underemployment note and take-home. The card
+    itself handles one scenario or two; only its series count changes.
+
+    Failures are swallowed to a caption. A chart that cannot render must not
+    take the results page with it: the visitor came for the numbers, and the
+    numbers are already on screen above this button.
+    """
+    try:
+        frame = net_position_frame(scenario_pairs, col_index, hs_wage_index,
+                                    roi_window_years)
+        png = build_share_card(
+            scenario_pairs, frame, verdict,
+            " vs ".join(label for label, _ in scenario_pairs),
+            school_name, strategy_label, roi_window_years)
+    except Exception as error:                                # pragma: no cover
+        report_write_failure("share card render", error)
+        st.caption("The shareable image could not be generated for this "
+                    "scenario. Everything above is unaffected.")
+        return
+    st.download_button(
+        "🖼️ Download image", data=png,
+        file_name="worth-my-degree.png", mime="image/png",
+        use_container_width=True, key=key,
+        help="A single image of this verdict — headline, chart and sources — "
+              "sized for a message or a post.",
+        on_click=lambda: log_usage_event(
+            f"share_card:major={scenario_pairs[0][0]}"
+            f":compare={int(len(scenario_pairs) > 1)}"),
+    )
+
+
 def render_school_lookup(container, school_name: str, label: str, unitid=None):
     """Render one scenario's school lookup (COA match + median debt) into a
     layout container. Used once for the single-scenario view and twice
@@ -18544,7 +18904,7 @@ if compare_mode:
         takehome_stages_a=_th_a["stages"], takehome_stages_b=_th_b["stages"],
     )
     with top_actions_container:
-        compare_pdf_col, compare_share_col = st.columns(2)
+        compare_pdf_col, compare_share_col, compare_card_col = st.columns(3)
         compare_pdf_col.download_button(
             "📄 Download PDF Report", data=compare_pdf_bytes,
             file_name=f"{major.replace(' ', '_')}_vs_{major_b.replace(' ', '_')}_comparison_report.pdf",
@@ -18586,6 +18946,22 @@ if compare_mode:
             ), **module_context})
             components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
             st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact comparison.")
+        with compare_card_col:
+            # Both scenarios on one card. Rendered here AND in the single
+            # branch, without exception: Compare Mode is the H2 contrast arm,
+            # so a button present in one branch only would be an arm difference
+            # the study never intended -- the failure CLAUDE.md records for the
+            # break-even, the underemployment note and take-home.
+            #
+            # No verdict passed: breakeven_summary answers for ONE scenario and
+            # this branch deliberately has no single verdict (that is why the
+            # banner container is left empty here). The card falls back to its
+            # neutral headline rather than picking a winner the page does not.
+            render_share_card_button(
+                [(major, scenario_a), (major_b, scenario_b)], None,
+                school_name_a, repayment_strategy, roi_horizon_years,
+                city_info["col_index"], get_metro_wage_index(city),
+                key="share_card_compare")
 else:
     scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                          personal_contribution, city_info["col_index"],
@@ -18851,7 +19227,7 @@ else:
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     )
     with top_actions_container:
-        single_pdf_col, single_share_col = st.columns(2)
+        single_pdf_col, single_share_col, single_card_col = st.columns(3)
         single_pdf_col.download_button(
             "📄 Download PDF Report", data=single_pdf_bytes,
             file_name=f"{major.replace(' ', '_')}_payoff_report.pdf", mime="application/pdf",
@@ -18879,6 +19255,12 @@ else:
             ), **module_context})
             components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
             st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact scenario.")
+        with single_card_col:
+            render_share_card_button(
+                [(major, scenario)], breakeven, school_name_a,
+                repayment_strategy, roi_horizon_years,
+                city_info["col_index"], get_metro_wage_index(city),
+                key="share_card_single")
 
 st.divider()
 
