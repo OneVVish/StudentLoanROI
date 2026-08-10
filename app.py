@@ -73,6 +73,13 @@ COLLEGE_SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.jso
 # two real BLS figures is derived on demand by get_major_growth_rate() -- see
 # 2a -- rather than stored separately, so the loan/ROI simulation's year-10
 # salary always matches this median exactly.
+# One resident stipend, shared by every path that has a residency, so a
+# refresh moves them together. AAMC's 2024 preliminary median first-post-MD-year
+# stipend. The 2025 survey puts PGY-1 at a $66,986 median / $68,166 mean, so
+# this is mildly conservative rather than stale-in-a-flattering-direction; a
+# refresh should move the citation and this number in the same commit.
+RESIDENT_STIPEND = 65000
+
 CURATED_MAJOR_DATA = {
     # Software Developers, SOC 15-1252: 25th pct $105,210 / median $135,980
     "Computer Science": {"starting_salary": 105210, "median_salary": 135980, "soc_major_group": "15"},
@@ -110,7 +117,7 @@ CURATED_MAJOR_DATA = {
     "Medicine": {
         "starting_salary": 162420, "median_salary": 244180,
         "unpaid_training_years": 4, "stipend_training_years": 3,
-        "stipend_salary": 65000, "additional_training_debt": 205000,
+        "stipend_salary": RESIDENT_STIPEND, "additional_training_debt": 205000,
         "soc_major_group": "29",
     },
     # Lawyers, SOC 23-1011: 25th pct $102,990 / median $159,670. 3 unpaid
@@ -172,7 +179,7 @@ ADVANCED_TRAINING_OVERLAY = {}
 # aamc.org/data-reports/students-residents
 _PHYSICIAN_TRAINING = {
     "unpaid_training_years": 4, "stipend_training_years": 3,
-    "stipend_salary": 65000, "additional_training_debt": 205000,
+    "stipend_salary": RESIDENT_STIPEND, "additional_training_debt": 205000,
 }
 PHYSICIAN_TITLES = [
     "Anesthesiologists", "Cardiologists", "Emergency Medicine Physicians",
@@ -192,10 +199,100 @@ for _title in PHYSICIAN_TITLES:
 _DENTIST_TRAINING = {
     "unpaid_training_years": 4, "additional_training_debt": 293900,
 }
-DENTIST_TITLES = ["Oral and Maxillofacial Surgeons", "Prosthodontists",
-                  "Dentists, All Other Specialists"]
+# "Dentists, General" is the largest of these by far and was missing, so the
+# most common dentist in the dataset was charged nine years of school, given no
+# dental-school debt, and paid a full salary from year one -- while the three
+# specialist titles beside it carried the structure. The gap was invisible
+# because each specialist entry looked correct on its own.
+DENTIST_TITLES = ["Dentists, General", "Oral and Maxillofacial Surgeons",
+                  "Prosthodontists", "Dentists, All Other Specialists"]
 for _title in DENTIST_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_DENTIST_TRAINING)
+
+# Law, the same omission as Dentists, General and larger: the curated "Medicine"
+# and "Law" MAJOR entries carried this structure while the OCCUPATIONS that
+# require the same degree carried none, so a Career-mode lawyer paid for nine
+# years of school, borrowed nothing for law school, and earned a lawyer's
+# salary from the year after a bachelor's.
+#
+# Debt is the same ABA Young Lawyers Division 2024 figure the curated entry
+# cites, and is a fallback: naming a school in the sidebar replaces it with
+# that school's own median, as it does for every professional path.
+#
+# JUDGES AND ADMINISTRATIVE LAW JUDGES ARE INCLUDED WITH A CAVEAT. They require
+# the degree, so charging for it is right, but this app models entry at
+# graduation and nobody is appointed a judge at 25 -- their earnings arrive a
+# career too early, which this change does not fix and did not cause. Adding
+# the debt is still strictly more honest than the "law degree, no cost" they
+# had.
+_LAW_TRAINING = {
+    "unpaid_training_years": 3, "additional_training_debt": 130000,
+}
+LAW_TITLES = ["Lawyers", "Judicial Law Clerks",
+              "Administrative Law Judges, Adjudicators, and Hearing Officers",
+              "Judges, Magistrate Judges, and Magistrates"]
+for _title in LAW_TITLES:
+    ADVANCED_TRAINING_OVERLAY[_title] = dict(_LAW_TRAINING)
+
+# Athletic Trainers: a master's, no professional-school debt figure to cite
+# (the Nurse Anesthetists reasoning above), but the two-year delay the curated
+# "Athletic Training" major has always modelled. Without it the same career
+# earned from year one in Career mode and from year three in Major mode.
+ADVANCED_TRAINING_OVERLAY["Athletic Trainers"] = {"unpaid_training_years": 2}
+
+# The other six professional-degree paths. Until this existed they had NO
+# training structure at all, which was wrong twice over and both silently:
+#
+#   1. They earned a full pharmacist's/vet's salary the year after a
+#      bachelor's, while the cost model charged them nine years of school.
+#   2. professional_debt_cap keys on `unpaid_training_years`, so at 0 it
+#      returned a cap of ZERO -- pricing an ordinary federal professional
+#      loan entirely as private money at the higher rate. The same
+#      wrong-in-two-directions failure resolve_professional_debt's docstring
+#      describes for a missing debt, reached by a different route.
+#
+# The cap can be applied to all of them unconditionally for the same reason it
+# can to medicine, dentistry and law: Pharmacy (Pharm.D.), Veterinary Medicine
+# (D.V.M.), Chiropractic (D.C.), Optometry (O.D.) and Podiatry (D.P.M.) are
+# each named in 34 CFR 668.2's own examples of a professional degree -- the
+# ORIGINAL list, not the one the 2026-06-24 stay temporarily expanded, so they
+# do not depend on how that litigation ends.
+# [ecfr.gov/current/title-34/subtitle-B/chapter-VI/part-668/subpart-A/section-668.2]
+#
+# No additional_training_debt here: unlike the physicians and dentists, these
+# read their debt from Scorecard through resolve_professional_debt, per
+# programme and per school. See dataset_professional_debt.
+#
+# Lengths are the standard first-professional ones, four years each. The one
+# with a caveat is chiropractic: CCE requires about 4,200 hours over 10-12
+# trimesters, which a year-round schedule finishes in 3.3 years. Four is the
+# common description and the common enrollment span, and it is also the
+# conservative choice for the earnings side; note it lifts the federal cap to
+# the $200,000 aggregate, where 3.3 years would cap at $165,000 and push about
+# $28,000 of the median chiropractic debt into private money.
+_PROFESSIONAL_SCHOOL_YEARS = 4
+
+# PODIATRY IS THE ONE WITH A REQUIRED RESIDENCY. CPME standardised podiatric
+# postgraduate training as a single 36-month Podiatric Medicine and Surgery
+# Residency in 2011, and the American Board of Podiatric Medicine certifies
+# only its completers -- so unlike the four below, this is not a choice a
+# graduate makes. Podiatric residents are hospital house staff paid on the
+# institution's own scale, which is why they take the same stipend constant as
+# physicians rather than one of their own: published 2025-26 podiatric PGY-1
+# salaries run $67,358 (Tower Health) to $86,923 (Scripps), so RESIDENT_STIPEND
+# sits at or below the bottom of that range.
+# [cpme.org/residencies/cpme-faqs-residency-programs/, podiatryboard.org]
+ADVANCED_TRAINING_OVERLAY["Podiatrists"] = {
+    "unpaid_training_years": _PROFESSIONAL_SCHOOL_YEARS,
+    "stipend_training_years": 3, "stipend_salary": RESIDENT_STIPEND,
+}
+# The rest go straight into practice. Where a residency exists it is optional
+# and a minority path, so charging every graduate for one would misprice the
+# median -- see OPTIONAL_RESIDENCY, which discloses it instead.
+for _title in ("Pharmacists", "Veterinarians", "Optometrists", "Chiropractors"):
+    ADVANCED_TRAINING_OVERLAY[_title] = {
+        "unpaid_training_years": _PROFESSIONAL_SCHOOL_YEARS,
+    }
 
 # Which professional program each of these paths attends, keying
 # data/graduate_debt_clean.csv. Built from the same title lists above
@@ -211,7 +308,40 @@ PROFESSIONAL_PROGRAM_BY_OCCUPATION = {
     **{title: "dentistry" for title in DENTIST_TITLES},
     "Medicine": "medicine",
     "Law": "law",
+    # Five more OEWS occupations that cannot be entered without a professional
+    # degree. BLS already files all five under "Doctoral or professional
+    # degree", so PROGRAM_YEARS_BY_EDUCATION was already charging them the same
+    # four years of school it charges medicine -- what was missing was the DEBT, which
+    # made them the only professional paths priced as if the degree were free.
+    #
+    # Titles are OEWS's exact strings. A near-miss here is silent: the path
+    # simply keeps costing nothing.
+    **{title: "law" for title in LAW_TITLES},
+    "Pharmacists": "pharmacy",
+    "Veterinarians": "veterinary",
+    "Optometrists": "optometry",
+    "Podiatrists": "podiatry",
+    "Chiropractors": "chiropractic",
 }
+
+# Which calculator programme a SEARCH level applies to, where they differ.
+#
+# Only osteopathic differs, and it has to: the app has no DO occupation because
+# DOs and MDs are the same occupations in OEWS, and their schools are largely
+# the same rows in Scorecard (22 DO-only schools are already options in the
+# medicine picker). A DO school therefore fills the Medical school field. The
+# level exists in the search because the PRICE is DO-specific -- $60,284 median
+# against medicine's $44,136 -- which is the number a visitor is there for.
+#
+# Podiatry does NOT belong here. It has its own occupation, so it fills its own
+# field; what it lacks is debt rows, which the carried-price path already
+# handles.
+SEARCH_LEVEL_APPLIES_TO = {"osteopathic": "medicine"}
+
+
+def calculator_programme_for_level(level_key: str) -> str:
+    """The programme key the sidebar picker uses for this search level."""
+    return SEARCH_LEVEL_APPLIES_TO.get(level_key, level_key)
 
 
 # BLS OEWS-sourced careers from data_pipeline.py's output, in the same
@@ -764,7 +894,7 @@ UNDEREMPLOYMENT_MAJOR_COUNT = 73
 UNDEREMPLOYMENT_SOURCE_URL = "https://www.newyorkfed.org/research/college-labor-market"
 
 
-def graduate_salary_disclosure(typical_education: str) -> str:
+def graduate_salary_disclosure(typical_education: str, major_name: str = None) -> str:
     """What the salary on this page does and does not account for, when the
     path includes graduate study.
 
@@ -781,7 +911,7 @@ def graduate_salary_disclosure(typical_education: str) -> str:
     """
     if not is_graduate_education(typical_education):
         return ""
-    extra = graduate_years_for_education(typical_education)
+    extra = graduate_years_for_education(typical_education, major_name)
     level = "master's" if typical_education == CREDENTIAL_MASTERS else "doctorate"
     return (
         f"BLS says this career is entered with a {level}, so the cost above "
@@ -793,8 +923,9 @@ def graduate_salary_disclosure(typical_education: str) -> str:
     )
 
 
-def render_graduate_salary_disclosure(typical_education: str) -> None:
-    text = graduate_salary_disclosure(typical_education)
+def render_graduate_salary_disclosure(typical_education: str,
+                                       major_name: str = None) -> None:
+    text = graduate_salary_disclosure(typical_education, major_name)
     if text:
         st.caption(text)
 
@@ -1354,6 +1485,23 @@ CREDENTIAL_LABELS = {
     CREDENTIAL_MASTERS: "Master's",
     CREDENTIAL_DOCTORAL: "Doctorate",
 }
+# The three curated MAJOR entries that describe a path needing school beyond a
+# bachelor's carry BLS's own education level, so Major mode and Career mode
+# price the same life the same way. Assigned here rather than in the literals
+# at the top of this section because the CREDENTIAL_* constants are defined
+# below them, and a literal string here would be free to drift from them.
+#
+# Without this, "Medicine" resolved to four undergraduate years and ZERO
+# graduate years while the physician occupations resolved to nine -- one life,
+# two prices, decided by which dropdown the visitor happened to use. That is
+# the contradiction ADVANCED_TRAINING_OVERLAY was built to end, surviving on
+# the other side of it.
+for _curated_title, _curated_level in (
+        ("Athletic Training", CREDENTIAL_MASTERS),
+        ("Medicine", CREDENTIAL_DOCTORAL),
+        ("Law", CREDENTIAL_DOCTORAL)):
+    CURATED_MAJOR_DATA[_curated_title]["typical_education"] = _curated_level
+
 # The credential key used in data/graduate_debt_clean.csv.
 CREDENTIAL_DATA_KEY = {
     CREDENTIAL_MASTERS: "master",
@@ -1367,15 +1515,49 @@ def is_graduate_education(typical_education: str) -> bool:
     return (typical_education or "") in GRADUATE_EDUCATION_LEVELS
 
 
-def program_years_for_education(typical_education: str) -> int:
+def curated_school_years(title: str) -> int:
+    """Post-bachelor's school length curated for THIS occupation, or 0.
+
+    `unpaid_training_years` is that length: 4 for medical, dental, pharmacy,
+    veterinary, optometry, podiatry and chiropractic school, 3 for law, 2 for
+    the Athletic Training master's. It is curated per path with a citation,
+    which is more than GRADUATE_ADDITIONAL_YEARS can say, so the cost model
+    should read it rather than keep a second opinion.
+
+    Both sources are section-1 constants, so this resolves BEFORE MAJOR_DATA
+    exists -- which is required, since Financing renders above Career (see
+    resolve_program_years).
+
+    THE IDENTITY THIS RELIES ON: "years earning nothing" equals "years of
+    school" only while school is unpaid. Every path here is. A funded doctorate
+    -- stipend during the programme -- would break it, and needs its own field
+    rather than a reinterpretation of this one.
+    """
+    for source in (ADVANCED_TRAINING_OVERLAY, CURATED_MAJOR_DATA):
+        years = source.get(title or "", {}).get("unpaid_training_years")
+        if years:
+            return int(years)
+    return 0
+
+
+def program_years_for_education(typical_education: str, title: str = None) -> int:
     """How many years of enrollment the cost model should charge for an
     occupation with this BLS typical-entry-education. UNDERGRAD_YEARS for
     anything without a specific length, which is every bachelor's-and-above
-    occupation and every major."""
+    occupation and every major.
+
+    `title` is what makes the graduate half exact instead of a placeholder --
+    omit it and a doctorate falls back to GRADUATE_ADDITIONAL_YEARS' 5, which
+    is no programme's real length. Pass it wherever the occupation is known.
+    """
+    graduate = graduate_years_for_education(typical_education, title)
+    if graduate:
+        return UNDERGRAD_YEARS + graduate
     return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
 
 
-def program_years_for_context(typical_education: str, returning: bool = False) -> int:
+def program_years_for_context(typical_education: str, returning: bool = False,
+                               title: str = None) -> int:
     """Years of enrollment to charge, for THIS visitor rather than for the
     path in the abstract.
 
@@ -1388,18 +1570,29 @@ def program_years_for_context(typical_education: str, returning: bool = False) -
     A returning student pursuing a BACHELOR'S is the ordinary undergraduate
     case and keeps the full length: they do not have that degree yet.
     """
-    total = program_years_for_education(typical_education)
+    total = program_years_for_education(typical_education, title)
     if not returning:
         return total
-    graduate = graduate_years_for_education(typical_education)
+    graduate = graduate_years_for_education(typical_education, title)
     return graduate if graduate else total
 
 
-def graduate_years_for_education(typical_education: str) -> int:
+def graduate_years_for_education(typical_education: str, title: str = None) -> int:
     """Of the total above, how many years are GRADUATE study. Zero for every
     undergraduate path. The loan model needs the split because the two halves
     have different annual limits, different aggregate caps and different rates
-    -- and because Parent PLUS exists for one and not the other."""
+    -- and because Parent PLUS exists for one and not the other.
+
+    The curated per-occupation length wins over GRADUATE_ADDITIONAL_YEARS,
+    which is a FALLBACK for paths whose length this app does not know. Reading
+    the fallback where a real length exists is how one scenario came to carry
+    two: a physician's cost and graduate cap sized on 5 years while the debt
+    cap and the earnings delay used 4.
+    """
+    if is_graduate_education(typical_education):
+        curated = curated_school_years(title)
+        if curated:
+            return curated
     return GRADUATE_ADDITIONAL_YEARS.get(typical_education or "", 0)
 
 
@@ -1410,7 +1603,13 @@ def program_years_for_major(major_name: str) -> int:
     through program_years_for_education so the two paths can't disagree about
     what an associate's degree costs."""
     return program_years_for_education(
-        MAJOR_DATA.get(major_name, {}).get("typical_education"))
+        MAJOR_DATA.get(major_name, {}).get("typical_education"), major_name)
+
+
+def graduate_years_for_major(major_name: str) -> int:
+    """The graduate half of program_years_for_major, same resolution order."""
+    return graduate_years_for_education(
+        MAJOR_DATA.get(major_name, {}).get("typical_education"), major_name)
 
 # Community-college-transfer path ("2+2"): a student spends the first
 # COMMUNITY_COLLEGE_YEARS years at a community college, then transfers to the
@@ -2072,6 +2271,10 @@ GRADUATE_CREDENTIAL_LEVELS = {
 GRADUATE_SEARCH_TO_CREDENTIAL = {
     "Master's degree": CREDENTIAL_MASTERS,
     "Doctoral degree": CREDENTIAL_DOCTORAL,
+    # The MBA is a master's. Without this row graduate_apply_target raises a
+    # KeyError the moment someone applies one -- the level would search and
+    # render perfectly and then break on the button.
+    "MBA": CREDENTIAL_MASTERS,
 }
 
 
@@ -2091,9 +2294,74 @@ GRADUATE_SEARCH_TO_CREDENTIAL = {
 # can afford to be exact where a single default cannot.
 PROFESSIONAL_SEARCH_LEVELS = {
     "Medicine (MD)": ("medicine", 4),
+    "Osteopathic medicine (DO)": ("osteopathic", 4),
     "Dentistry (DDS/DMD)": ("dentistry", 4),
     "Law (JD)": ("law", 3),
+    "Pharmacy (PharmD)": ("pharmacy", 4),
+    "Veterinary medicine (DVM)": ("veterinary", 4),
+    "Optometry (OD)": ("optometry", 4),
+    "Podiatry (DPM)": ("podiatry", 4),
+    "Chiropractic (DC)": ("chiropractic", 4),
 }
+
+# Programmes IPEDS prices but Scorecard cannot separate. There is no CIP for
+# osteopathic or podiatric medicine at any credential level -- searching every
+# CIPDESC in the release for "osteopath" or "podiatr" returns nothing -- so
+# those students are reported under 5112 "Medicine.". This is verified, not
+# assumed: 36 of the 37 DO schools and all 11 podiatry schools appear there,
+# and 22 DO-only and 7 podiatry-only schools are already options in the app's
+# medicine picker, carrying what are really DO and DPM medians.
+#
+# The search still lists them, because the PRICE is programme-specific and is
+# the number the level exists to show. What must not happen is a borrowing
+# column implying a DO-specific median: the debt beside a DO school is its
+# 5112 row, which is the same students, or blank. Both callers gate on this.
+#
+# It also means `medicine` is not allopathic-only, whatever CIPDESC says.
+PROGRAMMES_WITHOUT_OWN_DEBT = ("osteopathic", "podiatry")
+
+# A master's with a fixed field. The MBA is the only one, and it needs its own
+# registry because it is a THIRD shape: its controls behave like a professional
+# level (the programme IS the field, so no field selector), while its search
+# behaves like a graduate one (the universe is the debt file and the price is
+# the school's institution-wide graduate average).
+#
+# It cannot join PROFESSIONAL_SEARCH_LEVELS: those price from
+# professional_tuition_clean.csv, and IPEDS publishes no MBA price -- business
+# is absent from its nine per-programme charge fields. It cannot join
+# GRADUATE_CREDENTIAL_LEVELS either: those key a 2-digit CIP family chosen in
+# the field selector, and "mba" is an exact 4-digit programme.
+#
+# Value is (program_key, credential, years, picker_family).
+#
+# picker_family is the 2-digit family the sidebar's graduate picker is keyed
+# on, and it is what the apply hand-off aims at -- there is no "mba" option
+# list. Verified rather than assumed: all 777 MBA schools are already options
+# under family 52 at master's level, which follows from the rollup medianing
+# the same students.
+FIXED_FIELD_GRADUATE_LEVELS = {
+    "MBA": ("mba", CREDENTIAL_DATA_KEY[CREDENTIAL_MASTERS],
+            GRADUATE_ADDITIONAL_YEARS["Master's degree"], "52"),
+}
+
+
+def is_fixed_field_graduate(credential: str) -> bool:
+    """Whether the Level is a graduate programme that supplies its own field.
+    Beside its registry so a guard tests the real rule, not a copy."""
+    return credential in FIXED_FIELD_GRADUATE_LEVELS
+
+
+def level_supplies_its_own_field(credential: str) -> bool:
+    """Whether the Level control has already answered 'in what subject'.
+
+    The one question both other shapes share: a master's in *something* needs
+    a field selector, and "Pharmacy (PharmD)" or "MBA" does not. Everything
+    downstream that used to test is_professional_credential for this reason
+    must test THIS instead, or the MBA renders a field selector whose value it
+    then ignores.
+    """
+    return (is_professional_credential(credential)
+            or is_fixed_field_graduate(credential))
 
 
 def is_professional_credential(credential: str) -> bool:
@@ -4837,8 +5105,15 @@ def graduate_debt_for(cip_family: str, credential: str, school_name: str):
 
 PROFESSIONAL_SCHOOL_LABEL = {
     "medicine": "Medical school",
+    "osteopathic": "Osteopathic medical school",
     "law": "Law school",
     "dentistry": "Dental school",
+    "pharmacy": "Pharmacy school",
+    "veterinary": "Veterinary school",
+    "optometry": "Optometry school",
+    "podiatry": "Podiatry school",
+    "chiropractic": "Chiropractic school",
+    "mba": "Business school",
 }
 
 
@@ -4899,9 +5174,34 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
                     f"for {school} across the programme, not a debt figure. That "
                     f"school publishes no borrowing median, so this is a sticker "
                     f"price before any aid and reads high.")
-        return (f"Using the national average of {fmt_money(national)} for "
-                f"{'medical' if professional_program_for(major_name) == 'medicine' else 'this'} "
-                "school debt. Pick your school to use its own figure.")
+        program_key = professional_program_for(major_name)
+        # Three national figures with three provenances, and the sentence has
+        # to name the right one. An AAMC average and a median of Scorecard
+        # medians are different claims, and for podiatry the figure is not even
+        # this programme's own -- saying "the national average" over all three
+        # would make the weakest of them sound like the strongest.
+        curated = bool(MAJOR_DATA.get(major_name, {}).get("additional_training_debt"))
+        if curated:
+            source = (f"the national average of {fmt_money(national)} for "
+                      f"{'medical' if program_key == 'medicine' else 'this'} "
+                      f"school debt")
+            advice = " Pick your school to use its own figure."
+        elif program_key in PROGRAMMES_WITHOUT_OWN_DEBT:
+            source = (f"{fmt_money(national)} — no school publishes a "
+                      f"{program_key}-specific debt figure anywhere in federal "
+                      f"data, so this is the median at the schools that teach "
+                      f"it, filed under Medicine")
+            # There is no picker to point at: professional_schools_for returns
+            # nothing for a programme with no debt rows.
+            advice = (" Searching for a school in the graduate tool carries its "
+                      "published price instead.")
+        else:
+            listed = len(professional_schools_for(program_key))
+            source = (f"{fmt_money(national)} — the median across the {listed} "
+                      f"schools that publish a {program_key} debt figure "
+                      f"(College Scorecard)")
+            advice = " Pick your school to use its own figure."
+        return f"Using {source}.{advice}"
     delta = debt - national
     direction = "above" if delta > 0 else "below"
     over_cap = max(debt - PROFESSIONAL_AGGREGATE_LIMIT, 0)
@@ -4920,6 +5220,66 @@ def render_professional_debt_caption(major_name, school_name, debt, container=No
     text = professional_debt_caption(major_name, school_name, debt)
     if text:
         (container or st).caption(text.replace("$", chr(92) + "$"))
+
+
+# Residencies that exist but are NOT required, with what they pay and how many
+# graduates take one. Keyed by occupation title, value is
+# (years, stipend, share sentence).
+#
+# These are disclosed, never charged. The app's model has one earnings path per
+# occupation, so folding in a residency would apply it to every graduate --
+# and at these participation rates that misprices the median person, in the
+# direction of making the degree look worse than it is for the majority who
+# skip it. It is the same call the underemployment figure gets, and for the
+# same reason: a real number about a subgroup, shown as a disclosure rather
+# than folded into arithmetic that cannot represent the subgroup.
+#
+# Podiatry is deliberately absent: its residency IS required, so it lives in
+# ADVANCED_TRAINING_OVERLAY where it changes the numbers.
+OPTIONAL_RESIDENCY = {
+    "Pharmacists": (
+        1, 60000,
+        "about 6,000 PGY-1 places were filled in the 2025 ASHP match against "
+        "11,386 PharmD degrees conferred, so roughly half of graduates take "
+        "one — it is required for most hospital and clinical roles, and for "
+        "almost no community-pharmacy ones"),
+    # The money in these sentences is written {money:...} and formatted through
+    # fmt_money_md below. Two raw dollar signs in one markdown string are a
+    # LaTeX expression to Streamlit, which eats both and italicises whatever is
+    # between them -- and every sentence here already ends with a stipend
+    # figure, so any second one collides with it.
+    "Veterinarians": (
+        1, 58874,
+        "28% of 2025 graduates accepted advanced-education offers, at a mean "
+        "{money:58874} against the {money:129000} mean starting salary for "
+        "those going straight into practice (AVMA)"),
+    "Optometrists": (
+        1, 47274,
+        "538 funded residency places existed in 2024-25 against 1,712 OD "
+        "graduates, at an average stipend of {money:47274} (ASCO) — under a "
+        "third, and concentrated in hospital and specialty practice"),
+}
+
+
+def optional_residency_disclosure(major_name: str) -> str:
+    """One sentence naming a residency the model does NOT charge for.
+
+    Returns "" for paths with no optional residency, so a caller can print it
+    unconditionally. Chiropractic has none to disclose at all -- there is no
+    accredited post-graduate residency requirement in the field, which is a
+    fact about the profession rather than a gap in this data.
+    """
+    entry = OPTIONAL_RESIDENCY.get(major_name)
+    if not entry:
+        return ""
+    years, stipend, share = entry
+    share = re.sub(r"\{money:(\d+)\}",
+                   lambda m: fmt_money_md(int(m.group(1))), share)
+    return (f"**This path is modelled with no residency.** {major_name} can do "
+            f"a {years}-year postgraduate residency and this calculator does "
+            f"not charge anyone for one: {share}. If you intend to do one, "
+            f"expect roughly {fmt_money_md(stipend)} instead of the salary "
+            f"below for that year, and everything here to arrive a year late.")
 
 
 def professional_program_for(major_name: str):
@@ -4943,13 +5303,59 @@ def professional_schools_for(program_key: str) -> list:
     return sorted(df[df["program_key"] == program_key]["INSTNM"].dropna().unique())
 
 
-def national_professional_debt(major_name: str) -> float:
-    """The hand-curated national figure for this path -- AAMC/ABA/ADEA. The
-    fallback whenever no school is named or the named school publishes none."""
-    try:
-        return float(MAJOR_DATA.get(major_name, {}).get("additional_training_debt", 0) or 0)
-    except (TypeError, ValueError):
+@st.cache_data(show_spinner=False)
+def dataset_professional_debt(program_key: str) -> float:
+    """The national figure DERIVED from Scorecard, for paths with no constant.
+
+    Medicine, dentistry and law carry hand-curated AAMC/ADEA/ABA averages in
+    MAJOR_DATA and keep them -- changing those would move every scenario built
+    on them. The six programmes added after that have no association figure in
+    this codebase, and inventing one is worse than reading the file the picker
+    already reads: this is the median of the per-school medians, over the same
+    rows the picker offers.
+
+    Podiatry is the one that needs a second pass. Scorecard has no CIP for it
+    (see PROGRAMMES_WITHOUT_OWN_DEBT), so there is nothing to take a median of
+    -- and returning 0 is the specific trap resolve_professional_debt's
+    docstring warns about, where professional_debt_cap reads a falsy debt as a
+    real cap of zero and pushes the whole tranche private. So it falls back to
+    the medicine medians AT THE SCHOOLS THAT TEACH IT, which is what those rows
+    actually describe: 7 of the 11 IPEDS-priced podiatry schools publish a 5112
+    median, and at a school with no MD programme that median IS its DPM
+    graduates.
+    """
+    debt = load_professional_debt()
+    if debt.empty or "credential" not in debt.columns:
         return 0.0
+    prof = debt[debt["credential"] == "professional"]
+    own = prof[prof["program_key"] == program_key]["debt_median"].dropna()
+    if not own.empty:
+        return float(own.median())
+    tuition = load_professional_tuition()
+    if tuition.empty:
+        return 0.0
+    taught_at = set(tuition[tuition["program_key"] == program_key]["UNITID"])
+    proxy = prof[(prof["program_key"] == "medicine")
+                 & (prof["UNITID"].isin(taught_at))]["debt_median"].dropna()
+    return float(proxy.median()) if not proxy.empty else 0.0
+
+
+def national_professional_debt(major_name: str) -> float:
+    """The national figure for this path. The fallback whenever no school is
+    named or the named school publishes none.
+
+    Two sources, in order: the hand-curated AAMC/ABA/ADEA constant where one
+    exists, then Scorecard's own medians. It must never return 0 for a path
+    that attends a professional school -- see resolve_professional_debt.
+    """
+    try:
+        curated = float(MAJOR_DATA.get(major_name, {}).get("additional_training_debt", 0) or 0)
+    except (TypeError, ValueError):
+        curated = 0.0
+    if curated:
+        return curated
+    program_key = PROFESSIONAL_PROGRAM_BY_OCCUPATION.get(major_name)
+    return dataset_professional_debt(program_key) if program_key else 0.0
 
 
 def resolve_professional_debt(major_name: str, school_name: str = None) -> float:
@@ -5404,6 +5810,25 @@ def applied_program_price_school(program_key: str):
     return applied[1] if applied and applied[0] == program_key else None
 
 
+@st.cache_data(show_spinner=False)
+def mba_rollup_example(school: str = "Northwestern University") -> tuple:
+    """(school, business-rollup debt, MBA debt) for the caption, or None.
+
+    Computed rather than typed, because the whole point of the sentence is that
+    two numbers in the same file disagree -- and a rebuilt release moves both.
+    A literal pair would go stale silently and be quoted as evidence anyway.
+    """
+    df = load_professional_debt()
+    if df.empty or "credential" not in df.columns:
+        return None
+    rows = df[(df["INSTNM"] == school) & (df["credential"] == "master")]
+    rollup = rows[rows["program_key"] == "52"]["debt_median"]
+    mba = rows[rows["program_key"] == "mba"]["debt_median"]
+    if rollup.empty or mba.empty:
+        return None
+    return school, float(rollup.iloc[0]), float(mba.iloc[0])
+
+
 def graduate_search_universe(cip_family: str, credential: str) -> tuple:
     """(schools teaching it, how many of those can be priced).
 
@@ -5457,15 +5882,19 @@ def graduate_apply_target(professional: bool, level_key: str, family: str,
           field's schools and nothing else
     """
     if professional:
-        if professional_program_for(major_name) != level_key:
+        # The level and the calculator field are the same programme everywhere
+        # except osteopathic medicine, which fills the Medical school field --
+        # there is no DO occupation to give it one of its own.
+        programme = calculator_programme_for_level(level_key)
+        if professional_program_for(major_name) != programme:
             return None, (
                 f"Your scenario is studying **{major_name}**, so the sidebar has "
-                f"no {PROFESSIONAL_SCHOOL_LABEL.get(level_key, level_key)} field "
-                f"to fill. Set the major or occupation to a {level_key} path "
+                f"no {PROFESSIONAL_SCHOOL_LABEL.get(programme, programme)} field "
+                f"to fill. Set the major or occupation to a {programme} path "
                 f"first, then apply a school.")
-        if school_name not in professional_schools_for(level_key):
-            return (None, display_name, level_key, int(total_cost)), None
-        return ("prof_school_a", school_name, level_key, int(total_cost)), None
+        if school_name not in professional_schools_for(programme):
+            return (None, display_name, programme, int(total_cost)), None
+        return ("prof_school_a", school_name, programme, int(total_cost)), None
     if MAJOR_TO_CIP_FAMILY.get(major_name) != family:
         return None, (
             f"Your scenario is studying **{major_name}**, which is a different "
@@ -9673,7 +10102,7 @@ def _pdf_profile_rows(major_name, school_name, in_state, coa_per_year,
     # above is the undergraduate one. Naming only that would let a report show
     # UC Berkeley beside $99,160 of Harvard medical school debt with nothing
     # saying so.
-    _grad_extra = graduate_years_for_education(typical_education or "")
+    _grad_extra = graduate_years_for_education(typical_education or "", major_name)
     if _grad_extra:
         _level = ("Master's" if (typical_education or "") == CREDENTIAL_MASTERS
                   else "Doctorate")
@@ -10965,15 +11394,29 @@ def resolve_program_years(selection_key: str, fallback: str,
         # the visitor selected in the credential radio (Bachelor's by default,
         # which reproduces the old behaviour exactly).
         education = st.session_state.get("credential_a", CREDENTIAL_BACHELORS)
-    return program_years_for_context(education, returning)
+    return program_years_for_context(
+        education, returning,
+        resolve_selected_title(selection_key, fallback, share_param))
 
 
 def resolve_typical_education(selection_key: str, fallback: str,
                                share_param: str = None) -> str:
-    """The BLS entry-education for the current selection, resolved before the
-    Career section builds MAJOR_DATA. Empty string outside Career mode, where a
-    major is not an occupation and carries no education level -- everything
-    downstream then keeps the undergraduate defaults."""
+    """The entry-level education for the current selection, resolved before the
+    Career section builds MAJOR_DATA.
+
+    Two sources, BLS first: the OEWS occupation's own level, then the curated
+    entry's, for the eleven entries the Career dropdown carries that are not
+    OEWS occupations at all. "" when neither has one -- a major is not an
+    occupation and carries no level, and the caller then substitutes the
+    visitor's credential answer.
+
+    The curated half is not a nicety. "Medicine" and "Law" sit in the same
+    dropdown as Family Medicine Physicians and Lawyers, describing the same
+    lives; with no level they resolved to four undergraduate years and ZERO
+    graduate years while their OEWS twins resolved to nine. That is the
+    contradiction ADVANCED_TRAINING_OVERLAY was built to end, surviving on the
+    curated side of it.
+    """
     # dataset_mode_radio is seeded ~700 lines below this, so on the first render
     # of a shared link it does not exist yet and every ?mode=Career link was
     # read as Major mode for one pass -- which returned "" and priced a
@@ -10982,11 +11425,6 @@ def resolve_typical_education(selection_key: str, fallback: str,
     # below does.
     mode = st.session_state.get("dataset_mode_radio") or get_shared_default(
         "mode", DATASET_MODE_MAJOR)
-    if mode != DATASET_MODE_CAREER:
-        # Major mode -- see resolve_program_years. Returning "" rather than a
-        # credential keeps this function honest about what BLS says; the caller
-        # decides whether to substitute the visitor's own answer.
-        return ""
     # On the FIRST render of a shared link, session_state has no selection yet
     # -- the Career section seeds major_select_a hundreds of lines below this,
     # while the financing block above needs the length now. Falling straight to
@@ -10994,12 +11432,30 @@ def resolve_typical_education(selection_key: str, fallback: str,
     # one render: a link to Dental Hygienists showed four years instead of two,
     # and every one of the 113 graduate-level occupations showed four instead
     # of six or nine. Reading the link's own value closes that.
+    title = resolve_selected_title(selection_key, fallback, share_param)
+    education = ""
+    if mode == DATASET_MODE_CAREER:
+        # The {} default is load-bearing: the curated entries are absent from
+        # this file, and without it the page dies on selecting one.
+        education = load_bls_careers(CAREERS_CSV_PATH_NATIONAL).get(
+            title, {}).get("typical_education") or ""
+    return education or CURATED_MAJOR_DATA.get(title, {}).get(
+        "typical_education") or ""
+
+
+def resolve_selected_title(selection_key: str, fallback: str,
+                            share_param: str = None) -> str:
+    """The occupation or major currently selected, before MAJOR_DATA exists.
+
+    Split out of resolve_typical_education because the length now depends on
+    WHICH path it is, not only on its education level -- see
+    curated_school_years. Same read-ahead rules, in one place rather than two
+    that can drift.
+    """
     selection = st.session_state.get(selection_key)
     if not selection and share_param:
         selection = get_shared_default(share_param, None)
-    selection = selection or fallback
-    careers = load_bls_careers(CAREERS_CSV_PATH_NATIONAL)
-    return careers.get(selection, {}).get("typical_education") or ""
+    return selection or fallback or ""
 
 
 # Scenario B's own selection is made above its financing block, so it could read
@@ -11040,7 +11496,13 @@ program_years_a = (program_years_for_context(_education_source_a, True)
 _typical_education_a = (_education_source_a or resolve_typical_education(
     "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER], share_param="major")
     or st.session_state.get("credential_a", CREDENTIAL_BACHELORS))
-graduate_years_a = graduate_years_for_education(_typical_education_a)
+# The title matters as much as the level now: 4 graduate years for medicine, 3
+# for law, against the 5-year fallback. Resolved the same way program_years_a
+# was a few lines above, so the total and its graduate half cannot disagree.
+_selected_title_a = resolve_selected_title(
+    "major_select_a", DEFAULT_SELECTION_A[DATASET_MODE_CAREER], share_param="major")
+graduate_years_a = graduate_years_for_education(_typical_education_a,
+                                                 _selected_title_a)
 # The school's own median graduate debt, resolved HERE rather than at its
 # widget: the loan basis below runs before the Career section, the same reason
 # resolve_program_years reads ahead. The widget further down only renders the
@@ -11056,8 +11518,11 @@ graduate_debt_a = (graduate_debt_for(_cip_family_early_a, _credential_key_early_
                    if _credential_key_early_a and _cip_family_early_a else None)
 program_years_b = resolve_program_years(
     "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b")
-graduate_years_b = graduate_years_for_education(resolve_typical_education(
-    "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b"))
+graduate_years_b = graduate_years_for_education(
+    resolve_typical_education("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER],
+                               share_param="major_b"),
+    resolve_selected_title("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER],
+                            share_param="major_b"))
 
 
 if enable_prestige_mode:
@@ -12234,15 +12699,22 @@ if _program_key_a:
             or st.session_state["prof_school_a"] not in _prof_options_a):
         st.session_state["prof_school_a"] = PROFESSIONAL_SCHOOL_NATIONAL
     st.session_state["_prof_program_a"] = _program_key_a
-    _sb_study.selectbox(
-        PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
-        key="prof_school_a", on_change=_on_prof_school_change,
-        help="Median debt that this school's graduates leave with, from College "
-             "Scorecard. It replaces the national average, and the spread is "
-             "wide -- medical school debt runs from about $48,000 to $330,000 "
-             "depending on where you go. Leave on the national average if you "
-             "don't know yet. See Methodology.",
-    )
+    # A programme with no debt rows at all gets no picker. Podiatry is the case
+    # -- Scorecard has no CIP for it, so professional_schools_for returns
+    # nothing and the control would be a dropdown whose only option is the
+    # default. A one-option select reads as "your school is not in our data",
+    # which is true but says nothing about what to do; the caption below the
+    # figure says what to do instead.
+    if len(_prof_options_a) > 1:
+        _sb_study.selectbox(
+            PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
+            key="prof_school_a", on_change=_on_prof_school_change,
+            help="Median debt that this school's graduates leave with, from College "
+                 "Scorecard. It replaces the national average, and the spread is "
+                 "wide -- medical school debt runs from about $48,000 to $330,000 "
+                 "depending on where you go. Leave on the national average if you "
+                 "don't know yet. See Methodology.",
+        )
     professional_debt_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
     # A carried PRICE standing in for a debt has to say so, and say it instead
     # of the usual caption rather than beside it: that one describes what
@@ -12275,6 +12747,13 @@ if _program_key_a:
     else:
         render_professional_debt_caption(major, st.session_state["prof_school_a"],
                                           professional_debt_a, _sb_study)
+    # In the SIDEBAR, not the results: the sidebar renders once whichever
+    # result branch runs, so a disclosure placed here cannot become a
+    # difference between the randomly-assigned arms. Same reasoning that keeps
+    # the school search at module level.
+    _optional_residency_a = optional_residency_disclosure(major)
+    if _optional_residency_a:
+        _sb_study.caption(_optional_residency_a)
 
 # Returning students only. Placed here because it needs the chosen major to
 # pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --
@@ -12344,8 +12823,8 @@ elif is_graduate_education(typical_education_a):
     _sb_study.caption((
         f"ℹ️ The typical entry-level education for {major} (BLS: "
         f"\"{typical_education_a}\") is ABOVE a bachelor's, so costs below cover "
-        f"{program_years_for_education(typical_education_a)} years -- a bachelor's "
-        f"plus {graduate_years_for_education(typical_education_a)} more -- and the "
+        f"{program_years_for_major(major)} years -- a bachelor's "
+        f"plus {graduate_years_for_major(major)} more -- and the "
         "graduate loan limits apply."
     ).replace("$", r"\$"))
 elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
@@ -12593,9 +13072,9 @@ if compare_mode:
             st.caption((
                 f"ℹ️ The typical entry-level education for {major_b} (BLS: "
                 f"\"{typical_education_b}\") is ABOVE a bachelor's, so costs cover "
-                f"{program_years_for_education(typical_education_b)} years -- a "
+                f"{program_years_for_major(major_b)} years -- a "
                 f"bachelor's plus "
-                f"{graduate_years_for_education(typical_education_b)} more."
+                f"{graduate_years_for_major(major_b)} more."
             ).replace("$", r"\$"))
         elif typical_education_b in PROGRAM_YEARS_BY_EDUCATION:
             st.caption((
@@ -15087,9 +15566,10 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     Returns the resolved values; the caller decides what to do with an empty
     field of study, because the two tools say different things about it.
     """
-    # The graduate page offers degree levels and the three professional
-    # programmes; the undergraduate page offers only its own.
-    levels = ({**GRADUATE_CREDENTIAL_LEVELS, **PROFESSIONAL_SEARCH_LEVELS}
+    # The graduate page offers degree levels, the nine professional
+    # programmes and the MBA; the undergraduate page offers only its own.
+    levels = ({**GRADUATE_CREDENTIAL_LEVELS, **FIXED_FIELD_GRADUATE_LEVELS,
+               **PROFESSIONAL_SEARCH_LEVELS}
               if is_graduate else CREDENTIAL_LEVELS)
     default_credential = next(iter(levels))
     credential_key = "grad_search_credential" if is_graduate else "search_credential"
@@ -15101,8 +15581,14 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # "medicine" is not a subject you pick within, and CIP_FAMILY_TITLES has no
     # entry that means it -- so leaving the selector on screen would offer a
     # choice that changes nothing and imply the results were filtered by it.
-    professional = is_professional_credential(
-        st.session_state.get(credential_key, default_credential))
+    # `own_field` gates the SELECTOR; `professional` gates which search runs
+    # and which price source it reads. They differ for exactly one level -- the
+    # MBA supplies its own field like a professional programme but is priced
+    # and searched like a master's -- and conflating them renders a field
+    # selector whose value the MBA search then ignores.
+    _selected_level = st.session_state.get(credential_key, default_credential)
+    professional = is_professional_credential(_selected_level)
+    own_field = level_supplies_its_own_field(_selected_level)
 
     # Prefilled from the major ONLY in Major mode. A major and a CIP family
     # are both fields of study, so that is a correspondence. An occupation
@@ -15116,7 +15602,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         default_family if default_family in CIP_FAMILY_TITLES else None)
 
     row_one, row_two = st.columns([3, 2])
-    if not professional:
+    if not own_field:
         row_one.selectbox(
             "Field of study", families, key="search_cip_family",
             on_change=lambda: mark_interaction("search_cip_family"),
@@ -15327,9 +15813,12 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     return {
         # None when the programme IS the field: the caller must not run its
         # "pick a field of study" guard against a search that does not have one.
-        "family": (None if professional
+        "family": (None if own_field
                    else st.session_state.get("search_cip_family")),
         "professional": professional,
+        # The MBA reaches the graduate search with a fixed programme key, so
+        # the caller cannot derive "which field" from `family` alone.
+        "fixed_field": FIXED_FIELD_GRADUATE_LEVELS.get(credential),
         "credential": credential,
         "min_budget": min_coa,
         "max_budget": max_coa,
@@ -15345,7 +15834,8 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
 def render_graduate_results(results: pd.DataFrame, credential: str,
                              family: str, home_state: str, years: int,
                              level_key: str, coverage: tuple = None,
-                             professional: bool = False) -> None:
+                             professional: bool = False,
+                             programme_key: str = None) -> None:
     """The graduate half of the results panel.
 
     A separate renderer rather than more branches inside the undergraduate one,
@@ -15404,10 +15894,28 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         "**Rate** is which price you'd be charged"
         + (f", based on living in {home_state}. " if home_state else ". ")
         + f"**{years} years** is the per-year price times the standard length of "
+        # "a mba" is what lower-casing an acronym gets you. The fixed-field
+        # levels are acronyms by nature, so they keep their case and take the
+        # article their pronunciation wants.
         + (f"{credential} " if professional
+           else f"an {credential} " if programme_key
            else f"a {credential.lower()} ")
         + "— real programmes vary, and part-time study changes it completely."
     )
+    # Osteopathic and podiatric medicine have no CIP of their own anywhere in
+    # Scorecard -- those students are reported under 5112 "Medicine." -- so the
+    # figure beside a DO or DPM school is its medicine row, which is the same
+    # students under a name that does not say so. Said before the general
+    # caption, because it changes what that caption is describing.
+    if level_key in PROGRAMMES_WITHOUT_OWN_DEBT:
+        st.caption(
+            f"**Graduates borrowed here is not {level_key}-specific.** Federal "
+            f"data has no separate field for this programme at any level, so a "
+            f"figure shown is the school's *Medicine* row — which at a school "
+            f"that teaches only this programme is these same graduates, and at "
+            f"one that also runs an MD school is a mix. The price beside it is "
+            f"programme-specific; the borrowing is not."
+        )
     # The three qualifications that stop this table being read as one number.
     st.caption(
         "**Graduates borrowed** is a different measure from the price beside it, "
@@ -15422,9 +15930,23 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     if professional:
         st.caption(
             "**Per year is this programme's own price**, not the school's "
-            "graduate average — IPEDS publishes medicine, dentistry and law "
+            "graduate average — IPEDS publishes nine professional programmes "
             "separately, and they charge well above the average their "
             "university reports for graduate study as a whole."
+        )
+    elif programme_key == "mba":
+        # The generic version of this caption uses the MBA as its example of a
+        # programme the average hides, which cannot be printed on the MBA's own
+        # results. Here the borrowing column is the programme-specific number
+        # and the price is the school-wide one -- the reverse of every other
+        # level, and worth saying plainly.
+        st.caption(
+            "**Per year is an institution-wide average, not an MBA price.** No "
+            "federal source publishes one: IPEDS prices nine professional "
+            "programmes separately and business is not among them, so this is "
+            "what the school charges the average graduate student. Business "
+            "schools generally charge above it. On this page it is the "
+            "*borrowing* column that is MBA-specific."
         )
     else:
         st.caption(
@@ -15445,6 +15967,17 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
             "so it is more complete than the borrowing column beside it: a school "
             "showing **—** has a published price and no published debt figure, "
             "not the other way round."
+        )
+    elif programme_key == "mba":
+        _eg = mba_rollup_example()
+        st.caption(
+            "**Graduates borrowed is the MBA's own median**, not the business "
+            "rollup's. The two describe the same students at every school here "
+            "and disagree sharply"
+            + (f" — {_eg[0]} reads {fmt_money_md(_eg[1])} through the field "
+               f"rollup and {fmt_money_md(_eg[2])} as an MBA" if _eg else "")
+            + " — because the rollup medians every business master's together. "
+              "Never add or average them."
         )
     else:
         st.caption(
@@ -15587,7 +16120,11 @@ def render_graduate_school_search(always_open: bool = False) -> None:
         # empty-result message below explains.
         controls = render_search_controls(coa_df, is_graduate=True)
         family = controls["family"]
-        if not family and not controls["professional"]:
+        fixed = controls["fixed_field"]
+        # A level that supplies its own field has nothing to guard: the MBA and
+        # the professional programmes both arrive with family=None because the
+        # question is already answered, not because it is unanswered.
+        if not family and not controls["professional"] and not fixed:
             st.info("Pick a field of study to search.")
             return
 
@@ -15602,10 +16139,19 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                 min_price_per_year=controls["min_budget"],
                 control_types=tuple(controls["control_types"]) or None)
         else:
-            grad_key, grad_years = GRADUATE_CREDENTIAL_LEVELS[credential]
-            coverage = graduate_search_universe(family, grad_key)
+            # The MBA runs the GRADUATE search -- its universe is the debt file
+            # and its price is the school's institution-wide graduate average,
+            # because IPEDS publishes no MBA price. Only the programme key
+            # differs from a master's in a chosen field, which is why it needs
+            # no third search function.
+            if fixed:
+                search_key, grad_key, grad_years, _picker_family = fixed
+            else:
+                search_key = family
+                grad_key, grad_years = GRADUATE_CREDENTIAL_LEVELS[credential]
+            coverage = graduate_search_universe(search_key, grad_key)
             results = search_graduate_schools_by_budget(
-                family, grad_key, controls["max_budget"], controls["home_state"],
+                search_key, grad_key, controls["max_budget"], controls["home_state"],
                 states=tuple(controls["states"]) or None, limit=25,
                 min_price_per_year=controls["min_budget"],
                 control_types=tuple(controls["control_types"]) or None)
@@ -15622,7 +16168,7 @@ def render_graduate_school_search(always_open: bool = False) -> None:
             mark_interaction("module_grad_school_search")
             _log_school_search(family, controls["max_budget"], controls["states"],
                                 len(results), controls["home_state"],
-                                level=grad_key,
+                                level=(fixed[0] if fixed else grad_key),
                                 control_types=controls["control_types"])
 
         if results.empty:
@@ -15653,12 +16199,44 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                     "about a fifth of them at master's level and a sixteenth at "
                     "doctoral. Plenty of schools teach it and report nothing."
                 )
+            # "No school teaches this" and "none of them is this cheap" read
+            # identically and are completely different findings. The default
+            # budget is shared by every level, and the professional programmes
+            # sit well above it -- osteopathic medicine's median price is
+            # $60,284 against the slider's opening ceiling, so a level with 37
+            # schools opened on an empty page that looked like a coverage gap.
+            # Re-run without the budget rather than reason about it: the filters
+            # the visitor DID set still apply, so the floor quoted is the floor
+            # for their search and not for the whole file.
+            unbounded = (
+                search_professional_schools_by_budget(
+                    grad_key, float("inf"), controls["home_state"],
+                    states=tuple(controls["states"]) or None, limit=1,
+                    control_types=tuple(controls["control_types"]) or None)
+                if professional else
+                search_graduate_schools_by_budget(
+                    search_key, grad_key, float("inf"), controls["home_state"],
+                    states=tuple(controls["states"]) or None, limit=1,
+                    control_types=tuple(controls["control_types"]) or None))
+            if not unbounded.empty:
+                cheapest = float(unbounded["price_per_year"].iloc[0])
+                if cheapest > controls["max_budget"]:
+                    st.caption(
+                        f"The cheapest one that matches everything else is "
+                        f"**{fmt_money_md(cheapest)}/year** — raise the ceiling "
+                        f"to that and it appears. This is a price, not a "
+                        f"verdict on the programme."
+                    )
             return
 
-        render_graduate_results(results, credential, family,
+        render_graduate_results(results, credential,
+                                 # A fixed-field level applies to the family
+                                 # its picker is keyed on, not to None.
+                                 fixed[3] if fixed else family,
                                  controls["home_state"], grad_years,
                                  level_key=grad_key, coverage=coverage,
-                                 professional=professional)
+                                 professional=professional,
+                                 programme_key=fixed[0] if fixed else None)
 
 
 def render_school_search(always_open: bool = False) -> None:
@@ -16268,7 +16846,12 @@ def get_loan_principal_caption(scenario: dict) -> str:
         MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0))
     if additional_debt <= 0:
         return None
-    national = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    # The RESOLVED national figure, not the raw constant. Six of the nine
+    # professional paths have no curated constant and derive theirs from
+    # Scorecard, so reading MAJOR_DATA here compares a real debt against 0 and
+    # calls every one of them "the school you picked" while the picker plainly
+    # says National average.
+    national = national_professional_debt(scenario["major"])
     basis = ("est. average professional-school debt" if additional_debt == national
              else "professional-school debt for the school you picked")
     return (
@@ -16809,7 +17392,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         render_wage_distribution(scenario["major"], compact=True, caption=False,
                                   row_slots=wage_row_slots)
         render_wage_geography_note(scenario["major"])
-        render_graduate_salary_disclosure(scenario.get("typical_education"))
+        render_graduate_salary_disclosure(scenario.get("typical_education"),
+                                           scenario.get("major"))
 
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
@@ -17320,7 +17904,8 @@ else:
     # Which geography the salary above came from -- shared helper, called from
     # render_scenario_panel too so Compare Mode shows it as well.
     render_wage_geography_note(major)
-    render_graduate_salary_disclosure(scenario.get("typical_education"))
+    render_graduate_salary_disclosure(scenario.get("typical_education"),
+                                       scenario.get("major"))
 
     ai_context = {}
     if enable_ai_mode:
@@ -17767,6 +18352,20 @@ disagree with itself — picking California while living in New York showed
 California wages for the jobs New York doesn't report, while the page called
 them national figures.
 
+**How long a degree beyond a bachelor's is charged for.** The years come from
+the path, not from a single figure for "doctoral": four for medical, dental,
+pharmacy, veterinary, optometry, podiatry and chiropractic school, three for
+law, two for a master's. Where this app has no length for a graduate path — 93
+of the occupations in the dropdown, mostly research doctorates — it falls back
+to five years, which is a placeholder rather than an estimate of anything, and
+is labelled as such wherever it appears.
+
+That matters beyond the tuition: the years also set the federal graduate limit
+($20,500 a year), how many years of wages you give up, and the age this
+comparison starts the high-school baseline at. Charging five where a programme
+runs four is not conservative — it inflates the cost AND the borrowing capacity
+at the same time.
+
 **Majors that need school beyond a 4-year degree.** In real life,
 Athletic Training, Medicine, and Law don't pay a professional salary
 right after a 4-year degree — you need more school first. This calculator
@@ -17789,6 +18388,72 @@ right away:
   your loan — your school's median where you name one, otherwise a national
   **$130,000** from the ABA's 2024 survey
   ([source](https://www.americanbar.org/groups/young_lawyers/resources/after-the-bar/personal-financial/young-lawyers-significantly-impacted-by-high-debt-burdens/)).
+
+- **Dentistry and law beyond the specialties.** *Dentists, General* and
+  *Lawyers* — the two largest professional occupations here — are charged
+  dental school and law school like their specialist counterparts. Judges,
+  magistrates and administrative law judges are too, since the degree is
+  required, with one caveat worth stating: this calculator models everyone
+  entering their occupation the year they finish training, and nobody is
+  appointed a judge at 25. Their earnings therefore arrive a career too early,
+  which the debt on the other side does not offset.
+- **Pharmacy, veterinary medicine, optometry, podiatry and chiropractic**:
+  four years of school with no income, then the real salary from the table
+  above — except podiatry, below. Debt is your school's median where the
+  sidebar lets you name one, otherwise a national figure. Those national
+  figures are **not** an association average like the two above: no such figure
+  is curated here, so each is the **median of the per-school medians College
+  Scorecard publishes** for that programme — pharmacy $142,122 across 88
+  schools, veterinary $162,726 across 26, optometry $172,132 across 16,
+  chiropractic $193,488 across 10
+  ([source](https://collegescorecard.ed.gov/data/)). **Podiatry has no figure
+  of its own anywhere in federal data** — Scorecard publishes no CIP for it at
+  any level, so its students are counted under *Medicine*; the $239,574 shown
+  is the median at the schools that teach podiatry, which at a school with no
+  MD programme is these graduates and at one with both is a mix.
+- **Podiatry adds 3 years of residency at $65,000**, on the same footing as
+  medicine, because it is the one of these five that is **required**: the
+  Council on Podiatric Medical Education standardised podiatric postgraduate
+  training as a single 36-month Podiatric Medicine and Surgery Residency in
+  2011, and the American Board of Podiatric Medicine certifies only its
+  completers
+  ([CPME](https://www.cpme.org/residencies/cpme-faqs-residency-programs/),
+  [ABPM](https://podiatryboard.org/ufaq/)). Podiatric residents are hospital
+  house staff paid on the institution's own scale, so they take the same
+  stipend this calculator uses for medical residents — AAMC's 2024 median
+  first-post-MD-year figure. Published 2025-26 podiatric PGY-1 salaries run
+  from about $67,400 to $86,900, so $65,000 is at or below the bottom of that
+  range rather than a flattering estimate.
+- **Pharmacy, veterinary medicine and optometry have residencies too, and this
+  calculator charges nobody for one.** All three are optional and none is a
+  majority path, so folding one in would misprice the typical graduate — the
+  same call the underemployment figure gets, and for the same reason. What
+  they cost if you do one:
+  **Pharmacy** — about 6,000 PGY-1 places were filled in the 2025 ASHP match
+  against 11,386 PharmD degrees conferred in 2024, so roughly half of
+  graduates take one; it is required for most hospital and clinical roles and
+  for almost no community-pharmacy ones.
+  **Veterinary** — 28% of 2025 graduates accepted advanced-education offers, at
+  a mean $58,874 against the $129,000 mean starting salary for classmates going
+  straight into practice
+  ([AVMA](https://www.avma.org/news/inflation-continues-dampen-gains-veterinarian-salaries-fewer-new-grads-entering-full-time)).
+  **Optometry** — 538 funded places existed in 2024-25 against 1,712 OD
+  graduates in 2025, at an average stipend of $47,274
+  ([ASCO](https://optometriceducation.org/wp-content/uploads/2025/04/ASCOResFundingPromotionsSur24-25.pdf)).
+  **Chiropractic has none to disclose**: the field has no accredited
+  postgraduate residency requirement.
+- **All five qualify for the federal professional loan limit** — $50,000 a year
+  up to a $200,000 aggregate — because Pharmacy (Pharm.D.), Veterinary Medicine
+  (D.V.M.), Chiropractic (D.C.), Optometry (O.D.) and Podiatry (D.P.M.) are each
+  named in the Department of Education's own examples of a professional degree,
+  on the original list rather than the one a June 2026 court stay temporarily
+  expanded
+  ([34 CFR 668.2](https://www.ecfr.gov/current/title-34/subtitle-B/chapter-VI/part-668/subpart-A/section-668.2)).
+  Chiropractic carries one caveat: its programmes are about 4,200 hours over
+  10-12 trimesters, which a year-round schedule finishes in 3.3 years. Four
+  years is the common description and gives the full $200,000 cap; on a 3.3-year
+  reading the cap would be $165,000 and about $28,000 of the median debt would
+  be private borrowing instead.
 
 During those unpaid years, this calculator shows $0 income — and any loan
 you've taken out is still quietly racking up interest the whole time,

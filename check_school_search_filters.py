@@ -107,6 +107,12 @@ def load_app_namespace():
     prefix = src[:src.rindex("# " + "=" * 60, 0, cut)]
     ns = {"__name__": "searchfilterscheck"}
     exec(compile(prefix, "app.py", "exec"), ns)
+    # MAJOR_DATA is a section-4 name, and the professional checks need the REAL
+    # one: the curated AAMC/ABA/ADEA constants live in it, and against an empty
+    # dict every path falls through to the Scorecard-derived figure -- so the
+    # check would pass on code that had lost the curated ones entirely. Built
+    # the way analyze_model.py builds it, from app.py's own builder.
+    ns["MAJOR_DATA"] = ns["build_major_data"](ns["CAREERS_CSV_PATH_NATIONAL"])
     return ns
 
 
@@ -424,6 +430,326 @@ def check_graduate_search(ns) -> list:
     return problems
 
 
+def check_fixed_field_levels(ns) -> list:
+    """The MBA is a third shape, and every place that assumed two must know.
+
+    Its controls behave like a professional programme (the level IS the field,
+    so no field selector) while its search behaves like a master's (the debt
+    file is the universe, the price is the school's institution-wide graduate
+    average, because IPEDS publishes no MBA price). Every predicate below
+    exists because conflating the two halves breaks something silently: a field
+    selector whose value the search ignores, an empty frame read as "no school
+    teaches this", or a KeyError on the apply button of a level that searched
+    and rendered perfectly.
+    """
+    problems = []
+    fixed = ns["FIXED_FIELD_GRADUATE_LEVELS"]
+    prof = ns["PROFESSIONAL_SEARCH_LEVELS"]
+    grad = ns["GRADUATE_CREDENTIAL_LEVELS"]
+
+    for label in fixed:
+        if label in prof or label in grad:
+            problems.append(f"  {label!r} is in two level registries; the "
+                            f"dispatch would pick whichever it tests first")
+        if ns["is_professional_credential"](label):
+            problems.append(
+                f"  is_professional_credential({label!r}) is True, so it would "
+                f"be priced from the per-programme file -- which has no MBA")
+        if not ns["level_supplies_its_own_field"](label):
+            problems.append(
+                f"  {label!r} would render a field selector whose value its "
+                f"search then ignores")
+        if label not in ns["GRADUATE_SEARCH_TO_CREDENTIAL"]:
+            problems.append(
+                f"  {label!r} has no GRADUATE_SEARCH_TO_CREDENTIAL row, so "
+                f"applying a school raises a KeyError -- after the level has "
+                f"searched and rendered perfectly")
+
+    # The divergence itself: own-field is the union, and a plain degree level
+    # is in neither half of it.
+    for label in prof:
+        if not ns["level_supplies_its_own_field"](label):
+            problems.append(f"  {label!r} lost its own-field status")
+    for label in grad:
+        if ns["level_supplies_its_own_field"](label):
+            problems.append(
+                f"  {label!r} is a degree level and must ASK for a field")
+
+    for label, (program_key, credential, years, picker_family) in fixed.items():
+        results = ns["search_graduate_schools_by_budget"](
+            program_key, credential, 500_000, "CA", limit=10_000)
+        if results.empty:
+            problems.append(f"  {label} returns no schools at any price")
+            continue
+        missing = [c for c in SHARED_RESULT_COLUMNS if c not in results.columns]
+        if missing:
+            problems.append(f"  {label} results are missing {missing}")
+        if not results["price_per_year"].is_monotonic_increasing:
+            problems.append(f"  {label} results are not price-sorted")
+        # The hand-off aims at the FAMILY picker, since no per-programme option
+        # list exists. Every result must be in it or the apply silently resets.
+        options = set(ns["graduate_schools_for"](picker_family, credential))
+        stray = set(results["picker_name"]) - options
+        if stray:
+            problems.append(
+                f"  {len(stray)} {label} school(s) are absent from the family "
+                f"{picker_family} picker (e.g. {sorted(stray)[0]!r})\n"
+                f"    the picker resets to the national default on a name it "
+                f"does not have, discarding the school just applied")
+        # The programme median and the family rollup describe the same students
+        # and must stay separately readable -- they disagree by a lot.
+        rollup = ns["graduate_schools_for"](picker_family, credential)
+        if not rollup:
+            problems.append(f"  family {picker_family} has no rollup rows, so "
+                            f"{label} has nothing to be distinguished FROM")
+    return problems
+
+
+def check_programmes_without_debt(ns) -> list:
+    """PROGRAMMES_WITHOUT_OWN_DEBT must name exactly the programmes with none.
+
+    The caption on those levels tells the visitor the borrowing column is not
+    programme-specific. If a future release gave one of them its own CIP the
+    caption would become a lie in the safe direction; if a programme fell OUT
+    of the debt file without being listed here, the table would present a
+    medicine median as that programme's own. Both are silent, so both are
+    checked -- against the data, not against the tuple.
+    """
+    problems = []
+    debt = ns["load_professional_debt"]()
+    if debt.empty or "credential" not in debt.columns:
+        return ["  no professional debt data to check against"]
+    prof = debt[debt["credential"] == "professional"]
+    listed = set(ns["PROGRAMMES_WITHOUT_OWN_DEBT"])
+    for label, (program_key, _years) in ns["PROFESSIONAL_SEARCH_LEVELS"].items():
+        rows = len(prof[prof["program_key"] == program_key])
+        if program_key in listed and rows:
+            problems.append(
+                f"  {program_key!r} is listed as having no debt of its own but "
+                f"has {rows} rows -- the caption disclaiming it is now false")
+        if program_key not in listed and not rows:
+            problems.append(
+                f"  {program_key!r} has no debt rows and is not listed, so its "
+                f"results show a borrowing column built from another programme "
+                f"with nothing saying so")
+    return problems
+
+
+def check_professional_paths(ns) -> list:
+    """Every search level must be able to reach the calculator, or say so.
+
+    A level whose apply can never succeed is worse than one that does not
+    exist: the button is there, the warning tells the visitor to set a major
+    the app does not have, and nothing on screen admits the path is unmodelled.
+    So every professional level must map to an occupation, and every mapped
+    occupation must resolve a non-zero national debt.
+
+    Zero is the specific failure. professional_debt_cap reads a falsy debt as a
+    real cap of zero rather than "unset", which pushes the entire tranche into
+    private borrowing while the principal simultaneously loses the debt -- two
+    wrong answers from one absent row, and both flatter or punish silently.
+    """
+    problems = []
+    occupations = ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"]
+    # Every mapped title must be a real occupation. A near-miss ("Optometrist"
+    # for "Optometrists") is inert in the worst way: the map looks complete,
+    # every lookup against it succeeds in isolation, and the actual occupation
+    # in MAJOR_DATA silently keeps costing nothing. Only the curated pseudo-
+    # occupations are exempt, since those are entries this app invents.
+    known = set(ns["MAJOR_DATA"])
+    for title, programme in sorted(occupations.items()):
+        if title not in known:
+            problems.append(
+                f"  {title!r} -> {programme!r} names no occupation in "
+                f"MAJOR_DATA\n    the mapping is inert and that path is priced "
+                f"with no professional debt at all")
+    for label, (level_key, _years) in ns["PROFESSIONAL_SEARCH_LEVELS"].items():
+        programme = ns["calculator_programme_for_level"](level_key)
+        reachable = [occ for occ, key in occupations.items() if key == programme]
+        if not reachable:
+            problems.append(
+                f"  {label!r} applies to programme {programme!r}, which no "
+                f"occupation maps to\n    its apply button can only ever warn, "
+                f"and the warning names a path the app does not offer")
+            continue
+        occ = reachable[0]
+        national = ns["national_professional_debt"](occ)
+        if not national:
+            problems.append(
+                f"  {occ!r} ({programme}) resolves a national debt of 0\n"
+                f"    professional_debt_cap reads that as a cap, not as unset: "
+                f"the whole tranche goes private and the debt vanishes")
+        # The federal professional cap keys on unpaid_training_years, so a
+        # path with no training structure gets a cap of ZERO -- and
+        # split_loan_financing reads that as a real cap, pricing an ordinary
+        # federal professional loan entirely as private money at the higher
+        # rate. It is invisible: the page renders, the total is right, and only
+        # the tranche split is wrong. All five occupations shipped that way.
+        cap = ns["professional_debt_cap"](occ, national)
+        if not cap:
+            problems.append(
+                f"  {occ!r} has a federal professional cap of 0\n"
+                f"    every dollar of its {ns['fmt_money'](national)} debt is "
+                f"priced as private borrowing; check unpaid_training_years")
+        # And a path that attends school must not earn a full salary while in
+        # it. Year 0 is the first year after a bachelor's, which for every
+        # programme here is the first year OF the professional degree.
+        first_year = ns["get_annual_salary_for_year"](occ, 0)
+        if first_year:
+            problems.append(
+                f"  {occ!r} earns {ns['fmt_money'](first_year)} in its first "
+                f"year of professional school\n    it is being charged the "
+                f"tuition and paid the salary at the same time")
+        listed = ns["professional_schools_for"](programme)
+        if not listed and programme not in ns["PROGRAMMES_WITHOUT_OWN_DEBT"]:
+            problems.append(
+                f"  {programme!r} has no schools to pick and is not declared as "
+                f"a programme without its own debt")
+        # The caption promises a school figure differs from the national one.
+        if listed:
+            school_debt = ns["resolve_professional_debt"](occ, listed[0])
+            if not school_debt:
+                problems.append(
+                    f"  naming {listed[0]!r} for {occ!r} resolves no debt at all")
+    return problems
+
+
+def check_residency_modelling(ns) -> list:
+    """Charged residencies and disclosed ones must be different sets.
+
+    Two registries make one claim between them: ADVANCED_TRAINING_OVERLAY's
+    stipend years say "every graduate of this path serves this", and
+    OPTIONAL_RESIDENCY says "some do, and we are not charging for it". A path
+    in both charges everyone for something the caption calls optional; a path
+    in neither, that should be in one, is silent either way -- deleting
+    podiatry's residency moves its earnings four years earlier and raises no
+    error anywhere.
+
+    Podiatry is named here rather than derived, deliberately, and the same way
+    check_rap_payment_table names the published chart: CPME standardised
+    podiatric postgraduate training as a single 36-month residency in 2011 and
+    the ABPM certifies only its completers, so 3 years is an external fact this
+    file can hold the code to. Deriving it from the overlay would only assert
+    that the overlay equals itself.
+    """
+    problems = []
+    overlay = ns["ADVANCED_TRAINING_OVERLAY"]
+    optional = ns["OPTIONAL_RESIDENCY"]
+
+    REQUIRED_YEARS = {"Podiatrists": 3}
+    for occ, years in REQUIRED_YEARS.items():
+        entry = overlay.get(occ, {})
+        if entry.get("stipend_training_years") != years:
+            problems.append(
+                f"  {occ!r} must serve a required {years}-year residency "
+                f"(CPME 36-month PMSR); the overlay says "
+                f"{entry.get('stipend_training_years', 0)}")
+        if not entry.get("stipend_salary"):
+            problems.append(
+                f"  {occ!r} serves a residency at a stipend of 0 -- residents "
+                f"are salaried house staff, not unpaid")
+
+    both = set(optional) & {o for o, e in overlay.items()
+                            if e.get("stipend_training_years")}
+    for occ in sorted(both):
+        problems.append(
+            f"  {occ!r} is charged a residency AND disclosed as not charged "
+            f"for one\n    the sidebar caption and the earnings curve now "
+            f"contradict each other")
+
+    # A disclosed residency must be genuinely absent from the arithmetic, and
+    # the sentence must actually name a figure -- an empty disclosure is worse
+    # than none, since the path then looks like it has no residency at all.
+    for occ in optional:
+        if overlay.get(occ, {}).get("stipend_training_years"):
+            continue                       # already reported above
+        text = ns["optional_residency_disclosure"](occ)
+        if not text or "$" not in text:
+            problems.append(
+                f"  {occ!r} discloses no stipend figure: {text!r}")
+    return problems
+
+
+def check_program_lengths(ns) -> list:
+    """One length per path, and the two modes must price the same life alike.
+
+    GRADUATE_ADDITIONAL_YEARS' 5 is a FALLBACK for paths whose length this app
+    does not know, and reading it where a real length exists is how a single
+    scenario came to carry two: a physician's cost and graduate cap sized on 5
+    years while the debt cap and the earnings delay used 4. Nothing on screen
+    showed the disagreement -- both halves looked right on their own.
+    """
+    problems = []
+    MD = ns["MAJOR_DATA"]
+    undergrad = ns["UNDERGRAD_YEARS"]
+
+    # 1. Cost and earnings read one number. `unpaid_training_years` is the
+    #    length of post-bachelor's school for every path that has one, so the
+    #    graduate half of the cost must equal it.
+    for major, entry in sorted(MD.items()):
+        school = entry.get("unpaid_training_years", 0)
+        if not school:
+            continue
+        grad = ns["graduate_years_for_major"](major)
+        if grad != school:
+            problems.append(
+                f"  {major!r} is charged {grad} graduate year(s) of cost but "
+                f"attends {school}\n    the loan, the graduate cap and the "
+                f"foregone earnings all use the first; the debt cap and the "
+                f"earnings delay use the second")
+
+    # 2. The total is the undergraduate years plus that half, always. Anything
+    #    else means a call site added its own arithmetic.
+    for major, entry in sorted(MD.items()):
+        grad = ns["graduate_years_for_major"](major)
+        if not grad:
+            continue
+        total = ns["program_years_for_major"](major)
+        if total != undergrad + grad:
+            problems.append(
+                f"  {major!r}: total {total} != {undergrad} + {grad} graduate")
+
+    # 3. The same life must cost the same in both modes. These pairs are a
+    #    curated MAJOR and the OCCUPATION it leads to; "Medicine" resolving to
+    #    four undergraduate years while Family Medicine Physicians resolved to
+    #    nine is the contradiction ADVANCED_TRAINING_OVERLAY exists to prevent,
+    #    and it survived on the major side for as long as that overlay has.
+    TWINS = [("Medicine", "Family Medicine Physicians"),
+             ("Law", "Lawyers"),
+             ("Athletic Training", "Athletic Trainers")]
+    for major, occupation in TWINS:
+        if major not in MD or occupation not in MD:
+            problems.append(f"  fixture: {major!r}/{occupation!r} not in MAJOR_DATA")
+            continue
+        for label, fn in (("total years", ns["program_years_for_major"]),
+                          ("graduate years", ns["graduate_years_for_major"])):
+            if fn(major) != fn(occupation):
+                problems.append(
+                    f"  {major!r} and {occupation!r} disagree about {label}: "
+                    f"{fn(major)} vs {fn(occupation)}\n    one life, two "
+                    f"prices, decided by which dropdown the visitor used")
+        if (MD[major].get("unpaid_training_years", 0)
+                != MD[occupation].get("unpaid_training_years", 0)):
+            problems.append(
+                f"  {major!r} and {occupation!r} disagree about when earnings "
+                f"start")
+
+    # 4. Every occupation that attends a professional school has a curated
+    #    length. Without one it silently falls back to 5 -- and the fallback is
+    #    wrong for all nine programmes.
+    for occupation, programme in sorted(
+            ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"].items()):
+        if occupation not in MD:
+            continue                      # reported by check_professional_paths
+        if not ns["curated_school_years"](occupation):
+            problems.append(
+                f"  {occupation!r} attends {programme} school with no curated "
+                f"length, so it falls back to "
+                f"{ns['GRADUATE_ADDITIONAL_YEARS']['Doctoral or professional degree']} "
+                f"years -- which is no programme's real length")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -569,6 +895,11 @@ def main() -> int:
         ("graduate search", lambda: check_graduate_search(ns)),
         ("picker identity", lambda: check_picker_identity(ns, base)),
         ("apply target", lambda: check_apply_target(ns)),
+        ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
+        ("professional paths", lambda: check_professional_paths(ns)),
+        ("residency modelling", lambda: check_residency_modelling(ns)),
+        ("program lengths", lambda: check_program_lengths(ns)),
+        ("programmes without debt", lambda: check_programmes_without_debt(ns)),
     ]:
         found = fn()
         checks.append(name)
