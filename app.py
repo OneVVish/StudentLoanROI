@@ -11917,15 +11917,19 @@ def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
                                      styles) -> list:
     """Take-home tables for both scenarios in the compare report.
 
-    Mirrors the on-screen compare branch's render_takehome_block(
-    show_charts=False): every NUMBER, no pie charts. The single report keeps
-    its per-stage charts because it describes one scenario; here two
-    scenarios x two stages x two charts would be eight images saying what
-    four table rows already say, so the report takes the same deliberate
-    asymmetry the on-screen columns do. The compare PDF previously had no
-    take-home at all -- the downloadable artifact of the randomly assigned
-    contrast arm was missing a section the single arm's carries, the same
-    one-branch-only gap the on-screen parity fix chased.
+    Mirrors the on-screen compare branch, which since 2026-08-10 draws the
+    salary-flow bars below its two columns -- so this draws them too, grouped
+    by stage with A above B, all four sharing one axis.
+
+    The reason it previously did not is gone rather than overruled: two pies
+    per stage per scenario was EIGHT images saying what four table rows
+    already said. One bar per stage per scenario is four, and each carries
+    something no row does -- the loan payment's length against the tax
+    segments beside it, on a scale shared with the other scenario.
+
+    The compare PDF once had no take-home at all: the downloadable artifact of
+    the randomly assigned contrast arm was missing a section the single arm's
+    carries, the same one-branch-only gap the on-screen parity fix chased.
     """
     # BOTH lists or nothing: rendering one scenario's take-home in a
     # comparison report would be its own arm asymmetry, worse than omitting
@@ -11958,6 +11962,47 @@ def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
                   for label, f in stages],
             ]),
         ]
+
+    # The bars, grouped by stage so A sits directly above B. ONE axis across
+    # all four, computed here for the same reason the screen computes it
+    # across all four: two scenarios drawn to their own widths cannot be
+    # compared, and comparing them is what this report is.
+    _flow_rows = [
+        (stage_label, [("A", figs_a), ("B", figs_b)])
+        for (stage_label, figs_a), (_label_b, figs_b)
+        in zip(takehome_stages_a, takehome_stages_b)
+        if figs_a["gross"] > 0 or figs_b["gross"] > 0
+    ]
+    if _flow_rows:
+        _divisor = salary_flow_divisor(selected_salary_flow_period())
+        _entries = [figs for _h, cols in _flow_rows for _l, figs in cols]
+        _axis_max = salary_flow_axis_max(_entries, _divisor)
+        flowables += [
+            Spacer(1, 8),
+            Paragraph(_strip_emoji(salary_flow_caption(
+                [f["monthly_payment"] for f in _entries])), styles["caption"]),
+        ]
+        for stage_label, cols in _flow_rows:
+            # The WHOLE ROW is kept together, not each bar. Per-bar it broke
+            # across pages between A and B -- A: Starting on page 5, B:
+            # Starting on page 6 -- which is precisely the pairing the
+            # by-stage grouping exists to create. Two bars plus their labels
+            # is about 280pt and always fits a page.
+            _row = [Spacer(1, 6),
+                    Paragraph(_strip_emoji(stage_label), styles["section"])]
+            for panel_label, figs in cols:
+                img = build_pdf_salary_flow_chart(
+                    figs["take_home"], figs["monthly_payment"],
+                    max_width=PDF_CONTENT_WIDTH, axis_max=_axis_max,
+                    divisor=_divisor)
+                if img is None:
+                    continue
+                _row += [
+                    Paragraph(f"{panel_label}: "
+                              f"{xml_escape(scenario_a['major'] if panel_label == 'A' else scenario_b['major'])}",
+                              styles["body"]),
+                    img]
+            flowables.append(KeepTogether(_row))
     return flowables
 
 
@@ -18458,6 +18503,72 @@ def takehome_figures(scenario: dict, major_name: str, stage_key: int, city: dict
     }
 
 
+def render_salary_flow_charts(rows, key_prefix: str, columns: bool = True) -> None:
+    """The salary-flow bars, with their caption and their Annual/Monthly
+    control, for BOTH result branches.
+
+    `rows` is [(row_heading or None, [(column_label, figures), ...]), ...].
+    Single-scenario mode passes one unheaded row whose columns are the career
+    stages; Compare Mode passes one row PER STAGE whose columns are A and B --
+    the arrangement that puts the two scenarios adjacent, which is the whole
+    reason that branch exists.
+
+    ONE call site per branch, and the axis is computed across EVERY bar it is
+    given. That is what makes the compare arrangement safe: A's bars and B's
+    bars drawn to their own widths would be the same bug this chart already
+    had between career stages ($120,322 and $145,024 rendering identically),
+    reappearing across scenarios instead of across years -- and across
+    scenarios is the comparison the reader is actually making.
+
+    It is also the only widget with SALARY_FLOW_PERIOD_KEY, in either branch:
+    the compare columns pass show_charts=False and this is called once below
+    them. Rendering it inside a per-scenario loop would raise
+    StreamlitDuplicateElementKey, which is how this codebase has already
+    broken in production once.
+    """
+    entries = [(label, figs) for _heading, cols in rows for label, figs in cols]
+    if not entries:
+        return
+    st.caption(salary_flow_caption([figs["monthly_payment"]
+                                    for _label, figs in entries]))
+    # Beside the thing it relabels rather than in the sidebar: it changes how
+    # one chart is labelled and nothing about the model.
+    st.radio("Show these as", list(SALARY_FLOW_PERIODS),
+             key=SALARY_FLOW_PERIOD_KEY, horizontal=True,
+             help="The same bar in either unit — dividing by twelve "
+                  "changes the numbers, not the proportions.")
+    divisor = salary_flow_divisor(selected_salary_flow_period())
+    axis_max = salary_flow_axis_max([figs for _label, figs in entries], divisor)
+    for heading, cols in rows:
+        if heading:
+            panel_heading(heading, level=3)
+        # Columns only where this call owns a nesting level. Streamlit allows
+        # one, and Compare Mode's take-home NUMBERS have already spent it --
+        # but this renders below that block, at the top level, so it gets its
+        # own. stage_layout is what tells us which case we are in.
+        containers = (st.columns(len(cols)) if columns and len(cols) > 1
+                      else [contextlib.nullcontext()] * len(cols))
+        for (label, figs), container in zip(cols, containers):
+            with container:
+                panel_heading(label, level=3)
+                fig = build_salary_flow_chart(
+                    figs["take_home"], figs["monthly_payment"],
+                    axis_max=axis_max, divisor=divisor)
+                if fig is None:
+                    # Reachable only in Compare Mode, where one scenario can
+                    # still be in unpaid training at a stage the other is
+                    # earning in. Dropping the whole row would take the
+                    # earning scenario's bar with it; leaving the heading
+                    # bare reads as a rendering fault.
+                    st.caption(salary_flow_headline(figs["take_home"],
+                                                    figs["monthly_payment"]))
+                    continue
+                st.plotly_chart(
+                    fig, use_container_width=True,
+                    config=PLOTLY_CHART_CONFIG,
+                    key=f"salary_flow_{key_prefix}_{heading or ''}_{label}")
+
+
 def render_takehome_block(scenario: dict, major_name: str, city_name: str, city: dict,
                            show_charts: bool = True, heading: bool = True,
                            stage_layout: str = "columns") -> dict:
@@ -18484,11 +18595,13 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
     Streamlit allows only one level of column nesting, and those callers have
     already spent it on the A/B split.
 
-    show_charts=False drops the pie charts for the narrow Compare Mode columns
-    while keeping every NUMBER. That's the one deliberate asymmetry left
-    between the arms: the figures are identical, the redundant chart is not
-    repeated four times on one page. The charts encode the same split the
-    ratio metric states numerically, so no information is lost.
+    show_charts=False keeps every NUMBER and draws no bar. It no longer means
+    Compare Mode has no charts -- since 2026-08-10 that branch renders them
+    itself, once, BELOW both columns, via render_salary_flow_charts. What the
+    flag now says is "this call does not own the bars", which is what a
+    half-width column with its own private x-scale would have to mean: A's
+    bars and B's would not be to scale with each other, and comparing them is
+    the only reason that branch exists.
     """
     if heading:
         st.subheader(f"🏙️ Real-World Take-Home — {major_name} in {city_name}")
@@ -18522,33 +18635,8 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
     # render-time crash.
     drawable = [(label, figs) for label, figs in results if figs["gross"] > 0]
     if show_charts and drawable:
-        st.caption(salary_flow_caption(
-            [figs["monthly_payment"] for _label, figs in drawable]))
-        # Rendered here rather than in the sidebar: it changes how ONE chart
-        # is labelled and nothing about the model, so it belongs beside the
-        # thing it relabels. It exists only on this branch, which is the
-        # single-scenario one -- Compare Mode passes show_charts=False, so
-        # there is exactly one widget with this key and no duplicate-key risk.
-        st.radio("Show these as", list(SALARY_FLOW_PERIODS),
-                 key=SALARY_FLOW_PERIOD_KEY, horizontal=True,
-                 help="The same bar in either unit — dividing by twelve "
-                      "changes the numbers, not the proportions.")
-        _flow_divisor = salary_flow_divisor(selected_salary_flow_period())
-        _flow_axis_max = salary_flow_axis_max(
-            [figs for _label, figs in drawable], _flow_divisor)
-        chart_cols = (st.columns(len(drawable)) if stage_layout == "columns"
-                      else [contextlib.nullcontext()] * len(drawable))
-        for (label, figs), container in zip(drawable, chart_cols):
-            with container:
-                panel_heading(label, level=3)
-                _flow = build_salary_flow_chart(
-                    figs["take_home"], figs["monthly_payment"],
-                    axis_max=_flow_axis_max, divisor=_flow_divisor)
-                if _flow is not None:
-                    st.plotly_chart(
-                        _flow, use_container_width=True,
-                        config=PLOTLY_CHART_CONFIG,
-                        key=f"salary_flow_{major_name}_{label}")
+        render_salary_flow_charts([(None, drawable)], key_prefix=major_name,
+                                  columns=(stage_layout == "columns"))
 
     return {"stages": results}
 
@@ -19097,6 +19185,32 @@ if compare_mode:
         panel_heading(f"B: {scenario_b['major']}")
         _th_b = render_takehome_block(scenario_b, major_b, city, city_info,
                                       show_charts=False, heading=False, stage_layout="stacked")
+
+    # The bars render BELOW the two scenario columns, not inside them, and one
+    # row per career stage puts A next to B.
+    #
+    # Inside the columns they would be half-width and each scenario would own
+    # its own x-scale, so the reader's actual question -- is B's payment a
+    # bigger bite than A's -- would be answered by two bars that are not to
+    # scale with each other. Below, at the top level, all four share one axis
+    # and one nesting level is free again (the columns above spent this
+    # branch's only one, which is why the NUMBERS up there are stacked).
+    #
+    # Grouped by stage rather than by scenario for the same reason the
+    # balance and payment charts overlay A and B instead of drawing two: the
+    # comparison should be adjacent, not held in the reader's head.
+    _flow_rows = [
+        (_stage_label,
+         [(f"A: {scenario_a['major']}", _figs_a), (f"B: {scenario_b['major']}", _figs_b)])
+        for (_stage_label, _figs_a), (_label_b, _figs_b)
+        in zip(_th_a["stages"], _th_b["stages"])
+        # EITHER, not both: a physician in unpaid training at year 1 beside a
+        # scenario that is already earning is exactly the contrast this arm
+        # exists to show, and requiring both would delete the row that shows it.
+        if _figs_a["gross"] > 0 or _figs_b["gross"] > 0
+    ]
+    if _flow_rows:
+        render_salary_flow_charts(_flow_rows, key_prefix="compare")
 
     st.plotly_chart(
         build_comparison_balance_chart(
