@@ -2075,6 +2075,33 @@ GRADUATE_SEARCH_TO_CREDENTIAL = {
 }
 
 
+# The three professional-practice programmes the app already models, offered as
+# their own levels in the graduate search. Value is (program_key in both
+# professional datasets, years).
+#
+# These are keyed by PROGRAMME, not by CIP family, which is what makes them a
+# different shape from the two levels above: a master's needs a field of study
+# to be a question at all, while "medicine" already is one. The search hides
+# the field selector when one of these is chosen -- see render_search_controls.
+#
+# The lengths are the standard US ones and are used only for the "whole
+# programme" column here. The CALCULATOR still prices a professional path at
+# GRADUATE_ADDITIONAL_YEARS' 5 years, which its own comment calls a placeholder
+# and which its sidebar lets a visitor change; a search listing 213 law schools
+# can afford to be exact where a single default cannot.
+PROFESSIONAL_SEARCH_LEVELS = {
+    "Medicine (MD)": ("medicine", 4),
+    "Dentistry (DDS/DMD)": ("dentistry", 4),
+    "Law (JD)": ("law", 3),
+}
+
+
+def is_professional_credential(credential: str) -> bool:
+    """Whether the search's Level is a professional programme rather than a
+    field-plus-credential. Beside its registry so a guard can test it."""
+    return credential in PROFESSIONAL_SEARCH_LEVELS
+
+
 def is_graduate_credential(credential: str) -> bool:
     """Whether the search's Level selection is a graduate one.
 
@@ -5071,6 +5098,7 @@ def adm_filter_applies(credential: str) -> bool:
 
 
 GRADUATE_TUITION_PATH = "data/graduate_tuition_clean.csv"
+PROFESSIONAL_TUITION_PATH = "data/professional_tuition_clean.csv"
 
 
 @st.cache_data(show_spinner=False)
@@ -5180,6 +5208,103 @@ def search_graduate_schools_by_budget(cip_family: str, credential: str,
 
     matches = matches.sort_values("price_per_year").head(limit).copy()
     matches["total_program_cost"] = matches["price_per_year"] * years
+    return matches.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_professional_tuition() -> pd.DataFrame:
+    """Per-school, per-programme professional tuition (build_graduate_tuition.py).
+
+    Distinct from load_graduate_tuition: that one is one row per institution
+    and averages every graduate programme at it, which is exactly wrong for the
+    programmes that charge most above their school's average. This is the
+    per-programme figure IPEDS publishes separately for medicine, dentistry,
+    law and six others.
+    """
+    try:
+        return pd.read_csv(PROFESSIONAL_TUITION_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=[
+            "UNITID", "INSTNM", "CITY", "STABBR", "control_type", "program_key",
+            "prof_tuition_in", "prof_tuition_out",
+            "prof_tuition_fees_in", "prof_tuition_fees_out", "ipeds_year"])
+
+
+def search_professional_schools_by_budget(program_key: str,
+                                           max_price_per_year: float,
+                                           home_state: str = None,
+                                           states: tuple = None,
+                                           control_types: tuple = None,
+                                           limit: int = 25,
+                                           min_price_per_year: float = 0.0
+                                           ) -> pd.DataFrame:
+    """Medical, dental or law schools by price, cheapest first.
+
+    The universe is the TUITION file, not the debt file -- the reverse of
+    search_graduate_schools_by_budget, and deliberately. There, "who teaches
+    this" had to come from schools publishing a debt median because Scorecard
+    has no graduate program flags. Here a school reporting a medicine tuition
+    is a school with a medical school, so the price file answers both halves
+    and answers them better: 156 medical, 69 dental and 213 law schools against
+    143, 60 and 178 in the debt data.
+
+    Debt rides along where it exists, as the second column, and is left-joined
+    for that reason -- a school with a published price and no published debt
+    belongs in the list, with the debt cell empty.
+    """
+    tuition = load_professional_tuition()
+    if tuition.empty or program_key not in {key for key, _ in
+                                            PROFESSIONAL_SEARCH_LEVELS.values()}:
+        return pd.DataFrame()
+    matches = tuition[tuition["program_key"] == program_key].copy()
+    if matches.empty:
+        return pd.DataFrame()
+
+    debt = load_professional_debt()
+    if not debt.empty and "credential" in debt.columns:
+        rows = debt[(debt["credential"] == "professional")
+                    & (debt["program_key"] == program_key)]
+        matches = matches.merge(
+            rows[["UNITID", "debt_median", "INSTNM"]]
+                .drop_duplicates(subset=["UNITID"])
+                .rename(columns={"INSTNM": "picker_name"}),
+            on="UNITID", how="left")
+    else:
+        matches["debt_median"] = pd.NA
+        matches["picker_name"] = matches["INSTNM"]
+    # A school with a price but no debt row has no name in the picker's option
+    # list, so it falls back to its own. The apply hand-off reconciles against
+    # the list and will drop back to the national default for those -- correct,
+    # because there is no per-school debt figure for it to carry.
+    matches["picker_name"] = matches["picker_name"].fillna(matches["INSTNM"])
+
+    at_home = (matches["STABBR"] == home_state) if home_state else False
+    matches["is_home_state"] = at_home
+    matches["price_per_year"] = matches["prof_tuition_fees_out"].where(
+        ~matches["is_home_state"], matches["prof_tuition_fees_in"])
+    matches["price_per_year"] = matches["price_per_year"].fillna(
+        matches["prof_tuition_fees_in"])
+
+    affordable = (matches["price_per_year"].notna()
+                  & (matches["price_per_year"] <= max_price_per_year)
+                  & (matches["price_per_year"] >= min_price_per_year))
+    matches = matches[affordable]
+    if states:
+        matches = matches[matches["STABBR"].isin(states)]
+    if control_types:
+        matches = matches[matches["control_type"].isin(control_types)]
+
+    matches = matches.sort_values("price_per_year").head(limit).copy()
+    # Every column the shared results table reads, named as it expects them.
+    # The table is deliberately one renderer for both searches, so anything it
+    # touches has to exist on both frames -- a missing one is a KeyError at
+    # render time rather than anything a type or a test would catch, which is
+    # exactly how total_program_cost was found.
+    years = next(y for key, y in PROFESSIONAL_SEARCH_LEVELS.values()
+                 if key == program_key)
+    matches["total_program_cost"] = matches["price_per_year"] * years
+    matches["grad_tuition_fees_in"] = matches["prof_tuition_fees_in"]
+    matches["grad_tuition_fees_out"] = matches["prof_tuition_fees_out"]
     return matches.reset_index(drop=True)
 
 
@@ -14724,10 +14849,22 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     Returns the resolved values; the caller decides what to do with an empty
     field of study, because the two tools say different things about it.
     """
-    levels = GRADUATE_CREDENTIAL_LEVELS if is_graduate else CREDENTIAL_LEVELS
+    # The graduate page offers degree levels and the three professional
+    # programmes; the undergraduate page offers only its own.
+    levels = ({**GRADUATE_CREDENTIAL_LEVELS, **PROFESSIONAL_SEARCH_LEVELS}
+              if is_graduate else CREDENTIAL_LEVELS)
     default_credential = next(iter(levels))
     credential_key = "grad_search_credential" if is_graduate else "search_credential"
     budget_key = "grad_search_coa_range" if is_graduate else "search_coa_range"
+
+    # Read BEFORE the Level widget renders, which is the sidebar's own
+    # before-the-widget pattern, because it decides whether there is a field of
+    # study to ask about at all. A professional programme IS the field --
+    # "medicine" is not a subject you pick within, and CIP_FAMILY_TITLES has no
+    # entry that means it -- so leaving the selector on screen would offer a
+    # choice that changes nothing and imply the results were filtered by it.
+    professional = is_professional_credential(
+        st.session_state.get(credential_key, default_credential))
 
     # Prefilled from the major ONLY in Major mode. A major and a CIP family
     # are both fields of study, so that is a correspondence. An occupation
@@ -14741,17 +14878,24 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         default_family if default_family in CIP_FAMILY_TITLES else None)
 
     row_one, row_two = st.columns([3, 2])
-    row_one.selectbox(
-        "Field of study", families, key="search_cip_family",
-        on_change=lambda: mark_interaction("search_cip_family"),
-        index=None if st.session_state.get("search_cip_family") is None else None,
-        format_func=lambda code: CIP_FAMILY_TITLES[code],
-        placeholder="Pick a field",
-        help="Fields come from the federal CIP classification, which is broader "
-              "than a major -- 'Business, Management & Marketing' covers "
-              "accounting, finance and marketing alike, so those return the "
-              "same schools.",
-    )
+    if not professional:
+        row_one.selectbox(
+            "Field of study", families, key="search_cip_family",
+            on_change=lambda: mark_interaction("search_cip_family"),
+            index=(None if st.session_state.get("search_cip_family") is None
+                   else None),
+            format_func=lambda code: CIP_FAMILY_TITLES[code],
+            placeholder="Pick a field",
+            help="Fields come from the federal CIP classification, which is "
+                  "broader than a major -- 'Business, Management & Marketing' "
+                  "covers accounting, finance and marketing alike, so those "
+                  "return the same schools.",
+        )
+    else:
+        row_one.caption(
+            "The programme is the field here, so there is nothing to narrow: "
+            "every school below runs this one."
+        )
     # Undergraduate levels then graduate ones, from the two registries
     # rather than a hand-written list, so a level cannot exist in the
     # dropdown without a search that knows how to answer it.
@@ -14943,7 +15087,11 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         )
 
     return {
-        "family": st.session_state.get("search_cip_family"),
+        # None when the programme IS the field: the caller must not run its
+        # "pick a field of study" guard against a search that does not have one.
+        "family": (None if professional
+                   else st.session_state.get("search_cip_family")),
+        "professional": professional,
         "credential": credential,
         "min_budget": min_coa,
         "max_budget": max_coa,
@@ -14957,7 +15105,9 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
 
 
 def render_graduate_results(results: pd.DataFrame, credential: str,
-                             family: str, home_state: str, years: int) -> None:
+                             family: str, home_state: str, years: int,
+                             level_key: str, coverage: tuple = None,
+                             professional: bool = False) -> None:
     """The graduate half of the results panel.
 
     A separate renderer rather than more branches inside the undergraduate one,
@@ -14980,7 +15130,10 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     the school charges, beside what its graduates in this field actually
     borrowed. Two federal sources, two different questions.
     """
-    known, priced = graduate_search_universe(family, GRADUATE_CREDENTIAL_LEVELS[credential][0])
+    # Passed in rather than derived: a professional level has no CIP family to
+    # look a universe up by, and its list comes from the price file rather than
+    # the debt file, so the coverage question does not even mean the same thing.
+    known, priced = coverage or (0, 0)
     st.caption(
         f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
         f"**Per year** is tuition and required fees — *not* a full cost of "
@@ -15012,9 +15165,10 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     st.caption(
         "**Rate** is which price you'd be charged"
         + (f", based on living in {home_state}. " if home_state else ". ")
-        + f"**{years} years** is the per-year price times the length this app "
-        f"models for a {credential.lower()} — real programmes vary, and part-time "
-        "study changes it completely."
+        + f"**{years} years** is the per-year price times the standard length of "
+        + (f"{credential} " if professional
+           else f"a {credential.lower()} ")
+        + "— real programmes vary, and part-time study changes it completely."
     )
     # The three qualifications that stop this table being read as one number.
     st.caption(
@@ -15027,24 +15181,40 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         "Congress abolished on July 1, 2026, so it describes borrowing a student "
         "starting now cannot repeat federally."
     )
-    st.caption(
-        f"**Per year is an institution-wide average.** IPEDS publishes one "
-        f"graduate tuition per school, so an MBA and a teaching master's at the "
-        f"same university show the same figure — and the professional schools "
-        f"charge well above it."
-    )
+    if professional:
+        st.caption(
+            "**Per year is this programme's own price**, not the school's "
+            "graduate average — IPEDS publishes medicine, dentistry and law "
+            "separately, and they charge well above the average their "
+            "university reports for graduate study as a whole."
+        )
+    else:
+        st.caption(
+            "**Per year is an institution-wide average.** IPEDS publishes one "
+            "graduate tuition per school, so an MBA and a teaching master's at "
+            "the same university show the same figure — and the professional "
+            "schools charge well above it."
+        )
     if known and priced < known:
         st.caption(
             f"⚠️ {known - priced} of the {known} schools that publish a figure for "
             f"this field are missing above, because no graduate tuition is on file "
             f"for them. They have not stopped teaching it."
         )
-    st.caption(
-        "And this list is schools that publish a **debt** figure for this field — "
-        "roughly a fifth of school-and-field combinations at master's level and a "
-        "sixteenth at doctoral. Absence here is usually missing data, not a missing "
-        "programme."
-    )
+    if professional:
+        st.caption(
+            "This list is every school that publishes a price for the programme, "
+            "so it is more complete than the borrowing column beside it: a school "
+            "showing **—** has a published price and no published debt figure, "
+            "not the other way round."
+        )
+    else:
+        st.caption(
+            "And this list is schools that publish a **debt** figure for this "
+            "field — roughly a fifth of school-and-field combinations at master's "
+            "level and a sixteenth at doctoral. Absence here is usually missing "
+            "data, not a missing programme."
+        )
 
     picker_ids = [int(uid) for uid in results["UNITID"]]
     picker_labels = {
@@ -15078,11 +15248,17 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         # The name is the debt file's spelling: that is what the picker's
         # options are built from. See picker_name in
         # search_graduate_schools_by_budget.
+        # A professional programme hands off to the SAME sidebar picker but a
+        # different credential: the app models medicine, dentistry and law as
+        # doctoral/professional study, and GRADUATE_SEARCH_TO_CREDENTIAL only
+        # knows the two degree levels.
         st.session_state["_pending_grad_school"] = (
-            picked["picker_name"], GRADUATE_SEARCH_TO_CREDENTIAL[credential])
+            picked["picker_name"],
+            CREDENTIAL_DOCTORAL if professional
+            else GRADUATE_SEARCH_TO_CREDENTIAL[credential])
         log_usage_event(
             f"grad_school_search_apply:unitid={picked['UNITID']}"
-            f":cip={family}:level={GRADUATE_CREDENTIAL_LEVELS[credential][0]}"
+            f":cip={family or level_key}:level={level_key}"
             f":price={int(picked['coa_per_year'])}")
         # Whichever standalone page we are on, not a hard-coded key. This block
         # was copied from the undergraduate search while the graduate results
@@ -15149,17 +15325,28 @@ def render_graduate_school_search(always_open: bool = False) -> None:
         # empty-result message below explains.
         controls = render_search_controls(coa_df, is_graduate=True)
         family = controls["family"]
-        if not family:
+        if not family and not controls["professional"]:
             st.info("Pick a field of study to search.")
             return
 
         credential = controls["credential"]
-        grad_key, grad_years = GRADUATE_CREDENTIAL_LEVELS[credential]
-        results = search_graduate_schools_by_budget(
-            family, grad_key, controls["max_budget"], controls["home_state"],
-            states=tuple(controls["states"]) or None, limit=25,
-            min_price_per_year=controls["min_budget"],
-            control_types=tuple(controls["control_types"]) or None)
+        professional = controls["professional"]
+        if professional:
+            grad_key, grad_years = PROFESSIONAL_SEARCH_LEVELS[credential]
+            coverage = None
+            results = search_professional_schools_by_budget(
+                grad_key, controls["max_budget"], controls["home_state"],
+                states=tuple(controls["states"]) or None, limit=25,
+                min_price_per_year=controls["min_budget"],
+                control_types=tuple(controls["control_types"]) or None)
+        else:
+            grad_key, grad_years = GRADUATE_CREDENTIAL_LEVELS[credential]
+            coverage = graduate_search_universe(family, grad_key)
+            results = search_graduate_schools_by_budget(
+                family, grad_key, controls["max_budget"], controls["home_state"],
+                states=tuple(controls["states"]) or None, limit=25,
+                min_price_per_year=controls["min_budget"],
+                control_types=tuple(controls["control_types"]) or None)
         # One name for "the yearly price" downstream, so the table, the picker
         # and the apply button do not each have to know which search ran.
         if not results.empty:
@@ -15184,7 +15371,8 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                 narrowings.append(
                     f"at {' or '.join(controls['control_types'])} schools")
             st.warning(
-                f"No graduate schools teach **{CIP_FAMILY_TITLES[family]}** at "
+                f"No graduate schools teach "
+                f"**{CIP_FAMILY_TITLES[family] if family else credential}** at "
                 f"that level for {fmt_money(controls['max_budget'])}/year"
                 + (" " + " ".join(narrowings) if narrowings else "")
                 + "."
@@ -15195,17 +15383,20 @@ def render_graduate_school_search(always_open: bool = False) -> None:
             # one comes from schools that publish a DEBT median, which about a
             # fifth do at master's and a sixteenth at doctoral. "None" here is
             # usually a data gap, and at doctoral level it almost always is.
-            st.caption(
-                "At graduate level an empty result is usually missing data rather "
-                "than a missing programme: this list can only include schools that "
-                "publish borrowing figures for the field, which is about a fifth of "
-                "them at master's level and a sixteenth at doctoral. Plenty of "
-                "schools teach it and report nothing."
-            )
+            if not professional:
+                st.caption(
+                    "At graduate level an empty result is usually missing data "
+                    "rather than a missing programme: this list can only include "
+                    "schools that publish borrowing figures for the field, which is "
+                    "about a fifth of them at master's level and a sixteenth at "
+                    "doctoral. Plenty of schools teach it and report nothing."
+                )
             return
 
         render_graduate_results(results, credential, family,
-                                 controls["home_state"], grad_years)
+                                 controls["home_state"], grad_years,
+                                 level_key=grad_key, coverage=coverage,
+                                 professional=professional)
 
 
 def render_school_search(always_open: bool = False) -> None:

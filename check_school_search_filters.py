@@ -75,6 +75,17 @@ import sys
 
 import pandas as pd
 
+# Every column render_graduate_results reads. ONE renderer serves both the
+# graduate and the professional search, so a column present on only one frame
+# is a KeyError at render time -- nothing types it, nothing imports it, and the
+# page simply breaks for one level while working for the other.
+# total_program_cost went missing from the professional frame exactly this way.
+SHARED_RESULT_COLUMNS = [
+    "INSTNM", "CITY", "STABBR", "control_type", "UNITID", "picker_name",
+    "is_home_state", "total_program_cost", "debt_median",
+    "grad_tuition_fees_in", "grad_tuition_fees_out", "price_per_year",
+]
+
 # Chosen for size and spread rather than realism: CIP 11 (Computer & Information
 # Sciences) at bachelor's is the largest family in the dataset, spans all three
 # sectors, and has both rated and unrated schools -- so every property below has
@@ -354,6 +365,11 @@ def check_graduate_search(ns) -> list:
         if "picker_name" not in results.columns:
             problems.append("  results carry no picker_name for the handoff")
             continue
+        missing = [c for c in SHARED_RESULT_COLUMNS if c not in results.columns]
+        if missing:
+            problems.append(
+                f"  graduate results for CIP {family} are missing {missing}, "
+                f"which the shared results table reads")
         options = set(ns["graduate_schools_for"](family, credential))
         stray = set(results["picker_name"]) - options
         if stray:
@@ -364,6 +380,47 @@ def check_graduate_search(ns) -> list:
                 "name, silently discarding the school just applied")
         if not results["price_per_year"].is_monotonic_increasing:
             problems.append(f"  CIP {family} graduate results are not price-sorted")
+    # The professional programmes are a THIRD shape: keyed by programme rather
+    # than by field-plus-credential, and priced from the per-programme file.
+    prof_levels = ns["PROFESSIONAL_SEARCH_LEVELS"]
+    if set(prof_levels) & set(grad_levels):
+        problems.append("  a label is in both the graduate and professional registries")
+    for label in prof_levels:
+        if not ns["is_professional_credential"](label):
+            problems.append(f"  is_professional_credential({label!r}) is False")
+        if ns["is_graduate_credential"](label):
+            problems.append(
+                f"  {label!r} answers True to BOTH predicates\n"
+                "    the controls hide the field selector on one and require it "
+                "on the other, so a level in both renders an impossible page")
+
+    # Every column the shared results table reads must exist on the
+    # professional frame too. The table is one renderer for two searches, so a
+    # column present on only one is a KeyError at render time -- which is
+    # exactly how total_program_cost was found missing.
+    for label, (program_key, years) in prof_levels.items():
+        priced = ns["search_professional_schools_by_budget"](
+            program_key, 500_000, "CA", limit=10_000)
+        if priced.empty:
+            problems.append(f"  no {label} schools priced at all")
+            continue
+        missing = [c for c in SHARED_RESULT_COLUMNS if c not in priced.columns]
+        if missing:
+            problems.append(
+                f"  {label} results are missing {missing}, which the shared "
+                f"results table reads")
+        if not priced["price_per_year"].is_monotonic_increasing:
+            problems.append(f"  {label} results are not price-sorted")
+        # The price file is the universe here, and it must stay the larger one
+        # -- that is the reason this search reads it rather than the debt file.
+        debt = ns["load_professional_debt"]()
+        known = debt[(debt["credential"] == "professional")
+                     & (debt["program_key"] == program_key)]
+        if len(priced) < len(known):
+            problems.append(
+                f"  {label} prices {len(priced)} schools but {len(known)} publish "
+                f"debt\n    the price file is supposed to be the wider universe; "
+                f"if it is not, the search is reading the wrong source")
     return problems
 
 
