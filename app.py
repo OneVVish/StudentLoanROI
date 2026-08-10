@@ -2414,6 +2414,145 @@ def search_level_label(level_key: str) -> tuple:
         level_key, ("Unknown", f"retired or unrecognised: {level_key}"))
 
 
+# The school-search tools' own share namespace. Distinct from both the
+# calculator's params and the repayment tool's for the same reason those two
+# are distinct from each other: a shared search must never pick up a scenario
+# someone built in a different tool.
+#
+# WHY THESE ARE SHARED AT ALL. They were deliberately SHARE_EXEMPT -- "?school=
+# carries the result, and re-running someone else's search on their budget is
+# not what a shared link is for". That reasoning held while the only audience
+# was the visitor themselves. It does not hold for the audience these tools
+# actually have: a counsellor sending a student "here are the schools in your
+# field under $20k", which is the single most useful thing this page produces
+# and which currently has to be a screenshot.
+#
+# The repayment tool crossed the same line for the same reason. The difference
+# is what rides: a balance and an income are the most identifying numbers a
+# visitor types, and a field of study and a budget are not, so this one needs
+# no warning at the moment of pressing it.
+SEARCH_SHARE_PARAMS = {
+    "family": "sf", "level": "sl", "budget": "sb", "home": "sh",
+    "states": "ss", "types": "sy", "adm": "sa", "adm_on": "sao",
+}
+
+
+def build_search_share_params(is_graduate: bool) -> dict:
+    """The current search as query params, for either tool's Share button.
+
+    `tool` rides along so the link lands on the page the search was run on --
+    without it a graduate search would reopen inside the calculator's expander,
+    where the levels it names do not exist.
+
+    The LEVEL travels as its registry key, not its label. Labels carry spaces
+    and apostrophes ("Bachelor's degree", "Osteopathic medicine (DO)") and are
+    the one field most likely to be reworded; the keys are what the log already
+    records and what search_level_catalog can map back.
+    """
+    prefix = "grad_" if is_graduate else ""
+    state = st.session_state
+    params = {"tool": "gradschools" if is_graduate else "schools"}
+
+    family = state.get(f"{prefix}search_cip_family")
+    if family:
+        params[SEARCH_SHARE_PARAMS["family"]] = str(family)
+
+    label = state.get(f"{prefix}search_credential")
+    key = next((registry[label][0]
+                for registry in (CREDENTIAL_LEVELS, GRADUATE_CREDENTIAL_LEVELS,
+                                  FIXED_FIELD_GRADUATE_LEVELS,
+                                  PROFESSIONAL_SEARCH_LEVELS)
+                if label in registry), None)
+    if key:
+        params[SEARCH_SHARE_PARAMS["level"]] = key
+
+    budget = state.get(f"{prefix}search_coa_range")
+    if budget:
+        params[SEARCH_SHARE_PARAMS["budget"]] = f"{int(budget[0])}-{int(budget[1])}"
+
+    home = state.get(f"{prefix}search_home_state")
+    if home:
+        params[SEARCH_SHARE_PARAMS["home"]] = str(home)
+    for field, key_name in (("states", "search_states"),
+                             ("types", "search_control_types")):
+        values = state.get(f"{prefix}{key_name}") or []
+        if values:
+            params[SEARCH_SHARE_PARAMS[field]] = ",".join(str(v) for v in values)
+
+    # Undergraduate only, and BOTH halves or neither: the switch and the band
+    # mean different things, and a band without its switch is the ambiguity
+    # ADM_RATE_FULL_RANGE exists to prevent -- "every rate qualifies" and "I am
+    # not filtering on this" differ by 3,204 schools.
+    if not is_graduate and state.get("search_adm_rate_on"):
+        band = state.get("search_adm_rate_range") or ADM_RATE_FULL_RANGE
+        params[SEARCH_SHARE_PARAMS["adm_on"]] = "1"
+        params[SEARCH_SHARE_PARAMS["adm"]] = f"{int(band[0])}-{int(band[1])}"
+    return params
+
+
+def seed_search_from_share(is_graduate: bool) -> None:
+    """URL -> session_state for the search controls, before their widgets.
+
+    Once per session per tool, and ONLY for the tool the link names. A
+    ?tool=gradschools link seeding the undergraduate keys would silently move
+    a control the visitor never touched on a page they were not sent to -- and
+    since #21 the two tools have separate keys precisely so they cannot reach
+    into each other.
+    """
+    flag = f"_search_seeded_{'grad' if is_graduate else 'ug'}"
+    if st.session_state.get(flag):
+        return
+    st.session_state[flag] = True
+    wanted = "gradschools" if is_graduate else "schools"
+    if get_shared_default("tool", "") != wanted:
+        return
+
+    prefix = "grad_" if is_graduate else ""
+    setdefault = st.session_state.setdefault
+
+    family = get_shared_default(SEARCH_SHARE_PARAMS["family"], "")
+    if family in CIP_FAMILY_TITLES:
+        setdefault(f"{prefix}search_cip_family", family)
+
+    key = get_shared_default(SEARCH_SHARE_PARAMS["level"], "")
+    if key:
+        # search_level_catalog is the same map the admin breakdown reads, so a
+        # level can never be shareable and unlabelled, or vice versa.
+        _tool, label = search_level_label(key)
+        registries = ((GRADUATE_CREDENTIAL_LEVELS, FIXED_FIELD_GRADUATE_LEVELS,
+                        PROFESSIONAL_SEARCH_LEVELS) if is_graduate
+                       else (CREDENTIAL_LEVELS,))
+        if any(label in registry for registry in registries):
+            setdefault(f"{prefix}search_credential", label)
+
+    budget = get_shared_default(SEARCH_SHARE_PARAMS["budget"], "")
+    if "-" in budget:
+        low, _, high = budget.partition("-")
+        try:
+            setdefault(f"{prefix}search_coa_range", (int(low), int(high)))
+        except ValueError:
+            pass                       # a hand-edited link falls back, never raises
+
+    home = get_shared_default(SEARCH_SHARE_PARAMS["home"], "")
+    if home:
+        setdefault(f"{prefix}search_home_state", home)
+    for field, key_name in (("states", "search_states"),
+                             ("types", "search_control_types")):
+        raw = get_shared_default(SEARCH_SHARE_PARAMS[field], "")
+        if raw:
+            setdefault(f"{prefix}{key_name}", [v for v in raw.split(",") if v])
+
+    if not is_graduate and get_shared_default(SEARCH_SHARE_PARAMS["adm_on"], ""):
+        setdefault("search_adm_rate_on", True)
+        band = get_shared_default(SEARCH_SHARE_PARAMS["adm"], "")
+        if "-" in band:
+            low, _, high = band.partition("-")
+            try:
+                setdefault("search_adm_rate_range", (int(low), int(high)))
+            except ValueError:
+                pass
+
+
 def is_professional_credential(credential: str) -> bool:
     """Whether the search's Level is a professional programme rather than a
     field-plus-credential. Beside its registry so a guard can test it."""
@@ -10812,6 +10951,64 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
     return buffer.getvalue()
 
 
+def generate_pdf_search_report(results: pd.DataFrame, table: pd.DataFrame,
+                               captions: list, title: str, subtitle: str,
+                               is_graduate: bool = False) -> bytes:
+    """PDF of a school-search result list -- the two search tools' report.
+
+    Same reasoning as generate_pdf_repayment_report: NOT routed through
+    generate_pdf_report_single, because that builder is organised around a
+    scenario and this tool has none -- it has a filtered list. It shares every
+    primitive (_pdf_styles, _pdf_table, the header/footer) so the reports stay
+    visually one product.
+
+    THE CAPTIONS ARE THE POINT, and they are passed in rather than rebuilt
+    here. Every number in that table is qualified by prose sitting under it on
+    screen: the prices are sticker figures before aid, the borrowing columns
+    are two different people's debt and must never be added to the cost, a dash
+    means unreported rather than zero. A PDF that carried the table and left
+    the qualifications behind would be the most misleading artefact this app
+    can produce -- someone would print it and treat the numbers as final. So
+    the caller hands over the exact strings it rendered, and the chart-twin
+    rule applies: change what the page says and this changes with it.
+    """
+    styles = _pdf_styles()
+    story = [Paragraph(xml_escape(title), styles["section"]),
+             Paragraph(xml_escape(subtitle), styles["body"]), Spacer(1, 10)]
+
+    # Trimmed for the page, not for brevity: a letter-width PDF cannot hold ten
+    # columns legibly, and the ones dropped (Rate, Net price) are a label and a
+    # hyperlink -- neither survives print usefully. Everything numeric stays.
+    keep = [c for c in table.columns if c not in ("Rate", "Net price")]
+    rows = [keep] + table[keep].astype(str).values.tolist()
+    story.append(_pdf_table(rows, full_width=True))
+    story.append(Spacer(1, 12))
+
+    for caption in captions:
+        if not caption:
+            continue
+        # Markdown bold and the escaped dollars the on-screen captions carry
+        # are meaningless to reportlab, and \$ would print literally.
+        text = caption.replace("\\$", "$").replace("**", "")
+        story.append(Paragraph(xml_escape(text), styles["caption"]))
+        story.append(Spacer(1, 4))
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        xml_escape(
+            "Sorted by price and nothing else. Every salary in this app comes "
+            "from the occupation or major you picked, never from the school, so "
+            "this list cannot tell you which of these leads to higher pay — "
+            "only which teach your field at a price you could cover."),
+        styles["caption"]))
+
+    buffer = io.BytesIO()
+    SimpleDocTemplate(buffer, pagesize=letter).build(
+        story, onFirstPage=_draw_pdf_header_footer,
+        onLaterPages=_draw_pdf_header_footer)
+    return buffer.getvalue()
+
+
 def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   annual_income: float, dependents: int,
                                   accrued: float, prior_payments: int,
@@ -16013,6 +16210,10 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
                **PROFESSIONAL_SEARCH_LEVELS}
               if is_graduate else CREDENTIAL_LEVELS)
     default_credential = next(iter(levels))
+    # BEFORE any widget below: Streamlit raises if a key is assigned once its
+    # widget exists, which is the same rule seed_repayment_from_share follows.
+    seed_search_from_share(is_graduate)
+
     credential_key = "grad_search_credential" if is_graduate else "search_credential"
     budget_key = "grad_search_coa_range" if is_graduate else "search_coa_range"
 
@@ -16311,7 +16512,8 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
                              family: str, home_state: str, years: int,
                              level_key: str, coverage: tuple = None,
                              professional: bool = False,
-                             programme_key: str = None) -> None:
+                             programme_key: str = None,
+                             always_open: bool = False) -> None:
     """The graduate half of the results panel.
 
     A separate renderer rather than more branches inside the undergraduate one,
@@ -16350,6 +16552,14 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         ("out-of-state"
          if row["grad_tuition_fees_out"] != row["grad_tuition_fees_in"]
          else "same either way"), axis=1)
+    # See render_school_search: the PDF must carry the exact caption strings
+    # the page renders, not a paraphrase of them.
+    _captions = []
+
+    def _cap(text: str) -> None:
+        _captions.append(text)
+        st.caption(text)
+
     table = pd.DataFrame({
         "School": results["INSTNM"],
         "Where": results["CITY"].fillna("") + ", " + results["STABBR"].fillna(""),
@@ -16366,7 +16576,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         table, use_container_width=True, hide_index=True,
         column_config={"School": st.column_config.Column("School", width="large")})
 
-    st.caption(
+    _cap(
         "**Rate** is which price you'd be charged"
         + (f", based on living in {home_state}. " if home_state else ". ")
         + f"**{years} years** is the per-year price times the standard length of "
@@ -16384,7 +16594,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     # students under a name that does not say so. Said before the general
     # caption, because it changes what that caption is describing.
     if level_key in PROGRAMMES_WITHOUT_OWN_DEBT:
-        st.caption(
+        _cap(
             f"**Graduates borrowed here is not {level_key}-specific.** Federal "
             f"data has no separate field for this programme at any level, so a "
             f"figure shown is the school's *Medicine* row — which at a school "
@@ -16393,7 +16603,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
             f"programme-specific; the borrowing is not."
         )
     # The three qualifications that stop this table being read as one number.
-    st.caption(
+    _cap(
         "**Graduates borrowed** is a different measure from the price beside it, "
         "not a check on it: it is what people who finished this field at this "
         "school owed at graduation, already net of scholarships and family money, "
@@ -16404,7 +16614,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         "starting now cannot repeat federally."
     )
     if professional:
-        st.caption(
+        _cap(
             "**Per year is this programme's own price**, not the school's "
             "graduate average — IPEDS publishes nine professional programmes "
             "separately, and they charge well above the average their "
@@ -16416,7 +16626,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         # results. Here the borrowing column is the programme-specific number
         # and the price is the school-wide one -- the reverse of every other
         # level, and worth saying plainly.
-        st.caption(
+        _cap(
             "**Per year is an institution-wide average, not an MBA price.** No "
             "federal source publishes one: IPEDS prices nine professional "
             "programmes separately and business is not among them, so this is "
@@ -16425,20 +16635,20 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
             "*borrowing* column that is MBA-specific."
         )
     else:
-        st.caption(
+        _cap(
             "**Per year is an institution-wide average.** IPEDS publishes one "
             "graduate tuition per school, so an MBA and a teaching master's at "
             "the same university show the same figure — and the professional "
             "schools charge well above it."
         )
     if known and priced < known:
-        st.caption(
+        _cap(
             f"⚠️ {known - priced} of the {known} schools that publish a figure for "
             f"this field are missing above, because no graduate tuition is on file "
             f"for them. They have not stopped teaching it."
         )
     if professional:
-        st.caption(
+        _cap(
             "This list is every school that publishes a price for the programme, "
             "so it is more complete than the borrowing column beside it: a school "
             "showing **—** has a published price and no published debt figure, "
@@ -16446,7 +16656,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         )
     elif programme_key == "mba":
         _eg = mba_rollup_example()
-        st.caption(
+        _cap(
             "**Graduates borrowed is the MBA's own median**, not the business "
             "rollup's. The two describe the same students at every school here "
             "and disagree sharply"
@@ -16456,12 +16666,15 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
               "Never add or average them."
         )
     else:
-        st.caption(
+        _cap(
             "And this list is schools that publish a **debt** figure for this "
             "field — roughly a fifth of school-and-field combinations at master's "
             "level and a sixteenth at doctoral. Absence here is usually missing "
             "data, not a missing programme."
         )
+
+    _search_actions(results, table, _captions, is_graduate=True,
+                    level=level_key, family=family, enabled=always_open)
 
     picker_ids = [int(uid) for uid in results["UNITID"]]
     picker_labels = {
@@ -16478,7 +16691,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     # the button did nothing when it filled a field they were not looking at.
     _target_label = (PROFESSIONAL_SCHOOL_LABEL.get(level_key, "Graduate school")
                      if professional else "Graduate school")
-    st.caption(
+    _cap(
         f"This fills the sidebar's **{_target_label}** picker, not the college "
         "field above it — that one is your undergraduate school. It only exists "
         "when your scenario is already on this path, so set the major first if "
@@ -16712,7 +16925,58 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                                  controls["home_state"], grad_years,
                                  level_key=grad_key, coverage=coverage,
                                  professional=professional,
-                                 programme_key=fixed[0] if fixed else None)
+                                 programme_key=fixed[0] if fixed else None,
+                                 # Only the standalone page gets the PDF and
+                                 # Share buttons -- see _search_actions.
+                                 always_open=always_open)
+
+
+def _search_actions(results, table, captions, is_graduate: bool,
+                    level: str, family: str, enabled: bool) -> None:
+    """Download-PDF and Share buttons for either school-search tool.
+
+    Only on the standalone pages (`enabled`), the same rule _repayment_actions
+    follows and for the same reason: inside the calculator each search is one
+    expander among many and the page already has its own PDF and Share pinned
+    at the top. Two of each, meaning different things, is worse than one.
+
+    Neither writes to the three scenario tables. A search is not a scenario --
+    there is no major, no loan, no ROI -- so every column would be NULL and the
+    row would say only that it happened. A free-text usage_logs action instead,
+    the idiom school_search_run already uses, which needs no migration and so
+    cannot hit the PGRST204 whole-row drop.
+    """
+    if not enabled or results.empty:
+        return
+    tool = "gradschools" if is_graduate else "schools"
+    stamp = (f"level={level or 'unset'}:cip={family or 'unset'}"
+             f":n={len(results)}")
+    pdf_col, share_col = st.columns(2)
+
+    pdf_col.download_button(
+        "📄 Download this list (PDF)",
+        data=generate_pdf_search_report(
+            results, table, captions,
+            title=("Graduate schools that fit this budget" if is_graduate
+                   else "Schools that fit this budget"),
+            subtitle=(f"{len(results)} schools, cheapest first — "
+                      f"{CIP_FAMILY_TITLES.get(family, level or 'all fields')}"),
+            is_graduate=is_graduate),
+        file_name=f"{tool}_shortlist.pdf", mime="application/pdf",
+        use_container_width=True, key=f"{tool}_pdf",
+        on_click=lambda: log_usage_event(f"search_pdf:{tool}:{stamp}"),
+    )
+
+    if share_col.button("🔗 Share this search", use_container_width=True,
+                        key=f"{tool}_share"):
+        # session_query_params carries test, exactly as the other two shares
+        # do; src stays out because the recipient did not arrive through the
+        # sharer's recruitment channel.
+        st.query_params.from_dict({**session_query_params(),
+                                   **build_search_share_params(is_graduate)})
+        log_usage_event(f"search_share:{tool}:{stamp}")
+        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+        st.success("Link copied — it reopens this search, filters and all.")
 
 
 def render_school_search(always_open: bool = False) -> None:
@@ -16850,6 +17114,14 @@ def render_school_search(always_open: bool = False) -> None:
             if row["is_home_state"] else
             ("out-of-state" if row["out_of_state_coa"] != row["in_state_coa"]
              else "same either way"), axis=1)
+        # Captions collected as they render, so the PDF carries the EXACT
+        # strings on screen rather than a paraphrase that can drift from them.
+        _captions = []
+
+        def _cap(text: str) -> None:
+            _captions.append(text)
+            st.caption(text)
+
         table = pd.DataFrame({
             "School": results["INSTNM"],
             "Where": results["CITY"].fillna("") + ", " + results["STABBR"].fillna(""),
@@ -16921,7 +17193,7 @@ def render_school_search(always_open: bool = False) -> None:
                           "with your family's finances actually pays, as opposed "
                           "to the sticker price in this table."),
             })
-        st.caption(
+        _cap(
             "**Rate** is which price you'd be charged"
             + (f", based on living in {home_state}. " if home_state else ". ")
             + "*Same either way* means the school charges one price regardless — "
@@ -16939,7 +17211,7 @@ def render_school_search(always_open: bool = False) -> None:
         # column above, it is conditional on having borrowed at all, and it
         # describes families who borrowed before OBBBA capped the programme.
         # A bare money column would silently assert the opposite of all three.
-        st.caption(
+        _cap(
             "**Parents borrowed** is what families of *completers* at that school "
             "who took Parent PLUS borrowed in total, at the median — the parent's "
             "own debt, separate from every cost column here and from any loan this "
@@ -16953,7 +17225,7 @@ def render_school_search(always_open: bool = False) -> None:
         # it: the two columns sit side by side and describe DIFFERENT PEOPLE's
         # debt. One paragraph covering both is how a reader ends up adding them.
         if "field_debt_median" in results.columns:
-            st.caption(
+            _cap(
                 f"**Grads borrowed** is the student's own: the median federal "
                 f"debt at graduation for people who completed "
                 f"**{CIP_FAMILY_TITLES.get(family, 'this field')}** *at that "
@@ -16986,6 +17258,9 @@ def render_school_search(always_open: bool = False) -> None:
         # outright because 86 institution NAMES in this dataset are shared by
         # more than one school. A stale UNITID cannot be mistaken for a valid
         # one: it is either still in the result set or it is not.
+        _search_actions(results, table, _captions, is_graduate=False,
+                        level=credential, family=family, enabled=always_open)
+
         picker_ids = [int(uid) for uid in results["UNITID"]]
         picker_labels = {
             int(row["UNITID"]): f"{row['INSTNM']} — "

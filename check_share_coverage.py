@@ -142,6 +142,24 @@ PARAM_EXEMPT = {
 }
 
 
+def load_app_namespace():
+    """app.py's sections 1-2, without the UI.
+
+    This file is otherwise a pure AST reader -- it never needed to RUN app.py,
+    because the calculator's share pipeline is a hundred assignments it can
+    only inspect statically. The two search tools' pipeline is different: it is
+    one emitter and one seeder, both pure and both in section 2, so it can be
+    round-tripped for real instead of merely looked at. Same exec-prefix trick
+    the other guards use.
+    """
+    src = open(APP).read()
+    cut = src.index("# 3. PAGE CONFIG & SESSION STATE")
+    prefix = src[:src.rindex("# " + "=" * 60, 0, cut)]
+    ns = {"__name__": "sharecheck"}
+    exec(compile(prefix, APP, "exec"), ns)
+    return ns
+
+
 def _shared_locals(tree) -> set:
     """Names assigned from an expression containing a get_shared_* call.
 
@@ -384,6 +402,93 @@ def main() -> int:
                 f"  REPAYMENT   {sorted(clash)} collide with calculator share params.\n"
                 f"              A repayment link would be read as a scenario field.")
 
+    # The two SEARCH tools' share pipeline. Unlike the calculator's (walked
+    # statically above) and the repayment tool's (a table, read as data), this
+    # one is a pair of pure section-2 functions -- so it can be round-tripped
+    # for real: emit from a known state, seed into an empty one, compare.
+    #
+    # It exists at all because the search inputs used to be SHARE_EXEMPT on the
+    # reasoning that "re-running someone else's search on their budget is not
+    # what a shared link is for". That held while the only audience was the
+    # visitor; it does not hold for a counsellor sending a student a shortlist,
+    # which is the most useful thing these pages produce.
+    ns = load_app_namespace()
+    st_stub = ns["st"]
+    search_params = set(ns["SEARCH_SHARE_PARAMS"].values())
+
+    clash = search_params & emitted
+    if clash:
+        failures.append(
+            f"  SEARCH      {sorted(clash)} collide with calculator share params.\n"
+            f"              A shared search would be read as a scenario field.")
+    if fields is not None:
+        clash = search_params & set(params_repayment)
+        if clash:
+            failures.append(
+                f"  SEARCH      {sorted(clash)} collide with repayment params.")
+
+    class _Params(dict):
+        def get(self, key, default=None):
+            return dict.get(self, key, default)
+
+    FIXTURES = [
+        (False, {"search_cip_family": "11",
+                 "search_credential": "Bachelor's degree",
+                 "search_coa_range": (0, 45619), "search_home_state": "CA",
+                 "search_states": ["CA"], "search_control_types": ["Public"],
+                 "search_adm_rate_on": True, "search_adm_rate_range": (0, 50)}),
+        (True, {"grad_search_cip_family": "52", "grad_search_credential": "MBA",
+                "grad_search_coa_range": (0, 68000),
+                "grad_search_home_state": "NY",
+                "grad_search_states": ["NY", "NJ"],
+                "grad_search_control_types": ["Public"]}),
+    ]
+    for is_graduate, state in FIXTURES:
+        label = "graduate" if is_graduate else "undergraduate"
+        st_stub.session_state = dict(state)
+        params = ns["build_search_share_params"](is_graduate)
+
+        # The tool must ride along, or a graduate search reopens inside the
+        # calculator's expander where its levels do not exist.
+        if params.get("tool") != ("gradschools" if is_graduate else "schools"):
+            failures.append(
+                f"  SEARCH      the {label} share carries tool={params.get('tool')!r};"
+                f" the link would land on the wrong page.")
+
+        # The level travels as a registry KEY, and the same map the admin
+        # breakdown uses must resolve it -- so a level cannot be shareable and
+        # unlabelled, or labelled and unshareable.
+        level = params.get(ns["SEARCH_SHARE_PARAMS"]["level"])
+        if not level:
+            failures.append(f"  SEARCH      the {label} share emits no level.")
+        elif ns["search_level_label"](level)[0] == "Unknown":
+            failures.append(
+                f"  SEARCH      level={level!r} is shared but has no admin label.")
+
+        # Round trip: emit -> seed -> the same values come back.
+        st_stub.query_params = _Params(params)
+        st_stub.session_state = {}
+        ns["seed_search_from_share"](is_graduate)
+        for key, want in state.items():
+            got = st_stub.session_state.get(key)
+            if isinstance(want, tuple):
+                got = tuple(got) if got is not None else got
+            if got != want:
+                failures.append(
+                    f"  SEARCH      {label} {key}: shared {want!r}, came back "
+                    f"{got!r}\n              the link recreates a different "
+                    f"search than the one that was shared.")
+
+        # And the OTHER tool's keys must stay untouched -- since the duplicate
+        # -key fix the two tools have separate state, and a link for one must
+        # not reach into the other.
+        stray = [k for k in st_stub.session_state
+                 if k.startswith("grad_search_" if not is_graduate else "search_")]
+        if stray:
+            failures.append(
+                f"  SEARCH      a {label} link also seeded {stray}, which "
+                f"belongs to the other tool.")
+
     checked = len(widget_keys) - len([k for k in widget_keys if k in SHARE_EXEMPT])
     if failures:
         print(f"share-link coverage: {len(failures)} problem(s)\n")
@@ -393,7 +498,8 @@ def main() -> int:
     n_rep = len(pairs) if fields is not None else 0
     print(f"share-link coverage OK -- {checked} sidebar inputs round-trip, "
           f"{len(SHARE_EXEMPT)} exempt, {len(emitted)} params emitted; "
-          f"{n_rep} repayment inputs round-trip via their own emitter.")
+          f"{n_rep} repayment inputs round-trip via their own emitter; "
+          f"{len(search_params)} search params round-trip for both tools.")
     return 0
 
 
