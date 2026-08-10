@@ -3500,6 +3500,27 @@ STANDALONE_TOOLS = {
                    "you live.",
         "label": "Find schools that fit a budget",
     },
+    "gradschools": {
+        # Its own page rather than a level inside the schools search, for two
+        # reasons that are both about reach. A dropdown option has no URL, so
+        # infra/worker.js cannot list it in the sitemap or llms.txt and "what
+        # does a master's cost" -- a different search intent from undergraduate
+        # college shopping -- can never land on it. And a page gets its
+        # pageview action, traffic split, cold-vs-internal derivation and admin
+        # row from this registry for free, which is the only way to answer
+        # whether anyone wants it.
+        #
+        # The copy also stops fighting itself: the undergraduate page promises
+        # sticker prices before aid and points at net price calculators, and
+        # every one of those sentences is wrong for a graduate programme.
+        "action": "pageview_gradschools",
+        "title": "🎓 Find Graduate Schools That Fit a Budget",
+        "caption": "**Free · anonymous · no sign-up** — published graduate "
+                   "tuition from IPEDS beside what graduates in your field "
+                   "actually borrowed. Tuition and fees only: no federal "
+                   "source publishes graduate living costs.",
+        "label": "Find graduate schools",
+    },
 }
 
 # Where a visit can have navigated FROM. Validated against this set before any
@@ -14634,7 +14655,13 @@ def suggested_home_state(coa_df: pd.DataFrame, city_name: str) -> str:
 SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
                         "search_coa_range", "search_home_state",
                         "search_states", "search_adm_rate_on",
-                        "search_adm_rate_range", "search_control_types")
+                        "search_adm_rate_range", "search_control_types",
+                        # The graduate tool's own two. Field, state and sector
+                        # are shared with the undergraduate page and already
+                        # above; only the level and the budget are per-tool,
+                        # because one key over two option lists raises and the
+                        # two budgets are different quantities.
+                        "grad_search_credential", "grad_search_coa_range")
 
 
 def search_was_adjusted() -> bool:
@@ -14663,6 +14690,270 @@ def search_was_adjusted() -> bool:
                 & set(SEARCH_CONTROL_KEYS))
 
 
+
+
+def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
+    """The filter controls both school searches share, rendered once.
+
+    The undergraduate and graduate searches are separate tools with separate
+    price sources, result tables and hand-offs -- but they ask the same six
+    questions to get there: field, level, budget, where you live, which states,
+    which sectors. Those ~130 lines live here rather than in each tool, because
+    two copies of a control block is the failure this codebase has recorded more
+    times than any other (the Plotly/matplotlib chart twins, reconcile_cc_mode,
+    FULL_TIME_GRAD_CREDITS mirrored into a guard).
+
+    `is_graduate` changes exactly three things and must not grow a fourth
+    without a reason written down: which credential registry the Level control
+    offers, what the cost slider calls itself (an undergraduate cost of
+    attendance includes housing and a graduate figure does not -- a $13,214/yr
+    difference in the median), and whether the admit-rate block exists at all.
+
+    The KEYS differ per tool for the credential and the budget, and both are
+    forced rather than chosen. One `search_credential` key over two different
+    option lists raises the moment a stored graduate level meets the
+    undergraduate list -- Streamlit rejects a keyed widget whose value is not
+    among its options, which is the same trap reconcile_search_pick exists for.
+    And the two budgets are different quantities, so sharing the number would
+    silently carry a housing-inclusive figure onto a tuition-only page.
+
+    Everything else IS shared on purpose: field of study, home state, states and
+    sector all mean the same thing on both pages, so a visitor crossing between
+    them keeps their context and the cross-link is worth clicking.
+
+    Returns the resolved values; the caller decides what to do with an empty
+    field of study, because the two tools say different things about it.
+    """
+    levels = GRADUATE_CREDENTIAL_LEVELS if is_graduate else CREDENTIAL_LEVELS
+    default_credential = next(iter(levels))
+    credential_key = "grad_search_credential" if is_graduate else "search_credential"
+    budget_key = "grad_search_coa_range" if is_graduate else "search_coa_range"
+
+    # Prefilled from the major ONLY in Major mode. A major and a CIP family
+    # are both fields of study, so that is a correspondence. An occupation
+    # is not, and mapping one to a field of study is the crosswalk this
+    # codebase already declined to trust.
+    default_family = (MAJOR_TO_CIP_FAMILY.get(major)
+                       if dataset_mode == DATASET_MODE_MAJOR else None)
+    families = sorted(CIP_FAMILY_TITLES, key=lambda code: CIP_FAMILY_TITLES[code])
+    st.session_state.setdefault(
+        "search_cip_family",
+        default_family if default_family in CIP_FAMILY_TITLES else None)
+
+    row_one, row_two = st.columns([3, 2])
+    row_one.selectbox(
+        "Field of study", families, key="search_cip_family",
+        on_change=lambda: mark_interaction("search_cip_family"),
+        index=None if st.session_state.get("search_cip_family") is None else None,
+        format_func=lambda code: CIP_FAMILY_TITLES[code],
+        placeholder="Pick a field",
+        help="Fields come from the federal CIP classification, which is broader "
+              "than a major -- 'Business, Management & Marketing' covers "
+              "accounting, finance and marketing alike, so those return the "
+              "same schools.",
+    )
+    # Undergraduate levels then graduate ones, from the two registries
+    # rather than a hand-written list, so a level cannot exist in the
+    # dropdown without a search that knows how to answer it.
+    row_two.selectbox("Level", list(levels), key=credential_key,
+                       on_change=lambda: mark_interaction(credential_key))
+
+    # Read after its own widget, which has already rendered: the cost slider
+    # below needs the level to label itself.
+    credential = st.session_state.get(credential_key, default_credential)
+
+    # A range, not a ceiling. The old control only asked "most I could pay",
+    # which cannot express "what does this actually cost" -- and because
+    # results are the cheapest `limit` matches, an expensive school stayed
+    # invisible however high the ceiling went. Raising the FLOOR is what
+    # surfaces them.
+    #
+    # New key: search_budget holds an int in any session already open, and
+    # handing a range slider a stored int raises at render time.
+    _seed_high = int(st.session_state.get("coa_per_year_a", 25_000))
+    min_coa, max_coa = st.slider(
+        ("Graduate tuition and fees per year" if is_graduate
+         else "School Cost of Attendance (COA) — tuition, housing, everything"),
+        min_value=0, max_value=100_000,
+        value=(0, min(max(_seed_high, 1_000), 100_000)), step=1_000,
+        format="$%d", key=budget_key,
+        on_change=lambda: mark_interaction(budget_key),
+        help=("Tuition and required fees only -- no federal source publishes "
+              "graduate living costs, so housing and food are on top. "
+              if is_graduate else
+              "The whole yearly cost, not just tuition. ")
+             + "Drag the LEFT handle up to hide the cheapest schools — "
+               "results are the cheapest matches, so raising the floor is "
+               "how you surface pricier ones rather than raising the ceiling.",
+    )
+    budget = max_coa
+    all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
+    home_col, states_col, type_col = st.columns([2, 3, 3])
+
+    # Asked once, here, rather than inherited from the sidebar's in-state
+    # checkbox: that checkbox is one fact about the visitor and the ONE
+    # school they named, and these results span many states. See
+    # search_schools_by_budget for what pricing them all alike costs.
+    st.session_state.setdefault(
+        "search_home_state", suggested_home_state(coa_df, city))
+    home_col.selectbox(
+        "Where do you live?", all_states, key="search_home_state",
+        on_change=lambda: mark_interaction("search_home_state"),
+        index=None if st.session_state.get("search_home_state") is None else None,
+        placeholder="Pick your state",
+        help="Public schools charge residents far less. Without this, every "
+              "school is priced at its higher out-of-state rate.",
+    )
+    # Default the state filter to where the visitor lives. Without it the
+    # search spans every state, and since results are the CHEAPEST 50 of
+    # however many match, an expensive-but-obvious school could never
+    # appear: 751 US schools award an engineering bachelor's, the 50
+    # cheapest all cost under $24,602, and a Californian searching
+    # engineering therefore never saw a single UC campus -- all nine are in
+    # the data and all nine offer it. Scoping to one state takes 751 to
+    # about 40 and the cap stops binding at all.
+    #
+    # setdefault, not a forced value: it seeds the first render and then
+    # leaves the control alone, so clearing it to search nationally sticks.
+    _home = st.session_state.get("search_home_state")
+    if _home:
+        st.session_state.setdefault("search_states", [_home])
+    states = states_col.multiselect(
+        "Limit to states (optional)", all_states, key="search_states",
+        on_change=lambda: mark_interaction("search_states"),
+        help="Defaults to your home state, where public schools charge you "
+              "the resident rate. Clear it to search the whole country -- "
+              "results are the cheapest matches, so a national search "
+              "surfaces low-cost schools rather than well-known ones.")
+
+    # The one filter the search function could already apply and nothing
+    # ever asked it for -- control_types has been a parameter since this
+    # feature shipped, with no control wired to it.
+    #
+    # It earns a place because of what cheapest-first does without it.
+    # Private For-Profit is the LARGEST of the three categories in the
+    # dataset (1,884 of 5,035 rows, more than Public's 1,797) and its
+    # short-programme pricing sorts high, so the top of a price-driven
+    # list is exactly where those schools concentrate -- and a price-driven
+    # list is the only kind this tool makes.
+    #
+    # Empty means no filter, matching the states control beside it. There
+    # is deliberately no default: which sectors a visitor will consider is
+    # not something their home state or their major implies, and seeding
+    # one would silently hide two thirds of the dataset.
+    all_control_types = [t for t in CONTROL_TYPE_ORDER
+                         if t in set(coa_df["control_type"].dropna())]
+    control_types = type_col.multiselect(
+        "School type (optional)", all_control_types, key="search_control_types",
+        on_change=lambda: mark_interaction("search_control_types"),
+        help="Public, private non-profit, private for-profit. Leave it empty "
+              "to include all three. For-profit schools are the largest group "
+              "in this dataset and their prices sort near the top, so this is "
+              "how you look past them.")
+
+    # UNDERGRADUATE ONLY, and absent rather than disabled here.
+    # adm_filter_applies() already refuses every non-bachelor's
+    # level, so on a graduate page this whole block could only ever
+    # render a greyed-out control above a paragraph explaining that
+    # it is greyed out. That explanation is worth showing when a
+    # visitor switches level inside ONE page; it is noise on a page
+    # where the level was never available.
+    adm_filtered, adm_low, adm_high = False, *ADM_RATE_FULL_RANGE
+    if not is_graduate:
+        # Read before the control is drawn, the sidebar's own pattern: the
+        # credential selectbox is rendered above, so session_state already
+        # holds it, and the admit-rate filter's availability depends on it.
+        # Graduate levels fall out of this for free: ADM_RATE_CREDENTIALS is
+        # bachelor's-only, and an undergraduate admission rate says nothing
+        # about admission to a master's programme, which is decided per
+        # department.
+        adm_available = adm_filter_applies(credential)
+
+        # An explicit switch rather than "wide open means off". The band alone
+        # cannot express the difference between "I am not filtering on this"
+        # and "I am filtering, and every rate qualifies" -- and those differ by
+        # 3,204 schools, because a school reporting no rate cannot sit inside a
+        # band however wide. The switch makes the visitor's answer to that
+        # unambiguous instead of inferring it from handle positions.
+        #
+        # It is also what makes the level gate legible: a control that is
+        # visibly unavailable, with a reason, beats one that silently vanishes
+        # when someone switches from Bachelor's to Associate's.
+        adm_on = st.checkbox(
+            "Filter by admit rate", key="search_adm_rate_on",
+            disabled=not adm_available,
+            on_change=lambda: mark_interaction("search_adm_rate_on"),
+            help="Narrow the list by how selective a school is. Available for "
+                  "bachelor's degrees only — see the note when it is greyed out.")
+        # NOT a read of the checkbox. Streamlit keeps a widget's value in
+        # session_state after it stops being rendered OR becomes disabled, so a
+        # visitor who ticks this on a bachelor's search and switches to
+        # Associate's would otherwise carry a hidden filter that removes four
+        # schools in five with nothing on screen explaining it. Same discipline
+        # as the repayment tool's private-loan opt-in: hiding a control must
+        # also neutralise it. The stored tick is deliberately left alone, so
+        # switching back to Bachelor's restores what they chose.
+        adm_enabled = bool(adm_on) and adm_available
+        adm_low, adm_high = ADM_RATE_FULL_RANGE
+        if not adm_available:
+            st.caption(
+                f"Admit rate is a **bachelor's-only** filter here. It comes from "
+                f"each school's undergraduate admission rate, and below a "
+                f"bachelor's most schools publish none — 74% of bachelor's "
+                f"institutions report one against 35% at associate's and under a "
+                f"quarter for certificates. Filtering on it at this level would "
+                f"drop most of the list for having nothing on file rather than "
+                f"for being selective."
+            )
+        elif adm_enabled:
+            adm_low, adm_high = st.slider(
+                "Share of applicants admitted",
+                min_value=ADM_RATE_FULL_RANGE[0], max_value=ADM_RATE_FULL_RANGE[1],
+                value=ADM_RATE_FULL_RANGE, step=5, format="%d%%",
+                key="search_adm_rate_range",
+                on_change=lambda: mark_interaction("search_adm_rate_range"),
+                help="Drag either handle to limit how selective the schools are. "
+                      "While this filter is on, schools that report no admit rate "
+                      "are excluded at any width — an unknown rate cannot be shown "
+                      "to fall inside a band. It never changes the order: the list "
+                      "stays cheapest-first.",
+            )
+        adm_filtered = adm_enabled
+
+
+    # Named on screen, not left to the help text, because the two
+    # directions cost different things and only one of them is intuitive.
+    # Raising the floor is how someone looks for schools they are likely to
+    # get into -- and it is exactly the move that hides the open-admission
+    # schools, which admit nearly everyone and report no rate at all. A
+    # visitor doing that would otherwise conclude those schools do not
+    # teach their field.
+    # Still gated on a chosen field: this describes what is missing from a
+    # LIST, and before a field is picked there is no list. That gating used to
+    # come from sitting below the caller's `if not family: return`; extracting
+    # these controls moved it above that guard, so the condition has to carry
+    # it explicitly or the warning fires over an empty screen again.
+    if (adm_filtered and adm_low > ADM_RATE_FULL_RANGE[0]
+            and st.session_state.get("search_cip_family")):
+        st.caption(
+            "⚠️ Schools that report no admit rate are **not** in this list, "
+            "and most of them admit nearly everyone — so a high floor hides "
+            "the very schools that are easiest to get into. Drop the left "
+            "handle back to 0% to see them again."
+        )
+
+    return {
+        "family": st.session_state.get("search_cip_family"),
+        "credential": credential,
+        "min_budget": min_coa,
+        "max_budget": max_coa,
+        "home_state": st.session_state.get("search_home_state"),
+        "states": states,
+        "control_types": control_types,
+        "adm_filtered": adm_filtered,
+        "adm_low": adm_low,
+        "adm_high": adm_high,
+    }
 
 
 def render_graduate_results(results: pd.DataFrame, credential: str,
@@ -14793,17 +15084,128 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
             f"grad_school_search_apply:unitid={picked['UNITID']}"
             f":cip={family}:level={GRADUATE_CREDENTIAL_LEVELS[credential][0]}"
             f":price={int(picked['coa_per_year'])}")
-        if st.session_state.get("active_tool") == "schools":
+        # Whichever standalone page we are on, not a hard-coded key. This block
+        # was copied from the undergraduate search while the graduate results
+        # still lived inside ?tool=schools, and it tested for that key by name
+        # -- so once this moved to its own page the condition was false, the
+        # hand-off never ran, and applying a school parked the value and left
+        # the visitor staring at the same list. Nothing errored; the button
+        # simply did nothing visible, which is the exact failure the hand-off
+        # exists to prevent.
+        _origin = st.session_state.get("active_tool")
+        if _origin:
             st.session_state.active_tool = ""
             _handoff = dict(session_query_params())
             _src = get_traffic_source()
             if _src:
                 _handoff["src"] = _src
             st.query_params.from_dict(_handoff)
-            _nav = nav_action("schools", NAV_CALCULATOR, inpage=True)
+            _nav = nav_action(_origin, NAV_CALCULATOR, inpage=True)
             if _nav:
                 log_usage_event(_nav)
         st.rerun()
+
+
+def render_graduate_school_search(always_open: bool = False) -> None:
+    """Budget-first search for a master's or doctorate — its own tool.
+
+    Defined HERE, above the standalone-tool dispatch, for the same reason
+    render_school_search is: module-level defs execute in order and the
+    dispatch sits well above where the calculator flow would otherwise define
+    these. A def below its caller is a NameError at runtime that py_compile
+    cannot see.
+
+    Shares its filter controls with the undergraduate search through
+    render_search_controls and shares nothing else, because nothing else is
+    the same: who teaches a field comes from the debt file rather than
+    Scorecard's program flags, what it costs comes from IPEDS rather than a
+    cost of attendance, and four of the undergraduate table's columns are
+    undergraduate-only facts (see render_graduate_results).
+    """
+    # Both datasets, because this tool needs both halves of the question and
+    # either being absent means it cannot answer. Same empty-frame contract as
+    # the other loaders: a deploy without them loses the page, not the app.
+    if load_graduate_tuition().empty or load_professional_debt().empty:
+        return
+    coa_df = load_coa_dataset()
+    if coa_df.empty:
+        return
+
+    with st.expander("🎓 Find graduate schools that fit a budget",
+                      expanded=always_open):
+        if not always_open:
+            st.caption(
+                "Graduate cost is its own question — "
+                f"[open this as its own page]({internal_tool_url('gradschools')})."
+            )
+        st.caption(
+            "Sorted by price, and by nothing else. Every salary in this app comes "
+            "from the occupation or major you picked — never from the school — so "
+            "this cannot tell you which of these leads to higher pay."
+        )
+        # coa_df supplies the state and sector option lists on both pages. It
+        # is the superset, and suggested_home_state is written against it; a
+        # state with no graduate schools simply returns nothing, which the
+        # empty-result message below explains.
+        controls = render_search_controls(coa_df, is_graduate=True)
+        family = controls["family"]
+        if not family:
+            st.info("Pick a field of study to search.")
+            return
+
+        credential = controls["credential"]
+        grad_key, grad_years = GRADUATE_CREDENTIAL_LEVELS[credential]
+        results = search_graduate_schools_by_budget(
+            family, grad_key, controls["max_budget"], controls["home_state"],
+            states=tuple(controls["states"]) or None, limit=25,
+            min_price_per_year=controls["min_budget"],
+            control_types=tuple(controls["control_types"]) or None)
+        # One name for "the yearly price" downstream, so the table, the picker
+        # and the apply button do not each have to know which search ran.
+        if not results.empty:
+            results = results.rename(columns={"price_per_year": "coa_per_year"})
+
+        # The SAME event as the undergraduate search, with `level` separating
+        # them. A second event name would create a fourth regime on top of the
+        # three school_search_run already has (see migrations.sql), and
+        # analyze_survey.py already groups runs by level.
+        if search_was_adjusted():
+            mark_interaction("module_grad_school_search")
+            _log_school_search(family, controls["max_budget"], controls["states"],
+                                len(results), controls["home_state"],
+                                level=grad_key,
+                                control_types=controls["control_types"])
+
+        if results.empty:
+            narrowings = []
+            if controls["states"]:
+                narrowings.append(f"in {', '.join(controls['states'])}")
+            if controls["control_types"]:
+                narrowings.append(
+                    f"at {' or '.join(controls['control_types'])} schools")
+            st.warning(
+                f"No graduate schools teach **{CIP_FAMILY_TITLES[family]}** at "
+                f"that level for {fmt_money(controls['max_budget'])}/year"
+                + (" " + " ".join(narrowings) if narrowings else "")
+                + "."
+            )
+            # Said separately from the warning because it contradicts the
+            # obvious reading of it. The undergraduate list comes from
+            # Scorecard's program flags, which say what a school teaches; this
+            # one comes from schools that publish a DEBT median, which about a
+            # fifth do at master's and a sixteenth at doctoral. "None" here is
+            # usually a data gap, and at doctoral level it almost always is.
+            st.caption(
+                "At graduate level an empty result is usually missing data rather "
+                "than a missing programme: this list can only include schools that "
+                "publish borrowing figures for the field, which is about a fifth of "
+                "them at master's level and a sixteenth at doctoral. Plenty of "
+                "schools teach it and report nothing."
+            )
+            return
+
+        render_graduate_results(results, credential, family,
+                                 controls["home_state"], grad_years)
 
 
 def render_school_search(always_open: bool = False) -> None:
@@ -14844,221 +15246,16 @@ def render_school_search(always_open: bool = False) -> None:
             "tell you is which ones teach your field at a price you could cover."
         )
 
-        # Prefilled from the major ONLY in Major mode. A major and a CIP family
-        # are both fields of study, so that is a correspondence. An occupation
-        # is not, and mapping one to a field of study is the crosswalk this
-        # codebase already declined to trust.
-        default_family = (MAJOR_TO_CIP_FAMILY.get(major)
-                           if dataset_mode == DATASET_MODE_MAJOR else None)
-        families = sorted(CIP_FAMILY_TITLES, key=lambda code: CIP_FAMILY_TITLES[code])
-        st.session_state.setdefault(
-            "search_cip_family",
-            default_family if default_family in CIP_FAMILY_TITLES else None)
-
-        row_one, row_two = st.columns([3, 2])
-        row_one.selectbox(
-            "Field of study", families, key="search_cip_family",
-            on_change=lambda: mark_interaction("search_cip_family"),
-            index=None if st.session_state.get("search_cip_family") is None else None,
-            format_func=lambda code: CIP_FAMILY_TITLES[code],
-            placeholder="Pick a field",
-            help="Fields come from the federal CIP classification, which is broader "
-                  "than a major -- 'Business, Management & Marketing' covers "
-                  "accounting, finance and marketing alike, so those return the "
-                  "same schools.",
-        )
-        # Undergraduate levels then graduate ones, from the two registries
-        # rather than a hand-written list, so a level cannot exist in the
-        # dropdown without a search that knows how to answer it.
-        row_two.selectbox("Level",
-                           list(CREDENTIAL_LEVELS) + list(GRADUATE_CREDENTIAL_LEVELS),
-                           key="search_credential",
-                           on_change=lambda: mark_interaction("search_credential"))
-
-        # Read here, above the cost slider, because the slider's LABEL depends
-        # on it: the undergraduate figure is a full cost of attendance and the
-        # graduate one is tuition and fees. Same before-the-widget pattern the
-        # sidebar uses throughout -- the Level selectbox has already rendered,
-        # so session_state holds the answer.
-        credential = st.session_state.get("search_credential", "Bachelor's degree")
-        # Decided once and read everywhere below. Which registry the level came
-        # from determines the search, the price source, the columns and what
-        # "use this school" means, so it must not be re-derived.
-        is_graduate = is_graduate_credential(credential)
-
-        # A range, not a ceiling. The old control only asked "most I could pay",
-        # which cannot express "what does this actually cost" -- and because
-        # results are the cheapest `limit` matches, an expensive school stayed
-        # invisible however high the ceiling went. Raising the FLOOR is what
-        # surfaces them.
-        #
-        # New key: search_budget holds an int in any session already open, and
-        # handing a range slider a stored int raises at render time.
-        _seed_high = int(st.session_state.get("coa_per_year_a", 25_000))
-        min_coa, max_coa = st.slider(
-            ("Graduate tuition and fees per year" if is_graduate
-             else "School Cost of Attendance (COA) — tuition, housing, everything"),
-            min_value=0, max_value=100_000,
-            value=(0, min(max(_seed_high, 1_000), 100_000)), step=1_000,
-            format="$%d", key="search_coa_range",
-            on_change=lambda: mark_interaction("search_coa_range"),
-            help=("Tuition and required fees only -- no federal source publishes "
-                  "graduate living costs, so housing and food are on top. "
-                  if is_graduate else
-                  "The whole yearly cost, not just tuition. ")
-                 + "Drag the LEFT handle up to hide the cheapest schools — "
-                   "results are the cheapest matches, so raising the floor is "
-                   "how you surface pricier ones rather than raising the ceiling.",
-        )
-        budget = max_coa
-        all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
-        home_col, states_col, type_col = st.columns([2, 3, 3])
-
-        # Asked once, here, rather than inherited from the sidebar's in-state
-        # checkbox: that checkbox is one fact about the visitor and the ONE
-        # school they named, and these results span many states. See
-        # search_schools_by_budget for what pricing them all alike costs.
-        st.session_state.setdefault(
-            "search_home_state", suggested_home_state(coa_df, city))
-        home_col.selectbox(
-            "Where do you live?", all_states, key="search_home_state",
-            on_change=lambda: mark_interaction("search_home_state"),
-            index=None if st.session_state.get("search_home_state") is None else None,
-            placeholder="Pick your state",
-            help="Public schools charge residents far less. Without this, every "
-                  "school is priced at its higher out-of-state rate.",
-        )
-        # Default the state filter to where the visitor lives. Without it the
-        # search spans every state, and since results are the CHEAPEST 50 of
-        # however many match, an expensive-but-obvious school could never
-        # appear: 751 US schools award an engineering bachelor's, the 50
-        # cheapest all cost under $24,602, and a Californian searching
-        # engineering therefore never saw a single UC campus -- all nine are in
-        # the data and all nine offer it. Scoping to one state takes 751 to
-        # about 40 and the cap stops binding at all.
-        #
-        # setdefault, not a forced value: it seeds the first render and then
-        # leaves the control alone, so clearing it to search nationally sticks.
-        _home = st.session_state.get("search_home_state")
-        if _home:
-            st.session_state.setdefault("search_states", [_home])
-        states = states_col.multiselect(
-            "Limit to states (optional)", all_states, key="search_states",
-            on_change=lambda: mark_interaction("search_states"),
-            help="Defaults to your home state, where public schools charge you "
-                  "the resident rate. Clear it to search the whole country -- "
-                  "results are the cheapest matches, so a national search "
-                  "surfaces low-cost schools rather than well-known ones.")
-
-        # The one filter the search function could already apply and nothing
-        # ever asked it for -- control_types has been a parameter since this
-        # feature shipped, with no control wired to it.
-        #
-        # It earns a place because of what cheapest-first does without it.
-        # Private For-Profit is the LARGEST of the three categories in the
-        # dataset (1,884 of 5,035 rows, more than Public's 1,797) and its
-        # short-programme pricing sorts high, so the top of a price-driven
-        # list is exactly where those schools concentrate -- and a price-driven
-        # list is the only kind this tool makes.
-        #
-        # Empty means no filter, matching the states control beside it. There
-        # is deliberately no default: which sectors a visitor will consider is
-        # not something their home state or their major implies, and seeding
-        # one would silently hide two thirds of the dataset.
-        all_control_types = [t for t in CONTROL_TYPE_ORDER
-                             if t in set(coa_df["control_type"].dropna())]
-        control_types = type_col.multiselect(
-            "School type (optional)", all_control_types, key="search_control_types",
-            on_change=lambda: mark_interaction("search_control_types"),
-            help="Public, private non-profit, private for-profit. Leave it empty "
-                  "to include all three. For-profit schools are the largest group "
-                  "in this dataset and their prices sort near the top, so this is "
-                  "how you look past them.")
-
-        # Read before the control is drawn, the sidebar's own pattern: the
-        # credential selectbox is rendered above, so session_state already
-        # holds it, and the admit-rate filter's availability depends on it.
-        # Graduate levels fall out of this for free: ADM_RATE_CREDENTIALS is
-        # bachelor's-only, and an undergraduate admission rate says nothing
-        # about admission to a master's programme, which is decided per
-        # department.
-        adm_available = adm_filter_applies(credential)
-
-        # An explicit switch rather than "wide open means off". The band alone
-        # cannot express the difference between "I am not filtering on this"
-        # and "I am filtering, and every rate qualifies" -- and those differ by
-        # 3,204 schools, because a school reporting no rate cannot sit inside a
-        # band however wide. The switch makes the visitor's answer to that
-        # unambiguous instead of inferring it from handle positions.
-        #
-        # It is also what makes the level gate legible: a control that is
-        # visibly unavailable, with a reason, beats one that silently vanishes
-        # when someone switches from Bachelor's to Associate's.
-        adm_on = st.checkbox(
-            "Filter by admit rate", key="search_adm_rate_on",
-            disabled=not adm_available,
-            on_change=lambda: mark_interaction("search_adm_rate_on"),
-            help="Narrow the list by how selective a school is. Available for "
-                  "bachelor's degrees only — see the note when it is greyed out.")
-        # NOT a read of the checkbox. Streamlit keeps a widget's value in
-        # session_state after it stops being rendered OR becomes disabled, so a
-        # visitor who ticks this on a bachelor's search and switches to
-        # Associate's would otherwise carry a hidden filter that removes four
-        # schools in five with nothing on screen explaining it. Same discipline
-        # as the repayment tool's private-loan opt-in: hiding a control must
-        # also neutralise it. The stored tick is deliberately left alone, so
-        # switching back to Bachelor's restores what they chose.
-        adm_enabled = bool(adm_on) and adm_available
-        adm_low, adm_high = ADM_RATE_FULL_RANGE
-        if not adm_available:
-            st.caption(
-                f"Admit rate is a **bachelor's-only** filter here. It comes from "
-                f"each school's undergraduate admission rate, and below a "
-                f"bachelor's most schools publish none — 74% of bachelor's "
-                f"institutions report one against 35% at associate's and under a "
-                f"quarter for certificates. Filtering on it at this level would "
-                f"drop most of the list for having nothing on file rather than "
-                f"for being selective."
-            )
-        elif adm_enabled:
-            adm_low, adm_high = st.slider(
-                "Share of applicants admitted",
-                min_value=ADM_RATE_FULL_RANGE[0], max_value=ADM_RATE_FULL_RANGE[1],
-                value=ADM_RATE_FULL_RANGE, step=5, format="%d%%",
-                key="search_adm_rate_range",
-                on_change=lambda: mark_interaction("search_adm_rate_range"),
-                help="Drag either handle to limit how selective the schools are. "
-                      "While this filter is on, schools that report no admit rate "
-                      "are excluded at any width — an unknown rate cannot be shown "
-                      "to fall inside a band. It never changes the order: the list "
-                      "stays cheapest-first.",
-            )
-        adm_filtered = adm_enabled
-
-        family = st.session_state.get("search_cip_family")
+        controls = render_search_controls(coa_df, is_graduate=False)
+        family = controls["family"]
         if not family:
             st.info("Pick a field of study to search.")
             return
-
-        # Below the field-of-study guard, not above it: this describes what is
-        # missing from a LIST, so it must not fire on a screen showing no list
-        # at all -- "pick a field of study" with a warning above it about
-        # omitted schools is a warning about nothing.
-        #
-        # Named on screen, not left to the help text, because the two
-        # directions cost different things and only one of them is intuitive.
-        # Raising the floor is how someone looks for schools they are likely to
-        # get into -- and it is exactly the move that hides the open-admission
-        # schools, which admit nearly everyone and report no rate at all. A
-        # visitor doing that would otherwise conclude those schools do not
-        # teach their field.
-        if adm_enabled and adm_low > ADM_RATE_FULL_RANGE[0]:
-            st.caption(
-                "⚠️ Schools that report no admit rate are **not** in this list, "
-                "and most of them admit nearly everyone — so a high floor hides "
-                "the very schools that are easiest to get into. Drop the left "
-                "handle back to 0% to see them again."
-            )
+        credential = controls["credential"]
+        min_coa, budget = controls["min_budget"], controls["max_budget"]
+        states, control_types = controls["states"], controls["control_types"]
+        adm_filtered = controls["adm_filtered"]
+        adm_low, adm_high = controls["adm_low"], controls["adm_high"]
 
         home_state = st.session_state.get("search_home_state")
         if not home_state:
@@ -15073,26 +15270,12 @@ def render_school_search(always_open: bool = False) -> None:
         # it. Deliberately not re-read here: the search, the log and the level
         # gate must agree on which credential was asked for, and a second read
         # is how they come to disagree.
-        if is_graduate:
-            grad_key, grad_years = GRADUATE_CREDENTIAL_LEVELS[credential]
-            results = search_graduate_schools_by_budget(
-                family, grad_key, budget, home_state,
-                states=tuple(states) or None, limit=25,
-                min_price_per_year=min_coa,
-                control_types=tuple(control_types) or None)
-            # Two different columns mean "the yearly price" depending on which
-            # search ran. Normalised to one name here so the table, the picker
-            # and the apply button below stay single-branch -- the alternative
-            # is four more `if is_graduate` further down, each able to drift.
-            if not results.empty:
-                results = results.rename(columns={"price_per_year": "coa_per_year"})
-        else:
-            results = search_schools_by_budget(
-                family, credential, budget, home_state,
-                states=tuple(states) or None, limit=25, min_coa_per_year=min_coa,
-                control_types=tuple(control_types) or None,
-                # Percent on screen, fraction in the data.
-                adm_rate_range=(adm_low / 100, adm_high / 100) if adm_filtered else None)
+        results = search_schools_by_budget(
+            family, credential, budget, home_state,
+            states=tuple(states) or None, limit=25, min_coa_per_year=min_coa,
+            control_types=tuple(control_types) or None,
+            # Percent on screen, fraction in the data.
+            adm_rate_range=(adm_low / 100, adm_high / 100) if adm_filtered else None)
 
         # Only once the visitor has actually adjusted something -- see
         # search_was_adjusted. The results above still render either way; this
@@ -15104,12 +15287,7 @@ def render_school_search(always_open: bool = False) -> None:
         if search_was_adjusted():
             mark_interaction("module_school_search")
             _log_school_search(family, budget, states, len(results), home_state,
-                                # Both registries, or every graduate search
-                                # logs level=unset and the two halves of the
-                                # feature become indistinguishable in the data.
-                                level=(GRADUATE_CREDENTIAL_LEVELS[credential][0]
-                                       if is_graduate
-                                       else CREDENTIAL_LEVELS.get(credential, (None,))[0]),
+                                level=CREDENTIAL_LEVELS.get(credential, (None,))[0],
                                 adm_band=(adm_low, adm_high) if adm_filtered else None,
                                 control_types=control_types)
 
@@ -15145,26 +15323,6 @@ def render_school_search(always_open: bool = False) -> None:
                 + " the budget will find some — and the fact that this "
                 "combination has none is itself worth knowing."
             )
-            # ...except at graduate level, where "none" usually is not the
-            # finding. The undergraduate list is built from Scorecard's program
-            # flags, which say what a school teaches; the graduate list is built
-            # from schools that publish a DEBT median, which roughly a fifth of
-            # master's cells and a sixteenth of doctoral ones do. Letting the
-            # sentence above stand alone would report a data gap as a fact about
-            # what exists -- and at doctoral level it almost always is the gap.
-            if is_graduate:
-                st.caption(
-                    "At graduate level an empty result is usually missing data "
-                    "rather than a missing programme: this list can only include "
-                    "schools that publish borrowing figures for the field, which "
-                    "is about a fifth of them at master's level and a sixteenth "
-                    "at doctoral. Plenty of schools teach it and report nothing."
-                )
-            return
-
-        if is_graduate:
-            render_graduate_results(results, credential, family, home_state,
-                                     grad_years)
             return
 
         st.caption(
@@ -15412,6 +15570,8 @@ if active_tool == "repayment":
     render_existing_loan_comparison(always_open=True)
 elif active_tool == "schools":
     render_school_search(always_open=True)
+elif active_tool == "gradschools":
+    render_graduate_school_search(always_open=True)
 if active_tool:
     st.caption(
         "Looking at whether a degree is worth borrowing for instead? "
@@ -16780,6 +16940,7 @@ if not enable_prestige_mode:
     st.divider()
     st.subheader("🧰 More tools")
     render_school_search()
+    render_graduate_school_search()
     render_existing_loan_comparison()
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------

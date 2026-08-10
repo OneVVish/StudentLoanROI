@@ -91,6 +91,11 @@ const SITEMAP = `<?xml version="1.0" encoding="UTF-8"?>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
+  <url>
+    <loc>https://worthmydegree.com/?tool=gradschools</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
 </urlset>
 `;
 
@@ -119,6 +124,11 @@ const LLMS = `# WorthMyDegree
   study + monthly budget + home state → every US college that fits the
   budget, each priced at the rate that student would actually pay
   (in-state vs out-of-state resolved per school).
+- [Graduate school search](https://worthmydegree.com/?tool=gradschools):
+  field of study + master's or doctorate + budget → graduate schools
+  priced from IPEDS published tuition, each shown beside what graduates
+  in that field actually borrowed. Tuition and fees only — no federal
+  source publishes graduate living costs.
 
 ## Data sources (all public, all cited in-app)
 

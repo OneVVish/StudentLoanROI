@@ -39,6 +39,7 @@ Run after touching `internal_tool_url`, `session_query_params`,
 `get_traffic_source`, or `STANDALONE_TOOLS`.
 """
 import ast
+import re
 import sys
 from urllib.parse import urlparse, parse_qs
 
@@ -212,6 +213,38 @@ def main() -> int:
         if parse_qs(urlparse(url).query).get("tool", [None])[0] != tool:
             problems.append(f"  {tool!r} is in STANDALONE_TOOLS but its link "
                             f"does not carry ?tool={tool}\n      {url}")
+
+    # 12. Every registered tool must have a RENDERER the dispatch reaches.
+    #
+    #     The registry hands a new tool its action, traffic split, admin row
+    #     and cross-links automatically -- everything except the one thing it
+    #     cannot derive, which is the `elif active_tool == "<key>":` branch and
+    #     the function behind it. Register a key and forget the branch and the
+    #     page still resolves, still logs a pageview, still renders its title
+    #     and caption from the registry, and then shows nothing. A blank page
+    #     under a heading, no error anywhere.
+    #
+    #     Read out of the source rather than executed: the dispatch lives in
+    #     section 5 and cannot run without a Streamlit session, and the
+    #     renderers are defined ABOVE it precisely so a def below its caller
+    #     cannot NameError at runtime -- which py_compile also cannot see.
+    dispatch = re.findall(r'active_tool\s*==\s*["\'](\w+)["\']\s*:\s*\n\s*(\w+)\(',
+                          open(APP).read())
+    dispatched = {key: fn for key, fn in dispatch}
+    for tool in tools:
+        checked += 1
+        renderer = dispatched.get(tool)
+        if renderer is None:
+            problems.append(
+                f"  {tool!r} is in STANDALONE_TOOLS with no dispatch branch\n"
+                f"      ?tool={tool} would render its title and caption and then "
+                f"stop -- a blank page, and nothing raises")
+        elif not callable(ns.get(renderer)):
+            problems.append(
+                f"  {tool!r} dispatches to {renderer}(), which is not a function "
+                f"in app.py's module scope\n"
+                f"      a renderer defined below the dispatch is a NameError only "
+                f"the live page can show you")
 
     if problems:
         print(f"internal links: {len(problems)} problem(s) across {checked} checks\n")
