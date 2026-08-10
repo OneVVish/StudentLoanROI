@@ -997,6 +997,38 @@ def check_net_price_and_completion(ns, base) -> list:
     return problems
 
 
+def check_pdf_table_repeats_header(ns) -> list:
+    """A table that spills onto a second page must reprint its header there.
+
+    The shortlist PDF is the report this matters for: 25 schools across three
+    landscape pages, and pages 2 and 3 without a header are a grid of bare
+    figures -- three money columns, two percentages, two more money columns --
+    in an order the reader cannot recover. Nothing on page 1 looks wrong, which
+    is why this needs a check rather than an eye.
+
+    The negative half matters as much: header=False means column 0 is the bold
+    key of a key/value table, and repeating row 0 there would restate one
+    arbitrary pair at the top of every page as though it were a heading.
+    """
+    problems = []
+    build = ns["_pdf_table"]
+
+    with_header = build([["School", "Per year"], ["A", "$1"], ["B", "$2"]],
+                        header=True)
+    if getattr(with_header, "repeatRows", 0) != 1:
+        problems.append(
+            "  a header table does not set repeatRows=1, so a shortlist "
+            "spanning pages loses its column names after page 1")
+
+    key_value = build([["Field", "Computer Science"], ["Level", "Bachelor's"]],
+                      header=False)
+    if getattr(key_value, "repeatRows", 0):
+        problems.append(
+            "  a key/value table repeats its first ROW, which is a data pair "
+            "rather than a heading")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -1147,6 +1179,7 @@ def main() -> int:
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
         ("field debt column", lambda: check_field_debt_column(ns, base)),
+        ("pdf header repeats", lambda: check_pdf_table_repeats_header(ns)),
         ("net price and completion",
          lambda: check_net_price_and_completion(ns, base)),
         ("search level catalog", lambda: check_search_level_catalog(ns)),
