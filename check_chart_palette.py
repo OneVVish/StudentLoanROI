@@ -93,6 +93,72 @@ def pairs_to_check(ns):
     return light, dark
 
 
+# --- the one check the validator structurally cannot do -------------------
+#
+# validate_palette.js checks a CATEGORICAL palette, and the salary-flow bar's
+# three tax segments are deliberately not one: they are three steps of a single
+# grey, chosen to recede so that the two segments carrying the decision -- the
+# loan payment and what is left -- hold the only real colour on the chart. Fed
+# to the validator they fail the chroma floor by design, which is why this is
+# written out longhand rather than delegated.
+#
+# What still has to hold, and did not at first: two of the three tax segments
+# are usually too thin to hold a label, so the LEGEND SWATCH is the only place
+# their identity lives. The first ramp stepped by 1.25 contrast and the three
+# swatches were indistinguishable at 8pt -- three separate lines of legend
+# pointing at what looked like one colour.
+GREY_STEP_MIN = 1.30      # adjacent swatches, so the legend separates them
+GREY_INK_MIN = 4.50       # the in-segment label, where a segment is wide enough
+GREY_EDGE_MIN = 2.00      # the FIRST grey only: it is the bar's left end, and
+                          # the only tax segment that borders the page itself
+
+
+def _relative_luminance(hex_colour):
+    hex_colour = hex_colour.lstrip("#")
+    channels = []
+    for i in (0, 2, 4):
+        c = int(hex_colour[i:i + 2], 16) / 255
+        channels.append(c / 12.92 if c <= 0.03928
+                        else ((c + 0.055) / 1.055) ** 2.4)
+    r, g, b = channels
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast_ratio(a, b):
+    la, lb = _relative_luminance(a), _relative_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def check_tax_greys(ns):
+    """The salary-flow bar's grey ramp. Returns a list of problem strings."""
+    greys = list(ns["SALARY_FLOW_TAX_GREYS"])
+    ink = ns["SALARY_FLOW_TAX_INK"]
+    problems = []
+    for first, second in zip(greys, greys[1:]):
+        ratio = contrast_ratio(first, second)
+        if ratio < GREY_STEP_MIN:
+            problems.append(
+                f"  [salary-flow greys] {first} and {second} step by only "
+                f"{ratio:.2f} (need {GREY_STEP_MIN})\n"
+                f"      Their legend swatches are the only identity a tax "
+                f"segment too thin to label has.")
+    for grey in greys:
+        ratio = contrast_ratio(ink, grey)
+        if ratio < GREY_INK_MIN:
+            problems.append(
+                f"  [salary-flow greys] label ink {ink} on {grey} is "
+                f"{ratio:.2f}:1 (need {GREY_INK_MIN})")
+    edge = contrast_ratio(greys[0], LIGHT_SURFACE)
+    if edge < GREY_EDGE_MIN:
+        problems.append(
+            f"  [salary-flow greys] the first grey {greys[0]} is {edge:.2f}:1 "
+            f"against the page (need {GREY_EDGE_MIN})\n"
+            f"      It is the bar's left end, so at that contrast the segment "
+            f"fades into the background rather than starting somewhere.")
+    return problems
+
+
 def validate(validator, colours, mode, surface):
     """Run the skill's validator and return (ok, failing_check_lines)."""
     result = subprocess.run(
@@ -117,7 +183,8 @@ def main() -> int:
 
     ns = app_namespace()
     light, dark = pairs_to_check(ns)
-    problems, checked = [], 0
+    grey_problems = check_tax_greys(ns)
+    problems, checked = list(grey_problems), 0
     for mode, surface, chart_pairs in (("light", LIGHT_SURFACE, light),
                                         ("dark", DARK_SURFACE, dark)):
         for label, colours in chart_pairs:
@@ -131,13 +198,21 @@ def main() -> int:
                     f"      {', '.join(colours)} on {surface}\n{detail}")
 
     if problems:
-        print(f"chart palette: {len(problems)} failing pair(s) of {checked}\n")
+        print(f"chart palette: {len(problems)} problem(s) "
+              f"({checked} chart pairs checked, plus the grey ramp)\n")
         print("\n\n".join(problems))
-        print("\n  A pair below the CVD floor is not a style opinion: the two "
-              "bands\n  it colours cannot be told apart by a colourblind "
-              "reader, which for a\n  stacked chart removes the only thing the "
-              "stack is for.")
+        # Only when a PAIR failed. Printed unconditionally it explained a CVD
+        # failure under a grey-ramp one, which is a different problem with a
+        # different fix.
+        if len(problems) > len(grey_problems):
+            print("\n  A pair below the CVD floor is not a style opinion: the "
+                  "two bands\n  it colours cannot be told apart by a "
+                  "colourblind reader, which for a\n  stacked chart removes "
+                  "the only thing the stack is for.")
         return 1
+    print("salary-flow grey ramp OK -- the three tax swatches separate in the "
+          "legend,\n  carry their label ink, and the bar's left end is visible "
+          "against the page.")
     print(f"chart palette OK -- {checked} chart pairs pass every check "
           f"(lightness band, chroma floor, CVD separation, normal-vision "
           f"floor, contrast) on both the light and #0E1117 surfaces.")
