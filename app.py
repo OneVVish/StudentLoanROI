@@ -9434,75 +9434,293 @@ def build_comparison_payment_chart(result_a: dict, label_a: str,
     return fig
 
 
-def build_takehome_pie_chart(take_home: dict):
-    """Pie chart of how gross salary splits between take-home pay and each
-    tax category -- "slices of a whole" is a more intuitive framing for a
-    high-school audience than a waterfall's running subtraction. No legend:
-    each slice already labels itself (textinfo="percent+label"), and an
-    external legend has nowhere to go on a narrow screen without pushing
-    the pie itself out of the visible frame."""
-    fig = px.pie(
-        names=["Take-Home Pay", "Federal Tax", "State Tax", "FICA"],
-        values=[take_home["net_take_home"], take_home["federal_tax"],
-                 take_home["state_tax"], take_home["fica_tax"]],
-        title="Where Your Salary Actually Goes",
-    )
-    # Dollar amount alongside the percentage on each slice, matching the
-    # Loan-vs-What's-Left pie. %{value:$,.0f} is d3 currency formatting.
-    fig.update_traces(
-        texttemplate="%{label}<br>%{value:$,.0f} (%{percent})", automargin=True)
-    fig.update_layout(showlegend=False, title_font_size=14)
-    return fig
+# Where a year's salary actually goes, as ONE bar.
+#
+# This replaced two pie charts: a four-slice one splitting gross into take-home
+# and three taxes, and a two-slice one splitting that take-home into the loan
+# payment and the rest. They were nested -- the second divided a slice of the
+# first -- so a reader had to hold one chart in their head to read the other,
+# and the loan payment, which is the number this whole app is about, never
+# appeared beside the tax bites it is competing with.
+#
+# The two-slice pie was also a named anti-pattern outright: two slices is a
+# number, and a number is better as a number. Its colours failed the lightness
+# band, the chroma floor and contrast (1.46:1 and 2.19:1 against the surface);
+# the four-slice one had no explicit palette at all, so it took Plotly's
+# defaults, which nothing here had ever validated.
+#
+# EMPHASIS, not eight hues. Taxes are three recessive greys, deliberately: they
+# are context, they are not the decision, and greying them is what lets the two
+# segments that ARE the decision carry the only real colour on the bar. That is
+# also why the greys need no categorical validation -- they are chrome rather
+# than identity, and nothing asks the reader to tell one from another by hue.
+# The two meaningful hues pass every check in both modes.
+# Stepped for LEGEND legibility, not for the bar. Two of the three tax segments
+# are usually too thin to hold a label, so the legend swatch is the only place
+# their identity lives -- and at the first ramp's 1.25 step contrast the three
+# swatches were indistinguishable from each other at 8pt. These step 1.36/1.41
+# and all three still carry SALARY_FLOW_TAX_INK at 5:1 or better.
+#
+# DARKEST FIRST, which is why this is not the light-to-dark order a sequential
+# ramp normally runs in. Federal tax is the bar's left end, so it is the one
+# grey that borders the page rather than another segment; at the light end of
+# the ramp that edge is 1.39:1 against white and the segment visibly faded out
+# into the background. Darkest-first puts 2.65:1 there, and hands the lightest
+# grey to FICA, which borders the orange loan segment and separates from it
+# easily. Every other boundary is grey-on-grey either way.
+SALARY_FLOW_TAX_GREYS = ("#a09f99", "#bebdb7", "#dcdbd6")
+SALARY_FLOW_TAX_INK = "#2f2f2c"
 
 
-def build_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: float):
-    """Pie chart splitting monthly take-home pay into student loan payment
-    vs. remaining disposable income -- while the payment still fits inside
-    take-home pay. A pie chart can't represent a payment that *exceeds*
-    take-home pay (no valid slice set sums past 100%), so in that case this
-    returns a simple 2-bar comparison of Take-Home Pay vs. Required Student
-    Loan Payment instead, which can show the overage naturally. No legend,
-    same reasoning as build_takehome_pie_chart -- each slice already labels
-    itself. Deliberately no custom margin= override here -- Plotly's own
-    defaults (plus automargin for label overflow) are what
-    build_takehome_pie_chart uses, and these two charts should always
-    render at the same size."""
-    if monthly_payment <= monthly_net_take_home:
-        remaining = monthly_net_take_home - monthly_payment
-        # "vs. Disposable Income" was vague: "vs." reads as two separate
-        # things, when the pie is one whole (monthly take-home pay) split into
-        # two, and "disposable income" never says it means "what's left after
-        # the loan". Title now names the whole; slices use plain words.
-        fig = px.pie(
-            names=["Student Loan Payment", "What's Left to Spend"],
-            values=[monthly_payment, remaining],
-            title="Your Monthly Take-Home Pay: Loan vs. What's Left",
-            # Semantic colors, in sync with the PDF twin
-            # (build_pdf_takehome_vs_loan_chart): loan slice light red (money
-            # going out), remainder light green (money kept). A discrete MAP,
-            # not a sequence: px.pie sorts slices by value, so sequence colors
-            # land on whichever slice happens to be biggest -- the first cut
-            # of this shipped with the colors swapped for exactly that reason.
-            # Slices are directly labeled, so identity never rides on color
-            # alone.
-            color=["Student Loan Payment", "What's Left to Spend"],
-            color_discrete_map={"Student Loan Payment": "#F1948A",
-                                "What's Left to Spend": "#A9DFBF"},
+def salary_flow_segments(take_home: dict, monthly_payment: float,
+                         divisor: float = 1.0) -> list:
+    """[(label, amount, colour, is_muted)] from gross down to spendable.
+
+    `divisor` is 12 for the monthly view. Applied at the END, to figures that
+    were computed annually, so the segments still sum exactly as they did --
+    dividing each input first would let three roundings drift apart from the
+    total they are supposed to make up.
+
+    Computed annually and divided at the end -- the caller hands a MONTHLY
+    payment because that is how the rest of the page talks about it, and mixing
+    the two on one bar is how a reader concludes their loan eats a twelfth of
+    what it does. One unit per bar, chosen by the caller, never two.
+
+    Returns [] when there is no gross salary, which is a real state: an unpaid
+    training year has nothing to divide, and a bar of zeroes would imply it does.
+    """
+    gross = float(take_home.get("gross") or 0)
+    if gross <= 0:
+        return []
+    annual_payment = max(float(monthly_payment) * 12, 0)
+    kept = take_home["net_take_home"] - annual_payment
+    segments = [
+        ("Federal tax", float(take_home["federal_tax"]), SALARY_FLOW_TAX_GREYS[0], True),
+        ("State tax", float(take_home["state_tax"]), SALARY_FLOW_TAX_GREYS[1], True),
+        ("FICA", float(take_home["fica_tax"]), SALARY_FLOW_TAX_GREYS[2], True),
+        # NOT capped at take-home. Capping it drew a bar that always summed to
+        # the salary, which is tidy and puts a false number in the legend: on a
+        # $34,000 salary against a $3,200/month payment the segment read
+        # "Student loan -- $28,782", the take-home it had been clipped to,
+        # while the payment is $38,400. A segment's label has to be the length
+        # it is drawn at, so the length is the one that gives.
+        ("Student loan", annual_payment, SERIES_ORANGE, False),
+        ("What's left", max(kept, 0.0), SERIES_BLUE, False),
+    ]
+    divisor = divisor or 1.0
+    return [(label, amount / divisor, colour, muted)
+            for label, amount, colour, muted in segments if amount > 0]
+
+
+def salary_flow_overshoot(take_home: dict, monthly_payment: float,
+                          divisor: float = 1.0):
+    """Where the salary runs out, when the bar runs past it -- else None.
+
+    The overshoot is the finding in the shortfall case, so it is drawn rather
+    than described: everything right of this mark is money the person does not
+    have. It also stops the uncapped bar above from being read as the salary,
+    which is what a stacked bar with no axis normally means.
+    """
+    gross = float(take_home.get("gross") or 0)
+    if gross <= 0:
+        return None
+    annual_payment = max(float(monthly_payment) * 12, 0)
+    if take_home["net_take_home"] - annual_payment >= 0:
+        return None
+    return gross / (divisor or 1.0)
+
+
+def salary_flow_headline(take_home: dict, monthly_payment: float,
+                         divisor: float = 1.0) -> str:
+    """The finding, stated. Not "Where your salary goes" -- that names the
+    variable, and a reader who wanted the variable could read the axis.
+
+    EXACTLY ONE money figure, deliberately. Two dollar signs in one string is a
+    LaTeX expression to matplotlib's mathtext exactly as it is to Streamlit's
+    markdown -- "You keep $52,729 of $95,000" rendered as an italic
+    *52,729of95,000* with both signs eaten, the same failure fmt_money_md
+    exists for, in a renderer that has no fmt_money_md. The gross is the bar's
+    full length and is in the stage table above it, so naming it here bought
+    nothing. The matplotlib twin escapes the remaining sign anyway."""
+    gross = float(take_home.get("gross") or 0)
+    if gross <= 0:
+        return "No income at this stage — still in training"
+    annual_payment = max(float(monthly_payment) * 12, 0)
+    kept = take_home["net_take_home"] - annual_payment
+    divisor = divisor or 1.0
+    # The PERCENTAGE is unit-free, so only the money moves. Naming the period
+    # in the sentence is what stops a monthly figure being read as a year's.
+    period = "a month" if divisor > 1 else "a year"
+    if kept < 0:
+        return (f"The payment is {fmt_money(-kept / divisor)} {period} more "
+                f"than the whole take-home")
+    return (f"You keep {fmt_money(kept / divisor)} {period} — "
+            f"{kept / gross:.0%} of the salary")
+
+
+# Annual or monthly, for the salary-flow bar.
+#
+# The SHAPE is identical either way -- dividing every segment by twelve is a
+# change of unit, not of proportion -- so this is a relabelling and nothing
+# else. It exists because the numbers around the chart are already monthly:
+# "Monthly Disposable Income" sits directly above it, and the loan-to-take-home
+# ratio it is drawn to explain is a ratio of MONTHLY figures. A reader checking
+# the bar against the metric above it was dividing by twelve in their head.
+#
+# Annual stays the default: it is the unit the salary itself is quoted in, and
+# it is what the tax figures beside it mean.
+SALARY_FLOW_PERIODS = {"Annual": 1.0, "Monthly": 12.0}
+SALARY_FLOW_PERIOD_KEY = "salary_flow_period"
+
+
+def salary_flow_divisor(period: str) -> float:
+    """Twelve for a monthly view, one for annual. Falls back to annual on an
+    unknown value rather than raising -- this reaches the PDF builder through
+    session_state, and a stale key must cost a unit, not a report."""
+    return SALARY_FLOW_PERIODS.get(period, 1.0)
+
+
+def selected_salary_flow_period() -> str:
+    """The visitor's choice, read from session_state.
+
+    The PDF is static and cannot carry a toggle, so it prints the period the
+    visitor was looking at when they pressed the button -- the same treatment
+    every other selection gets. Wrapped for the exec'd guards and
+    analyze_model.py, which have no session_state at all.
+    """
+    try:
+        return st.session_state.get(SALARY_FLOW_PERIOD_KEY, "Annual")
+    except Exception:
+        return "Annual"
+
+
+def salary_flow_axis_max(stages, divisor: float = 1.0) -> float:
+    """The longest bar among the stages drawn together, so they share one scale.
+
+    A PIE could not be misread across stages -- each one is its own 100%. A bar
+    can: drawn to its own width, Starting ($120,322) and Mid-Career ($145,024)
+    came out exactly the same length, so "What's left" looked identical at
+    $70,090 and $84,677. Stages are rendered side by side precisely to be
+    compared, so the scale has to be shared or the comparison the layout
+    invites is one the chart cannot support.
+
+    Takes the SEGMENT total rather than the gross salary: in the shortfall case
+    the bar deliberately runs past the salary, and clipping it to gross would
+    cut off the overshoot that is the whole finding.
+    """
+    totals = [sum(amount for _, amount, _, _ in
+                  salary_flow_segments(figs["take_home"], figs["monthly_payment"],
+                                       divisor))
+              for figs in stages]
+    return max([t for t in totals if t > 0], default=0.0)
+
+
+def salary_flow_caption(drawable_payments) -> str:
+    """The sentence above the stage bars.
+
+    Conditional because the interesting claim is not always true. "The loan
+    payment is the same dollar amount at every stage -- what changes is how
+    much of the pay it takes" is the whole reason two stages are drawn side by
+    side, and it is exactly wrong once the loan is repaid before the later
+    stage: the Berkeley default clears in under ten years, so the Mid-Career
+    bar has no loan segment at all and the sentence described a payment the
+    reader could see was gone. The old pies' caption made the same claim and
+    was wrong in the same case; it is fixed here rather than carried over.
+    """
+    base = ("Each bar is one career stage, running from the whole salary down "
+            "to what is actually spendable.")
+    payments = [p for p in drawable_payments if p]
+    if len(payments) > 1 and max(payments) - min(payments) < 1:
+        return (base + " The loan payment is the same dollar amount at every "
+                "stage — what changes is how much of the pay it takes, and how "
+                "it measures against the tax bites beside it.")
+    return (base + " The loan payment sits beside the tax bites it is "
+            "competing with, at each stage's own pay.")
+
+
+def build_salary_flow_chart(take_home: dict, monthly_payment: float,
+                            axis_max: float = 0.0, divisor: float = 1.0):
+    """One horizontal stacked bar: gross salary down to what is actually
+    spendable, taxes and the loan payment taken out in place.
+
+    The shortfall case is drawn, not hidden. When the payment exceeds take-home
+    there is nothing left to divide, and the old pie could not represent it at
+    all (no slice set sums past 100%), so it silently swapped itself for a bar
+    chart -- one figure quietly becoming a different figure. Here the bar shows
+    what the payment consumes, the "What's left" segment is simply absent, and
+    the headline states the shortfall in dollars.
+
+    THE AMOUNT RIDES IN THE LEGEND NAME, not only in the label on the segment.
+    A thin segment cannot hold "State tax $2,310" at any width, and hiding an
+    overflowing label is the right call for layout -- but it must not also be
+    how a number disappears. Five segments is one more than the four the direct-
+    label rule covers, so the legend is present anyway; carrying the dollars
+    there costs nothing and makes the hidden-label case lossless.
+    """
+    segments = salary_flow_segments(take_home, monthly_payment, divisor)
+    if not segments:
+        return None
+    fig = go.Figure()
+    for label, amount, colour, muted in segments:
+        fig.add_bar(
+            x=[amount], y=[""], orientation="h",
+            name=f"{label} · {fmt_money(amount)}",
+            marker=dict(color=colour,
+                        # The 2px surface gap between adjacent fills, the same
+                        # rule the stacked areas follow.
+                        line=dict(color=STACK_SEPARATOR,
+                                  width=STACK_SEPARATOR_WIDTH)),
+            text=[f"{label}<br>{fmt_money(amount)}"],
+            textposition="inside", insidetextanchor="middle",
+            # textangle=0 or Plotly ROTATES a label that will not fit rather
+            # than shrinking it, and a narrow segment rendered "State tax
+            # $7,217" sideways down a 30px band. Pinned horizontal, the label
+            # shrinks instead and uniformtext's "hide" catches it at the floor.
+            textangle=0, constraintext="inside",
+            textfont=dict(size=12, color=SALARY_FLOW_TAX_INK if muted else "white"),
+            hovertemplate=f"{label}: %{{x:$,.0f}}<extra></extra>",
         )
-        # Show the dollar amount alongside the percentage on each slice, not
-        # just percent -- "$4,631 (60%)" is more actionable than "60%" alone
-        # when the whole point is how much cash the payment actually consumes.
-        # %{value:$,.0f} is d3 currency formatting, matching fmt_money's style.
-        fig.update_traces(
-            texttemplate="%{label}<br>%{value:$,.0f} (%{percent})", automargin=True)
-        fig.update_layout(showlegend=False, title_font_size=14)
-        return fig
-    fig = px.bar(
-        x=["Take-Home Pay", "Required Student Loan Payment"],
-        y=[monthly_net_take_home, monthly_payment],
-        title="Monthly Student Loan Payment Exceeds Take-Home Pay",
+    fig.update_layout(
+        barmode="stack",
+        title=dict(text=salary_flow_headline(take_home, monthly_payment,
+                                             divisor),
+                   font=dict(size=15)),
+        showlegend=True,
+        # traceorder normal: Plotly reverses a stacked chart's legend by
+        # default, which read backwards against a bar whose whole argument is
+        # left-to-right — the legend listed "What's left" first, under a bar
+        # that ends with it.
+        legend=dict(orientation="h", yanchor="top", y=-0.05,
+                    xanchor="left", x=0, font=dict(size=11),
+                    traceorder="normal"),
+        height=215, margin=dict(t=54, b=8, l=8, r=8),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                   title=None,
+                   # One scale across the stages drawn together, so bar length
+                   # is comparable between them. 0 means "just this bar".
+                   range=[0, axis_max] if axis_max else None),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                   title=None),
+        # A label sits inside its own segment, so a thin one has nowhere to go.
+        # "hide" drops it rather than letting it overflow into a neighbour and
+        # read as that neighbour's amount; the legend still carries both.
+        uniformtext=dict(minsize=10, mode="hide"),
     )
-    fig.update_layout(yaxis_title="Monthly $", xaxis_title=None, title_font_size=14)
+    overshoot = salary_flow_overshoot(take_home, monthly_payment)
+    if overshoot is not None:
+        # #888 and no font colour, matching the two vlines this file already
+        # draws. The rule and its label sit on the SURFACE rather than on a
+        # segment, and nothing here can read the visitor's theme -- ink dark
+        # enough for the white surface is 1.4:1 against Streamlit's #0E1117.
+        # A mid grey works on both, and an unset font colour lets the theme
+        # supply its own.
+        fig.add_vline(
+            x=overshoot, line_dash="dot", line_color="#888", line_width=2,
+            # Short on purpose: Plotly clips annotation text at the plot-area
+            # edge rather than the canvas edge, the same rule the wage chart's
+            # p10/p90 money labels and the tranche payoff events run into.
+            annotation_text="salary ends", annotation_position="top",
+            annotation_font_size=11)
     return fig
 
 
@@ -10707,57 +10925,80 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     return _pdf_image_from_figure(fig)
 
 
-def build_pdf_takehome_pie_chart(take_home: dict, max_width: float = PDF_CONTENT_WIDTH) -> Image:
-    """PDF counterpart to build_takehome_pie_chart. max_width lets the caller
-    render it at half width so the two take-home charts sit side by side on one
-    page (a full-width pair is taller than a page and would split)."""
-    fig, ax = plt.subplots(figsize=(4.5, 4.0))
-    labels = ["Take-Home Pay", "Federal Tax", "State Tax", "FICA"]
-    values = [take_home["net_take_home"], take_home["federal_tax"],
-              take_home["state_tax"], take_home["fica_tax"]]
-    # Dollar amount alongside the percentage, in sync with the on-screen
-    # build_takehome_pie_chart. autopct only gets the percentage, so recover
-    # each slice's dollars from it via the total (sum of all four slices).
-    _pie_total = sum(values)
-    ax.pie(
-        values, labels=labels, startangle=90,
-        autopct=lambda pct: f"${pct / 100 * _pie_total:,.0f}\n({pct:.0f}%)",
-    )
-    ax.set_title("Where Your Salary Actually Goes")
-    return _pdf_image_from_figure(fig, max_width=max_width)
+def _pdf_escape_money(text: str) -> str:
+    """matplotlib treats paired dollar signs as mathtext, so a string carrying
+    two money figures typesets as one italic expression with both signs eaten
+    -- the same trap fmt_money_md guards on the Streamlit side. Escaping is
+    unconditional rather than conditional on there being two: a caller cannot
+    know whether the sentence it is handed will grow a second figure later."""
+    return text.replace("$", r"\$")
 
 
-def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payment: float,
-                                      max_width: float = PDF_CONTENT_WIDTH) -> Image:
-    """PDF counterpart to build_takehome_vs_loan_chart -- same pie-or-bar-
-    fallback branch condition (a pie can't represent a payment that
-    exceeds take-home pay)."""
-    fig, ax = plt.subplots(figsize=(4.5, 4.0))
-    if monthly_payment <= monthly_net_take_home:
-        remaining = monthly_net_take_home - monthly_payment
-        # Kept in sync with the on-screen build_takehome_vs_loan_chart, which
-        # now labels each slice with its dollar amount as well as the percent.
-        # matplotlib's autopct only gets the percentage, so recover the dollar
-        # value from it via the slice total (payment + remaining).
-        _pie_total = monthly_payment + remaining
-        ax.pie(
-            [monthly_payment, remaining],
-            labels=["Student Loan Payment", "What's Left to Spend"],
-            autopct=lambda pct: f"${pct / 100 * _pie_total:,.0f}\n({pct:.0f}%)",
-            startangle=90,
-            # Semantic colors, in sync with the on-screen twin: the loan slice
-            # light red (money going out), the remainder light green (money
-            # kept). Slices are directly labeled, so identity never rides on
-            # color alone.
-            colors=["#F1948A", "#A9DFBF"],
-        )
-        ax.set_title("Your Monthly Take-Home Pay: Loan vs. What's Left")
-    else:
-        ax.bar(["Take-Home Pay", "Required Student Loan Payment"],
-               [monthly_net_take_home, monthly_payment], color=["#636EFA", "#EF553B"])
-        ax.set_title("Monthly Student Loan Payment Exceeds Take-Home Pay")
-        ax.set_ylabel("Monthly $")
-        ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
+def build_pdf_salary_flow_chart(take_home: dict, monthly_payment: float,
+                                max_width: float = PDF_CONTENT_WIDTH,
+                                axis_max: float = 0.0,
+                                divisor: float = 1.0) -> Image:
+    """PDF counterpart to build_salary_flow_chart -- same segments, same order,
+    same colours, same headline, redrawn for print (the chart-twin rule).
+
+    It replaced a PAIR of half-width pies, so it takes the full content width
+    rather than PDF_CONTENT_WIDTH / 2. A stacked bar earns its space
+    horizontally: the whole comparison this chart exists to make is how the
+    loan segment measures against the tax segments, and that is a length.
+
+    Returns None when there is nothing to draw, which the caller must handle --
+    an unpaid training year has no salary to divide, and the flowables list
+    simply omits the chart rather than printing an empty axis.
+    """
+    segments = salary_flow_segments(take_home, monthly_payment, divisor)
+    if not segments:
+        return None
+    fig, ax = plt.subplots(figsize=(9.0, 2.1))
+    total = sum(amount for _, amount, _, _ in segments)
+    left = 0.0
+    placed = []
+    for label, amount, colour, muted in segments:
+        ax.barh([0], [amount], left=left, color=colour, height=0.55,
+                edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH,
+                label=f"{label} — {fmt_money(amount)}")
+        placed.append((
+            ax.text(left + amount / 2, 0,
+                    f"{label}\n{_pdf_escape_money(fmt_money(amount))}",
+                    ha="center", va="center", fontsize=8.5,
+                    color=SALARY_FLOW_TAX_INK if muted else "white"),
+            left, amount))
+        left += amount
+    overshoot = salary_flow_overshoot(take_home, monthly_payment, divisor)
+    if overshoot is not None:
+        ax.axvline(overshoot, color="#2f2f2c", linewidth=1.4, linestyle=":",
+                   ymin=0.08, ymax=0.92, zorder=5)
+        ax.text(overshoot, 0.42, " salary ends", ha="left", va="bottom",
+                fontsize=8, color="#2f2f2c", zorder=5)
+    ax.set_xlim(0, axis_max or total)
+    ax.set_ylim(-0.6, 0.6)
+    ax.axis("off")
+    ax.set_title(_pdf_escape_money(
+        salary_flow_headline(take_home, monthly_payment, divisor)), fontsize=11)
+    # The legend carries every segment's dollars, so a hidden in-bar label
+    # loses position but never the number.
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 0.02), ncol=3,
+              frameon=False, fontsize=8)
+
+    # DROP A LABEL THAT DOES NOT FIT ITS OWN SEGMENT -- the matplotlib side of
+    # the Plotly layout's uniformtext "hide". A share-of-total threshold was
+    # tried first and is not good enough: at 13.4% of a $95,000 salary the
+    # "Federal tax / $12,741" label cleared a 10% cut and still overhung its
+    # grey block on both sides, reading as though it belonged to the segments
+    # either side of it. Text width depends on the string, the font and the
+    # figure size, so it has to be measured rather than guessed, and that
+    # needs a renderer -- hence after the draw, not during it.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    for artist, seg_left, amount in placed:
+        span = (ax.transData.transform((seg_left + amount, 0))[0]
+                - ax.transData.transform((seg_left, 0))[0])
+        if artist.get_window_extent(renderer).width > span - 6:
+            artist.set_visible(False)
     return _pdf_image_from_figure(fig, max_width=max_width)
 
 
@@ -11193,17 +11434,23 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
     _drawable = [(label, figs) for label, figs in takehome_stages
                  if figs["gross"] > 0 and figs["monthly_payment"] is not None]
     if _drawable:
-        # Both charts for a stage side by side, and slightly narrower than a
-        # strict half: the whole Take-Home page -- header, stage table, and
-        # BOTH stages' chart pairs -- must total under the 648pt content
-        # height so the section that just page-broke above stays one page.
-        # Stacked at full width each chart is taller than half a page.
-        _chart_w = (PDF_CONTENT_WIDTH - 44) / 2
+        # One full-width bar per stage. The pair of half-width pies this
+        # replaced had to be squeezed narrower than a strict half so that the
+        # whole Take-Home page -- header, stage table and both stages' charts
+        # -- stayed under the 648pt content height; at 9.0x2.1in each bar is
+        # about 109pt, so two stages plus their headings now clear that with
+        # room to spare and no width compromise.
+        # The period the visitor was looking at when they pressed Download.
+        # A static report cannot carry the toggle, and printing the other unit
+        # would hand them a chart whose numbers do not match the screen they
+        # asked for a copy of.
+        _flow_divisor = salary_flow_divisor(selected_salary_flow_period())
+        _flow_axis_max = salary_flow_axis_max(
+            [_f for _l, _f in _drawable], _flow_divisor)
         story += [
             Spacer(1, 8),
-            Paragraph(_strip_emoji(
-                "Each block below is one career stage. The loan payment is the same "
-                "dollar amount in both -- what changes is how much of your pay it takes."),
+            Paragraph(_strip_emoji(salary_flow_caption(
+                [_f["monthly_payment"] for _l, _f in _drawable])),
                 styles["caption"]),
         ]
         for _label, _figs in _drawable:
@@ -11211,17 +11458,15 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             story += [
                 Spacer(1, 6),
                 Paragraph(_strip_emoji(_label), styles["section"]),
-                KeepTogether(Table(
-                    [[build_pdf_takehome_pie_chart(_take_home, max_width=_chart_w),
-                      build_pdf_takehome_vs_loan_chart(
-                          _take_home["net_take_home"] / 12, _figs["monthly_payment"],
-                          max_width=_chart_w)]],
-                    colWidths=[PDF_CONTENT_WIDTH / 2, PDF_CONTENT_WIDTH / 2],
-                    hAlign="CENTER",
-                    style=TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
-                                      ("ALIGN", (0, 0), (-1, -1), "CENTER")]),
-                )),
             ]
+            # One full-width bar replaces the two half-width pies. None means
+            # this stage has no salary to divide (an unpaid training year), so
+            # the chart is omitted rather than drawn empty.
+            _flow_img = build_pdf_salary_flow_chart(
+                _take_home, _figs["monthly_payment"], max_width=PDF_CONTENT_WIDTH,
+                axis_max=_flow_axis_max, divisor=_flow_divisor)
+            if _flow_img is not None:
+                story.append(KeepTogether(_flow_img))
     story += [
         # Financial Position starts its own page too: with Take-Home filling
         # its page above, this header rendered orphaned at the bottom of that
@@ -18257,25 +18502,33 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
     # render-time crash.
     drawable = [(label, figs) for label, figs in results if figs["gross"] > 0]
     if show_charts and drawable:
-        st.caption(
-            "Each column is one career stage. The loan payment is the same "
-            "dollar amount in both — what changes is how much of your pay it "
-            "takes, which is the comparison worth making."
-        )
+        st.caption(salary_flow_caption(
+            [figs["monthly_payment"] for _label, figs in drawable]))
+        # Rendered here rather than in the sidebar: it changes how ONE chart
+        # is labelled and nothing about the model, so it belongs beside the
+        # thing it relabels. It exists only on this branch, which is the
+        # single-scenario one -- Compare Mode passes show_charts=False, so
+        # there is exactly one widget with this key and no duplicate-key risk.
+        st.radio("Show these as", list(SALARY_FLOW_PERIODS),
+                 key=SALARY_FLOW_PERIOD_KEY, horizontal=True,
+                 help="The same bar in either unit — dividing by twelve "
+                      "changes the numbers, not the proportions.")
+        _flow_divisor = salary_flow_divisor(selected_salary_flow_period())
+        _flow_axis_max = salary_flow_axis_max(
+            [figs for _label, figs in drawable], _flow_divisor)
         chart_cols = (st.columns(len(drawable)) if stage_layout == "columns"
                       else [contextlib.nullcontext()] * len(drawable))
         for (label, figs), container in zip(drawable, chart_cols):
             with container:
                 panel_heading(label, level=3)
-                st.plotly_chart(build_takehome_pie_chart(figs["take_home"]),
-                                 use_container_width=True, config=PLOTLY_CHART_CONFIG,
-                                 key=f"takehome_pie_{major_name}_{label}")
-                st.plotly_chart(
-                    build_takehome_vs_loan_chart(figs["take_home"]["net_take_home"] / 12,
-                                                  figs["monthly_payment"]),
-                    use_container_width=True, config=PLOTLY_CHART_CONFIG,
-                    key=f"takehome_vs_loan_{major_name}_{label}",
-                )
+                _flow = build_salary_flow_chart(
+                    figs["take_home"], figs["monthly_payment"],
+                    axis_max=_flow_axis_max, divisor=_flow_divisor)
+                if _flow is not None:
+                    st.plotly_chart(
+                        _flow, use_container_width=True,
+                        config=PLOTLY_CHART_CONFIG,
+                        key=f"salary_flow_{major_name}_{label}")
 
     return {"stages": results}
 
