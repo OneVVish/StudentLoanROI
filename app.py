@@ -211,7 +211,39 @@ PROFESSIONAL_PROGRAM_BY_OCCUPATION = {
     **{title: "dentistry" for title in DENTIST_TITLES},
     "Medicine": "medicine",
     "Law": "law",
+    # Five more OEWS occupations that cannot be entered without a professional
+    # degree. BLS already files all five under "Doctoral or professional
+    # degree", so PROGRAM_YEARS_BY_EDUCATION was already charging them the same
+    # 4 + 5 years it charges medicine -- what was missing was the DEBT, which
+    # made them the only professional paths priced as if the degree were free.
+    #
+    # Titles are OEWS's exact strings. A near-miss here is silent: the path
+    # simply keeps costing nothing.
+    "Pharmacists": "pharmacy",
+    "Veterinarians": "veterinary",
+    "Optometrists": "optometry",
+    "Podiatrists": "podiatry",
+    "Chiropractors": "chiropractic",
 }
+
+# Which calculator programme a SEARCH level applies to, where they differ.
+#
+# Only osteopathic differs, and it has to: the app has no DO occupation because
+# DOs and MDs are the same occupations in OEWS, and their schools are largely
+# the same rows in Scorecard (22 DO-only schools are already options in the
+# medicine picker). A DO school therefore fills the Medical school field. The
+# level exists in the search because the PRICE is DO-specific -- $60,284 median
+# against medicine's $44,136 -- which is the number a visitor is there for.
+#
+# Podiatry does NOT belong here. It has its own occupation, so it fills its own
+# field; what it lacks is debt rows, which the carried-price path already
+# handles.
+SEARCH_LEVEL_APPLIES_TO = {"osteopathic": "medicine"}
+
+
+def calculator_programme_for_level(level_key: str) -> str:
+    """The programme key the sidebar picker uses for this search level."""
+    return SEARCH_LEVEL_APPLIES_TO.get(level_key, level_key)
 
 
 # BLS OEWS-sourced careers from data_pipeline.py's output, in the same
@@ -4975,9 +5007,34 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
                     f"for {school} across the programme, not a debt figure. That "
                     f"school publishes no borrowing median, so this is a sticker "
                     f"price before any aid and reads high.")
-        return (f"Using the national average of {fmt_money(national)} for "
-                f"{'medical' if professional_program_for(major_name) == 'medicine' else 'this'} "
-                "school debt. Pick your school to use its own figure.")
+        program_key = professional_program_for(major_name)
+        # Three national figures with three provenances, and the sentence has
+        # to name the right one. An AAMC average and a median of Scorecard
+        # medians are different claims, and for podiatry the figure is not even
+        # this programme's own -- saying "the national average" over all three
+        # would make the weakest of them sound like the strongest.
+        curated = bool(MAJOR_DATA.get(major_name, {}).get("additional_training_debt"))
+        if curated:
+            source = (f"the national average of {fmt_money(national)} for "
+                      f"{'medical' if program_key == 'medicine' else 'this'} "
+                      f"school debt")
+            advice = " Pick your school to use its own figure."
+        elif program_key in PROGRAMMES_WITHOUT_OWN_DEBT:
+            source = (f"{fmt_money(national)} — no school publishes a "
+                      f"{program_key}-specific debt figure anywhere in federal "
+                      f"data, so this is the median at the schools that teach "
+                      f"it, filed under Medicine")
+            # There is no picker to point at: professional_schools_for returns
+            # nothing for a programme with no debt rows.
+            advice = (" Searching for a school in the graduate tool carries its "
+                      "published price instead.")
+        else:
+            listed = len(professional_schools_for(program_key))
+            source = (f"{fmt_money(national)} — the median across the {listed} "
+                      f"schools that publish a {program_key} debt figure "
+                      f"(College Scorecard)")
+            advice = " Pick your school to use its own figure."
+        return f"Using {source}.{advice}"
     delta = debt - national
     direction = "above" if delta > 0 else "below"
     over_cap = max(debt - PROFESSIONAL_AGGREGATE_LIMIT, 0)
@@ -5019,13 +5076,59 @@ def professional_schools_for(program_key: str) -> list:
     return sorted(df[df["program_key"] == program_key]["INSTNM"].dropna().unique())
 
 
-def national_professional_debt(major_name: str) -> float:
-    """The hand-curated national figure for this path -- AAMC/ABA/ADEA. The
-    fallback whenever no school is named or the named school publishes none."""
-    try:
-        return float(MAJOR_DATA.get(major_name, {}).get("additional_training_debt", 0) or 0)
-    except (TypeError, ValueError):
+@st.cache_data(show_spinner=False)
+def dataset_professional_debt(program_key: str) -> float:
+    """The national figure DERIVED from Scorecard, for paths with no constant.
+
+    Medicine, dentistry and law carry hand-curated AAMC/ADEA/ABA averages in
+    MAJOR_DATA and keep them -- changing those would move every scenario built
+    on them. The six programmes added after that have no association figure in
+    this codebase, and inventing one is worse than reading the file the picker
+    already reads: this is the median of the per-school medians, over the same
+    rows the picker offers.
+
+    Podiatry is the one that needs a second pass. Scorecard has no CIP for it
+    (see PROGRAMMES_WITHOUT_OWN_DEBT), so there is nothing to take a median of
+    -- and returning 0 is the specific trap resolve_professional_debt's
+    docstring warns about, where professional_debt_cap reads a falsy debt as a
+    real cap of zero and pushes the whole tranche private. So it falls back to
+    the medicine medians AT THE SCHOOLS THAT TEACH IT, which is what those rows
+    actually describe: 7 of the 11 IPEDS-priced podiatry schools publish a 5112
+    median, and at a school with no MD programme that median IS its DPM
+    graduates.
+    """
+    debt = load_professional_debt()
+    if debt.empty or "credential" not in debt.columns:
         return 0.0
+    prof = debt[debt["credential"] == "professional"]
+    own = prof[prof["program_key"] == program_key]["debt_median"].dropna()
+    if not own.empty:
+        return float(own.median())
+    tuition = load_professional_tuition()
+    if tuition.empty:
+        return 0.0
+    taught_at = set(tuition[tuition["program_key"] == program_key]["UNITID"])
+    proxy = prof[(prof["program_key"] == "medicine")
+                 & (prof["UNITID"].isin(taught_at))]["debt_median"].dropna()
+    return float(proxy.median()) if not proxy.empty else 0.0
+
+
+def national_professional_debt(major_name: str) -> float:
+    """The national figure for this path. The fallback whenever no school is
+    named or the named school publishes none.
+
+    Two sources, in order: the hand-curated AAMC/ABA/ADEA constant where one
+    exists, then Scorecard's own medians. It must never return 0 for a path
+    that attends a professional school -- see resolve_professional_debt.
+    """
+    try:
+        curated = float(MAJOR_DATA.get(major_name, {}).get("additional_training_debt", 0) or 0)
+    except (TypeError, ValueError):
+        curated = 0.0
+    if curated:
+        return curated
+    program_key = PROFESSIONAL_PROGRAM_BY_OCCUPATION.get(major_name)
+    return dataset_professional_debt(program_key) if program_key else 0.0
 
 
 def resolve_professional_debt(major_name: str, school_name: str = None) -> float:
@@ -5552,15 +5655,19 @@ def graduate_apply_target(professional: bool, level_key: str, family: str,
           field's schools and nothing else
     """
     if professional:
-        if professional_program_for(major_name) != level_key:
+        # The level and the calculator field are the same programme everywhere
+        # except osteopathic medicine, which fills the Medical school field --
+        # there is no DO occupation to give it one of its own.
+        programme = calculator_programme_for_level(level_key)
+        if professional_program_for(major_name) != programme:
             return None, (
                 f"Your scenario is studying **{major_name}**, so the sidebar has "
-                f"no {PROFESSIONAL_SCHOOL_LABEL.get(level_key, level_key)} field "
-                f"to fill. Set the major or occupation to a {level_key} path "
+                f"no {PROFESSIONAL_SCHOOL_LABEL.get(programme, programme)} field "
+                f"to fill. Set the major or occupation to a {programme} path "
                 f"first, then apply a school.")
-        if school_name not in professional_schools_for(level_key):
-            return (None, display_name, level_key, int(total_cost)), None
-        return ("prof_school_a", school_name, level_key, int(total_cost)), None
+        if school_name not in professional_schools_for(programme):
+            return (None, display_name, programme, int(total_cost)), None
+        return ("prof_school_a", school_name, programme, int(total_cost)), None
     if MAJOR_TO_CIP_FAMILY.get(major_name) != family:
         return None, (
             f"Your scenario is studying **{major_name}**, which is a different "
@@ -12329,15 +12436,22 @@ if _program_key_a:
             or st.session_state["prof_school_a"] not in _prof_options_a):
         st.session_state["prof_school_a"] = PROFESSIONAL_SCHOOL_NATIONAL
     st.session_state["_prof_program_a"] = _program_key_a
-    _sb_study.selectbox(
-        PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
-        key="prof_school_a", on_change=_on_prof_school_change,
-        help="Median debt that this school's graduates leave with, from College "
-             "Scorecard. It replaces the national average, and the spread is "
-             "wide -- medical school debt runs from about $48,000 to $330,000 "
-             "depending on where you go. Leave on the national average if you "
-             "don't know yet. See Methodology.",
-    )
+    # A programme with no debt rows at all gets no picker. Podiatry is the case
+    # -- Scorecard has no CIP for it, so professional_schools_for returns
+    # nothing and the control would be a dropdown whose only option is the
+    # default. A one-option select reads as "your school is not in our data",
+    # which is true but says nothing about what to do; the caption below the
+    # figure says what to do instead.
+    if len(_prof_options_a) > 1:
+        _sb_study.selectbox(
+            PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
+            key="prof_school_a", on_change=_on_prof_school_change,
+            help="Median debt that this school's graduates leave with, from College "
+                 "Scorecard. It replaces the national average, and the spread is "
+                 "wide -- medical school debt runs from about $48,000 to $330,000 "
+                 "depending on where you go. Leave on the national average if you "
+                 "don't know yet. See Methodology.",
+        )
     professional_debt_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
     # A carried PRICE standing in for a debt has to say so, and say it instead
     # of the usual caption rather than beside it: that one describes what
@@ -15815,6 +15929,34 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                     "about a fifth of them at master's level and a sixteenth at "
                     "doctoral. Plenty of schools teach it and report nothing."
                 )
+            # "No school teaches this" and "none of them is this cheap" read
+            # identically and are completely different findings. The default
+            # budget is shared by every level, and the professional programmes
+            # sit well above it -- osteopathic medicine's median price is
+            # $60,284 against the slider's opening ceiling, so a level with 37
+            # schools opened on an empty page that looked like a coverage gap.
+            # Re-run without the budget rather than reason about it: the filters
+            # the visitor DID set still apply, so the floor quoted is the floor
+            # for their search and not for the whole file.
+            unbounded = (
+                search_professional_schools_by_budget(
+                    grad_key, float("inf"), controls["home_state"],
+                    states=tuple(controls["states"]) or None, limit=1,
+                    control_types=tuple(controls["control_types"]) or None)
+                if professional else
+                search_graduate_schools_by_budget(
+                    search_key, grad_key, float("inf"), controls["home_state"],
+                    states=tuple(controls["states"]) or None, limit=1,
+                    control_types=tuple(controls["control_types"]) or None))
+            if not unbounded.empty:
+                cheapest = float(unbounded["price_per_year"].iloc[0])
+                if cheapest > controls["max_budget"]:
+                    st.caption(
+                        f"The cheapest one that matches everything else is "
+                        f"**{fmt_money_md(cheapest)}/year** — raise the ceiling "
+                        f"to that and it appears. This is a price, not a "
+                        f"verdict on the programme."
+                    )
             return
 
         render_graduate_results(results, credential,
@@ -16434,7 +16576,12 @@ def get_loan_principal_caption(scenario: dict) -> str:
         MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0))
     if additional_debt <= 0:
         return None
-    national = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    # The RESOLVED national figure, not the raw constant. Six of the nine
+    # professional paths have no curated constant and derive theirs from
+    # Scorecard, so reading MAJOR_DATA here compares a real debt against 0 and
+    # calls every one of them "the school you picked" while the picker plainly
+    # says National average.
+    national = national_professional_debt(scenario["major"])
     basis = ("est. average professional-school debt" if additional_debt == national
              else "professional-school debt for the school you picked")
     return (
@@ -17955,6 +18102,26 @@ right away:
   your loan — your school's median where you name one, otherwise a national
   **$130,000** from the ABA's 2024 survey
   ([source](https://www.americanbar.org/groups/young_lawyers/resources/after-the-bar/personal-financial/young-lawyers-significantly-impacted-by-high-debt-burdens/)).
+
+- **Pharmacy, veterinary medicine, optometry, podiatry and chiropractic**:
+  BLS files all five as needing a doctoral or professional degree, so they
+  are charged the same 4 + 5 years of school as medicine, and now the same
+  way for debt — your school's median where the sidebar lets you name one,
+  otherwise a national figure. Those national figures are **not** an
+  association average like the two above: no such figure is curated here, so
+  each is the **median of the per-school medians College Scorecard
+  publishes** for that programme — pharmacy $142,122 across 88 schools,
+  veterinary $162,726 across 26, optometry $172,132 across 16, chiropractic
+  $193,488 across 10
+  ([source](https://collegescorecard.ed.gov/data/)). Two caveats. **Podiatry
+  has no figure of its own anywhere in federal data** — Scorecard publishes
+  no CIP for it at any level, so its students are counted under *Medicine*;
+  the $239,574 shown is the median at the schools that teach podiatry, which
+  at a school with no MD programme is these graduates and at one with both is
+  a mix. And **none of the five is modelled with a residency**: podiatric
+  medicine in particular normally requires three more years at a resident's
+  pay, which this calculator does not deduct, so its early years read better
+  than they will be.
 
 During those unpaid years, this calculator shows $0 income — and any loan
 you've taken out is still quietly racking up interest the whole time,

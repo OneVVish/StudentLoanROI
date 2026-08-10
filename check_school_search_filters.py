@@ -107,6 +107,12 @@ def load_app_namespace():
     prefix = src[:src.rindex("# " + "=" * 60, 0, cut)]
     ns = {"__name__": "searchfilterscheck"}
     exec(compile(prefix, "app.py", "exec"), ns)
+    # MAJOR_DATA is a section-4 name, and the professional checks need the REAL
+    # one: the curated AAMC/ABA/ADEA constants live in it, and against an empty
+    # dict every path falls through to the Scorecard-derived figure -- so the
+    # check would pass on code that had lost the curated ones entirely. Built
+    # the way analyze_model.py builds it, from app.py's own builder.
+    ns["MAJOR_DATA"] = ns["build_major_data"](ns["CAREERS_CSV_PATH_NATIONAL"])
     return ns
 
 
@@ -529,6 +535,64 @@ def check_programmes_without_debt(ns) -> list:
     return problems
 
 
+def check_professional_paths(ns) -> list:
+    """Every search level must be able to reach the calculator, or say so.
+
+    A level whose apply can never succeed is worse than one that does not
+    exist: the button is there, the warning tells the visitor to set a major
+    the app does not have, and nothing on screen admits the path is unmodelled.
+    So every professional level must map to an occupation, and every mapped
+    occupation must resolve a non-zero national debt.
+
+    Zero is the specific failure. professional_debt_cap reads a falsy debt as a
+    real cap of zero rather than "unset", which pushes the entire tranche into
+    private borrowing while the principal simultaneously loses the debt -- two
+    wrong answers from one absent row, and both flatter or punish silently.
+    """
+    problems = []
+    occupations = ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"]
+    # Every mapped title must be a real occupation. A near-miss ("Optometrist"
+    # for "Optometrists") is inert in the worst way: the map looks complete,
+    # every lookup against it succeeds in isolation, and the actual occupation
+    # in MAJOR_DATA silently keeps costing nothing. Only the curated pseudo-
+    # occupations are exempt, since those are entries this app invents.
+    known = set(ns["MAJOR_DATA"])
+    for title, programme in sorted(occupations.items()):
+        if title not in known:
+            problems.append(
+                f"  {title!r} -> {programme!r} names no occupation in "
+                f"MAJOR_DATA\n    the mapping is inert and that path is priced "
+                f"with no professional debt at all")
+    for label, (level_key, _years) in ns["PROFESSIONAL_SEARCH_LEVELS"].items():
+        programme = ns["calculator_programme_for_level"](level_key)
+        reachable = [occ for occ, key in occupations.items() if key == programme]
+        if not reachable:
+            problems.append(
+                f"  {label!r} applies to programme {programme!r}, which no "
+                f"occupation maps to\n    its apply button can only ever warn, "
+                f"and the warning names a path the app does not offer")
+            continue
+        occ = reachable[0]
+        national = ns["national_professional_debt"](occ)
+        if not national:
+            problems.append(
+                f"  {occ!r} ({programme}) resolves a national debt of 0\n"
+                f"    professional_debt_cap reads that as a cap, not as unset: "
+                f"the whole tranche goes private and the debt vanishes")
+        listed = ns["professional_schools_for"](programme)
+        if not listed and programme not in ns["PROGRAMMES_WITHOUT_OWN_DEBT"]:
+            problems.append(
+                f"  {programme!r} has no schools to pick and is not declared as "
+                f"a programme without its own debt")
+        # The caption promises a school figure differs from the national one.
+        if listed:
+            school_debt = ns["resolve_professional_debt"](occ, listed[0])
+            if not school_debt:
+                problems.append(
+                    f"  naming {listed[0]!r} for {occ!r} resolves no debt at all")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -675,6 +739,7 @@ def main() -> int:
         ("picker identity", lambda: check_picker_identity(ns, base)),
         ("apply target", lambda: check_apply_target(ns)),
         ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
+        ("professional paths", lambda: check_professional_paths(ns)),
         ("programmes without debt", lambda: check_programmes_without_debt(ns)),
     ]:
         found = fn()
