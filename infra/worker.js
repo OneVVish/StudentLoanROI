@@ -216,10 +216,75 @@ const TEXT_FILES = {
   "/llms.txt": ["text/markdown", LLMS],
 };
 
+// Served when the origin cannot answer: a 5xx, or a fetch that throws
+// (connection refused, TLS failure, or the subrequest timing out).
+//
+// WHY THIS EXISTS. The app is one Streamlit process on Community Cloud. Under
+// a spike it can stop answering, and what a visitor sees then is Streamlit's
+// own connecting spinner, forever, with no explanation -- and a crawler sees
+// an error where it previously saw a calculator. A static page that says what
+// happened costs nothing to serve, is indexable, and is honest.
+//
+// Deliberately plain HTML with inline CSS: it must render with no origin, no
+// assets and no JavaScript. Anything it references could be the thing that is
+// down.
+//
+// It carries a 503 with Retry-After so crawlers treat it as temporary and come
+// back, rather than de-indexing the page.
+const BUSY_PAGE = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Busy right now — Worth My Degree</title>
+<meta name="robots" content="noindex">
+<style>
+ body{margin:0;background:#0e1117;color:#fafafa;font:16px/1.6 -apple-system,
+   BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+ main{max-width:38rem;margin:0 auto;padding:3rem 1.25rem;}
+ h1{font-size:1.6rem;line-height:1.25;margin:0 0 .5rem;}
+ p{color:#c9ccd4;} a{color:#ff4b4b;}
+ .card{border:1px solid #2b3038;border-radius:.6rem;padding:1rem 1.25rem;
+   margin:1.5rem 0;background:#161a22;}
+ ul{padding-left:1.1rem;color:#c9ccd4;} li{margin:.35rem 0;}
+</style></head><body><main>
+<h1>🎓 More people than usual are using this right now</h1>
+<p>The calculator is temporarily unavailable. Nothing is broken and nothing you
+entered was saved — it is one small server, and it is busy.
+<a href="/">Try again</a> in a minute.</p>
+<div class="card">
+<p><strong>What this tool does, while you wait.</strong> It models the real
+ten-year financial outcome of a major, school and loan: repayment under the
+2026 federal rules, federal and state tax, and cost of living by city, compared
+against a debt-free high school graduate.</p>
+<ul>
+<li>Wages: BLS Occupational Employment and Wage Statistics.</li>
+<li>Major outcomes: New York Fed's labor-market survey.</li>
+<li>School cost and borrowing: College Scorecard and IPEDS.</li>
+</ul>
+<p>Free, anonymous, no sign-up. Every figure is computed from published federal
+data — an educational estimate, not financial advice.</p>
+</div>
+<p><a href="/llms.txt">A dense text summary</a> of the whole tool is served
+from the edge and is always available.</p>
+</main></body></html>`;
+
 // Streamlit-owned path prefixes that must reach the origin unmodified.
 // /_stcore carries the websocket (the app's entire runtime) and the
 // health endpoint Railway checks.
 const PASSTHROUGH = ["/_stcore", "/static", "/component", "/media", "/vendor", "/favicon"];
+
+function busyResponse() {
+  return new Response(BUSY_PAGE, {
+    status: 503,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      // Temporary, and say so: a crawler that reads 503 + Retry-After comes
+      // back rather than dropping the page from its index.
+      "retry-after": "60",
+      "cache-control": "no-store",
+    },
+  });
+}
 
 export default {
   async fetch(request) {
@@ -254,7 +319,19 @@ export default {
     }
 
     // 5. Serve the shell with canonical + JSON-LD + description injected.
-    const resp = await fetch(request);
+    //
+    // The origin call is guarded from here down. A spike shows up as a 5xx or
+    // a throw, and either one used to become Streamlit's bare spinner; now it
+    // becomes a page that says what happened. Only the HTML DOCUMENT is
+    // substituted -- /_stcore returned above, untouched, because breaking the
+    // websocket is how you hang a session that would otherwise have recovered.
+    let resp;
+    try {
+      resp = await fetch(request);
+    } catch (err) {
+      return busyResponse();
+    }
+    if (resp.status >= 500) return busyResponse();
     const ctype = resp.headers.get("content-type") || "";
     if (!ctype.includes("text/html")) return resp;
 

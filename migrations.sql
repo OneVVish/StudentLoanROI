@@ -1431,3 +1431,36 @@ alter table scenario_events
 -- search can now be reached WITHOUT a schools pageview, and before today it
 -- could not. Any funnel that used pageview_schools as the denominator for
 -- graduate searches is measuring something that stopped existing.
+
+-- =====================================================================
+-- 2026-08-10 -- WRITES CAN NOW BE DROPPED, AND THE GAP IS NOT RANDOM.
+-- No DDL. This records a change in how rows ARRIVE, which matters more
+-- for reading the data than most schema changes do.
+--
+-- Until today every writer ran synchronously inside the page render, with
+-- the PostgREST client's own 120-SECOND default timeout. A slow database
+-- therefore did not lose rows -- it held the page open until the row
+-- landed. Under load that is a hang, so it was fixed: the timeout is 3s,
+-- and usage_logs + scenario_events now go through a bounded in-process
+-- queue with a circuit breaker.
+--
+-- The consequence for analysis: those two tables can now LOSE rows, and
+-- they lose them in the worst possible pattern -- exactly when the
+-- database is struggling, which is exactly when traffic is highest. A
+-- quiet hour and a shed hour are the same shape in this data.
+--
+--   * survey_responses, pdf_downloads and scenario_shares are UNAFFECTED.
+--     They are still written synchronously (with the 3s timeout), because
+--     each one shows the visitor a confirmation. A row missing from those
+--     three still means what it always meant.
+--   * usage_logs and scenario_events may be short. The admin page reports
+--     written / failed / dropped / skipped counts since the last container
+--     restart -- there is no persistent record, because a process that is
+--     being restarted cannot write one.
+--   * If a spike is ever visible in the traffic digest, treat the same
+--     window in these two tables as a LOWER BOUND, and record the window
+--     here by hand. That is the only durable trace there will be.
+--
+-- Before this date, absence in usage_logs means "did not happen". After
+-- it, absence means "did not happen, or was shed". Do not pool the two
+-- eras when computing a rate whose denominator is a usage_logs count.
