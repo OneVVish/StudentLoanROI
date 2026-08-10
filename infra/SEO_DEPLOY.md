@@ -25,6 +25,31 @@ Rollback: grey-cloud both records — instant return to direct-to-Railway.
 
 ## Phase C — Deploy the Worker
 
+**Updating an already-deployed Worker (the normal case):**
+
+```bash
+npx wrangler login     # once per machine; opens a browser, riteshvk@gmail.com
+npx wrangler deploy    # from the repo root, reads ./wrangler.toml
+```
+
+`wrangler.toml` declares the script and nothing else — **routes are not
+managed from the repo**, deliberately, so a bad deploy can only serve wrong
+code on the right routes. Rollback is Worker → Deployments → revert, one
+click, no route surgery.
+
+Two things to check before the FIRST wrangler deploy, because they are the
+only ways this path differs from the dashboard one:
+
+- Worker → Settings → **Runtime**: if the deployed compatibility date is not
+  the `compatibility_date` in `wrangler.toml`, put the deployed one in the
+  file first. Changing runtime semantics in the same deploy as a code change
+  makes any regression impossible to attribute.
+- The deploy output must name **`wmd-edge`**. A typo in `name` creates a NEW
+  Worker with no routes, which looks like a successful deploy and changes
+  nothing — the live site keeps serving the old code.
+
+**First-time setup, or a rebuild from scratch (dashboard):**
+
 1. Workers & Pages → Create → name `wmd-edge` → paste `infra/worker.js`
    → Deploy.
 2. Worker → Settings → Domains & Routes → add routes
@@ -32,6 +57,18 @@ Rollback: grey-cloud both records — instant return to direct-to-Railway.
    worthmydegree.com).
 3. Run the verification set below immediately. Rollback: delete the two
    routes (Worker stays deployed, stops receiving traffic).
+
+**Verifying from a network with a web-isolation proxy.** Observed
+2026-08-10 on the development machine: every command-line fetch of
+worthmydegree.com returned a `fire.glass` (Fireglass browser-isolation)
+page — 200 with the appliance's own HTML for `/`, `/robots.txt` and stray
+paths alike, and 403 for non-browser user agents. It is indistinguishable
+from a broken deploy if you only look at status codes: no JSON-LD, no
+canonical header, no 301 on stray paths. Anthropic's WebFetch egress was
+also 403. A real browser rendered the site correctly the whole time.
+
+So on such a network the curl set below proves nothing. Use a phone
+hotspot, or do the browser checks and trust those.
 
 ## Phase D — Index registration
 

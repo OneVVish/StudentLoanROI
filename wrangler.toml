@@ -1,0 +1,62 @@
+# Cloudflare Worker deploy config for the edge layer in infra/worker.js.
+#
+#     npx wrangler login      # once per machine, opens a browser
+#     npx wrangler deploy     # from the repo root
+#
+# Before this file the Worker was deployed by pasting infra/worker.js into the
+# Cloudflare dashboard (infra/SEO_DEPLOY.md, Phase C). That works and is still
+# the documented fallback, but it has the failure mode every copy-paste
+# deployment has: what is running is whatever was last pasted, and nothing ties
+# it to a commit. This makes the repo the source of truth.
+#
+# At the repo root rather than in infra/ so the command is a bare
+# `npx wrangler deploy` -- wrangler discovers this file by walking up from the
+# working directory, and `main` below is resolved relative to THIS file.
+
+name = "wmd-edge"
+main = "infra/worker.js"
+
+# The Workers runtime version, and the one setting here that can change
+# behaviour rather than just deployment. It is pinned to the date the Worker
+# was first deployed from the dashboard (see infra/SEO_DEPLOY.md Phase D, whose
+# steps are dated 2026-08-06) so that moving to wrangler cannot quietly change
+# semantics at the same time.
+#
+# CHECK THIS AGAINST THE DASHBOARD BEFORE THE FIRST WRANGLER DEPLOY --
+# Worker → Settings → Runtime. If the deployed Worker shows a different
+# compatibility date, put THAT date here first, deploy, and only then raise it
+# as a separate, deliberate change. Raising it at the same moment as a code
+# change makes any regression impossible to attribute.
+compatibility_date = "2026-08-06"
+
+# No *.workers.dev subdomain. The Worker exists to sit on worthmydegree.com;
+# a second public hostname serving the same thing is a duplicate-content
+# signal aimed at the exact SEO work this layer does.
+workers_dev = false
+
+# ROUTES ARE DELIBERATELY NOT DECLARED HERE.
+#
+# They already exist, created in the dashboard:
+#
+#     worthmydegree.com/*
+#     www.worthmydegree.com/*      (zone: worthmydegree.com)
+#
+# infra/SEO_DEPLOY.md's rollback is "delete the two routes", and its Phase C
+# note is explicit that re-adding them is the way to break a working setup.
+# Leaving them out means `wrangler deploy` updates the SCRIPT ONLY and cannot
+# touch routing -- so the worst a bad deploy can do is serve wrong code on the
+# right routes, which the dashboard's Deployments tab reverts in one click.
+#
+# Recorded here rather than only in the runbook so that a rebuild from scratch
+# has the values, and uncomment only if you are deliberately taking route
+# management over from the dashboard:
+#
+# routes = [
+#   { pattern = "worthmydegree.com/*", zone_name = "worthmydegree.com" },
+#   { pattern = "www.worthmydegree.com/*", zone_name = "worthmydegree.com" },
+# ]
+
+# account_id is intentionally absent. It identifies the Cloudflare account
+# (riteshvk@gmail.com's, not the repo owner's day-to-day one), and this repo is
+# public. wrangler prompts when an account is ambiguous; set CLOUDFLARE_ACCOUNT_ID
+# in the shell to skip the prompt without committing it.
