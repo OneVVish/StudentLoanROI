@@ -71,6 +71,7 @@ returned 1, and every other property still passed.
 Run this after touching search_schools_by_budget, reconcile_search_pick, or
 the filter controls in render_school_search.
 """
+import ast
 import sys
 
 import pandas as pd
@@ -750,6 +751,52 @@ def check_program_lengths(ns) -> list:
     return problems
 
 
+def check_shared_controls_have_per_tool_keys(_ns) -> list:
+    """render_search_controls runs TWICE in one script run, so no key it
+    creates may be a bare string.
+
+    The calculator's "More tools" renders the undergraduate search and the
+    graduate one back to back. Streamlit raises StreamlitDuplicateElementKey on
+    the second widget with a repeated key and the script dies there -- and
+    because the results above had already drawn, the page looks half-built
+    rather than broken. That shipped: `key="search_cip_family"` took down the
+    calculator for every visitor who reached that section.
+
+    It is invisible to every other guard in this repo, which exec sections 1-2
+    and never render anything. Checked statically instead: read the keyword
+    arguments inside the function and require each `key=` to be an expression,
+    not a constant. A per-tool name has to be computed, so "computed" is a
+    sound proxy for "distinct per tool".
+
+    The reverse -- that the values still travel between the two tools -- is not
+    checked here, because it is a seeding behaviour rather than a shape. It is
+    verified in a browser: the graduate keys setdefault from the undergraduate
+    ones on first render.
+    """
+    problems = []
+    tree = ast.parse(open("app.py").read())
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef)
+               and n.name == "render_search_controls"), None)
+    if fn is None:
+        return ["  render_search_controls is gone; this check is inert"]
+
+    literal_keys = []
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "key" and isinstance(kw.value, ast.Constant):
+                literal_keys.append((kw.value.value, getattr(node, "lineno", "?")))
+    for key, line in literal_keys:
+        problems.append(
+            f"  app.py:{line} creates key={key!r} as a literal\n"
+            f"    this function renders twice per run on the calculator page, "
+            f"so the second one raises StreamlitDuplicateElementKey and the "
+            f"page dies mid-render")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -899,6 +946,8 @@ def main() -> int:
         ("professional paths", lambda: check_professional_paths(ns)),
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
+        ("per-tool widget keys",
+         lambda: check_shared_controls_have_per_tool_keys(ns)),
         ("programmes without debt", lambda: check_programmes_without_debt(ns)),
     ]:
         found = fn()

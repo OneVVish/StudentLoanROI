@@ -15733,12 +15733,21 @@ SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
                         "search_coa_range", "search_home_state",
                         "search_states", "search_adm_rate_on",
                         "search_adm_rate_range", "search_control_types",
-                        # The graduate tool's own two. Field, state and sector
-                        # are shared with the undergraduate page and already
-                        # above; only the level and the budget are per-tool,
-                        # because one key over two option lists raises and the
-                        # two budgets are different quantities.
-                        "grad_search_credential", "grad_search_coa_range")
+                        # The graduate tool's own copies. EVERY control is
+                        # per-tool now, not just the level and the budget:
+                        # "More tools" on the calculator renders both searches
+                        # in one run, and a shared widget key raises
+                        # StreamlitDuplicateElementKey on the second one. The
+                        # VALUES are still shared -- the graduate keys seed
+                        # from these on first render (see tool_key) -- but the
+                        # keys cannot be.
+                        #
+                        # Missing an entry here is silent in the usual way: the
+                        # control works, the results render, and only the LOG
+                        # stops counting that search as adjusted.
+                        "grad_search_credential", "grad_search_coa_range",
+                        "grad_search_cip_family", "grad_search_home_state",
+                        "grad_search_states", "grad_search_control_types")
 
 
 def search_was_adjusted() -> bool:
@@ -15810,6 +15819,41 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     credential_key = "grad_search_credential" if is_graduate else "search_credential"
     budget_key = "grad_search_coa_range" if is_graduate else "search_coa_range"
 
+    # EVERY widget key in this function must be per-tool, not just those two.
+    #
+    # Sharing a key is only safe while one of the two searches renders per run,
+    # which is true on the standalone pages and FALSE on the calculator, where
+    # "More tools" renders both. Streamlit raises StreamlitDuplicateElementKey
+    # on the second one and the script dies there -- the results above it had
+    # already drawn, so the page looked half-built rather than broken, which is
+    # how it survived review.
+    #
+    # The shared VALUES are still the point (a visitor crossing between the two
+    # pages keeps their field, residency and sector, which is what makes the
+    # cross-link worth clicking). So the graduate keys are SEEDED from the
+    # undergraduate ones on first render and drift independently after that.
+    # Seeded, not synced: two-way syncing would need a canonical third value
+    # and a write-back on every rerun, and the cross-page case this exists for
+    # is a fresh session on the other page, where a seed is exactly right.
+    def tool_key(base: str) -> str:
+        if not is_graduate:
+            return base
+        graduate = f"grad_{base}"
+        if graduate not in st.session_state and base in st.session_state:
+            st.session_state[graduate] = st.session_state[base]
+        return graduate
+
+    family_key = tool_key("search_cip_family")
+    # The admit-rate pair cannot collide today -- that block renders only when
+    # `not is_graduate` -- but "safe because of a condition somewhere else" is
+    # the exception that rots. Routed through tool_key like everything else, so
+    # the rule is absolute: NO literal key in this function.
+    adm_on_key = tool_key("search_adm_rate_on")
+    adm_range_key = tool_key("search_adm_rate_range")
+    home_key = tool_key("search_home_state")
+    states_key = tool_key("search_states")
+    control_types_key = tool_key("search_control_types")
+
     # Read BEFORE the Level widget renders, which is the sidebar's own
     # before-the-widget pattern, because it decides whether there is a field of
     # study to ask about at all. A professional programme IS the field --
@@ -15833,15 +15877,15 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
                        if dataset_mode == DATASET_MODE_MAJOR else None)
     families = sorted(CIP_FAMILY_TITLES, key=lambda code: CIP_FAMILY_TITLES[code])
     st.session_state.setdefault(
-        "search_cip_family",
+        family_key,
         default_family if default_family in CIP_FAMILY_TITLES else None)
 
     row_one, row_two = st.columns([3, 2])
     if not own_field:
         row_one.selectbox(
-            "Field of study", families, key="search_cip_family",
-            on_change=lambda: mark_interaction("search_cip_family"),
-            index=(None if st.session_state.get("search_cip_family") is None
+            "Field of study", families, key=family_key,
+            on_change=lambda: mark_interaction(family_key),
+            index=(None if st.session_state.get(family_key) is None
                    else None),
             format_func=lambda code: CIP_FAMILY_TITLES[code],
             placeholder="Pick a field",
@@ -15898,11 +15942,11 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # school they named, and these results span many states. See
     # search_schools_by_budget for what pricing them all alike costs.
     st.session_state.setdefault(
-        "search_home_state", suggested_home_state(coa_df, city))
+        home_key, suggested_home_state(coa_df, city))
     home_col.selectbox(
-        "Where do you live?", all_states, key="search_home_state",
-        on_change=lambda: mark_interaction("search_home_state"),
-        index=None if st.session_state.get("search_home_state") is None else None,
+        "Where do you live?", all_states, key=home_key,
+        on_change=lambda: mark_interaction(home_key),
+        index=None if st.session_state.get(home_key) is None else None,
         placeholder="Pick your state",
         help="Public schools charge residents far less. Without this, every "
               "school is priced at its higher out-of-state rate.",
@@ -15918,12 +15962,12 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     #
     # setdefault, not a forced value: it seeds the first render and then
     # leaves the control alone, so clearing it to search nationally sticks.
-    _home = st.session_state.get("search_home_state")
+    _home = st.session_state.get(home_key)
     if _home:
-        st.session_state.setdefault("search_states", [_home])
+        st.session_state.setdefault(states_key, [_home])
     states = states_col.multiselect(
-        "Limit to states (optional)", all_states, key="search_states",
-        on_change=lambda: mark_interaction("search_states"),
+        "Limit to states (optional)", all_states, key=states_key,
+        on_change=lambda: mark_interaction(states_key),
         help="Defaults to your home state, where public schools charge you "
               "the resident rate. Clear it to search the whole country -- "
               "results are the cheapest matches, so a national search "
@@ -15947,8 +15991,8 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     all_control_types = [t for t in CONTROL_TYPE_ORDER
                          if t in set(coa_df["control_type"].dropna())]
     control_types = type_col.multiselect(
-        "School type (optional)", all_control_types, key="search_control_types",
-        on_change=lambda: mark_interaction("search_control_types"),
+        "School type (optional)", all_control_types, key=control_types_key,
+        on_change=lambda: mark_interaction(control_types_key),
         help="Public, private non-profit, private for-profit. Leave it empty "
               "to include all three. For-profit schools are the largest group "
               "in this dataset and their prices sort near the top, so this is "
@@ -15983,7 +16027,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         # visibly unavailable, with a reason, beats one that silently vanishes
         # when someone switches from Bachelor's to Associate's.
         adm_on = st.checkbox(
-            "Filter by admit rate", key="search_adm_rate_on",
+            "Filter by admit rate", key=adm_on_key,
             disabled=not adm_available,
             on_change=lambda: mark_interaction("search_adm_rate_on"),
             help="Narrow the list by how selective a school is. Available for "
@@ -16013,8 +16057,8 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
                 "Share of applicants admitted",
                 min_value=ADM_RATE_FULL_RANGE[0], max_value=ADM_RATE_FULL_RANGE[1],
                 value=ADM_RATE_FULL_RANGE, step=5, format="%d%%",
-                key="search_adm_rate_range",
-                on_change=lambda: mark_interaction("search_adm_rate_range"),
+                key=adm_range_key,
+                on_change=lambda: mark_interaction(adm_range_key),
                 help="Drag either handle to limit how selective the schools are. "
                       "While this filter is on, schools that report no admit rate "
                       "are excluded at any width — an unknown rate cannot be shown "
@@ -16037,7 +16081,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # these controls moved it above that guard, so the condition has to carry
     # it explicitly or the warning fires over an empty screen again.
     if (adm_filtered and adm_low > ADM_RATE_FULL_RANGE[0]
-            and st.session_state.get("search_cip_family")):
+            and st.session_state.get(family_key)):
         st.caption(
             "⚠️ Schools that report no admit rate are **not** in this list, "
             "and most of them admit nearly everyone — so a high floor hides "
@@ -16049,7 +16093,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         # None when the programme IS the field: the caller must not run its
         # "pick a field of study" guard against a search that does not have one.
         "family": (None if own_field
-                   else st.session_state.get("search_cip_family")),
+                   else st.session_state.get(family_key)),
         "professional": professional,
         # The MBA reaches the graduate search with a fixed programme key, so
         # the caller cannot derive "which field" from `family` alone.
@@ -16057,7 +16101,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         "credential": credential,
         "min_budget": min_coa,
         "max_budget": max_coa,
-        "home_state": st.session_state.get("search_home_state"),
+        "home_state": st.session_state.get(home_key),
         "states": states,
         "control_types": control_types,
         "adm_filtered": adm_filtered,
@@ -16523,7 +16567,10 @@ def render_school_search(always_open: bool = False) -> None:
         adm_filtered = controls["adm_filtered"]
         adm_low, adm_high = controls["adm_low"], controls["adm_high"]
 
-        home_state = st.session_state.get("search_home_state")
+        # From the controls' own return value rather than by re-reading a key:
+        # the key is per-tool now, and re-deriving it here is how the two get
+        # to disagree about which tool's residency is on screen.
+        home_state = controls["home_state"]
         if not home_state:
             st.caption(
                 "⚠️ Every school below is priced at its **out-of-state** rate, "
