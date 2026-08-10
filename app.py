@@ -3069,6 +3069,81 @@ def fmt_money_k(value) -> str:
     return f"{sign}${magnitude / 1000:,.0f}k"
 
 
+def duration_axis_end(data_max: float, tickvals) -> float:
+    """Where the time axis stops: the data, nudged out to the next tick when
+    that tick is all but reached.
+
+    A 10-year Standard plan's last schedule row is 9.92 years -- month 119 of
+    120 -- so an axis pinned exactly to the data puts the "10y" tick 0.08 years
+    outside it and Plotly draws no label at all. The line then ran to the right
+    edge of a chart whose last mark said 8y, which reads as a chart that failed
+    rather than as a loan that finished.
+
+    The nudge is capped at 2% of the span, so it only ever closes a rounding
+    gap. A 26-year payoff on a 5-year ladder is NOT stretched to 30 -- four
+    blank years to gain one label is a worse trade than an axis that stops
+    where the data does.
+    """
+    end = max(float(data_max), 0.0)
+    if not tickvals or end <= 0:
+        return end
+    beyond = [v for v in tickvals if v > end]
+    if beyond and min(beyond) - end <= end * 0.02:
+        return min(beyond)
+    return end
+
+
+DURATION_AXIS_TITLE = "Time in repayment"
+
+
+def apply_duration_axis(fig, years_values):
+    """Years-and-months ticks on a Plotly time axis, and the axis title that
+    goes with them.
+
+    The title changed with the ticks and had to. "Years" over labels reading
+    "2y 6m" names a unit the axis is no longer in, and it never said what the
+    time was measured FROM -- these schedules begin when repayment does, not
+    when the degree does, and on a path with unpaid training years those are
+    several years apart.
+    """
+    vals, txt = duration_ticks(years_values)
+    if vals:
+        fig.update_xaxes(tickmode="array", tickvals=vals, ticktext=txt)
+    # PIN THE RANGE TO THE DATA, or the two ticks that matter most are the two
+    # that vanish. Plotly pads an axis, and a tick outside the range is simply
+    # not drawn -- so a 10-year Standard plan showed 2y/4y/6y/8y and neither 0
+    # nor the payoff itself, which is the one moment the chart is read for. It
+    # also subsumes the rangemode="tozero" the area branches carry to stop a
+    # padded range printing a negative year.
+    finite = [v for v in years_values if v is not None and v == v]
+    if finite:
+        end = duration_axis_end(max(finite), vals)
+        # HEADROOM PAST THE LAST TICK, or that tick's label is invisible.
+        # Plotly centres a tick label on its tick and clips at the PLOT-AREA
+        # edge, not the canvas edge -- the same rule the wage chart's p10/p90
+        # money labels and the tranche payoff annotations already run into --
+        # so a label sitting exactly on the edge loses its right half and
+        # Plotly drops it entirely. On a 10-year plan that is the "10y" tick:
+        # the line ran to an edge whose last mark said 8y. 2% is under three
+        # pixels at these widths and reads as nothing.
+        if end > 0:
+            fig.update_xaxes(range=[0, end * 1.02])
+    fig.update_xaxes(title_text=DURATION_AXIS_TITLE)
+    return fig
+
+
+def apply_pdf_duration_axis(ax, years_values):
+    """The matplotlib twin of apply_duration_axis -- same ticks, same title,
+    same helper deciding both, so the printed axis cannot drift from the
+    screen's the way the two renderers otherwise would."""
+    vals, txt = duration_ticks(years_values)
+    if vals:
+        ax.set_xticks(vals)
+        ax.set_xticklabels(txt)
+    ax.set_xlabel(DURATION_AXIS_TITLE)
+    return ax
+
+
 def money_k_ticks(values) -> tuple:
     """(tickvals, ticktext) in thousands for a Plotly money axis, spanning the
     data. Plotly has no "always use k" option -- tickformat is a d3 format
@@ -3088,6 +3163,62 @@ def money_k_ticks(values) -> tuple:
     while v <= high + step * 0.5:
         vals.append(v); v += step
     return vals, [fmt_money_k(v) for v in vals]
+
+
+# The tick ladder for a repayment time axis, in MONTHS. 1/2/5 does not apply to
+# time: a 4-month or 5-month step is not a unit anyone counts in, while a
+# quarter, a half-year and a year are. This is the calendar's own ladder, which
+# is why it is written out rather than derived.
+DURATION_TICK_MONTHS = (1, 3, 6, 12, 24, 60, 120)
+
+
+def fmt_duration(months: float) -> str:
+    """A repayment length as years and months -- "2y 6m", "3y", "8m".
+
+    Years alone was the whole axis before this, and it hid the part of the
+    story with the most in it. A capped federal tranche clearing at 2.4 years
+    is a real event on the balance chart, and "2.4" is a number a reader has
+    to convert; the loan is billed monthly and every servicer quotes months, so
+    the axis was in a unit nothing else in the borrower's life uses.
+
+    Whole years drop the month, and the first year drops the year -- "0y 8m"
+    reads as a template that failed to fill in.
+    """
+    total = int(round(months))
+    if total <= 0:
+        return "0"
+    years, rem = divmod(total, 12)
+    if years and rem:
+        return f"{years}y {rem}m"
+    return f"{years}y" if years else f"{rem}m"
+
+
+def duration_ticks(years_values) -> tuple:
+    """(tickvals in YEARS, ticktext) for a time axis spanning years_values.
+
+    Positions land on month boundaries and are labelled in years and months.
+    The step is chosen from DURATION_TICK_MONTHS for roughly six ticks, so the
+    same function serves a 7-month payoff and a 30-year one: the first gets
+    monthly ticks, the second five-yearly, and neither is told about the other.
+
+    Returns years because that is the unit the SERIES is in -- every schedule
+    frame carries `year` as a float, and converting the data to months instead
+    would touch the ROI math, the break-even and both PDF builders to change a
+    label. Position in years, label in months.
+    """
+    finite = [v for v in years_values if v is not None and v == v]
+    if not finite:
+        return [], []
+    span_months = max(max(finite), 0.0) * 12
+    if span_months <= 0:
+        return [], []
+    step = next((m for m in DURATION_TICK_MONTHS if span_months / m <= 6),
+                DURATION_TICK_MONTHS[-1])
+    vals, months = [], 0
+    while months <= span_months + step * 0.5:
+        vals.append(months / 12)
+        months += step
+    return vals, [fmt_duration(v * 12) for v in vals]
 
 
 def fmt_pct(value):
@@ -9024,7 +9155,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
         fig = px.area(
             tranche_frame, x="year", y="amount", color="component",
             title="Loan Balance Over Time — by loan type",
-            labels={"year": "Years", "amount": "Remaining Balance ($)",
+            labels={"year": DURATION_AXIS_TITLE, "amount": "Remaining Balance ($)",
                     "component": ""},
             color_discrete_map=stack_color_map(TRANCHE_LABELS),
         )
@@ -9041,6 +9172,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
         # that padding puts a "-2" on an axis labelled Years. There is no year
         # before the loan starts.
         fig.update_xaxes(rangemode="tozero")
+        apply_duration_axis(fig, schedule_df["year"])
         return fig
     if balance_split_is_informative(schedule_df):
         stacked = schedule_df.melt(
@@ -9051,7 +9183,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
         fig = px.area(
             stacked, x="year", y="amount", color="component",
             title="Loan Balance Over Time — principal vs unpaid interest",
-            labels={"year": "Years", "amount": "Remaining Balance ($)",
+            labels={"year": DURATION_AXIS_TITLE, "amount": "Remaining Balance ($)",
                     "component": ""},
             color_discrete_map={"Principal": SERIES_BLUE,
                                 "Unpaid interest": SERIES_RED},
@@ -9062,11 +9194,12 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
             hovermode="x unified", title_font_size=14,
             yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
         )
+        apply_duration_axis(fig, schedule_df["year"])
         return fig
     fig = px.line(
         schedule_df, x="year", y="balance",
         title="Loan Balance Over Time",
-        labels={"year": "Years", "balance": "Remaining Balance ($)"},
+        labels={"year": DURATION_AXIS_TITLE, "balance": "Remaining Balance ($)"},
     )
     fig.update_traces(line=dict(width=3))
     _tickvals, _ticktext = money_k_ticks(schedule_df["balance"])
@@ -9074,6 +9207,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
         hovermode="x unified", title_font_size=14,
         yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
     )
+    apply_duration_axis(fig, schedule_df["year"])
     return fig
 
 
@@ -9170,7 +9304,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
         fig = px.area(
             stacked, x="year", y="payment", color="component",
             title=f"Monthly Payment Over Time — {label}",
-            labels={"year": "Years", "payment": "Monthly payment ($)",
+            labels={"year": DURATION_AXIS_TITLE, "payment": "Monthly payment ($)",
                     "component": ""},
             color_discrete_map=stack_color_map(labels),
         )
@@ -9189,12 +9323,13 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
             fig.add_vline(x=when, line_dash="dot", line_color="#888",
                           annotation_text=text, annotation_position="top left",
                           annotation_font_size=11)
+        apply_duration_axis(fig, merged["year"])
         return fig
 
     series = payment_series(result)
     fig = px.line(series, x="year", y="payment",
                   title=f"Monthly Payment Over Time — {label}",
-                  labels={"year": "Years", "payment": "Monthly payment ($)"})
+                  labels={"year": DURATION_AXIS_TITLE, "payment": "Monthly payment ($)"})
     fig.update_traces(line=dict(width=3))
     fig.update_layout(hovermode="x unified", title_font_size=14)
     # Name the cliff. Without this the step reads as a rendering fault; see
@@ -9203,6 +9338,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
         fig.add_vline(x=when, line_dash="dot", line_color="#888",
                       annotation_text=text, annotation_position="top left",
                       annotation_font_size=11)
+    apply_duration_axis(fig, series["year"])
     return fig
 
 
@@ -9379,7 +9515,7 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     fig = px.line(
         combined, x="year", y="balance", color="Scenario",
         title="Loan Balance Over Time",
-        labels={"year": "Years", "balance": "Remaining Balance ($)"},
+        labels={"year": DURATION_AXIS_TITLE, "balance": "Remaining Balance ($)"},
     )
     _tickvals, _ticktext = money_k_ticks(combined["balance"])
     fig.update_layout(
@@ -9394,6 +9530,7 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
                      xanchor="center", x=0.5, title_text=""),
         margin=dict(t=60, b=90),
     )
+    apply_duration_axis(fig, combined["year"])
     return fig
 
 
@@ -9420,7 +9557,7 @@ def build_comparison_payment_chart(result_a: dict, label_a: str,
     fig = px.line(
         combined, x="year", y="payment", color="Scenario",
         title="Monthly Payment Over Time",
-        labels={"year": "Years", "payment": "Monthly payment ($)"},
+        labels={"year": DURATION_AXIS_TITLE, "payment": "Monthly payment ($)"},
     )
     fig.update_layout(
         hovermode="x unified", title_font_size=14,
@@ -9431,6 +9568,7 @@ def build_comparison_payment_chart(result_a: dict, label_a: str,
                      xanchor="center", x=0.5, title_text=""),
         margin=dict(t=60, b=90),
     )
+    apply_duration_axis(fig, combined["year"])
     return fig
 
 
@@ -10807,7 +10945,7 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
     else:
         ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
         ax.set_title("Loan Balance Over Time")
-    ax.set_xlabel("Years")
+    apply_pdf_duration_axis(ax, schedule_df["year"])
     ax.set_ylabel("Remaining Balance ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
@@ -10836,9 +10974,11 @@ def build_pdf_payment_chart(result: dict, label: str,
                      labels=list(labels), colors=list(STACK_COLORS),
                      edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper right", fontsize=8)
+        _x_years = merged["year"]
     else:
         series = payment_series(result)
         ax.plot(series["year"], series["payment"], linewidth=2.5)
+        _x_years = series["year"]
     _xlo, _xhi = ax.get_xlim()
     for when, text in (events or []):
         ax.axvline(when, color="#888888", linewidth=1, linestyle=":")
@@ -10851,7 +10991,7 @@ def build_pdf_payment_chart(result: dict, label: str,
                     fontsize=7, color="#666666")
     ax.set_title(f"Monthly Payment Over Time - {label}",
                  pad=18 if events else None)
-    ax.set_xlabel("Years")
+    apply_pdf_duration_axis(ax, _x_years)
     ax.set_ylabel("Monthly payment ($)")
     ax.grid(True, alpha=0.3)
     return _pdf_image_from_figure(fig)
@@ -10863,8 +11003,13 @@ def build_pdf_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
     fig, ax = plt.subplots(figsize=(6, 3.5))
     ax.plot(schedule_a["year"], schedule_a["balance"], linewidth=2.5, label=label_a)
     ax.plot(schedule_b["year"], schedule_b["balance"], linewidth=2.5, label=label_b)
+    # The ticks are chosen from BOTH schedules, not the axis limits: matplotlib
+    # pads an axis by about 5%, and near a ladder boundary that padding is
+    # enough to pick a different step than the on-screen twin -- which reads
+    # the data. The two renderers must choose from the same numbers.
+    _x_years = pd.concat([schedule_a["year"], schedule_b["year"]])
     ax.set_title("Loan Balance Over Time")
-    ax.set_xlabel("Years")
+    apply_pdf_duration_axis(ax, _x_years)
     ax.set_ylabel("Remaining Balance ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
@@ -10876,12 +11021,15 @@ def build_pdf_comparison_payment_chart(result_a: dict, label_a: str,
                                         result_b: dict, label_b: str) -> Image:
     """PDF counterpart to build_comparison_payment_chart."""
     fig, ax = plt.subplots(figsize=(6, 3.0))
+    _spans = []
     for result, label in ((result_a, label_a), (result_b, label_b)):
         series = payment_series(result)
         if not series.empty:
             ax.plot(series["year"], series["payment"], linewidth=2.5, label=label)
+            _spans.append(series["year"])
+    _x_years = pd.concat(_spans) if _spans else pd.Series(dtype=float)
     ax.set_title("Monthly Payment Over Time")
-    ax.set_xlabel("Years")
+    apply_pdf_duration_axis(ax, _x_years)
     ax.set_ylabel("Monthly payment ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_FORMATTER)
     ax.grid(True, alpha=0.3)
