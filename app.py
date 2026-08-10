@@ -5604,9 +5604,19 @@ def _apply_pending_grad_school() -> None:
     pending = st.session_state.pop("_pending_grad_school", None)
     if not pending:
         return
-    school_name, credential = pending
-    # Credential first: it is what decides whether the picker exists.
-    st.session_state["credential_a"] = credential
+    key, school_name, extra = pending
+    if key == "prof_school_a":
+        # Medicine, dentistry and law: their own picker, keyed by programme.
+        # The credential comes from the occupation rather than from here, so
+        # this sets only the school -- and clears the guard key, or the
+        # picker's own reconcile sees a changed programme and resets the
+        # selection straight back to the national average.
+        st.session_state["prof_school_a"] = school_name
+        st.session_state.pop("_prof_program_a", None)
+        return
+    # Credential first: it is what decides whether the graduate picker exists
+    # at all, and it is read further down the sidebar than this runs.
+    st.session_state["credential_a"] = extra
     st.session_state["grad_school_a"] = school_name
     # The guard key the picker reconciles against. Left stale, it would see a
     # changed (family, credential) pair and reset the selection straight back
@@ -15225,10 +15235,17 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     choice = st.selectbox(
         "Use one of these as your graduate school", picker_ids,
         format_func=lambda uid: picker_labels[uid], key="grad_search_pick")
+    # Names the picker this actually fills, which differs by level: a
+    # professional programme goes to its own Medical/Dental/Law school field,
+    # not to Graduate school. Saying the wrong one is how a visitor concludes
+    # the button did nothing when it filled a field they were not looking at.
+    _target_label = (PROFESSIONAL_SCHOOL_LABEL.get(level_key, "Graduate school")
+                     if professional else "Graduate school")
     st.caption(
-        "This fills the sidebar's **Graduate school** picker, not the college "
-        "field above it — that one is your undergraduate school. The picker is "
-        "Major-mode only, so in Career mode the figure has nowhere to land."
+        f"This fills the sidebar's **{_target_label}** picker, not the college "
+        "field above it — that one is your undergraduate school. It only exists "
+        "when your scenario is already on this path, so set the major first if "
+        "you have not."
     )
     if st.button("Use this graduate school", type="primary",
                   key="grad_search_apply"):
@@ -15248,14 +15265,53 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         # The name is the debt file's spelling: that is what the picker's
         # options are built from. See picker_name in
         # search_graduate_schools_by_budget.
-        # A professional programme hands off to the SAME sidebar picker but a
-        # different credential: the app models medicine, dentistry and law as
-        # doctoral/professional study, and GRADUATE_SEARCH_TO_CREDENTIAL only
-        # knows the two degree levels.
-        st.session_state["_pending_grad_school"] = (
-            picked["picker_name"],
-            CREDENTIAL_DOCTORAL if professional
-            else GRADUATE_SEARCH_TO_CREDENTIAL[credential])
+        # WHICH picker this school belongs in, and whether it can land there
+        # at all. Both sidebar pickers build their options from a specific
+        # (field or programme) slice of the debt file and RESET to the national
+        # default when handed a name that is not in their own list -- so an
+        # apply that targets the wrong one, or the right one for a different
+        # subject, does not raise. It silently discards the school and leaves
+        # the visitor looking at a sidebar that ignored their click.
+        #
+        # Medicine, dentistry and law belong to prof_school_a, not
+        # grad_school_a: they are keyed by programme rather than by CIP family,
+        # and only 7 of the 13 California medical rows here are even options in
+        # that picker. Sending them to the graduate one applied nothing at all.
+        target, blocked = None, None
+        if professional:
+            if professional_program_for(major) != level_key:
+                blocked = (
+                    f"Your scenario is studying **{major}**, so the sidebar has "
+                    f"no {PROFESSIONAL_SCHOOL_LABEL.get(level_key, level_key)} "
+                    f"field to fill. Set the major or occupation to a "
+                    f"{level_key} path first, then apply a school.")
+            elif picked["picker_name"] not in professional_schools_for(level_key):
+                blocked = (
+                    f"**{picked['INSTNM']}** publishes a price but no borrowing "
+                    f"figure, and the sidebar's picker lists only schools that "
+                    f"publish one. Its price is still above; enter it as your "
+                    f"own cost.")
+            else:
+                target = ("prof_school_a", picked["picker_name"], level_key)
+        else:
+            if MAJOR_TO_CIP_FAMILY.get(major) != family:
+                blocked = (
+                    f"Your scenario is studying **{major}**, which is a "
+                    f"different field from the one you searched — the sidebar's "
+                    f"Graduate school picker only lists schools for your own "
+                    f"field. Change the major first, then apply a school.")
+            else:
+                target = ("grad_school_a", picked["picker_name"],
+                          GRADUATE_SEARCH_TO_CREDENTIAL[credential])
+
+        if blocked:
+            # Said out loud rather than applied-and-lost. The whole reason this
+            # button hands off to the calculator is that a silent apply looks
+            # broken; an apply that cannot work has to say so for the same
+            # reason.
+            st.warning(blocked)
+            return
+        st.session_state["_pending_grad_school"] = target
         log_usage_event(
             f"grad_school_search_apply:unitid={picked['UNITID']}"
             f":cip={family or level_key}:level={level_key}"
