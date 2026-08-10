@@ -797,6 +797,83 @@ def check_shared_controls_have_per_tool_keys(_ns) -> list:
     return problems
 
 
+def check_field_debt_column(ns, base) -> list:
+    """The per-field borrowing figure must ADD a column and change nothing else.
+
+    It is attached by a merge, and a merge is the easiest way to accidentally
+    build a filter: an inner join would silently drop every school that
+    publishes no figure for the field -- half of them in computing and
+    engineering -- turning a display column into the narrowest filter in the
+    search, with the result count still looking plausible. The whole search
+    would then answer a different question than the one the visitor asked.
+
+    So the properties are about what did NOT change: same schools, same order,
+    same count. Plus the level gate, because the debt file has no associate's
+    or certificate rows at all and a column of dashes reads as "these graduates
+    borrow nothing".
+    """
+    problems = []
+    search_fn = ns["search_schools_by_budget"]
+    family, credential = "11", "Bachelor's degree"
+
+    with_debt = search_fn(family, credential, 60_000, home_state="CA", limit=25)
+    if "field_debt_median" not in with_debt.columns:
+        return ["  a bachelor's search carries no field_debt_median column"]
+
+    # 1. Membership and order are untouched. Compared against the SAME search
+    #    with the join disabled -- monkeypatching the gate rather than the
+    #    merge, so this measures the merge itself.
+    real_gate = ns["field_debt_applies"]
+    ns["field_debt_applies"] = lambda credential: False
+    try:
+        without = search_fn.__wrapped__(family, credential, 60_000,
+                                        home_state="CA", limit=25) \
+            if hasattr(search_fn, "__wrapped__") else search_fn(
+                family, credential, 60_000, home_state="CA", limit=25)
+    finally:
+        ns["field_debt_applies"] = real_gate
+    if list(without["UNITID"]) != list(with_debt["UNITID"]):
+        problems.append(
+            f"  the join changed the result set: {len(without)} schools without "
+            f"it, {len(with_debt)} with\n    it is a display column and must "
+            f"not filter -- an inner join drops every school with no figure")
+    if not with_debt["coa_per_year"].is_monotonic_increasing:
+        problems.append("  the join broke the cost ordering")
+
+    # 2. It must actually populate, or the join key is wrong and every cell
+    #    reads "—" while looking like honest missing data.
+    if with_debt["field_debt_median"].notna().sum() == 0:
+        problems.append(
+            "  no row carries a figure; a wrong join key looks exactly like a "
+            "field nobody publishes")
+
+    # 3. The level gate. These rows exist only at CREDLEV 3.
+    for credential, want in [("Bachelor's degree", True),
+                             ("Associate's degree", False)]:
+        if ns["field_debt_applies"](credential) != want:
+            problems.append(f"  field_debt_applies({credential!r}) != {want}")
+    lower = search_fn(family, "Associate's degree", 60_000, home_state="CA", limit=25)
+    if not lower.empty and "field_debt_median" in lower.columns:
+        problems.append(
+            "  an associate's search carries the column, which can only render "
+            "as a full column of dashes")
+
+    # 4. Values must be per-FIELD, not the institution-wide figure repeated.
+    #    Two different fields at the same school should generally differ; if
+    #    they never do, the join has collapsed to something school-level.
+    other = search_fn("52", "Bachelor's degree", 60_000, home_state="CA", limit=25)
+    shared = set(with_debt["UNITID"]) & set(other["UNITID"])
+    if shared:
+        a = with_debt.set_index("UNITID")["field_debt_median"]
+        b = other.set_index("UNITID")["field_debt_median"]
+        both = [u for u in shared if pd.notna(a.get(u)) and pd.notna(b.get(u))]
+        if both and all(a[u] == b[u] for u in both):
+            problems.append(
+                f"  computing and business report identical debt at all "
+                f"{len(both)} shared school(s) -- the figure is not per-field")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -946,6 +1023,7 @@ def main() -> int:
         ("professional paths", lambda: check_professional_paths(ns)),
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
+        ("field debt column", lambda: check_field_debt_column(ns, base)),
         ("per-tool widget keys",
          lambda: check_shared_controls_have_per_tool_keys(ns)),
         ("programmes without debt", lambda: check_programmes_without_debt(ns)),

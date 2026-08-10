@@ -2235,6 +2235,12 @@ ADM_RATE_FULL_RANGE = (0, 100)
 # future release brings another level's coverage up, this is the edit.
 ADM_RATE_CREDENTIALS = ("Bachelor's degree",)
 
+# Levels for which a per-FIELD student borrowing median exists. Bachelor's
+# only, and structurally: data/graduate_debt_clean.csv carries CREDLEV 3, 5 and
+# 6, so the associate's and certificate levels this search also offers have no
+# rows at all. See field_debt_applies.
+FIELD_DEBT_CREDENTIALS = ("Bachelor's degree",)
+
 CREDENTIAL_LEVELS = {
     "Bachelor's degree": ("bachl", 4),
     "Associate's degree": ("assoc", 2),
@@ -5726,7 +5732,73 @@ def search_schools_by_budget(cip_family: str, credential: str,
 
     matches = matches.sort_values("coa_per_year").head(limit).copy()
     matches["total_program_cost"] = matches["coa_per_year"] * nominal_years
+
+    # What students of THIS field borrowed at each school, attached last and
+    # deliberately so.
+    #
+    # AFTER the cap, and a LEFT join. Every filter in this function runs before
+    # .head(limit) -- results are the cheapest `limit` MATCHES, not the matches
+    # among the cheapest `limit`, which is a property the guard measures. This
+    # is not a filter and must never behave like one: an inner join would
+    # silently drop the half of schools that publish no figure for the field,
+    # turning a display column into the narrowest filter in the search. Joining
+    # after the cap makes that structural rather than careful, and a left merge
+    # preserves both the row set and the cost ordering.
+    if field_debt_applies(credential):
+        matches = matches.merge(bachelor_field_debt(cip_family),
+                                on="UNITID", how="left")
     return matches.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def bachelor_field_debt(cip_family: str) -> pd.DataFrame:
+    """What UNDERGRADUATES of one field borrowed, per school.
+
+    The bachelor's rows of data/graduate_debt_clean.csv -- 15,208 of them
+    across 1,936 schools and 41 CIP families -- have been committed since that
+    file was built and read by nothing. They are keyed on the same 2-digit CIP
+    family the school search already asks the visitor for, so this needs no
+    crosswalk: the field selector IS the join key.
+
+    Why it belongs beside the cost columns: those describe what a school
+    CHARGES, and this describes what people studying that subject there
+    actually left owing, already net of scholarships and family money. Within
+    Computer Science the median runs $4,049 to $45,268 depending on the school
+    -- a spread the institution-wide figures cannot show, and the same argument
+    the per-school professional debt made for medicine, applied to the fields
+    most visitors are actually choosing between.
+
+    Federal loans only, like every Scorecard debt figure. Empty frame when the
+    file is absent, so a deploy without it loses a column rather than the page.
+    """
+    df = load_professional_debt()
+    if df.empty or "credential" not in df.columns or not cip_family:
+        return pd.DataFrame(columns=["UNITID", "field_debt_median"])
+    rows = df[(df["credential"] == "bachelor")
+              & (df["program_key"] == str(cip_family))]
+    if rows.empty:
+        return pd.DataFrame(columns=["UNITID", "field_debt_median"])
+    return (rows[["UNITID", "debt_median"]]
+            .dropna(subset=["UNITID"])
+            .drop_duplicates(subset=["UNITID"])
+            .rename(columns={"debt_median": "field_debt_median"}))
+
+
+def field_debt_applies(credential: str) -> bool:
+    """Whether a field-specific borrowing figure exists at this level.
+
+    Bachelor's only, and structurally rather than by choice: the debt file
+    carries CREDLEV 3, 5 and 6 (bachelor's, master's, doctoral), so the
+    associate's and certificate levels this search also offers have no rows at
+    ALL. Showing the column there would print a full column of dashes and
+    invite the reading that those schools' graduates borrow nothing.
+
+    Beside the search it gates, like adm_filter_applies, so a guard tests the
+    rule rather than a copy of it. An unknown credential returns False: this
+    only ever ADDS a claim, so the safe answer for a level we do not recognise
+    is to make none.
+    """
+    return credential in FIELD_DEBT_CREDENTIALS
 
 
 def adm_filter_applies(credential: str) -> bool:
@@ -16686,6 +16758,20 @@ def render_school_search(always_open: bool = False) -> None:
             "Parents borrowed": results["PLUS_DEBT_INST_COMP_MD"].map(
                 lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0
                 else "—"),
+            # And the STUDENT's own, for their own field. The column beside it
+            # has always shown what PARENTS borrowed with no student equivalent
+            # anywhere in this table, which is a strange pair of facts to give
+            # someone choosing a school.
+            #
+            # Per FIELD, not per institution: within Computer Science the
+            # median runs $4,049 to $45,268 across schools, and an
+            # institution-wide figure averages a nursing programme with an art
+            # one. Same not-sortable, not-filterable rule as Parents borrowed,
+            # and for the same reason.
+            **({"Grads borrowed": results["field_debt_median"].map(
+                lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0
+                else "—")}
+               if "field_debt_median" in results.columns else {}),
             # Scorecard publishes a per-school calculator for all but one row,
             # and the caption above has always told visitors to go check one.
             # Until now the only one the page could reach was for the school
@@ -16737,6 +16823,26 @@ def render_school_search(always_open: bool = False) -> None:
             "PLUS on July 1, 2026, so these are amounts borrowed under the older, "
             "uncapped rules. **—** means the school reports none."
         )
+
+        # Said separately from the Parent PLUS caption above, not folded into
+        # it: the two columns sit side by side and describe DIFFERENT PEOPLE's
+        # debt. One paragraph covering both is how a reader ends up adding them.
+        if "field_debt_median" in results.columns:
+            st.caption(
+                f"**Grads borrowed** is the student's own: the median federal "
+                f"debt at graduation for people who completed "
+                f"**{CIP_FAMILY_TITLES.get(family, 'this field')}** *at that "
+                f"school*, already net of scholarships and family money. It is "
+                f"per field rather than per school, which is the point — within "
+                f"one subject it ranges from about "
+                f"{fmt_money_md(4049)} to {fmt_money_md(45268)} depending on "
+                f"where you study. Federal loans only, so private borrowing is "
+                f"not in it, and it is **not** a cost: never add it to the price "
+                f"columns. **—** means this school publishes no figure for this "
+                f"field, which is ordinary — coverage runs from about half of "
+                f"schools in engineering and computing to four in five in "
+                f"business and psychology."
+            )
 
         # One selectbox and one button, not a button per row: 25 widgets would
         # re-render every pass and need stable keys for no gain.
