@@ -51,7 +51,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image as PILImage
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -10054,6 +10054,12 @@ def _strip_emoji(text: str) -> str:
 # a table can never spill past the page edge regardless of how long its
 # header/cell text is.
 PDF_CONTENT_WIDTH = letter[0] - 2 * inch
+# The same measurement for the one report that is landscape (the school
+# shortlist -- twelve columns do not fit portrait). A CONSTANT rather than a
+# calculation at the call site, because _pdf_table scales columns to whichever
+# width it is handed and a table sized for the wrong page either wraps money
+# mid-number or runs off the edge.
+PDF_CONTENT_WIDTH_LANDSCAPE = landscape(letter)[0] - 2 * inch
 PDF_CELL_FONT_SIZE = 9
 PDF_CELL_MIN_WIDTH = 60  # floor per column, so a short table's cells never get unreadably cramped
 PDF_CELL_H_PADDING = 12  # matches the 6pt LEFTPADDING + 6pt RIGHTPADDING applied below
@@ -10436,7 +10442,7 @@ def build_pdf_takehome_vs_loan_chart(monthly_net_take_home: float, monthly_payme
 
 
 def _pdf_table(rows: list, header: bool = True, full_width: bool = False,
-                col_ratios: list = None) -> Table:
+                col_ratios: list = None, content_width: float = None) -> Table:
     """A bordered reportlab Table, centered on the page. Each column is
     sized to its own widest cell's natural text width (so a short table --
     e.g. a 2-column module summary -- stays compact and visibly centered,
@@ -10451,6 +10457,11 @@ def _pdf_table(rows: list, header: bool = True, full_width: bool = False,
     table, e.g. the profile summary). Cell text is XML-escaped since
     Paragraph parses its content as markup -- a school name like "Texas
     A&M" would otherwise break Paragraph's parser."""
+    # Defaults to the portrait width every other report uses; the landscape
+    # shortlist passes its own. Without this the table was laid out for 468pt
+    # on a 648pt page -- it sat in the left two-thirds AND still wrapped the
+    # money mid-number, which is the worst of both.
+    content_width = content_width or PDF_CONTENT_WIDTH
     num_cols = len(rows[0]) if rows else 1
 
     def _is_bold(r, c):
@@ -10481,11 +10492,11 @@ def _pdf_table(rows: list, header: bool = True, full_width: bool = False,
     natural_widths = [max(w, PDF_CELL_MIN_WIDTH) for w in natural_widths]
     total_natural = sum(natural_widths)
     if col_ratios:
-        col_widths = [PDF_CONTENT_WIDTH * r for r in col_ratios]
-    elif total_natural > PDF_CONTENT_WIDTH or full_width:
+        col_widths = [content_width * r for r in col_ratios]
+    elif total_natural > content_width or full_width:
         # Scale to fit exactly: down when the natural width would overflow,
         # up when the caller asked for a full-width table.
-        scale = PDF_CONTENT_WIDTH / total_natural
+        scale = content_width / total_natural
         col_widths = [w * scale for w in natural_widths]
     else:
         col_widths = natural_widths
@@ -10953,7 +10964,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
 
 def generate_pdf_search_report(results: pd.DataFrame, table: pd.DataFrame,
                                captions: list, title: str, subtitle: str,
-                               is_graduate: bool = False) -> bytes:
+                               is_graduate: bool = False,
+                               filters: list = None) -> bytes:
     """PDF of a school-search result list -- the two search tools' report.
 
     Same reasoning as generate_pdf_repayment_report: NOT routed through
@@ -10976,12 +10988,31 @@ def generate_pdf_search_report(results: pd.DataFrame, table: pd.DataFrame,
     story = [Paragraph(xml_escape(title), styles["section"]),
              Paragraph(xml_escape(subtitle), styles["body"]), Spacer(1, 10)]
 
+    # WHAT PRODUCED THIS LIST, before the list itself. A printed shortlist gets
+    # separated from the screen that made it, and without the filters it is a
+    # ranking of nothing in particular -- a reader cannot tell whether a school
+    # is absent because it is expensive, in the wrong state, or does not teach
+    # the subject. It is also the only way to check the list against a budget
+    # someone else typed.
+    if filters:
+        story.append(Paragraph("Search", styles["section"]))
+        story.append(_pdf_table(
+            [["Filter", "Value"]] + [[label, str(value)] for label, value in filters
+                                      if value not in (None, "", [])],
+            # Half width: a two-column key/value table stretched across a
+            # landscape page is a line of text with an acre between the key
+            # and its value.
+            col_ratios=[0.18, 0.32],
+            content_width=PDF_CONTENT_WIDTH_LANDSCAPE))
+        story.append(Spacer(1, 12))
+
     # Trimmed for the page, not for brevity: a letter-width PDF cannot hold ten
     # columns legibly, and the ones dropped (Rate, Net price) are a label and a
     # hyperlink -- neither survives print usefully. Everything numeric stays.
     keep = [c for c in table.columns if c not in ("Rate", "Net price")]
     rows = [keep] + table[keep].astype(str).values.tolist()
-    story.append(_pdf_table(rows, full_width=True))
+    story.append(_pdf_table(rows, full_width=True,
+                            content_width=PDF_CONTENT_WIDTH_LANDSCAPE))
     story.append(Spacer(1, 12))
 
     for caption in captions:
@@ -11003,7 +11034,13 @@ def generate_pdf_search_report(results: pd.DataFrame, table: pd.DataFrame,
         styles["caption"]))
 
     buffer = io.BytesIO()
-    SimpleDocTemplate(buffer, pagesize=letter).build(
+    # LANDSCAPE, unlike every other report this app produces. Twelve columns of
+    # school data on a portrait page wrapped the money mid-number -- "$54,30 0"
+    # -- which is not merely ugly: a figure broken across two lines can be read
+    # as the wrong number. The extra 3 inches fixes it without dropping a
+    # column, and _draw_pdf_header_footer reads doc.pagesize, so the furniture
+    # follows.
+    SimpleDocTemplate(buffer, pagesize=landscape(letter)).build(
         story, onFirstPage=_draw_pdf_header_footer,
         onLaterPages=_draw_pdf_header_footer)
     return buffer.getvalue()
@@ -16513,7 +16550,8 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
                              level_key: str, coverage: tuple = None,
                              professional: bool = False,
                              programme_key: str = None,
-                             always_open: bool = False) -> None:
+                             always_open: bool = False,
+                             controls: dict = None) -> None:
     """The graduate half of the results panel.
 
     A separate renderer rather than more branches inside the undergraduate one,
@@ -16674,7 +16712,8 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         )
 
     _search_actions(results, table, _captions, is_graduate=True,
-                    level=level_key, family=family, enabled=always_open)
+                    level=level_key, family=family, enabled=always_open,
+                    controls=controls)
 
     picker_ids = [int(uid) for uid in results["UNITID"]]
     picker_labels = {
@@ -16928,11 +16967,44 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                                  programme_key=fixed[0] if fixed else None,
                                  # Only the standalone page gets the PDF and
                                  # Share buttons -- see _search_actions.
-                                 always_open=always_open)
+                                 always_open=always_open,
+                                 # The same dict the search ran on, so the
+                                 # PDF's Search section cannot describe a
+                                 # different query than its own results.
+                                 controls=controls)
+
+
+def _search_filter_summary(controls: dict, is_graduate: bool) -> list:
+    """(label, value) pairs describing the search that produced a list.
+
+    Built here rather than inside the PDF builder so it reads the SAME controls
+    dict the search ran on -- a summary reconstructed from session_state could
+    describe a different query than the one whose results are printed beside
+    it, which is the failure mode this whole file keeps running into.
+    """
+    money = lambda amount: fmt_money(amount) if amount is not None else "—"
+    rows = [
+        ("Field of study",
+         CIP_FAMILY_TITLES.get(controls.get("family"), "—")
+         if controls.get("family") else "the programme itself"),
+        ("Level", controls.get("credential")),
+        ("Price per year",
+         f"{money(controls.get('min_budget'))} to {money(controls.get('max_budget'))}"),
+        ("Priced for a resident of", controls.get("home_state") or
+         "nowhere given — everything shown at out-of-state rates"),
+        ("Limited to states", ", ".join(controls.get("states") or []) or "any"),
+        ("School type", ", ".join(controls.get("control_types") or []) or "any"),
+    ]
+    if not is_graduate and controls.get("adm_filtered"):
+        rows.append(("Admit rate",
+                     f"{controls.get('adm_low')}%-{controls.get('adm_high')}% "
+                     f"(schools reporting no rate are excluded)"))
+    return rows
 
 
 def _search_actions(results, table, captions, is_graduate: bool,
-                    level: str, family: str, enabled: bool) -> None:
+                    level: str, family: str, enabled: bool,
+                    controls: dict = None) -> None:
     """Download-PDF and Share buttons for either school-search tool.
 
     Only on the standalone pages (`enabled`), the same rule _repayment_actions
@@ -16961,7 +17033,9 @@ def _search_actions(results, table, captions, is_graduate: bool,
                    else "Schools that fit this budget"),
             subtitle=(f"{len(results)} schools, cheapest first — "
                       f"{CIP_FAMILY_TITLES.get(family, level or 'all fields')}"),
-            is_graduate=is_graduate),
+            is_graduate=is_graduate,
+            filters=(_search_filter_summary(controls, is_graduate)
+                     if controls else None)),
         file_name=f"{tool}_shortlist.pdf", mime="application/pdf",
         use_container_width=True, key=f"{tool}_pdf",
         on_click=lambda: log_usage_event(f"search_pdf:{tool}:{stamp}"),
@@ -17128,6 +17202,20 @@ def render_school_search(always_open: bool = False) -> None:
             "Type": results["control_type"],
             "Rate": rate_label,
             "Per year": results["coa_per_year"].map(fmt_money),
+            # Directly beside the sticker it corrects, because the two are only
+            # meaningful read together. Scorecard's average annual net price
+            # for students who received federal aid: cost of attendance minus
+            # the grants and scholarships actually awarded.
+            #
+            # NOT what the list is filtered or sorted on, and the caption says
+            # so. It is an average over AIDED students, so treating it as the
+            # affordability test would promise a discount not everyone gets --
+            # sticker stays the honest ceiling and this says what usually
+            # happens. Median $7,063/yr below sticker; below HALF of it at
+            # 1,388 of the 5,035 schools.
+            "Avg net price": results["net_price"].map(
+                lambda price: fmt_money(price) if pd.notna(price) and price > 0
+                else "—"),
             "Whole program": results["total_program_cost"].map(fmt_money),
             # A dash, not "open / not reported". Nine columns share the width
             # that seven used to, and the two longest strings in the table were
@@ -17139,6 +17227,12 @@ def render_school_search(always_open: bool = False) -> None:
             # the school reports none, so the short form is also the one the
             # prose was describing.
             "Admits": results["ADM_RATE"].map(
+                lambda rate: f"{rate:.0%}" if pd.notna(rate) else "—"),
+            # The assumption the ROI model never states out loud: it charges a
+            # full programme and pays out a graduate's salary. A school where
+            # 28% finish is a different financial proposition from one where
+            # 90% do, and until now the two rendered identically.
+            "Finish": results["completion_rate"].map(
                 lambda rate: f"{rate:.0%}" if pd.notna(rate) else "—"),
             # The PARENT's borrowing, beside the student's cost. Same figure
             # render_parent_plus_note puts under a named school, and it earns a
@@ -17212,6 +17306,27 @@ def render_school_search(always_open: bool = False) -> None:
         # describes families who borrowed before OBBBA capped the programme.
         # A bare money column would silently assert the opposite of all three.
         _cap(
+            "**Avg net price** is what students who received federal aid "
+            "actually paid, on average, after grants and scholarships — cost "
+            "of attendance minus the aid awarded, from College Scorecard. It "
+            "is usually well below the sticker beside it: about "
+            f"{fmt_money_md(7063)}/year lower at the median school, and less "
+            "than half the sticker at 1,388 of the 5,035 schools here. **The "
+            "list is filtered and sorted on the sticker, not on this** — it is "
+            "an average over aided students, so it is what usually happens "
+            "rather than what you are guaranteed. **—** means unreported."
+        )
+        _cap(
+            "**Finish** is the share of first-time, full-time students who "
+            "completed within 150% of the normal time — six years for a "
+            "four-year degree. It matters here because everything else on "
+            "this page assumes you graduate: the cost is charged in full and "
+            "the salary is a graduate's. It **undercounts** real completion, "
+            "because a student who transfers and finishes elsewhere counts "
+            "against the school they left, and part-time students are not in "
+            "it at all. **—** means unreported."
+        )
+        _cap(
             "**Parents borrowed** is what families of *completers* at that school "
             "who took Parent PLUS borrowed in total, at the median — the parent's "
             "own debt, separate from every cost column here and from any loan this "
@@ -17259,7 +17374,8 @@ def render_school_search(always_open: bool = False) -> None:
         # more than one school. A stale UNITID cannot be mistaken for a valid
         # one: it is either still in the result set or it is not.
         _search_actions(results, table, _captions, is_graduate=False,
-                        level=credential, family=family, enabled=always_open)
+                        level=credential, family=family, enabled=always_open,
+                        controls=controls)
 
         picker_ids = [int(uid) for uid in results["UNITID"]]
         picker_labels = {
