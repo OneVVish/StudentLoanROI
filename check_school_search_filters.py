@@ -670,6 +670,86 @@ def check_residency_modelling(ns) -> list:
     return problems
 
 
+def check_program_lengths(ns) -> list:
+    """One length per path, and the two modes must price the same life alike.
+
+    GRADUATE_ADDITIONAL_YEARS' 5 is a FALLBACK for paths whose length this app
+    does not know, and reading it where a real length exists is how a single
+    scenario came to carry two: a physician's cost and graduate cap sized on 5
+    years while the debt cap and the earnings delay used 4. Nothing on screen
+    showed the disagreement -- both halves looked right on their own.
+    """
+    problems = []
+    MD = ns["MAJOR_DATA"]
+    undergrad = ns["UNDERGRAD_YEARS"]
+
+    # 1. Cost and earnings read one number. `unpaid_training_years` is the
+    #    length of post-bachelor's school for every path that has one, so the
+    #    graduate half of the cost must equal it.
+    for major, entry in sorted(MD.items()):
+        school = entry.get("unpaid_training_years", 0)
+        if not school:
+            continue
+        grad = ns["graduate_years_for_major"](major)
+        if grad != school:
+            problems.append(
+                f"  {major!r} is charged {grad} graduate year(s) of cost but "
+                f"attends {school}\n    the loan, the graduate cap and the "
+                f"foregone earnings all use the first; the debt cap and the "
+                f"earnings delay use the second")
+
+    # 2. The total is the undergraduate years plus that half, always. Anything
+    #    else means a call site added its own arithmetic.
+    for major, entry in sorted(MD.items()):
+        grad = ns["graduate_years_for_major"](major)
+        if not grad:
+            continue
+        total = ns["program_years_for_major"](major)
+        if total != undergrad + grad:
+            problems.append(
+                f"  {major!r}: total {total} != {undergrad} + {grad} graduate")
+
+    # 3. The same life must cost the same in both modes. These pairs are a
+    #    curated MAJOR and the OCCUPATION it leads to; "Medicine" resolving to
+    #    four undergraduate years while Family Medicine Physicians resolved to
+    #    nine is the contradiction ADVANCED_TRAINING_OVERLAY exists to prevent,
+    #    and it survived on the major side for as long as that overlay has.
+    TWINS = [("Medicine", "Family Medicine Physicians"),
+             ("Law", "Lawyers"),
+             ("Athletic Training", "Athletic Trainers")]
+    for major, occupation in TWINS:
+        if major not in MD or occupation not in MD:
+            problems.append(f"  fixture: {major!r}/{occupation!r} not in MAJOR_DATA")
+            continue
+        for label, fn in (("total years", ns["program_years_for_major"]),
+                          ("graduate years", ns["graduate_years_for_major"])):
+            if fn(major) != fn(occupation):
+                problems.append(
+                    f"  {major!r} and {occupation!r} disagree about {label}: "
+                    f"{fn(major)} vs {fn(occupation)}\n    one life, two "
+                    f"prices, decided by which dropdown the visitor used")
+        if (MD[major].get("unpaid_training_years", 0)
+                != MD[occupation].get("unpaid_training_years", 0)):
+            problems.append(
+                f"  {major!r} and {occupation!r} disagree about when earnings "
+                f"start")
+
+    # 4. Every occupation that attends a professional school has a curated
+    #    length. Without one it silently falls back to 5 -- and the fallback is
+    #    wrong for all nine programmes.
+    for occupation, programme in sorted(
+            ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"].items()):
+        if occupation not in MD:
+            continue                      # reported by check_professional_paths
+        if not ns["curated_school_years"](occupation):
+            problems.append(
+                f"  {occupation!r} attends {programme} school with no curated "
+                f"length, so it falls back to "
+                f"{ns['GRADUATE_ADDITIONAL_YEARS']['Doctoral or professional degree']} "
+                f"years -- which is no programme's real length")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -818,6 +898,7 @@ def main() -> int:
         ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
         ("professional paths", lambda: check_professional_paths(ns)),
         ("residency modelling", lambda: check_residency_modelling(ns)),
+        ("program lengths", lambda: check_program_lengths(ns)),
         ("programmes without debt", lambda: check_programmes_without_debt(ns)),
     ]:
         found = fn()
