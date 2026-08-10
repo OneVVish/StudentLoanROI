@@ -17848,10 +17848,30 @@ def render_school_search(always_open: bool = False) -> None:
             table, use_container_width=True, hide_index=True,
             column_config={
                 # School names are the one genuinely long field and the one
-                # nothing else identifies a row by, so it gets the width the
-                # placeholders gave back. "California Polytechnic State
-                # University-San Luis Obispo" is 57 characters.
-                "School": st.column_config.Column("School", width="large"),
+                # nothing else identifies a row by -- "California Polytechnic
+                # State University-San Luis Obispo" is 57 characters -- so this
+                # column was "large" while the table had seven columns.
+                #
+                # At twelve it is the wrong trade: a wide School column pushes
+                # the money and percentage columns into each other, and those
+                # are what the visitor is comparing across rows.
+                #
+                # A PIXEL WIDTH, not a bucket. Streamlit's three named widths
+                # are roughly 75 / 200 / 400px, and this column's requirement
+                # is a property of the DATA rather than of that scale: name
+                # lengths in college_coa_clean.csv run p50 28 characters, p80
+                # 36, p90 41. "medium" cuts off everything past ~28 -- half
+                # the dataset, and 7 of the 11 rows visible without scrolling
+                # in a live search. 280px covers about 40 characters, so ~88%
+                # of schools render whole, while still handing 120px back to
+                # the money columns against "large".
+                #
+                # Truncation past that point is accepted rather than avoided,
+                # and it is the least bad place to spend it: a school is
+                # recognisable from its first forty characters in a way that
+                # "$73,076" is not from "$73,0". The column stays
+                # drag-resizable and the full name is on hover.
+                "School": st.column_config.Column("School", width=280),
                 # A fixed display_text, so the column is a row of identical
                 # links rather than 25 raw URLs of wildly different lengths --
                 # Scorecard stores everything from a bare domain to a 120-char
