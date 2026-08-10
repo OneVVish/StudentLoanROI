@@ -874,6 +874,67 @@ def check_field_debt_column(ns, base) -> list:
     return problems
 
 
+def check_search_level_catalog(ns) -> list:
+    """Every level a search can log must have an admin label, and the action
+    must still carry the two fields the admin parser reads.
+
+    Both tools emit one school_search_run with `level` as the only
+    discriminator, so that field is what separates an undergraduate search from
+    a graduate or professional one after the fact. Two ways that breaks
+    silently:
+
+      * A level added to a registry and not to search_level_catalog renders as
+        "Unknown" in the admin table -- indistinguishable from a parsing bug,
+        and it lands in the one place nobody double-checks.
+      * The action string is built in one f-string and read by a regex ~1,500
+        lines away. Drop `:level=` or `:n=` from the format and the table goes
+        quietly empty, which reads as "nobody searched".
+    """
+    problems = []
+    catalog = ns["search_level_catalog"]()
+
+    registries = [
+        ("CREDENTIAL_LEVELS", ns["CREDENTIAL_LEVELS"], 0),
+        ("GRADUATE_CREDENTIAL_LEVELS", ns["GRADUATE_CREDENTIAL_LEVELS"], 0),
+        ("FIXED_FIELD_GRADUATE_LEVELS", ns["FIXED_FIELD_GRADUATE_LEVELS"], 0),
+        ("PROFESSIONAL_SEARCH_LEVELS", ns["PROFESSIONAL_SEARCH_LEVELS"], 0),
+    ]
+    for name, registry, key_index in registries:
+        for label, value in registry.items():
+            key = value[key_index]
+            if key not in catalog:
+                problems.append(
+                    f"  {name}[{label!r}] logs level={key!r}, which has no "
+                    f"admin label\n    it renders as \"Unknown\" beside real "
+                    f"levels and looks like a parsing bug")
+                continue
+            tool, _shown = ns["search_level_label"](key)
+            if tool == "Unknown":
+                problems.append(
+                    f"  level={key!r} resolves to the Unknown bucket")
+
+    # An unrecognised level must be REPORTED, not folded into a neighbour --
+    # rows predating a rename carry levels that no longer exist, and absorbing
+    # them overstates whichever bucket takes them.
+    tool, shown = ns["search_level_label"]("level_that_never_existed")
+    if tool != "Unknown" or "level_that_never_existed" not in shown:
+        problems.append(
+            f"  a retired level was bucketed as {tool!r} instead of surfaced")
+
+    # The two fields the admin regex depends on must still be in the action.
+    src = open("app.py").read()
+    start = src.index("def _log_school_search")
+    body = src[start:src.index("\ndef ", start + 1)]
+    for fragment, why in ((":level=", "separates the two search tools"),
+                          (":n=", "carries the result count")):
+        if fragment not in body:
+            problems.append(
+                f"  the school_search_run action no longer contains "
+                f"{fragment!r}, which {why}\n    the admin table parses it "
+                f"with a regex and would go quietly empty")
+    return problems
+
+
 def check_apply_target(ns) -> list:
     """Where an applied school lands, and when it must refuse instead.
 
@@ -1024,6 +1085,7 @@ def main() -> int:
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
         ("field debt column", lambda: check_field_debt_column(ns, base)),
+        ("search level catalog", lambda: check_search_level_catalog(ns)),
         ("per-tool widget keys",
          lambda: check_shared_controls_have_per_tool_keys(ns)),
         ("programmes without debt", lambda: check_programmes_without_debt(ns)),
