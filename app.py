@@ -21,8 +21,11 @@ import hashlib
 import html
 import io
 import math
+import queue
 import re
 import sys
+import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape as xml_escape
@@ -30,6 +33,9 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import certifi
+# Already an indirect dependency of supabase/postgrest; imported directly to
+# set an explicit write timeout -- see SUPABASE_TIMEOUT_SECONDS.
+import httpx
 import matplotlib
 matplotlib.use("Agg")  # must precede importing pyplot -- no display/browser needed
 import matplotlib.pyplot as plt
@@ -3371,9 +3377,42 @@ def get_lower_risk_alternative_major(major_name: str) -> str:
 # local files would be silently wiped on every sleep/restart, defeating the
 # whole point of logging this data for the companion research paper.
 
+# How long a write may block the page. st-supabase-connection calls
+# create_client(url, key) with no options, so without this the PostgREST client
+# keeps its own default -- DEFAULT_POSTGREST_CLIENT_TIMEOUT, which is 120
+# SECONDS. Every writer in this section runs inside the script run, and the
+# pageview fires before the page body renders, so one slow response meant a
+# blank page for two minutes with nothing on screen to explain it. That is the
+# shape a traffic spike takes: the database throttles first, and the app looks
+# hung rather than busy.
+#
+# Three seconds is chosen to be longer than a healthy round-trip by a wide
+# margin and shorter than a visitor's patience. Anything that cannot answer in
+# three seconds is not going to answer usefully.
+SUPABASE_TIMEOUT_SECONDS = 3.0
+
+# After this many consecutive failures, stop trying for SUPABASE_BREAKER_COOLDOWN
+# seconds. Without it a throttling database costs every visitor the timeout on
+# every write -- 3s x 12 writes for an engaged session -- which is the same hang
+# arriving more slowly. Process-global rather than per-session, because the
+# database is process-global: one session discovering it is down should spare
+# the others.
+SUPABASE_BREAKER_THRESHOLD = 3
+SUPABASE_BREAKER_COOLDOWN = 60.0
+
+
 @st.cache_resource
 def get_supabase_connection():
-    return st.connection("supabase_connection", type=SupabaseConnection)
+    conn = st.connection("supabase_connection", type=SupabaseConnection)
+    # Reaching through the wrapper because it exposes no options argument.
+    # Guarded: a version bump that moves this attribute must not take the app
+    # down, it must only lose the shorter timeout.
+    try:
+        conn.client.postgrest.session.timeout = httpx.Timeout(
+            SUPABASE_TIMEOUT_SECONDS)
+    except Exception as error:                                # pragma: no cover
+        report_write_failure("postgrest timeout not applied", error)
+    return conn
 
 
 def get_session_id() -> str:
@@ -4146,6 +4185,163 @@ def report_write_failure(what: str, error: Exception) -> None:
     print(f"[supabase] {what} failed: {detail}", file=sys.stderr)
 
 
+class SupabaseWriteQueue:
+    """Writes that must never make a visitor wait.
+
+    The research tables are logging, not the product. A page that renders in
+    50ms and loses a pageview row under load is strictly better than one that
+    renders in two minutes and keeps it -- and the second is what this app did,
+    because every writer ran inside the script run and the pageview fired
+    before the page body.
+
+    THE ROW IS BUILT ON THE MAIN THREAD; only the HTTP call moves here. Nothing
+    in the worker may touch st.session_state: it has no ScriptRunContext, and
+    now_local, get_session_id, get_traffic_source and json_safe_row all read
+    session state today. Callers hand over a finished, JSON-safe dict.
+
+    One worker thread, so FIFO order survives -- scenario_events.event_seq is
+    assigned on the main thread and must land in the order it was assigned.
+
+    A full queue DROPS and counts, rather than blocking. Blocking on a full
+    queue would reintroduce the exact failure this exists to remove, and would
+    do it at the worst moment. Dropped rows are reported: a gap in the data
+    that nobody knows about is worse than one that is recorded, because the
+    research paper cannot tell a quiet day from a lost hour (see migrations.sql).
+    """
+
+    def __init__(self, maxsize: int = 500):
+        self._queue = queue.Queue(maxsize=maxsize)
+        self._worker = None
+        self._lock = threading.Lock()
+        # Resolved on the MAIN thread at first submit and reused by the worker.
+        # get_supabase_connection is st.connection + st.cache_resource, i.e.
+        # Streamlit API, and calling it from a bare thread logs "missing
+        # ScriptRunContext" on every write. It works today; it is also exactly
+        # the kind of thing a Streamlit version bump turns into an exception,
+        # in a thread whose failure nobody would see. Keeping every Streamlit
+        # call on the main thread costs one attribute.
+        self._conn = None
+        self._conn_attempted = False
+        # Breaker state. Guarded by the same lock: the worker writes it and the
+        # main thread reads it for the degraded-mode caption.
+        self._consecutive_failures = 0
+        self._open_until = 0.0
+        self.submitted = 0
+        self.written = 0
+        self.dropped = 0
+        self.failed = 0
+        self.skipped_open = 0
+
+    def _ensure_worker(self) -> None:
+        """Started on first use, never at import. The guards exec this module's
+        section 1-2 prefix outside any Streamlit runtime, and a thread spawned
+        at import would outlive them."""
+        with self._lock:
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(
+                    target=self._run, name="supabase-writer", daemon=True)
+                self._worker.start()
+
+    def breaker_is_open(self) -> bool:
+        with self._lock:
+            return time.monotonic() < self._open_until
+
+    def stats(self) -> dict:
+        """For the admin panel. A snapshot, not a live view."""
+        with self._lock:
+            return {
+                "depth": self._queue.qsize(),
+                "submitted": self.submitted, "written": self.written,
+                "dropped": self.dropped, "failed": self.failed,
+                "skipped_open": self.skipped_open,
+                "breaker_open": time.monotonic() < self._open_until,
+                "consecutive_failures": self._consecutive_failures,
+            }
+
+    def submit(self, table: str, row: dict) -> bool:
+        """Enqueue one finished row. True when accepted, False when dropped.
+
+        Never raises and never blocks -- callers are on the render path.
+        """
+        self.submitted += 1
+        if self.breaker_is_open():
+            with self._lock:
+                self.skipped_open += 1
+            return False
+        # Resolved once, ever. Building the client is cheap and does no network
+        # I/O, but "cheap today" is not a property to bet the render path on:
+        # if it ever becomes slow or starts failing, retrying it per submit
+        # would put that cost in front of every visitor. One attempt; a failure
+        # opens the breaker like any other, so the retry comes after the
+        # cooldown rather than immediately.
+        if self._conn is None:
+            if self._conn_attempted:
+                return False
+            self._conn_attempted = True
+            try:
+                self._conn = get_supabase_connection()
+            except Exception as error:
+                with self._lock:
+                    self._open_until = time.monotonic() + SUPABASE_BREAKER_COOLDOWN
+                report_write_failure(f"{table} (no connection)", error)
+                return False
+        try:
+            self._queue.put_nowait((table, row))
+        except queue.Full:
+            with self._lock:
+                self.dropped += 1
+            report_write_failure(
+                f"{table} dropped (queue full)",
+                RuntimeError(f"{self._queue.maxsize} rows already pending"))
+            return False
+        self._ensure_worker()
+        return True
+
+    def _run(self) -> None:
+        while True:
+            table, row = self._queue.get()
+            try:
+                if time.monotonic() < self._open_until:
+                    with self._lock:
+                        self.skipped_open += 1
+                    continue
+                # .execute() rather than execute_query(..., ttl=0):
+                # execute_query is st_supabase_connection's CACHED helper, so
+                # it is a Streamlit API call, and calling it from this thread
+                # logs "missing ScriptRunContext" on every single write. At
+                # ttl=0 it caches nothing anyway -- it is a wrapper around
+                # exactly this call. Keeping Streamlit out of the worker means
+                # the only thing running here is an HTTP POST.
+                self._conn.table(table).insert([row], count="None").execute()
+                with self._lock:
+                    self.written += 1
+                    self._consecutive_failures = 0
+            except Exception as error:
+                with self._lock:
+                    self.failed += 1
+                    self._consecutive_failures += 1
+                    tripped = self._consecutive_failures >= SUPABASE_BREAKER_THRESHOLD
+                    if tripped:
+                        self._open_until = time.monotonic() + SUPABASE_BREAKER_COOLDOWN
+                        # Reset so one probe after the cooldown decides, rather
+                        # than the breaker re-opening on the next single failure.
+                        self._consecutive_failures = 0
+                        # And let the connection be rebuilt on the next attempt:
+                        # a restarted database usually needs a fresh client.
+                        self._conn_attempted = False
+                        self._conn = None
+                report_write_failure(f"{table} insert (queued)", error)
+            finally:
+                self._queue.task_done()
+
+
+@st.cache_resource
+def get_write_queue() -> SupabaseWriteQueue:
+    """One queue per process, shared by every session -- the same reasoning
+    that makes get_supabase_connection a cache_resource."""
+    return SupabaseWriteQueue()
+
+
 def json_safe_row(row: dict) -> dict:
     """Make one insert payload safe to serialise, replacing values JSON cannot
     represent with None. Every Supabase writer runs its row through this.
@@ -4201,23 +4397,17 @@ def log_usage_event(action: str):
     calculator for every visitor."""
     if st.session_state.get("test_mode"):
         return  # ?test=1 developer session -- don't log interactions
-    try:
-        conn = get_supabase_connection()
-        execute_query(
-            conn.table("usage_logs").insert(
-                [json_safe_row({
-                    "timestamp": now_local().isoformat(), "session_id": get_session_id(),
-                    "traffic_source": get_traffic_source(), "action": action})],
-                count="None",
-            ),
-            ttl=0,
-        )
-    except Exception as error:
-        # Reported, not swallowed silently: a forgotten migration rejects the
-        # WHOLE row (PGRST204) and an unreported one is indistinguishable from
-        # a day with no traffic. Reporting goes to the server console only, so
-        # this still can't take the page down.
-        report_write_failure("usage_logs insert", error)
+    # QUEUED, not written here. This fires before the page body renders and
+    # again on every touched control, so it is the write that decides whether a
+    # slow database looks like a slow page or a broken one. The row is built
+    # here, on the main thread, because every value in it reads session state.
+    #
+    # Failures are still reported -- from the worker, to the same server
+    # console -- because a forgotten migration rejects the WHOLE row (PGRST204)
+    # and an unreported one is indistinguishable from a day with no traffic.
+    get_write_queue().submit("usage_logs", json_safe_row({
+        "timestamp": now_local().isoformat(), "session_id": get_session_id(),
+        "traffic_source": get_traffic_source(), "action": action}))
 
 
 def save_survey_response(respondent_role: str, hs_graduation_year: str,
@@ -4797,9 +4987,11 @@ def maybe_log_scenario_event(context: dict) -> bool:
     on timestamps, which are taken from the visitor's own clock (now_local)
     and can tie or run backwards across a timezone round-trip.
 
-    Returns True when a row was written, False when deduped or on any
-    failure -- matching the other save_* helpers, a logging problem must
-    never break the calculator.
+    Returns True when a row was ACCEPTED FOR WRITING, False when deduped or
+    when the queue refused it. Not "written": this hands off to the background
+    writer, so a True here means the row is on its way, not that it landed.
+    Nothing on screen depends on the distinction -- a logging problem must
+    never break the calculator -- but the admin panel's counters do.
     """
     if st.session_state.get("test_mode"):
         return False  # ?test=1 developer session -- don't log interactions
@@ -4830,25 +5022,23 @@ def maybe_log_scenario_event(context: dict) -> bool:
     st.session_state.last_scenario_signature = signature
     seq = st.session_state.get("scenario_event_seq", 0) + 1
     st.session_state.scenario_event_seq = seq
-    try:
-        conn = get_supabase_connection()
-        row = {
-            "timestamp": now_local().isoformat(),
-            "session_id": get_session_id(),
-            "traffic_source": get_traffic_source(),
-            "experiment_arm": get_experiment_arm(),
-            "major_explicitly_selected": get_major_explicitly_selected(),
-            "event_seq": seq,
-            **context,
-        }
-        execute_query(
-            conn.table("scenario_events").insert([json_safe_row(row)], count="None"),
-            ttl=0,
-        )
-        return True
-    except Exception as error:
-        report_write_failure("scenario_events insert", error)
-        return False
+    # Queued like the usage log, and for a stronger reason: this fires on
+    # RERUN, so it sits in the middle of the script on every interaction that
+    # lands on a new major or school.
+    #
+    # event_seq is assigned above, on the main thread, and the queue has a
+    # single worker -- so rows land in the order they were numbered. A pool of
+    # workers would deliver them out of order and make event_seq a lie.
+    row = {
+        "timestamp": now_local().isoformat(),
+        "session_id": get_session_id(),
+        "traffic_source": get_traffic_source(),
+        "experiment_arm": get_experiment_arm(),
+        "major_explicitly_selected": get_major_explicitly_selected(),
+        "event_seq": seq,
+        **context,
+    }
+    return get_write_queue().submit("scenario_events", json_safe_row(row))
 
 
 def get_shared_default(param_name: str, fallback: str) -> str:
@@ -6305,7 +6495,11 @@ def get_coa_confirmation_caption(school_name: str, match, in_state: bool):
     ).replace("$", r"\$")
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
+# max_entries bounds what an unbounded key space can hold. School names come
+# from a free-text box, so this cache grows with the number of DISTINCT
+# searches, not with the number of schools -- on a 1 GB container that is a
+# slow OOM, and an OOM restart looks exactly like a hang.
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=256)
 def fetch_median_debt(school_name: str, api_key: str):
     """
     Look up median completer debt for a school via the College Scorecard
@@ -6346,7 +6540,7 @@ def fetch_median_debt(school_name: str, api_key: str):
         return None
 
 
-@st.cache_data(show_spinner=False, ttl=3600)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=256)
 def fetch_school_coa_history(school_name: str, api_key: str):
     """
     Look up a school's Cost of Attendance for the two fixed reference years
@@ -7994,7 +8188,12 @@ BREAKEVEN_SEARCH_MAX_LOAN = 1_000_000.0
 BREAKEVEN_SEARCH_TOLERANCE = 50.0  # dollars; well under the precision the model claims
 
 
-@st.cache_data(show_spinner=False)
+# The widest key space in the app: fifteen arguments, most of them floats off
+# sliders, so a single visitor dragging one control mints entries as fast as
+# they can move the mouse. Bounded rather than unbounded for the reason above;
+# 512 is well past a session's working set, so the hit rate this cache exists
+# for is unaffected.
+@st.cache_data(show_spinner=False, max_entries=512)
 def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strategy: str,
                          roi_window_years: int = ROI_WINDOW_YEARS,
                          col_index: float = 100.0,
@@ -15080,6 +15279,30 @@ def render_admin_dashboard() -> None:
     scenario_shares_df = load_table_safe("scenario_shares", columns=["timestamp", "session_id"])
     survey_df = load_table_safe("survey_responses", columns=["timestamp", "session_id"])
 
+    # The write queue's own health, first, because it decides how far to trust
+    # everything below it. A dropped row and a quiet hour are the same shape in
+    # this data, so the count of what never landed has to be visible somewhere
+    # -- and this is the only surface that can show it. Counters are
+    # per-process and reset whenever Streamlit Cloud restarts the container, so
+    # read them as "since the last restart", not as a total.
+    _wq = get_write_queue().stats()
+    if _wq["dropped"] or _wq["failed"] or _wq["breaker_open"]:
+        st.warning(
+            f"**Logging is degraded.** {_wq['written']:,} rows written, "
+            f"{_wq['failed']:,} failed, {_wq['dropped']:,} dropped at the queue, "
+            f"{_wq['skipped_open']:,} skipped while the breaker was open"
+            + (f" — breaker is OPEN now, retrying in up to "
+               f"{int(SUPABASE_BREAKER_COOLDOWN)}s." if _wq["breaker_open"]
+               else " — breaker is closed.")
+            + " Rows lost in this window are gone; record the window in "
+              "migrations.sql if it was long."
+        )
+    else:
+        st.caption(
+            f"Write queue healthy — {_wq['written']:,} rows written since the "
+            f"last restart, {_wq['depth']} pending."
+        )
+
     # One row per distinct visitor's final configuration -- the basis for every
     # "what visitors configured" breakdown below.
     final_df = _admin_final_per_session(events_df)
@@ -15432,6 +15655,18 @@ else:
     )
 if st.session_state.get("test_mode"):
     st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
+elif get_write_queue().breaker_is_open():
+    # One line, and only while the breaker is open. The calculator does not
+    # depend on the database at all -- every number on this page comes from
+    # committed CSVs and arithmetic -- so the honest message is that a
+    # background feature is off, not that the app is unwell. Saying nothing
+    # would be defensible; saying this costs nothing and stops a visitor
+    # wondering whether their results are affected.
+    st.caption(
+        "📋 Usage logging is paused while the research database is "
+        "unavailable. Nothing on this page depends on it — every figure is "
+        "computed locally."
+    )
 
 # The before-you-look questions. Above the results because that is the only
 # place a "before" measurement can be taken, and skippable because the results
