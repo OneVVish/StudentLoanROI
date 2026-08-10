@@ -127,3 +127,59 @@ Edit `features()`. Keep the bodies short — the first draft ran two sentences a
 tile and at the size a 1200×630 tile actually is, the text left its own box and
 crossed the row beneath it. Six tiles is the ceiling: past that the type drops
 below what a phone resolves and the graphic becomes a picture of some text.
+
+---
+
+# Borrowing-limits poster
+
+```bash
+python3 brand/build_borrowing_graphic.py
+```
+
+| File | Size | For |
+|---|---|---|
+| `borrowing-1080x1350.png` | 1080×1350 | Instagram / Facebook portrait — the default |
+| `borrowing-1080x1920.png` | 1080×1920 | story |
+| `borrowing-letter.png` | 1275×1650 | a counselor handout, letter portrait at 150dpi |
+
+Built after a reference graphic in the counselor-infographic idiom: condensed
+caps headline, callout, a **table** as the centrepiece, footnote, three points,
+closing line. The reference used navy and gold; this uses a deep step of the
+app's own blue (`#12335c`, white on it at 12.7:1) with the app's orange as the
+accent — a second palette would be a second brand, and the logo would stop
+matching the poster inside a week.
+
+## The table is computed, not transcribed
+
+`borrowing_table()` execs app.py's section 1–2 prefix and calls
+`federal_direct_cap` and `parent_plus_cap` on a real four-year schedule, one
+year at a time, so each row is that year's marginal capacity and the total is
+the app's own answer with aggregate ceilings applied.
+
+It matters more here than on the feature grid: this graphic's whole claim is
+that the numbers are right, and it gets screenshotted and forwarded without the
+site attached.
+
+## One thing the reference got wrong, and this does not
+
+The reference labels its table *"Class of 2028 — under current federal law."*
+The new Parent PLUS ceiling binds on loans **first disbursed on or after
+July 1 2026** (`PARENT_PLUS_LIMIT_EFFECTIVE_YEAR`), so a 2028 graduate borrowed
+their first two years under the old rule, where Parent PLUS was
+cost-of-attendance-minus-aid with no practical ceiling. The table is true for a
+student **starting** in 2026 or later, and that is what the callout says.
+
+## Layout notes
+
+- **Every string is `$`-escaped at the one place text reaches the canvas.**
+  matplotlib reads paired dollar signs as mathtext, so the footnote came out as
+  an italic run with both signs eaten. Same trap as `fmt_money_md` on the
+  Streamlit side and `_pdf_escape_money` in the PDF — met a third time, hence
+  escaping everything rather than only what looks like money today.
+- **A taller canvas gets bigger type, not bigger gaps.** The sections have
+  fixed heights, so on the story the slack pass had ~570px to spread over four
+  gaps and the poster came apart into four islands. Type now scales with the
+  aspect (capped at 1.35×) and per-gap slack is capped.
+- **Table headers share one size**, the smallest any of them needs. Fitted
+  independently they came out at different sizes in the same row.
+- The build warns if content runs into the closing block.
