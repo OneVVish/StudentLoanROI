@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="worthmydegree.com mark">
+  <title>worthmydegree.com mark</title>
+  <g style="--surface: #ffffff">
+    <line x1="4" y1="38.0" x2="60" y2="38.0" stroke="#b0b5bd" stroke-width="2.6" stroke-linecap="round"/>
+    <path d="M 8.0 38.0 L 24.0 54.0 L 35.826 38.0" fill="none" stroke="#eb6834" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 35.826 38.0 L 58.0 8.0" fill="none" stroke="#2a78d6" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="35.826" cy="38.0" r="5.6" fill="#2a78d6" stroke="var(--surface)" stroke-width="2.4"/>
+  </g>
+</svg>

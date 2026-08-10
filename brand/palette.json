@@ -1,0 +1,32 @@
+{
+  "light": {
+    "cost": "#eb6834",
+    "gain": "#2a78d6",
+    "ink": "#1a1c1f",
+    "muted": "#8a8f98",
+    "rule": "#b0b5bd"
+  },
+  "dark": {
+    "cost": "#d95926",
+    "gain": "#3987e5",
+    "ink": "#f2f4f7",
+    "muted": "#9aa1ab",
+    "rule": "#484e57"
+  },
+  "geometry": {
+    "start": [
+      8.0,
+      38.0
+    ],
+    "trough": [
+      24.0,
+      54.0
+    ],
+    "end": [
+      58.0,
+      8.0
+    ],
+    "zero_y": 38.0,
+    "crossing_x": 35.826
+  }
+}
