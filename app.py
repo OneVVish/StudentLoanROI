@@ -4299,6 +4299,23 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     if compare_mode and st.session_state.get(
             "prof_school_b", PROFESSIONAL_SCHOOL_NATIONAL) != PROFESSIONAL_SCHOOL_NATIONAL:
         params["prof_school_b"] = st.session_state["prof_school_b"]
+    # A price carried over from the graduate search for a school with no
+    # published debt. It is not a widget, so nothing else in this pipeline
+    # would emit it -- and it moves the whole loan: Cal Northern's $54,450
+    # against the $130,000 national law figure is 12.2 years to payoff instead
+    # of 23.9. A link that dropped it would rebuild the scenario at a debt the
+    # sharer had explicitly displaced, silently, which is the returning-student
+    # failure this guard exists for.
+    #
+    # The programme is NOT emitted: the seeder derives it from the shared major,
+    # which is the same derivation that produced it here. That makes the pair
+    # self-validating -- a link whose major is not on this path cannot seed a
+    # price for one.
+    _carried = applied_program_price(professional_program_for(major))
+    if _carried:
+        params["pp"] = str(int(_carried))
+        params["pps"] = applied_program_price_school(
+            professional_program_for(major)) or ""
     # The community-college baccalaureate's pricing structure. Rendered only
     # under cc_mode "ccb", but emitted unconditionally: a widget that stops
     # rendering keeps its session_state value, and a link that dropped it would
@@ -5406,6 +5423,59 @@ def graduate_search_universe(cip_family: str, credential: str) -> tuple:
     return len(known), len(priced)
 
 
+def graduate_apply_target(professional: bool, level_key: str, family: str,
+                           credential: str, school_name: str, display_name: str,
+                           total_cost: int, major_name: str) -> tuple:
+    """Where a searched school can land in the sidebar, or why it cannot.
+
+    Returns `(target, blocked)` -- exactly one of which is set. `target` is the
+    `_pending_grad_school` payload; `blocked` is the sentence to show instead.
+
+    In section 2, and pure, because this is the decision that shipped wrong.
+    Both sidebar pickers build their options from one slice of the debt file --
+    grad_school_a by CIP family, prof_school_a by programme -- and both RESET a
+    value they do not recognise back to the national default. So aiming at the
+    wrong picker, or the right one for a different subject, does not raise: the
+    school is silently discarded and the sidebar looks like it ignored the
+    click. That is what "only the school is populated" turned out to mean, and
+    it was invisible to every guard because it lived inside a section-5
+    renderer. Same reasoning that moved reconcile_search_pick,
+    adm_filter_applies and is_graduate_credential down here.
+
+    `major_name` is passed rather than read off the module global so this stays
+    callable from a test.
+
+    The three outcomes:
+
+      medicine/dentistry/law WITH a debt row -> prof_school_a, selectable
+      medicine/dentistry/law WITHOUT one     -> carried by programme instead,
+          because its price still beats the national median of other schools
+          the sidebar would otherwise use, and 44 of 156 medical schools are
+          in this position
+      master's / doctoral                    -> grad_school_a, but only when
+          the searched field IS the scenario's field; that picker stocks one
+          field's schools and nothing else
+    """
+    if professional:
+        if professional_program_for(major_name) != level_key:
+            return None, (
+                f"Your scenario is studying **{major_name}**, so the sidebar has "
+                f"no {PROFESSIONAL_SCHOOL_LABEL.get(level_key, level_key)} field "
+                f"to fill. Set the major or occupation to a {level_key} path "
+                f"first, then apply a school.")
+        if school_name not in professional_schools_for(level_key):
+            return (None, display_name, level_key, int(total_cost)), None
+        return ("prof_school_a", school_name, level_key, int(total_cost)), None
+    if MAJOR_TO_CIP_FAMILY.get(major_name) != family:
+        return None, (
+            f"Your scenario is studying **{major_name}**, which is a different "
+            f"field from the one you searched — the sidebar's Graduate school "
+            f"picker only lists schools for your own field. Change the major "
+            f"first, then apply a school.")
+    return ("grad_school_a", school_name,
+            GRADUATE_SEARCH_TO_CREDENTIAL[credential], int(total_cost)), None
+
+
 def reconcile_search_pick(stored, picker_ids: list):
     """Which school the result picker should point at, given what it pointed
     at before the filters changed.
@@ -5661,6 +5731,24 @@ def get_suggested_coa_per_year(school_name: str, in_state: bool, unitid=None):
     return float(match["in_state_coa"] if in_state else match["out_of_state_coa"])
 
 
+def _on_prof_school_change() -> None:
+    """Touching this picker drops any price carried from the graduate search.
+
+    Without it the carried price outranks the picker on the one value the
+    picker can still express -- the national average. Selecting "National
+    average (no specific school)" deliberately would keep returning the price
+    of a school the visitor looked at earlier, with no way back to the national
+    figure short of choosing some other school. Disclosed by the caption, but
+    still a deliberate choice being overruled.
+
+    Changing the picker at all is that choice being made, so the carried value
+    goes. Any school with its own published debt is in the list anyway, and
+    resolve_professional_debt prefers that over both.
+    """
+    mark_interaction("prof_school_a")
+    st.session_state.pop("_applied_prof_price", None)
+
+
 def _apply_pending_grad_school() -> None:
     """Move a graduate school chosen in the search into the sidebar's state.
 
@@ -5695,7 +5783,6 @@ def _apply_pending_grad_school() -> None:
     # confusing the caption.
     st.session_state.pop("_applied_prof_price", None)
     if key == "prof_school_a":
-        _ = price   # the school has its own published debt; the price is not used
         # Medicine, dentistry and law: their own picker, keyed by programme.
         # The credential comes from the occupation rather than from here, so
         # this sets only the school -- and clears the guard key, or the
@@ -7415,6 +7502,15 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         "major": major_name,
         "strategy_label": strategy_label,
         "effective_principal": effective_principal,
+        # The professional-school debt that actually went into the principal
+        # above. Stamped rather than re-derived: it is a per-SCHOOL figure now
+        # (and can be a price carried from the graduate search), so a reader
+        # that goes back to MAJOR_DATA for it names the national average over a
+        # total built from something else -- which is what
+        # get_loan_principal_caption did, printing "$130,000 est. average
+        # professional-school debt: $244,450" on a $54,450 school. Same rule as
+        # the three consumers inside this function: resolve once, pass it.
+        "professional_debt": _professional_debt,
         "personal_contribution": personal_contribution,
         "total_investment": total_investment,
         # Stamp the enrollment-cost assumptions onto the scenario so every
@@ -12121,13 +12217,26 @@ if _program_key_a:
     # "no change" -- otherwise the re-pin below fires on the first render and
     # discards ?prof_school=, the trap _salary_override_major closes for ?sso=.
     st.session_state.setdefault("_prof_program_a", _program_key_a)
+    # ?pp= / ?pps=: a price the sharer carried over from the graduate search.
+    # Seeded once per session rather than per rerun, and never over a value
+    # already present: _apply_pending_grad_school runs ~1,500 lines above this
+    # and may have just set one, and clearing it (the picker's on_change, or
+    # the button under the caption) must stay cleared rather than being reset
+    # by the link on the next rerun. Same first-render-only discipline as
+    # seed_repayment_from_share.
+    if not st.session_state.get("_prof_price_seeded"):
+        st.session_state["_prof_price_seeded"] = True
+        _shared_price = get_shared_int("pp", 0)
+        if _shared_price > 0 and "_applied_prof_price" not in st.session_state:
+            st.session_state["_applied_prof_price"] = (
+                _program_key_a, get_shared_default("pps", ""), _shared_price)
     if (st.session_state["_prof_program_a"] != _program_key_a
             or st.session_state["prof_school_a"] not in _prof_options_a):
         st.session_state["prof_school_a"] = PROFESSIONAL_SCHOOL_NATIONAL
     st.session_state["_prof_program_a"] = _program_key_a
     _sb_study.selectbox(
         PROFESSIONAL_SCHOOL_LABEL[_program_key_a], _prof_options_a,
-        key="prof_school_a", on_change=lambda: mark_interaction("prof_school_a"),
+        key="prof_school_a", on_change=_on_prof_school_change,
         help="Median debt that this school's graduates leave with, from College "
              "Scorecard. It replaces the national average, and the spread is "
              "wide -- medical school debt runs from about $48,000 to $330,000 "
@@ -12151,6 +12260,18 @@ if _program_key_a:
             f"before any aid**, not what its graduates owed. It counts no "
             f"scholarship or family money, so treat it as a ceiling."
         )
+        # The one state the picker cannot express. Its own on_change drops the
+        # carried price, so choosing any school -- including the national
+        # average -- overrides it; but the average is what is already SHOWING
+        # here, and re-selecting the current value fires no change event.
+        # Without this the only way back to the national figure is to pick some
+        # other school and then pick this one again.
+        _sb_study.button(
+            "Use the national average instead", key="clear_carried_prof_price",
+            on_click=lambda: st.session_state.pop("_applied_prof_price", None),
+            help=f"Go back to {fmt_money(national_professional_debt(major))}, "
+                 f"what {PROFESSIONAL_SCHOOL_LABEL.get(_program_key_a, 'these')} "
+                 f"graduates owe nationally on average.")
     else:
         render_professional_debt_caption(major, st.session_state["prof_school_a"],
                                           professional_debt_a, _sb_study)
@@ -15384,35 +15505,10 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         # grad_school_a: they are keyed by programme rather than by CIP family,
         # and only 7 of the 13 California medical rows here are even options in
         # that picker. Sending them to the graduate one applied nothing at all.
-        target, blocked = None, None
-        if professional:
-            if professional_program_for(major) != level_key:
-                blocked = (
-                    f"Your scenario is studying **{major}**, so the sidebar has "
-                    f"no {PROFESSIONAL_SCHOOL_LABEL.get(level_key, level_key)} "
-                    f"field to fill. Set the major or occupation to a "
-                    f"{level_key} path first, then apply a school.")
-            elif picked["picker_name"] not in professional_schools_for(level_key):
-                # No debt row, so the picker cannot name it -- but its PRICE
-                # can still drive the loan, and doing that beats the national
-                # median of other schools that the sidebar would otherwise
-                # use. The school is carried by programme rather than selected.
-                target = (None, picked["INSTNM"], level_key,
-                          int(picked["total_program_cost"]))
-            else:
-                target = ("prof_school_a", picked["picker_name"], level_key,
-                          int(picked["total_program_cost"]))
-        else:
-            if MAJOR_TO_CIP_FAMILY.get(major) != family:
-                blocked = (
-                    f"Your scenario is studying **{major}**, which is a "
-                    f"different field from the one you searched — the sidebar's "
-                    f"Graduate school picker only lists schools for your own "
-                    f"field. Change the major first, then apply a school.")
-            else:
-                target = ("grad_school_a", picked["picker_name"],
-                          GRADUATE_SEARCH_TO_CREDENTIAL[credential],
-                          int(picked["total_program_cost"]))
+        target, blocked = graduate_apply_target(
+            professional, level_key, family, credential,
+            picked["picker_name"], picked["INSTNM"],
+            int(picked["total_program_cost"]), major)
 
         if blocked:
             # Said out loud rather than applied-and-lost. The whole reason this
@@ -16164,12 +16260,20 @@ def get_loan_principal_caption(scenario: dict) -> str:
     """Explains what actually feeds the loan repayment simulation, when it
     differs from the raw loan slider (professional-school debt on top of
     it). Returns None if there's nothing extra to explain."""
-    additional_debt = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    # The debt this scenario was actually computed with -- a school's own
+    # median, or a price carried from the graduate search, or the national
+    # average. MAJOR_DATA is the fallback for callers predating the stamp.
+    additional_debt = scenario.get(
+        "professional_debt",
+        MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0))
     if additional_debt <= 0:
         return None
+    national = MAJOR_DATA[scenario["major"]].get("additional_training_debt", 0)
+    basis = ("est. average professional-school debt" if additional_debt == national
+             else "professional-school debt for the school you picked")
     return (
         f"Effective loan principal including {fmt_money(additional_debt)} "
-        f"est. average professional-school debt: **{fmt_money(scenario['effective_principal'])}**"
+        f"{basis}: **{fmt_money(scenario['effective_principal'])}**"
     ).replace("$", r"\$")
 
 

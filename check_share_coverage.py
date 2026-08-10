@@ -45,6 +45,12 @@ WIDGET_FUNCS = {
 # Inputs that deliberately do NOT ride in a share link. Every entry needs a
 # reason: the point of the allowlist is to force the decision to be conscious,
 # not to be a place to silence the check.
+# (session_state key, params it rides on, what it is). See the loop in main().
+NON_WIDGET_SHARE_STATE = (
+    ("_applied_prof_price", ("pp", "pps"),
+     "a price carried from the graduate search"),
+)
+
 SHARE_EXEMPT = {
     # Survey answers -- a research instrument, not part of a scenario. Sharing
     # them would put one visitor's answers in another visitor's form.
@@ -280,6 +286,32 @@ def main() -> int:
             f"             emitted by build_share_params, so no share link can\n"
             f"             ever carry it."
         )
+
+    # Scenario state that is NOT a widget. The sweep above walks sidebar widget
+    # keys, so a value living only in session_state is invisible to it in BOTH
+    # directions -- it can be dropped from the emitter, or the seeder, and this
+    # check would stay green while shared links quietly rebuilt a different
+    # scenario. `_applied_prof_price` is exactly that: a price carried over
+    # from the graduate search for a professional school that publishes no
+    # debt, which replaces the national average and moves the whole loan (Cal
+    # Northern's $54,450 against the $130,000 national law figure is 12.2 years
+    # to payoff rather than 23.9).
+    #
+    # Add a row here for any future value of that shape, with the param(s) it
+    # rides on. It costs one line and it is the only thing standing between a
+    # non-widget field and the returning-student failure this file exists for.
+    for state_key, param_names, what in NON_WIDGET_SHARE_STATE:
+        for param in param_names:
+            if param not in emitted:
+                failures.append(
+                    f"  EMIT SIDE  {state_key} ({what}) is not a widget, so nothing\n"
+                    f"             else checks it -- and ?{param}= is never emitted by\n"
+                    f"             build_share_params. Shared links drop it silently.")
+            if param not in read_params:
+                failures.append(
+                    f"  READ SIDE  ?{param}= is emitted for {state_key} ({what}) but no\n"
+                    f"             get_shared_* call reads it back, so the link carries\n"
+                    f"             a value the visit that opens it ignores.")
 
     # The repayment tool's own share pipeline. Its emitter and its seeder both
     # loop over REPAYMENT_SHARE_FIELDS, so every param name reaches

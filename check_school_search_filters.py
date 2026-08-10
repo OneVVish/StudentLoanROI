@@ -424,6 +424,92 @@ def check_graduate_search(ns) -> list:
     return problems
 
 
+def check_apply_target(ns) -> list:
+    """Where an applied school lands, and when it must refuse instead.
+
+    This is the property the user reported broken: "when i click use graduate
+    school, only the school is populated". Both sidebar pickers RESET a value
+    they do not recognise back to their default, so aiming at the wrong one
+    fails silently -- no exception, no message, a sidebar that looks like it
+    ignored the click. Nothing here can be caught by reading a stack trace.
+
+    The whole reason graduate_apply_target is a pure section-2 function is so
+    this can run at all: it used to be ~30 lines inline in a section-5
+    renderer, unreachable by any guard.
+    """
+    problems = []
+    target = ns["graduate_apply_target"]
+    med = next(k for k, v in ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"].items()
+               if v == "medicine")
+    priced = ns["search_professional_schools_by_budget"]("medicine", 1_000_000,
+                                                         limit=400)
+    listed = set(ns["professional_schools_for"]("medicine"))
+    named = next((n for n in priced["picker_name"] if n in listed), None)
+    unlisted = next((n for n in priced["picker_name"] if n not in listed), None)
+    if named is None or unlisted is None:
+        problems.append(
+            "  fixture: medicine has no school of one of the two kinds, so the "
+            "listed/unlisted split discriminates nothing")
+        return problems
+
+    # 1. A professional school the picker CAN name goes to prof_school_a.
+    got, blocked = target(True, "medicine", None, None, named, named,
+                          300_000, med)
+    if blocked or got is None or got[0] != "prof_school_a":
+        problems.append(
+            f"  a medical school went to {got and got[0]!r}, not prof_school_a\n"
+            f"    the graduate picker stocks CIP families and would drop it")
+
+    # 2. One it cannot name is carried by price instead, never dropped and
+    #    never aimed at a picker that has no such option.
+    got, blocked = target(True, "medicine", None, None, unlisted, unlisted,
+                          300_000, med)
+    if blocked or got is None or got[0] is not None or got[3] != 300_000:
+        problems.append(
+            f"  {unlisted!r} has no debt row, so its PRICE must be carried; "
+            f"got {got!r} / {blocked!r}")
+
+    # 3. A subject the sidebar has no field for must SAY so, not apply.
+    got, blocked = target(True, "medicine", None, None, named, named,
+                          300_000, "Accounting")
+    if got is not None or not blocked:
+        problems.append(
+            "  applying a medical school to an accounting scenario was not "
+            "refused -- prof_school_a would reset and nothing would say why")
+
+    # 4. Graduate: right field applies, wrong field refuses. Both from the
+    #    real crosswalk, so a rewrite of it re-tests this.
+    major, family = next(iter(sorted(ns["MAJOR_TO_CIP_FAMILY"].items())))
+    other = next(m for m, f in ns["MAJOR_TO_CIP_FAMILY"].items() if f != family)
+    got, blocked = target(False, None, family, "Master's degree",
+                          "Some University", "Some University", 60_000, major)
+    if blocked or got is None or got[0] != "grad_school_a":
+        problems.append(f"  a same-field master's did not reach grad_school_a: "
+                        f"{got!r} / {blocked!r}")
+    elif got[2] != ns["GRADUATE_SEARCH_TO_CREDENTIAL"]["Master's degree"]:
+        problems.append(f"  the applied credential is {got[2]!r}, which is not "
+                        f"what the Level control searched")
+    got, blocked = target(False, None, family, "Master's degree",
+                          "Some University", "Some University", 60_000, other)
+    if got is not None or not blocked:
+        problems.append(
+            f"  a {ns['MAJOR_TO_CIP_FAMILY'][other]} scenario accepted a CIP "
+            f"{family} school; that picker does not stock it")
+
+    # 5. Exactly one of the two is ever set. A renderer reading the pair would
+    #    otherwise both apply and complain, or do neither.
+    for case in [(True, "medicine", None, None, named, named, 1, med),
+                 (True, "medicine", None, None, unlisted, unlisted, 1, med),
+                 (True, "medicine", None, None, named, named, 1, "Accounting"),
+                 (False, None, family, "Master's degree", "S", "S", 1, major),
+                 (False, None, family, "Master's degree", "S", "S", 1, other)]:
+        got, blocked = target(*case)
+        if bool(got) == bool(blocked):
+            problems.append(f"  {case[7]!r}: target and blocked are both "
+                            f"{'set' if got else 'empty'}")
+    return problems
+
+
 def check_picker_identity(ns, base) -> list:
     """The picker keys on UNITID, so UNITID must be a real key -- and the
     reconcile must keep a survivor while replacing an evicted selection."""
@@ -482,6 +568,7 @@ def main() -> int:
         ("credential gate", lambda: check_credential_gate(ns)),
         ("graduate search", lambda: check_graduate_search(ns)),
         ("picker identity", lambda: check_picker_identity(ns, base)),
+        ("apply target", lambda: check_apply_target(ns)),
     ]:
         found = fn()
         checks.append(name)
@@ -496,7 +583,8 @@ def main() -> int:
           f"{len(base)} schools ({unrated} unrated): wide-open means no filter, "
           f"narrowing excludes unrated, edges inclusive, sectors partition, "
           f"order preserved, cap applied last, graduate levels dispatch "
-          f"separately, admit rate gated to "
+          f"separately, applies reach the picker that stocks them, "
+          f"admit rate gated to "
           f"{'/'.join(ns['ADM_RATE_CREDENTIALS'])}, picker keyed on UNITID.")
     return 0
 
