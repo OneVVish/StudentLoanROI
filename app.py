@@ -10501,7 +10501,17 @@ def _pdf_table(rows: list, header: bool = True, full_width: bool = False,
     else:
         col_widths = natural_widths
 
-    table = Table(wrapped_rows, colWidths=col_widths, hAlign="CENTER")
+    # repeatRows=1 redraws the header on every page a table spills onto.
+    # Without it the second page of a 25-school shortlist is a grid of bare
+    # numbers -- three money columns, two percentages and two more money
+    # columns, in an order the reader can no longer recover. It is the one
+    # thing that makes a long printed table readable, and it costs a keyword.
+    #
+    # Only when there IS a header row: header=False means column 0 is the bold
+    # key of a key/value table, and repeating row 0 there would restate one
+    # arbitrary pair at the top of each page as though it were a heading.
+    table = Table(wrapped_rows, colWidths=col_widths, hAlign="CENTER",
+                  repeatRows=1 if header else 0)
     # Horizontal rules only, no vertical grid: the column gutters already
     # separate the data, and dropping the verticals turns a boxed-in
     # spreadsheet into something that reads like a report.
