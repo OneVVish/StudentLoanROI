@@ -1538,3 +1538,31 @@ alter table scenario_events
 -- navs. It is an ESTIMATE, not an observation: a visitor who closes the tab
 -- sends nothing. Two leaks, both stated on the panel -- clicking two CTAs
 -- counts twice against one landing, and returning later lands twice.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-11 -- ONE TAGGED VERIFICATION ROW, no DDL.
+--
+-- Verifying the edge landing logger immediately after its deploy wrote one
+-- row to usage_logs:
+--
+--     timestamp     2026-08-11T18:52:42Z
+--     action        'landing_view:path=welcome'
+--     traffic_source'deploycheck'
+--     session_id    NULL
+--
+-- It is TAGGED, so unlike the untagged rows noted above it can be excluded
+-- exactly: traffic_source = 'deploycheck'. Recorded anyway so the tag is
+-- never mistaken for a real channel if it turns up in a source breakdown.
+-- 'deploycheck' is reserved for this purpose and appears in no marketing
+-- link.
+--
+-- WHY IT COULD NOT USE THE USUAL 'selftest' TAG: the Worker drops
+-- src=selftest (and ?test=1) BEFORE building the row, by design -- which
+-- also means the landing logger cannot be verified with it. A distinct
+-- tag is the honest way to prove the path works: it writes a real row and
+-- labels itself. If the logger ever needs re-verifying, reuse
+-- 'deploycheck' rather than visiting untagged.
+--
+-- Two rows in the same minute (18:51:29 and 18:52:05, action
+-- 'landing_view:path=root', no tag) are NOT verification traffic -- they are
+-- organic visitors who typed the domain, and are genuine data.
