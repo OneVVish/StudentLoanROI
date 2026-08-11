@@ -1,5 +1,10 @@
 # Guides — how to publish one
 
+> Working with Claude Code? Just say **`/publish-guide`** (or "write a guide
+> about X") — `.claude/skills/publish-guide/` carries this whole workflow,
+> including the rule that every number must come from the datasets rather
+> than from memory. This file is the human version of the same thing.
+
 ```bash
 $EDITOR content/posts/my-new-guide.md     # write it
 python3 infra/build_site.py               # build pages + sitemap + worker
