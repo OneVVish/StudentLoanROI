@@ -100,17 +100,30 @@ def build_html(f: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Is the degree worth the loan? — worthmydegree.com</title>
 <meta name="description" content="Free, anonymous calculator: pick a major, school, and loan; see the 10-year outcome under the 2026 federal repayment rules. {f['schools']:,} real schools, no sign-up.">
-<link rel="canonical" href="https://worthmydegree.com/welcome">
+<link rel="canonical" href="https://worthmydegree.com/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Is the degree worth the loan? — worthmydegree.com">
 <meta property="og:description" content="Free, anonymous calculator: pick a major, school, and loan; see the 10-year outcome under the 2026 federal repayment rules. {f['schools']:,} real schools, no sign-up.">
-<meta property="og:url" content="https://worthmydegree.com/welcome">
+<meta property="og:url" content="https://worthmydegree.com/">
 <meta property="og:image" content="https://worthmydegree.com/app/static/feature-og-1200x630.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://worthmydegree.com/app/static/feature-og-1200x630.png">
 <link rel="icon" href="data:image/svg+xml;base64,{favicon}">
+<script type="application/ld+json">{{
+  "@context": "https://schema.org",
+  "@graph": [
+    {{"@type": "Organization", "@id": "https://worthmydegree.com/#org",
+      "name": "WorthMyDegree", "url": "https://worthmydegree.com/"}},
+    {{"@type": "WebApplication", "@id": "https://worthmydegree.com/#app",
+      "name": "WorthMyDegree — Student Loan Payoff & Major ROI Calculator",
+      "url": "https://worthmydegree.com/",
+      "applicationCategory": "FinanceApplication", "operatingSystem": "Web",
+      "offers": {{"@type": "Offer", "price": "0", "priceCurrency": "USD"}},
+      "publisher": {{"@id": "https://worthmydegree.com/#org"}}}}
+  ]
+}}</script>
 <style>
   :root {{
     --deep: #12335c; --blue: #2a78d6; --orange: #eb6834;
@@ -198,7 +211,7 @@ def build_html(f: dict) -> str:
 
 <header>
   <a class="logo" href="/" aria-label="worthmydegree.com">{logo_svg}</a>
-  <a class="btn hide-m" href="/">Open the calculator</a>
+  <a class="btn hide-m" href="/?go=1">Open the calculator</a>
 </header>
 
 <div class="hero">
@@ -207,7 +220,7 @@ def build_html(f: dict) -> str:
   <p class="sub">Pick a school and a major. See the real loan, the monthly
   payment under the 2026 federal rules, and where you stand ten years out —
   before anyone signs anything.</p>
-  <a class="btn big" href="/">Run your numbers — free</a>
+  <a class="btn big" href="/?go=1">Run your numbers — free</a>
   <div class="trust">Free · anonymous · no sign-up · no ads</div>
 </div>
 
@@ -276,7 +289,7 @@ def build_html(f: dict) -> str:
   <div class="grid">
     <div class="tile"><b>🎓 The calculator</b>
       <p>School + major + loan → the 10-year verdict.
-      <a href="/">Open&nbsp;→</a></p></div>
+      <a href="/?go=1">Open&nbsp;→</a></p></div>
     <div class="tile"><b>🔎 Schools that fit a budget</b>
       <p>Every school teaching your field, cheapest first, priced for your
       state. <a href="/?tool=schools">Search&nbsp;→</a></p></div>
@@ -290,7 +303,7 @@ def build_html(f: dict) -> str:
   <h2>Two minutes. Zero forms.</h2>
   <p class="deck" style="margin:8px auto 22px">The most expensive decision most
   families ever finance deserves ten real minutes of arithmetic.</p>
-  <a class="btn big" href="/">Open the calculator</a>
+  <a class="btn big" href="/?go=1">Open the calculator</a>
 </div>
 
 <footer>
@@ -306,7 +319,13 @@ def build_html(f: dict) -> str:
 <script>
 /* Carry the visitor's query string (?src= attribution, ?test=) onto every
    internal link, so a tagged arrival stays tagged when they click through --
-   the same rule the app's own internal_tool_url enforces. */
+   the same rule the app's own internal_tool_url enforces.
+
+   Every app-bound link already carries ?go=1: the worker serves THIS page on
+   a parameter-less "/", so a bare href="/" would loop a clean visitor back
+   here instead of opening the calculator. go=1 means nothing to the app --
+   it exists purely to make the click-through distinguishable from a fresh
+   arrival at the edge. */
 (function () {{
   var qs = location.search.replace(/^\\?/, "");
   if (!qs) return;

@@ -1464,3 +1464,14 @@ alter table scenario_events
 -- Before this date, absence in usage_logs means "did not happen". After
 -- it, absence means "did not happen, or was shed". Do not pool the two
 -- eras when computing a rate whose denominator is a usage_logs count.
+
+-- 2026-08-11: THE FRONT DOOR MOVED. From this date the edge Worker serves the
+-- static landing page on a bare, parameter-less "/" (and on /welcome); the
+-- Streamlit app -- and therefore every `pageview` row -- is reached only via a
+-- URL carrying at least one query parameter (the landing's own CTAs append
+-- ?go=1; share links, ?src= and ?tool= links always carried params).
+-- CONSEQUENCE: `usage_logs` pageview rows before this date are RAW ARRIVALS;
+-- rows from this date on are CLICKED-THROUGH visitors, one funnel step deeper.
+-- Do not compare pageview counts across this seam without saying so; the
+-- landing page itself writes no rows anywhere (it is static, served from the
+-- edge).
