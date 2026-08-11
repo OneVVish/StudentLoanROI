@@ -101,6 +101,15 @@ def build_html(f: dict) -> str:
 <title>Is the degree worth the loan? — worthmydegree.com</title>
 <meta name="description" content="Free, anonymous calculator: pick a major, school, and loan; see the 10-year outcome under the 2026 federal repayment rules. {f['schools']:,} real schools, no sign-up.">
 <link rel="canonical" href="https://worthmydegree.com/welcome">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Is the degree worth the loan? — worthmydegree.com">
+<meta property="og:description" content="Free, anonymous calculator: pick a major, school, and loan; see the 10-year outcome under the 2026 federal repayment rules. {f['schools']:,} real schools, no sign-up.">
+<meta property="og:url" content="https://worthmydegree.com/welcome">
+<meta property="og:image" content="https://worthmydegree.com/app/static/feature-og-1200x630.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://worthmydegree.com/app/static/feature-og-1200x630.png">
 <link rel="icon" href="data:image/svg+xml;base64,{favicon}">
 <style>
   :root {{
