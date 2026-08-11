@@ -1566,3 +1566,24 @@ alter table scenario_events
 -- Two rows in the same minute (18:51:29 and 18:52:05, action
 -- 'landing_view:path=root', no tag) are NOT verification traffic -- they are
 -- organic visitors who typed the domain, and are genuine data.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-11 -- TWO MORE EDGE ACTIONS in usage_logs, no DDL.
+--
+-- The Worker now also serves guide articles, and writes:
+--     'guide_view:slug=<slug>'    a guide page was served ('index' = /guides)
+--     'article_like:slug=<slug>'  the Helpful button was tapped
+-- both with session_id NULL and a UTC timestamp, like landing_view.
+--
+-- NEITHER IS A MEASUREMENT OF PEOPLE, and analysis must not treat them as one:
+--   * a guide_view has no session, so reads cannot be de-duplicated to
+--     visitors -- one person reloading is two rows;
+--   * an article_like has no identity whatsoever. The browser guard is
+--     localStorage, which anyone can clear, and the endpoint is public and
+--     unauthenticated. It is a warm signal for editorial decisions, nothing
+--     more. Do not put it in the paper.
+--
+-- All three edge actions (landing_view, guide_view, article_like) are kept out
+-- of PAGEVIEW_ACTIONS; app.py filters them from every app-activity panel and
+-- check_internal_links.py asserts the separation. Any query counting sessions,
+-- pageviews or survey rates must exclude EDGE_ACTION_PREFIXES.

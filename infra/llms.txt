@@ -60,3 +60,8 @@
 
 research@worthmydegree.com — student research project on whether outcome
 transparency changes college decisions.
+
+## Guides
+
+Plain-English explainers on the 2026 federal loan rules and what a degree
+costs, at https://worthmydegree.com/guides -- each one ends at the calculator.

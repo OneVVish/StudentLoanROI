@@ -4218,6 +4218,25 @@ PAGEVIEW_ACTIONS = ("pageview",) + tuple(t["action"] for t in STANDALONE_TOOLS.v
 # check_internal_links.py asserts the separation.
 LANDING_ACTION_PREFIX = "landing_view"
 
+# Guide reactions, also written by the Worker: "article_like:slug=<slug>".
+#
+# NOT A MEASUREMENT, and nothing downstream may treat it as one. There is no
+# identity behind it -- the browser guard is localStorage, which anyone can
+# clear, and nothing stops a script POSTing in a loop. It is a warm signal for
+# deciding what to write next. Out of PAGEVIEW_ACTIONS for the same reason
+# landing rows are.
+LIKE_ACTION_PREFIX = "article_like"
+
+# Guide reads, also from the Worker: "guide_view:slug=<slug>". These give the
+# like count a denominator -- 14 reactions means one thing against 20 readers
+# and quite another against 2,000.
+GUIDE_ACTION_PREFIX = "guide_view"
+
+# Everything the edge writes directly. These rows never ran the app, carry no
+# session_id, and must be kept out of any panel that means "app activity".
+EDGE_ACTION_PREFIXES = (LANDING_ACTION_PREFIX, LIKE_ACTION_PREFIX,
+                        GUIDE_ACTION_PREFIX)
+
 
 def requested_tool() -> str:
     """Which standalone tool this visit asked for, or "" for the calculator.
@@ -16736,6 +16755,31 @@ def _admin_welcome_destinations(usage_df: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
+def _admin_guide_likes(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """Reactions per guide, newest-liked first.
+
+    Deliberately just a count and a slug: there is no identity behind a like
+    (see LIKE_ACTION_PREFIX), so a rate, a share or a per-visitor figure would
+    all dress an unauthenticated tap as a measurement.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    actions = usage_df["action"].astype(str)
+    likes = actions[actions.str.startswith(LIKE_ACTION_PREFIX)]
+    views = actions[actions.str.startswith(GUIDE_ACTION_PREFIX)]
+    if likes.empty and views.empty:
+        return pd.DataFrame()
+    table = pd.DataFrame({
+        "Reads": views.str.split("slug=").str[-1].value_counts(),
+        "Likes": likes.str.split("slug=").str[-1].value_counts(),
+    }).fillna(0).astype(int)
+    # The index page is a read, not a guide -- counting it as one would put a
+    # row with no article behind it at the top of the table.
+    table = table.drop(index="index", errors="ignore")
+    return (table.rename_axis("Guide").reset_index()
+            .sort_values("Reads", ascending=False))
+
+
 def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
     """Distinct session_ids across the union of the given tables -- the funnel
     counts visitors, not rows, and a visitor can appear in several tables."""
@@ -17028,6 +17072,20 @@ def render_admin_dashboard() -> None:
             )
             st.dataframe(_dests, use_container_width=True, hide_index=True)
 
+    _likes = _admin_guide_likes(usage_df)
+    if not _likes.empty:
+        st.markdown("#### 📖 Guides")
+        st.caption(
+            "Reads counted at the edge; likes are taps on the Helpful button. "
+            "**Neither is a measurement of people** — an edge read has no "
+            "session, and a like has no identity at all (the browser guard is "
+            "localStorage, which anyone can clear, and nothing stops a "
+            "script). Read them as warm signals for what to write next, never "
+            "as data. The guides index page is excluded — it is a read with "
+            "no article behind it."
+        )
+        st.dataframe(_likes, use_container_width=True, hide_index=True)
+
     st.markdown("#### 🔗 Traffic by source")
     st.caption(
         "From the `?src=` tag on the link visitors arrived through; organic "
@@ -17050,7 +17108,7 @@ def render_admin_dashboard() -> None:
         # landings that have no session and never ran the app. They have their
         # own panel above.
         _src = usage_df[~usage_df["action"].astype(str)
-                        .str.startswith(LANDING_ACTION_PREFIX)].copy() \
+                        .str.startswith(EDGE_ACTION_PREFIXES)].copy() \
             if "action" in usage_df.columns else usage_df.copy()
         _src["Source"] = (_src["traffic_source"].astype("object")
                            .where(_src["traffic_source"].notna(), "(organic)")
