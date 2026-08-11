@@ -317,8 +317,85 @@ function busyResponse() {
   });
 }
 
+// Landing-page counting, written to the SAME Supabase table the app logs to,
+// so the admin page reads it with the machinery it already has.
+//
+// SERVER-SIDE ON PURPOSE. The obvious alternative -- a beacon script in the
+// page -- would put an external reference on a page whose entire value is
+// that it references nothing and therefore renders when the origin is down.
+// This runs in the Worker AFTER the response is already on its way
+// (ctx.waitUntil), so the visitor's browser makes zero extra requests and
+// waits for nothing.
+//
+// Needs two secrets, set once per deploy:
+//     npx wrangler secret put SUPABASE_URL
+//     npx wrangler secret put SUPABASE_ANON_KEY
+// Absent either, logging is skipped silently -- a missing secret must cost a
+// statistic, never a page.
+const LANDING_ACTION = "landing_view";
+const LANDING_LOG_TIMEOUT_MS = 2500;
+
+// Crude on purpose, and stated as such: a user-agent substring match catches
+// the declared crawlers (which are most of the volume) and nothing else. It
+// exists so the landing count is not mostly Googlebot; it is not a bot
+// defence and must not be read as one.
+const BOT_UA = /bot|crawl|spider|slurp|bingpreview|facebookexternalhit|headless|lighthouse|pingdom|uptime/i;
+
+async function logLanding(request, env, url) {
+  if (!env || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return;
+
+  // Same exclusions the app applies to itself. ?test=1 is the developer flag;
+  // src=selftest is the production-verification tag. A bare "/" cannot carry
+  // either (a query string routes to the app), so this only ever fires for
+  // /welcome -- but the check stays, because the routing rule is one edit away
+  // from changing and this is the row nobody would notice was wrong.
+  const src = url.searchParams.get("src");
+  if (url.searchParams.get("test") === "1" || src === "selftest") return;
+  if (BOT_UA.test(request.headers.get("user-agent") || "")) return;
+
+  // The event:k=v shape analyze_survey.py already parses. path= separates a
+  // typed bare domain from a clicked marketing link, which the src tag alone
+  // cannot: a /welcome hit whose tag went missing is a different story from
+  // someone who typed the name.
+  const action = `${LANDING_ACTION}:path=${url.pathname === "/" ? "root" : "welcome"}`;
+
+  // UTC, not visitor-local. isoformat() in the app emits an offset and this
+  // emits Z; both are correct absolute instants, which is all daily bucketing
+  // needs (traffic_report_dates converts before it buckets). The edge knows
+  // the visitor's timezone but constructing a local ISO string from an IANA
+  // name here would be guesswork for no gain.
+  //
+  // session_id is NULL because an edge landing HAS no session -- no Streamlit
+  // run, no browser state. CLAUDE.md's rule for NULL session_id is "exclude
+  // from joins rather than treat as one shared session", which is exactly the
+  // right treatment here.
+  const row = {
+    timestamp: new Date().toISOString(),
+    session_id: null,
+    traffic_source: src || null,
+    action,
+  };
+
+  try {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/usage_logs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: env.SUPABASE_ANON_KEY,
+        authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+        prefer: "return=minimal",
+      },
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(LANDING_LOG_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // Swallowed deliberately: the response has already been returned, and a
+    // database that is slow or down must not turn into a Worker exception.
+  }
+}
+
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // 1. Host + scheme canonicalization, path and query preserved.
@@ -362,13 +439,19 @@ export default {
       (url.pathname === "/" && url.search === "") ||
       url.pathname === "/welcome" || url.pathname === "/welcome/";
     if (isLanding) {
-      return new Response(LANDING, {
+      const page = new Response(LANDING, {
         headers: {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "public, max-age=3600",
           "link": `<${CANON}/>; rel="canonical"`,
         },
       });
+      // AFTER the response. waitUntil keeps the invocation alive for the
+      // insert without delaying a single byte to the visitor.
+      if (ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil(logLanding(request, env, url));
+      }
+      return page;
     }
 
     // 3. Streamlit internals: passthrough, cached at the edge where safe.

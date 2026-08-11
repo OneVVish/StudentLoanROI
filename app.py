@@ -4200,6 +4200,17 @@ TRAFFIC_REPORT_TZ = "America/Los_Angeles"
 # split without also being added to the totals.
 PAGEVIEW_ACTIONS = ("pageview",) + tuple(t["action"] for t in STANDALONE_TOOLS.values())
 
+# Landings on the static welcome page, written by the edge Worker
+# (infra/worker.js) straight into usage_logs -- the app never sees the request.
+# Rows look like "landing_view:path=root" / ":path=welcome".
+#
+# DELIBERATELY NOT IN PAGEVIEW_ACTIONS. A landing is not an app session: no
+# Streamlit run, no session_id, none of the state a pageview implies. Folding
+# it in would inflate every pageview-denominated rate in this dashboard and in
+# analyze_survey.py, silently and from one date onward.
+# check_internal_links.py asserts the separation.
+LANDING_ACTION_PREFIX = "landing_view"
+
 
 def requested_tool() -> str:
     """Which standalone tool this visit asked for, or "" for the calculator.
@@ -16642,6 +16653,43 @@ def _admin_search_runs(usage_df: pd.DataFrame) -> pd.DataFrame:
               .reset_index(drop=True))
 
 
+def _admin_landing_funnel(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """Landings on the edge welcome page against app arrivals, per source.
+
+    Two independent counts, NOT a tracked journey -- and the caption says so.
+    An edge landing has no session_id (there is no session), so nothing links
+    a landing row to the arrival it produced. The ratio is
+    arrivals-with-this-tag over landings-with-this-tag, which is the right
+    number when the posted link was the landing and a misleading one when a
+    channel's traffic arrives by other routes too.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    frame = usage_df.copy()
+    frame["Source"] = (frame.get("traffic_source", pd.Series(dtype="object"))
+                       .astype("object")
+                       .where(frame.get("traffic_source").notna(), "(untagged)")
+                       .replace("", "(untagged)"))
+    landings = frame[frame["action"].astype(str)
+                     .str.startswith(LANDING_ACTION_PREFIX)]
+    if landings.empty:
+        return pd.DataFrame()
+    arrivals = frame[frame["action"].isin(PAGEVIEW_ACTIONS)]
+    table = pd.DataFrame({
+        "Landings": landings.groupby("Source").size(),
+        "App arrivals": arrivals.groupby("Source").size(),
+    }).fillna(0).astype(int)
+    table["Click-through"] = [
+        f"{(a / l * 100):.0f}%" if l else "—"
+        for l, a in zip(table["Landings"], table["App arrivals"])]
+    # Split typed-the-domain from clicked-a-link. The src tag cannot do this:
+    # an untagged /welcome hit and a bare-root hit both arrive tagless.
+    by_path = (landings["action"].astype(str).str.split("path=").str[-1]
+               .value_counts())
+    table.attrs["by_path"] = by_path.to_dict()
+    return table.sort_values(["Landings", "App arrivals"], ascending=False)
+
+
 def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
     """Distinct session_ids across the union of the given tables -- the funnel
     counts visitors, not rows, and a visitor can appear in several tables."""
@@ -16893,6 +16941,33 @@ def render_admin_dashboard() -> None:
         )
 
     # (b) App interactions by traffic source (?src= tag)
+    st.markdown("#### 🚪 Welcome page (served at the edge)")
+    _landing = _admin_landing_funnel(usage_df)
+    if _landing.empty:
+        st.caption(
+            "No landing rows yet. The edge Worker writes these directly to "
+            "`usage_logs`; if the page is live and this stays empty, the "
+            "`SUPABASE_URL` / `SUPABASE_ANON_KEY` Worker secrets are probably "
+            "unset (`npx wrangler secret put ...`)."
+        )
+    else:
+        _paths = _landing.attrs.get("by_path", {})
+        st.caption(
+            "Landings on the static welcome page, counted by the Worker AFTER "
+            "it answers — the page itself loads nothing and logs nothing in "
+            "the browser. "
+            f"**{_paths.get('root', 0):,}** arrived at the bare domain "
+            f"(typed or organic) and **{_paths.get('welcome', 0):,}** at "
+            "`/welcome` (a marketing link).\n\n"
+            "**Click-through is a ratio of two counts, not a followed "
+            "journey.** An edge landing has no session, so nothing ties a "
+            "landing to the arrival it caused; the figure is honest where a "
+            "channel's posted link WAS the landing, and inflated where that "
+            "channel also sends people straight to the app. `?test=1`, "
+            "`src=selftest` and declared crawlers are excluded at the edge."
+        )
+        st.dataframe(_landing, use_container_width=True)
+
     st.markdown("#### 🔗 Traffic by source")
     st.caption(
         "From the `?src=` tag on the link visitors arrived through; organic "
@@ -16910,7 +16985,13 @@ def render_admin_dashboard() -> None:
     if usage_df.empty or "traffic_source" not in usage_df.columns:
         st.caption("No data yet.")
     else:
-        _src = usage_df.copy()
+        # Landing rows are excluded: this panel is about APP activity, and
+        # its "Logged events" column would otherwise silently absorb edge
+        # landings that have no session and never ran the app. They have their
+        # own panel above.
+        _src = usage_df[~usage_df["action"].astype(str)
+                        .str.startswith(LANDING_ACTION_PREFIX)].copy() \
+            if "action" in usage_df.columns else usage_df.copy()
         _src["Source"] = (_src["traffic_source"].astype("object")
                            .where(_src["traffic_source"].notna(), "(organic)")
                            .replace("", "(organic)"))

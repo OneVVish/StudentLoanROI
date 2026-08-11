@@ -1508,3 +1508,19 @@ alter table scenario_events
 -- with a tag without defeating the very routing being tested; the honest
 -- sequence is bare load (logs nothing), then hand-append ?src=selftest
 -- before clicking through. Recorded so the next verifier does that.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-11 -- NEW ACTION in usage_logs, no DDL.
+--
+-- The edge Worker (infra/worker.js) now writes landing-page views directly:
+--     action        = 'landing_view:path=root' | 'landing_view:path=welcome'
+--     session_id    = NULL   (an edge landing has no Streamlit session)
+--     traffic_source= the ?src= tag, or NULL
+--     timestamp     = UTC (toISOString), not visitor-local
+--
+-- These rows are NOT app pageviews and are deliberately excluded from
+-- PAGEVIEW_ACTIONS. Any query counting sessions, pageviews or survey rates
+-- must filter them out -- app.py does, and check_internal_links.py asserts
+-- the separation. They begin only once the Worker's SUPABASE_URL /
+-- SUPABASE_ANON_KEY secrets are set, so an absence before that date (or
+-- before the secrets were added) means "not being written", not "no traffic".

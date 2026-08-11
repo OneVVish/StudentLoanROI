@@ -70,6 +70,31 @@ class FakeQueryParams(dict):
         return dict.get(self, key, default)
 
 
+def check_landing_action_separate(ns, fail):
+    """The edge Worker's landing rows must never count as app pageviews.
+
+    infra/worker.js writes `landing_view:path=...` straight into usage_logs,
+    bypassing the app entirely. Those rows have no session_id and never ran a
+    Streamlit script -- folding them into PAGEVIEW_ACTIONS would inflate every
+    pageview-denominated rate in the admin dashboard AND analyze_survey.py's
+    survey-rate denominator, silently, from one date onward. Exactly the
+    whole-string-match hazard this file already guards for nav: values.
+    """
+    prefix = ns["LANDING_ACTION_PREFIX"]
+    for action in ns["PAGEVIEW_ACTIONS"]:
+        if action.startswith(prefix) or prefix.startswith(action):
+            fail(f"PAGEVIEW_ACTIONS contains {action!r}, which collides with "
+                 f"the edge landing prefix {prefix!r} -- landings would be "
+                 f"counted as app pageviews")
+    # And the Worker must actually emit that prefix: a rename on one side only
+    # makes the admin panel silently empty forever.
+    worker = open("infra/worker.js").read()
+    if f'LANDING_ACTION = "{prefix}"' not in worker:
+        fail(f"infra/worker.js does not emit LANDING_ACTION = {prefix!r} -- "
+             f"app.py's LANDING_ACTION_PREFIX and the Worker have drifted, so "
+             f"the admin panel would show nothing with no error anywhere")
+
+
 def main() -> int:
     ns = load_app_namespace()
     st = ns["st"]
@@ -245,6 +270,10 @@ def main() -> int:
                 f"in app.py's module scope\n"
                 f"      a renderer defined below the dispatch is a NameError only "
                 f"the live page can show you")
+
+    checked += 1
+    check_landing_action_separate(
+        ns, lambda msg: problems.append("  " + msg))
 
     if problems:
         print(f"internal links: {len(problems)} problem(s) across {checked} checks\n")
