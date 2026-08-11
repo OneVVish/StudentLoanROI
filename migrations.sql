@@ -1475,3 +1475,36 @@ alter table scenario_events
 -- Do not compare pageview counts across this seam without saying so; the
 -- landing page itself writes no rows anywhere (it is static, served from the
 -- edge).
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-11 -- DATA QUALITY NOTE, no DDL.
+--
+-- Browser verification of the edge deploys wrote a small number of UNTAGGED
+-- rows to production, in two known windows:
+--
+--   * 2026-08-10 ~16:52 local: two page loads of worthmydegree.com/ while
+--     verifying the /static edge-cache deploy (the og/preview work). Each
+--     load wrote one `pageview` to usage_logs and one scenario_events row.
+--   * 2026-08-11 ~17:52 local: one click-through from the bare landing page
+--     to /?go=1 while verifying the front-door deploy. One `pageview`, one
+--     scenario_events row. (The bare landing page itself logs nothing; the
+--     click did.)
+--
+-- Total: ~3 pageview rows and ~3 scenario_events rows, none carrying a
+-- traffic_source -- indistinguishable from organic visits after the fact,
+-- exactly the failure mode the 2026-07-31 note describes. All OTHER
+-- verification visits in both windows carried ?src=selftest and are
+-- self-identified; survey_responses, pdf_downloads and scenario_shares took
+-- no rows from any verification visit.
+--
+-- Guidance: the affected windows are one minute each and the row counts are
+-- known and tiny, so no filtering is warranted -- but any analysis counting
+-- untagged sessions on 2026-08-10 or 2026-08-11 overstates organic traffic
+-- by up to 2 and 1 sessions respectively. Nothing else is affected.
+--
+-- Process note: production verification MUST carry ?src=selftest on the
+-- FIRST navigation -- a tag added on a later navigation does not reach back.
+-- The 08-11 row happened because the bare landing page cannot be loaded
+-- with a tag without defeating the very routing being tested; the honest
+-- sequence is bare load (logs nothing), then hand-append ?src=selftest
+-- before clicking through. Recorded so the next verifier does that.
