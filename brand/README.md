@@ -23,6 +23,22 @@ instead of *on* it is the one flaw this mark cannot survive.
 
 ## Which file to use
 
+**The app itself consumes three of these at runtime** — `logo-horizontal-auto.svg`
+(st.logo, all pages), `mark-light.svg` (the collapsed-sidebar icon) and
+`favicon-32.png` (the browser tab). Renaming or deleting them breaks the
+deployed app, not just this folder. The PDFs and the share card do NOT read
+any file here: app.py draws the mark from geometry constants copied out of
+`palette.json` — if `START`/`TROUGH`/`END` move in `build_logo.py`, move
+`LOGO_*` in app.py §2k in the same commit.
+
+`logo-horizontal-auto.svg` switches its wordmark ink with
+`prefers-color-scheme` via an internal `<style>` block — an SVG loaded through
+`<img>` still applies its own media queries, which is how one file serves
+st.logo's both-themes requirement. The favicon PNGs are rasterised by
+matplotlib from the same geometry, since no SVG rasteriser is installed here.
+
+
+
 | File | Use it for |
 |---|---|
 | `logo-horizontal-{light,dark}.svg` | the default. Site header, email signature, slides |
