@@ -70,6 +70,31 @@ class FakeQueryParams(dict):
         return dict.get(self, key, default)
 
 
+def check_landing_ctas_tagged(ns, fail):
+    """Every app-bound link on the welcome page must carry from=welcome.
+
+    That param is the whole per-destination breakdown: the app validates it
+    against NAV_ORIGINS and logs `nav:from=welcome:to=X`. A link that loses it
+    still works perfectly for the visitor and silently stops being counted --
+    the admin panel just shows fewer clicks and a bigger "no click" estimate,
+    with nothing anywhere to say a link went dark.
+    """
+    import re as _re
+    html = open("infra/landing.html").read()
+    if ns["NAV_WELCOME"] not in ns["NAV_ORIGINS"]:
+        fail(f"{ns['NAV_WELCOME']!r} is not in NAV_ORIGINS -- nav_action would "
+             f"reject every welcome click and return \"\", so the landing's "
+             f"CTAs would log nothing")
+    for href in _re.findall(r'href="(/[^"]*)"', html):
+        # Home links (bare "/") point AT this page and take no origin; the
+        # llms.txt link leaves the app entirely.
+        if href == "/" or "llms.txt" in href:
+            continue
+        if f"from={ns['NAV_WELCOME']}" not in href:
+            fail(f"landing CTA {href!r} does not carry from={ns['NAV_WELCOME']} "
+                 f"-- clicks through it will not be counted")
+
+
 def check_landing_action_separate(ns, fail):
     """The edge Worker's landing rows must never count as app pageviews.
 
@@ -271,9 +296,10 @@ def main() -> int:
                 f"      a renderer defined below the dispatch is a NameError only "
                 f"the live page can show you")
 
-    checked += 1
-    check_landing_action_separate(
-        ns, lambda msg: problems.append("  " + msg))
+    checked += 2
+    _fail = lambda msg: problems.append("  " + msg)
+    check_landing_action_separate(ns, _fail)
+    check_landing_ctas_tagged(ns, _fail)
 
     if problems:
         print(f"internal links: {len(problems)} problem(s) across {checked} checks\n")

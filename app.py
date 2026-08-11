@@ -4181,7 +4181,14 @@ STANDALONE_TOOLS = {
 # nav: event is written -- an unvalidated ?from= lets a hand-edited URL inject
 # arbitrary text straight into usage_logs.action, which is the research dataset.
 NAV_CALCULATOR = "calculator"
-NAV_ORIGINS = frozenset({NAV_CALCULATOR}) | frozenset(STANDALONE_TOOLS)
+# The static welcome page at the edge. An ORIGIN only -- the app can never
+# navigate TO it (it is not a Streamlit page), so `nav:from=welcome:to=X` is
+# the only shape this ever produces. It joins NAV_ORIGINS so that the
+# validation already guarding ?from= covers it: an unvalidated origin lets a
+# hand-edited URL write arbitrary text into usage_logs.action.
+NAV_WELCOME = "welcome"
+NAV_ORIGINS = (frozenset({NAV_CALCULATOR, NAV_WELCOME})
+               | frozenset(STANDALONE_TOOLS))
 
 
 # The zone every daily/weekly traffic figure is bucketed in.
@@ -16690,6 +16697,45 @@ def _admin_landing_funnel(usage_df: pd.DataFrame) -> pd.DataFrame:
     return table.sort_values(["Landings", "App arrivals"], ascending=False)
 
 
+def _admin_welcome_destinations(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """Where visitors went from the welcome page, and how many went nowhere.
+
+    Reads the `nav:from=welcome:to=X` rows the app writes when a landing CTA
+    is followed -- the same validated mechanism cross-page links already use,
+    so this needed no new event type.
+
+    "No click" is DERIVED (landings minus clicks), not observed: a visitor who
+    closes the tab sends nothing, and nothing at the edge could see them
+    leave. It is therefore an estimate with two known leaks -- someone who
+    clicks two CTAs is counted twice against one landing, and someone who
+    returns later in a new session lands twice. Floored at zero so those leaks
+    show as a shrinking estimate rather than a negative count.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    actions = usage_df["action"].astype(str)
+    landings = int(actions.str.startswith(LANDING_ACTION_PREFIX).sum())
+    if not landings:
+        return pd.DataFrame()
+
+    navs = actions.str.extract(
+        rf"^nav:from={NAV_WELCOME}:to=(?P<to>[^:]+)")["to"].dropna()
+    labels = {NAV_CALCULATOR: "The calculator"}
+    labels.update({k: t["label"] for k, t in STANDALONE_TOOLS.items()})
+
+    rows = [{"Went to": labels.get(dest, dest), "Visitors": int(count)}
+            for dest, count in navs.value_counts().items()]
+    clicked = int(navs.shape[0])
+    rows.append({"Went to": "No click (estimated)",
+                 "Visitors": max(landings - clicked, 0)})
+    table = pd.DataFrame(rows)
+    table["Share of landings"] = [
+        f"{(v / landings * 100):.0f}%" for v in table["Visitors"]]
+    table.attrs["landings"] = landings
+    table.attrs["clicked"] = clicked
+    return table
+
+
 def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
     """Distinct session_ids across the union of the given tables -- the funnel
     counts visitors, not rows, and a visitor can appear in several tables."""
@@ -16967,6 +17013,20 @@ def render_admin_dashboard() -> None:
             "`src=selftest` and declared crawlers are excluded at the edge."
         )
         st.dataframe(_landing, use_container_width=True)
+
+        _dests = _admin_welcome_destinations(usage_df)
+        if not _dests.empty:
+            _clicked = _dests.attrs["clicked"]
+            _land_n = _dests.attrs["landings"]
+            st.caption(
+                f"**What they did next.** {_clicked:,} of {_land_n:,} landings "
+                f"followed a link into the app "
+                f"({_clicked / _land_n * 100:.0f}%). *No click* is derived, "
+                "not observed — a visitor who closes the tab sends nothing. "
+                "Two known leaks make it an estimate: clicking two CTAs counts "
+                "twice against one landing, and returning later lands twice."
+            )
+            st.dataframe(_dests, use_container_width=True, hide_index=True)
 
     st.markdown("#### 🔗 Traffic by source")
     st.caption(

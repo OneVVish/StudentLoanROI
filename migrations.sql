@@ -1524,3 +1524,17 @@ alter table scenario_events
 -- the separation. They begin only once the Worker's SUPABASE_URL /
 -- SUPABASE_ANON_KEY secrets are set, so an absence before that date (or
 -- before the secrets were added) means "not being written", not "no traffic".
+--
+-- SAME DATE, "COLD ARRIVALS" CHANGES MEANING. The welcome page's CTAs now
+-- carry ?from=welcome, so the app writes `nav:from=welcome:to=<page>` when a
+-- landing click arrives -- a new value in an existing event. The admin
+-- panel's Cold column is derived as (tool pageviews - inbound page
+-- navigations), so a visitor who reaches a tool via the welcome page counts
+-- as INTERNAL from this date where they would previously have counted as
+-- COLD. That is more accurate -- they did come from one of our pages -- but
+-- it is a seam: do not compare Cold across 2026-08-11 without saying so.
+--
+-- The derived "No click" figure on that panel is landings minus welcome-origin
+-- navs. It is an ESTIMATE, not an observation: a visitor who closes the tab
+-- sends nothing. Two leaks, both stated on the panel -- clicking two CTAs
+-- counts twice against one landing, and returning later lands twice.
