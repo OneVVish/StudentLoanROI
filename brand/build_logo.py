@@ -249,6 +249,58 @@ def build():
     (OUT / "logo-mono.svg").write_text(mono)
     written.append("logo-mono.svg")
 
+    # ---- theme-AUTO horizontal lockup, for st.logo ----
+    # Streamlit's st.logo renders ONE image on both the light and dark theme
+    # and its docs say to pick one that works on both. The mark already does
+    # (its two hues pass the validator on both surfaces); only the wordmark
+    # ink cannot -- near-black on a dark sidebar disappears. An SVG loaded
+    # through <img> still applies its own internal media queries, so the ink
+    # switches with prefers-color-scheme while the file stays one file.
+    # Streamlit's theme toggle follows the OS by default, which is exactly
+    # the signal this reads; a visitor who forces the app theme against
+    # their OS gets the OS's ink, the one case this cannot see.
+    word_d, word_w, _ = text_path(WORDMARK, 40)
+    suf_d, suf_w, _ = text_path(SUFFIX, 40 * 0.80)
+    auto_body = (
+        f'<style>\n'
+        f'      .ink {{ fill: {LIGHT["ink"]}; }} .muted {{ fill: {LIGHT["muted"]}; }}\n'
+        f'      @media (prefers-color-scheme: dark) {{\n'
+        f'        .ink {{ fill: {DARK["ink"]}; }} .muted {{ fill: {DARK["muted"]}; }}\n'
+        f'      }}\n'
+        f'    </style>\n'
+        f'    <g>{mark_svg(LIGHT, ring=False)}</g>\n'
+        f'    <g transform="translate({64 + 18}, 42)">'
+        f'<path class="ink" d="{word_d}"/></g>\n'
+        f'    <g transform="translate({64 + 18 + word_w + 6}, 42)">'
+        f'<path class="muted" d="{suf_d}"/></g>')
+    (OUT / "logo-horizontal-auto.svg").write_text(svg_document(
+        round(64 + 18 + word_w + 6 + suf_w + 8), 64, auto_body,
+        title="worthmydegree.com"))
+    written.append("logo-horizontal-auto.svg")
+
+    # ---- favicon PNGs, for st.set_page_config ----
+    # page_icon takes a raster; no SVG rasteriser is installed, but matplotlib
+    # is -- and the favicon variant is three strokes, which matplotlib draws
+    # exactly. Same geometry constants, so the tab icon cannot drift from the
+    # SVG favicon.
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    for px in (32, 64):
+        fig = Figure(figsize=(1, 1), dpi=px)
+        FigureCanvasAgg(fig)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_xlim(0, 64); ax.set_ylim(64, 0); ax.axis("off")
+        lw = 9.5 * px / 64
+        ax.plot([START[0], TROUGH[0], CROSS_X], [START[1], TROUGH[1], ZERO_Y],
+                color=LIGHT["cost"], lw=lw, solid_capstyle="round",
+                solid_joinstyle="round")
+        ax.plot([CROSS_X, END[0]], [ZERO_Y, END[1]],
+                color=LIGHT["gain"], lw=lw, solid_capstyle="round")
+        fig.savefig(OUT / f"favicon-{px}.png", transparent=True)
+        written.append(f"favicon-{px}.png")
+
     (OUT / "palette.json").write_text(json.dumps(
         {"light": LIGHT, "dark": DARK,
          "geometry": {"start": START, "trough": TROUGH, "end": END,

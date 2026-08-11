@@ -10199,7 +10199,108 @@ PDF_RULE = colors.HexColor("#d8dce5")       # hairlines, table grid
 PDF_BAND = colors.HexColor("#f5f7fb")       # alternating table rows
 
 
-def _draw_pdf_header_footer(canvas, doc):
+# The break-even tick, the app's own mark. Geometry is COPIED from
+# brand/palette.json (which brand/build_logo.py solves and writes) rather than
+# read at runtime: three points and a derived crossing change roughly never,
+# and a runtime file dependency is one more way a deploy can differ from a dev
+# machine. If build_logo.py's START/TROUGH/END move, move these in the same
+# commit -- the brand README says the same from its side.
+LOGO_START = (8.0, 38.0)
+LOGO_TROUGH = (24.0, 54.0)
+LOGO_END = (58.0, 8.0)
+LOGO_ZERO_Y = 38.0
+LOGO_CROSS_X = LOGO_TROUGH[0] + (LOGO_END[0] - LOGO_TROUGH[0]) * (
+    (LOGO_TROUGH[1] - LOGO_ZERO_Y) / (LOGO_TROUGH[1] - LOGO_END[1]))
+LOGO_COST = SERIES_ORANGE
+LOGO_GAIN = SERIES_BLUE
+
+
+def draw_logo_mark_pdf(canvas, x, y, size):
+    """The mark on a reportlab canvas, for the PDF page header.
+
+    Drawn as two polylines rather than placed as an image: reportlab cannot
+    read SVG without svglib (not in requirements), and rasterising a PNG into
+    every header would put a compression artifact where three vector strokes
+    do the job at any print resolution. The favicon variant -- no zero line,
+    no dot, heavier stroke -- because a header mark is favicon-sized and the
+    dot is sub-pixel there (the same reasoning recorded in brand/README.md).
+
+    reportlab's y runs UP; the logo grid's runs down, hence the flips.
+    """
+    s = size / 64.0
+
+    def pt(px, py):
+        return x + px * s, y + (64 - py) * s
+
+    canvas.saveState()
+    canvas.setLineWidth(size * 0.148)
+    canvas.setLineCap(1)   # round
+    canvas.setLineJoin(1)
+    canvas.setStrokeColor(colors.HexColor(LOGO_COST))
+    path = canvas.beginPath()
+    path.moveTo(*pt(*LOGO_START))
+    path.lineTo(*pt(*LOGO_TROUGH))
+    path.lineTo(*pt(LOGO_CROSS_X, LOGO_ZERO_Y))
+    canvas.drawPath(path, stroke=1, fill=0)
+    canvas.setStrokeColor(colors.HexColor(LOGO_GAIN))
+    path = canvas.beginPath()
+    path.moveTo(*pt(LOGO_CROSS_X, LOGO_ZERO_Y))
+    path.lineTo(*pt(*LOGO_END))
+    canvas.drawPath(path, stroke=1, fill=0)
+    canvas.restoreState()
+
+
+def draw_logo_mark_mpl(fig, x, y, size_frac):
+    """The mark on a matplotlib figure in FIGURE coordinates, for the share
+    card. Same favicon variant, same geometry, drawn with figure-level lines
+    so it needs no axes of its own."""
+    import matplotlib.lines as mlines
+    aspect = fig.get_figwidth() / fig.get_figheight()
+
+    def pt(px, py):
+        return (x + (px / 64.0) * size_frac,
+                y + ((64 - py) / 64.0) * size_frac * aspect)
+
+    lw = size_frac * fig.get_figwidth() * 72 * 0.148
+    for pts, colour in (
+            ((LOGO_START, LOGO_TROUGH, (LOGO_CROSS_X, LOGO_ZERO_Y)), LOGO_COST),
+            (((LOGO_CROSS_X, LOGO_ZERO_Y), LOGO_END), LOGO_GAIN)):
+        xs, ys = zip(*(pt(*p) for p in pts))
+        fig.add_artist(mlines.Line2D(
+            xs, ys, transform=fig.transFigure, color=colour, linewidth=lw,
+            solid_capstyle="round", solid_joinstyle="round"))
+
+
+def _pdf_page_painter(tool: str = None):
+    """The header/footer painter for one report, bound to the page it came
+    from.
+
+    A PDF from a standalone tool used to carry the CALCULATOR's header --
+    "STUDENT LOAN PAYOFF & MAJOR ROI CALCULATOR / worthmydegree.com" over a
+    repayment comparison the calculator did not produce, and a reader typing
+    that URL landed on the wrong page. The header now names the tool and the
+    URL carries its ?tool= -- the same address the sitemap and the cross-links
+    already treat as the page's identity.
+
+    A factory rather than a `tool` argument on the painter itself because
+    reportlab calls onFirstPage/onLaterPages with exactly (canvas, doc) --
+    the binding has to happen before the callback is handed over.
+    """
+    if tool and tool in STANDALONE_TOOLS:
+        title = _strip_emoji(STANDALONE_TOOLS[tool]["title"]).strip().upper()
+        url = APP_URL.replace("https://", "") + f"/?tool={tool}"
+    else:
+        title = "STUDENT LOAN PAYOFF & MAJOR ROI CALCULATOR"
+        url = APP_URL.replace("https://", "")
+
+    def painter(canvas, doc):
+        _draw_pdf_header_footer(canvas, doc, title=title, url=url)
+    return painter
+
+
+def _draw_pdf_header_footer(canvas, doc,
+                            title="STUDENT LOAN PAYOFF & MAJOR ROI CALCULATOR",
+                            url=None):
     """Page decoration for every page of every generated PDF -- passed to
     SimpleDocTemplate.build() as onFirstPage/onLaterPages, which reportlab
     calls once per page with the low-level canvas (flowables like _pdf_table
@@ -10214,16 +10315,20 @@ def _draw_pdf_header_footer(canvas, doc):
     canvas.saveState()
     page_width, page_height = doc.pagesize
 
-    # Header: accent rule + wordmark, so the page reads as the app's output.
+    # Header: mark + accent rule + wordmark, so the page reads as the app's
+    # output. The mark sits on the rule's baseline, title shifted right to
+    # clear it.
     canvas.setStrokeColor(PDF_ACCENT)
     canvas.setLineWidth(2)
     canvas.line(doc.leftMargin, page_height - 44, page_width - doc.rightMargin, page_height - 44)
+    draw_logo_mark_pdf(canvas, doc.leftMargin, page_height - 41, 12)
     canvas.setFont("Helvetica-Bold", 8)
     canvas.setFillColor(PDF_ACCENT)
-    canvas.drawString(doc.leftMargin, page_height - 40, "STUDENT LOAN PAYOFF & MAJOR ROI CALCULATOR")
+    canvas.drawString(doc.leftMargin + 17, page_height - 40, title)
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(PDF_MUTED)
-    canvas.drawRightString(page_width - doc.rightMargin, page_height - 40, APP_URL.replace("https://", ""))
+    canvas.drawRightString(page_width - doc.rightMargin, page_height - 40,
+                           url or APP_URL.replace("https://", ""))
 
     # Footer: disclaimer left, page number right, hairline above both.
     canvas.setStrokeColor(PDF_RULE)
@@ -10809,6 +10914,12 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
              va="top", ha="left")
     fig.text(0.945, 0.135, SHARE_CARD_URL, fontsize=11, fontweight="bold",
              color=PANEL_HEADING_COLOR, va="top", ha="right")
+    # The mark, just left of the URL -- the card is built to travel without
+    # the site attached, and the tick is the identity that survives a crop.
+    # 0.780 clears the right-anchored URL: at fontsize 11 the text spans
+    # roughly 0.845-0.945 of figure width, and the first placement (0.805)
+    # put the tick through the "r" of worthmydegree.
+    draw_logo_mark_mpl(fig, 0.780, 0.100, 0.020)
 
     buffer = io.BytesIO()
     fig.savefig(buffer, format="png", dpi=SHARE_CARD_DPI,
@@ -11857,8 +11968,10 @@ def generate_pdf_search_report(results: pd.DataFrame, table: pd.DataFrame,
     # column, and _draw_pdf_header_footer reads doc.pagesize, so the furniture
     # follows.
     SimpleDocTemplate(buffer, pagesize=landscape(letter)).build(
-        story, onFirstPage=_draw_pdf_header_footer,
-        onLaterPages=_draw_pdf_header_footer)
+        story, onFirstPage=_pdf_page_painter(
+            "gradschools" if is_graduate else "schools"),
+        onLaterPages=_pdf_page_painter(
+            "gradschools" if is_graduate else "schools"))
     return buffer.getvalue()
 
 
@@ -12132,7 +12245,7 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
 
     buffer = io.BytesIO()
     SimpleDocTemplate(buffer, pagesize=letter).build(
-        story, onFirstPage=_draw_pdf_header_footer, onLaterPages=_draw_pdf_header_footer,
+        story, onFirstPage=_pdf_page_painter("repayment"), onLaterPages=_pdf_page_painter("repayment"),
     )
     return buffer.getvalue()
 
@@ -12432,7 +12545,16 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
 # 3. PAGE CONFIG & SESSION STATE
 # ============================================================
 
-st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator",
+                   page_icon="brand/favicon-32.png", layout="wide")
+# The lockup in the top-left corner, on every page this script serves -- the
+# calculator AND the ?tool= pages, which are the same script, so one call
+# covers them all. The -auto variant switches its wordmark ink with
+# prefers-color-scheme (an SVG's internal media queries apply inside <img>),
+# which is what st.logo's own docs ask for: one image that works on both
+# themes. icon_image is what the collapsed sidebar shows.
+st.logo("brand/logo-horizontal-auto.svg", size="large",
+        link=APP_URL, icon_image="brand/mark-light.svg")
 
 # Global (every page: calculator, ?tool= pages, admin): stack st.columns
 # vertically on phone-width viewports. Streamlit columns only ever SQUEEZE --
@@ -16930,6 +17052,12 @@ if active_tool:
     st.markdown("<style>section[data-testid='stSidebar'],"
                 "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
                 unsafe_allow_html=True)
+    # The lockup, in the page BODY. st.logo renders inside the sidebar, and
+    # these pages hide the sidebar with the CSS above -- so the one call that
+    # brands every other page renders into a display:none container here and
+    # the tool pages shipped unbranded. Verified by loading ?tool=repayment,
+    # not by reasoning about where st.logo "should" appear.
+    st.image("brand/logo-horizontal-auto.svg", width=250)
     st.title(STANDALONE_TOOLS[active_tool]["title"])
     st.caption(STANDALONE_TOOLS[active_tool]["caption"])
 else:
