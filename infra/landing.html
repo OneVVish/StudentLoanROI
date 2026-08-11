@@ -131,7 +131,7 @@
   </g>
 </svg>
 </a>
-  <a class="btn hide-m" href="/?go=1">Open the calculator</a>
+  <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
 <div class="hero">
@@ -140,7 +140,7 @@
   <p class="sub">Pick a school and a major. See the real loan, the monthly
   payment under the 2026 federal rules, and where you stand ten years out —
   before anyone signs anything.</p>
-  <a class="btn big" href="/?go=1">Run your numbers — free</a>
+  <a class="btn big" href="/?go=1&amp;from=welcome">Run your numbers — free</a>
   <div class="trust">Free · anonymous · no sign-up · no ads</div>
 </div>
 
@@ -212,13 +212,13 @@
   <div class="grid">
     <div class="tile"><b>🎓 The calculator</b>
       <p>School + major + loan → the 10-year verdict.
-      <a href="/?go=1">Open&nbsp;→</a></p></div>
+      <a href="/?go=1&amp;from=welcome">Open&nbsp;→</a></p></div>
     <div class="tile"><b>🔎 Schools that fit a budget</b>
       <p>Every school teaching your field, cheapest first, priced for your
-      state. <a href="/?tool=schools">Search&nbsp;→</a></p></div>
+      state. <a href="/?tool=schools&amp;from=welcome">Search&nbsp;→</a></p></div>
     <div class="tile"><b>💸 Already have loans?</b>
       <p>Compare the 2026 repayment plans on the balance you already owe.
-      <a href="/?tool=repayment">Compare&nbsp;→</a></p></div>
+      <a href="/?tool=repayment&amp;from=welcome">Compare&nbsp;→</a></p></div>
   </div>
 </section>
 
@@ -226,7 +226,7 @@
   <h2>Two minutes. Zero forms.</h2>
   <p class="deck" style="margin:8px auto 22px">The most expensive decision most
   families ever finance deserves ten real minutes of arithmetic.</p>
-  <a class="btn big" href="/?go=1">Open the calculator</a>
+  <a class="btn big" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </div>
 
 <footer>
@@ -248,7 +248,13 @@
    a parameter-less "/", so a bare href="/" would loop a clean visitor back
    here instead of opening the calculator. go=1 means nothing to the app --
    it exists purely to make the click-through distinguishable from a fresh
-   arrival at the edge. */
+   arrival at the edge.
+
+   They also carry from=welcome: the app validates that against NAV_ORIGINS
+   and logs `nav:from=welcome:to=<destination>`, which is what turns "someone
+   landed" into "someone landed and went to the schools search". Drop the
+   param from a link and that link silently stops being counted --
+   check_internal_links.py asserts every app-bound href still carries it. */
 (function () {
   var qs = location.search.replace(/^\?/, "");
   if (!qs) return;

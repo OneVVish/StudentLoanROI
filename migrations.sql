@@ -1508,3 +1508,33 @@ alter table scenario_events
 -- with a tag without defeating the very routing being tested; the honest
 -- sequence is bare load (logs nothing), then hand-append ?src=selftest
 -- before clicking through. Recorded so the next verifier does that.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-11 -- NEW ACTION in usage_logs, no DDL.
+--
+-- The edge Worker (infra/worker.js) now writes landing-page views directly:
+--     action        = 'landing_view:path=root' | 'landing_view:path=welcome'
+--     session_id    = NULL   (an edge landing has no Streamlit session)
+--     traffic_source= the ?src= tag, or NULL
+--     timestamp     = UTC (toISOString), not visitor-local
+--
+-- These rows are NOT app pageviews and are deliberately excluded from
+-- PAGEVIEW_ACTIONS. Any query counting sessions, pageviews or survey rates
+-- must filter them out -- app.py does, and check_internal_links.py asserts
+-- the separation. They begin only once the Worker's SUPABASE_URL /
+-- SUPABASE_ANON_KEY secrets are set, so an absence before that date (or
+-- before the secrets were added) means "not being written", not "no traffic".
+--
+-- SAME DATE, "COLD ARRIVALS" CHANGES MEANING. The welcome page's CTAs now
+-- carry ?from=welcome, so the app writes `nav:from=welcome:to=<page>` when a
+-- landing click arrives -- a new value in an existing event. The admin
+-- panel's Cold column is derived as (tool pageviews - inbound page
+-- navigations), so a visitor who reaches a tool via the welcome page counts
+-- as INTERNAL from this date where they would previously have counted as
+-- COLD. That is more accurate -- they did come from one of our pages -- but
+-- it is a seam: do not compare Cold across 2026-08-11 without saying so.
+--
+-- The derived "No click" figure on that panel is landings minus welcome-origin
+-- navs. It is an ESTIMATE, not an observation: a visitor who closes the tab
+-- sends nothing. Two leaks, both stated on the panel -- clicking two CTAs
+-- counts twice against one landing, and returning later lands twice.
