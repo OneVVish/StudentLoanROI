@@ -6,3 +6,9 @@
 # injected by the Community Cloud platform itself and can't be hidden
 # from app-level config while the repo is public.
 toolbarMode = "minimal"
+
+[server]
+# Serve ./static at /app/static/* -- the marketing images live there so posts,
+# emails and og:image can reference them at worthmydegree.com. The files are
+# COPIES of brand/ output; re-copy after regenerating (brand/README.md).
+enableStaticServing = true

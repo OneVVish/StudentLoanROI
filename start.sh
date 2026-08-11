@@ -18,8 +18,16 @@ else
          "and the College Scorecard API will be unavailable" >&2
 fi
 
+# Config flags are passed HERE as well as living in .streamlit/config.toml,
+# because .dockerignore excludes the whole .streamlit/ directory (so the image
+# never carries a stale secrets file) -- which also means config.toml never
+# reaches the container. Community Cloud ignores this script and reads the
+# toml; the container ignores the toml and reads these flags. Keep the two in
+# step or the deploys diverge silently.
 exec streamlit run app.py \
     --server.port "${PORT:-8501}" \
     --server.address 0.0.0.0 \
     --server.headless true \
+    --server.enableStaticServing true \
+    --client.toolbarMode minimal \
     --browser.gatherUsageStats false
