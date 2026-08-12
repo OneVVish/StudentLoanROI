@@ -103,9 +103,25 @@
     border-top: 1px solid var(--rule); margin-top: 40px; padding: 26px 0 40px;
     color: var(--muted); font-size: 14px;
   }
+  /* Guide cards render on BOTH the landing page and the guides index, so these
+     live in SITE_CSS rather than ARTICLE_CSS. They were in ARTICLE_CSS, which
+     only the guide pages include -- so the landing page emitted the markup with
+     no rules at all and the card collapsed into one run-on underlined link:
+     title, summary and date with nothing separating them. The display:block on
+     b/time is what does the separating, so a card without this CSS is not
+     merely unstyled, it is unreadable. */
+  .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
+    display: block; text-decoration: none; color: inherit; }
+  .guide-card b { display: block; color: var(--deep); font-size: 18px;
+    margin-bottom: 6px; }
+  .guide-card span { color: var(--muted); font-size: 15px; }
+  .guide-card time { display: block; color: var(--muted); font-size: 13px;
+    margin-top: 10px; }
   @media (max-width: 720px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
+    .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
   }
@@ -138,9 +154,9 @@
   <h1>Is the degree<br>worth the loan?</h1>
   <div class="accent"></div>
   <p class="sub">Pick a school and a major. See the real loan, the monthly
-  payment under the 2026 federal rules, and where you stand ten years out —
-  before anyone signs anything.</p>
-  <a class="btn big" href="/?go=1&amp;from=welcome">Run your numbers — free</a>
+  payment under the 2026 federal rules, and where you stand ten years out,
+  before anyone signs on the dotted line.</p>
+  <a class="btn big" href="/?go=1&amp;from=welcome">Run your numbers, free</a>
   <div class="trust">Free · anonymous · no sign-up · no ads</div>
 </div>
 
@@ -157,20 +173,20 @@
   that decide how the next decade feels.</p>
   <div class="grid">
     <div class="tile"><b>📊 The loan you'd actually sign</b>
-      <p>Median borrowing at your school — or build it from cost, aid and the
+      <p>Median borrowing at your school, or build it from cost, aid and the
       federal caps. Berkeley's sticker is $45,619/yr; its
       median borrower leaves with $13,000.</p></div>
     <div class="tile"><b>💸 The payment, not just the debt</b>
       <p>The 2026 RAP income-driven plan against the fixed plans, month by
       month, including what gets waived and what gets forgiven.</p></div>
     <div class="tile"><b>🏙️ Ten years out, where you'll live</b>
-      <p>Metro wages and cost of living, not a national average — the same
+      <p>Metro wages and cost of living, not a national average. The same
       salary is a different life in San Francisco and in Columbus.</p></div>
     <div class="tile"><b>🔀 Two paths, side by side</b>
       <p>UC vs CSU, nursing vs CS, or the same degree with two community-college
       years first. One page, same math on both sides.</p></div>
     <div class="tile"><b>🎓 Graduate &amp; professional</b>
-      <p>Medicine, dentistry, law, the MBA and five more — priced per school
+      <p>Medicine, dentistry, law, the MBA and five more, priced per school
       from federal data, residency years modelled.</p></div>
     <div class="tile"><b>📄 Take it with you</b>
       <p>Every result exports as a PDF report or a shareable image, sourced
@@ -198,22 +214,20 @@
   </table>
   </div>
   <p class="note">*Parent PLUS is capped at $65,000 in
-  total per dependent student — borrow $20,000 in each of the
+  total per dependent student: borrow $20,000 in each of the
   first three years and only $5,000 remains for senior year. These
   are ceilings, not offers; anything a school costs beyond them is private
   borrowing.</p>
   <div class="callout">Planning around PLUS? The steady number is
-  $16,250 a year — not $20,000.
+  $16,250 a year, not $20,000.
   The calculator applies these caps automatically to any school you pick.</div>
 </section>
 
 <section>
   <h2>Guides</h2>
-  <p class="deck">The rules that decide what a degree costs, in plain English —
-  same federal data the calculator runs on.</p>
   <div class="guides">
     <a class="guide-card" href="/guides/parent-plus-senior-year">
-      <b>The Parent PLUS cap nobody mentions until senior year</b><span>Everyone quotes the annual cap. The total is the one that bites — and it bites in the year you have the least room to react.</span>
+      <b>The Parent PLUS cap nobody mentions until senior year</b><span>Everyone quotes the annual cap. The total is the one that bites, and it bites in the year you have the least room to react.</span>
       <time datetime="2026-08-11">2026-08-11</time></a>
   </div>
   <p class="deck" style="margin-top:14px"><a href="/guides"
@@ -238,14 +252,15 @@
 
 <div class="cta">
   <h2>Two minutes. Zero forms.</h2>
-  <p class="deck" style="margin:8px auto 22px">The most expensive decision most
-  families ever finance deserves ten real minutes of arithmetic.</p>
+  <p class="deck" style="margin:8px auto 22px">That is all it takes to see where
+  you would stand ten years out on the most expensive decision most families
+  ever finance.</p>
   <a class="btn big" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </div>
 
 <footer>
   Built from Bureau of Labor Statistics, New York Fed, College Scorecard,
-  IPEDS and CPS ASEC data — every figure traceable to its source in the app's
+  IPEDS and CPS ASEC data, every figure traceable to its source in the app's
   Methodology section. A student research project. Educational estimate, not
   financial advice.<br>
   <a href="/llms.txt" style="color:inherit">Plain-text summary</a> ·

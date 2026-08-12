@@ -88,9 +88,25 @@
     border-top: 1px solid var(--rule); margin-top: 40px; padding: 26px 0 40px;
     color: var(--muted); font-size: 14px;
   }
+  /* Guide cards render on BOTH the landing page and the guides index, so these
+     live in SITE_CSS rather than ARTICLE_CSS. They were in ARTICLE_CSS, which
+     only the guide pages include -- so the landing page emitted the markup with
+     no rules at all and the card collapsed into one run-on underlined link:
+     title, summary and date with nothing separating them. The display:block on
+     b/time is what does the separating, so a card without this CSS is not
+     merely unstyled, it is unreadable. */
+  .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
+    display: block; text-decoration: none; color: inherit; }
+  .guide-card b { display: block; color: var(--deep); font-size: 18px;
+    margin-bottom: 6px; }
+  .guide-card span { color: var(--muted); font-size: 15px; }
+  .guide-card time { display: block; color: var(--muted); font-size: 13px;
+    margin-top: 10px; }
   @media (max-width: 720px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
+    .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
   }
@@ -125,15 +141,6 @@
   .likes button:focus-visible { outline: 3px solid var(--blue);
     outline-offset: 2px; }
   .likes .count { color: var(--muted); font-size: 15px; }
-  .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-  .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
-    display: block; text-decoration: none; color: inherit; }
-  .guide-card b { display: block; color: var(--deep); font-size: 18px;
-    margin-bottom: 6px; }
-  .guide-card span { color: var(--muted); font-size: 15px; }
-  .guide-card time { display: block; color: var(--muted); font-size: 13px;
-    margin-top: 10px; }
-  @media (max-width: 700px) { .guides { grid-template-columns: 1fr; } }
 
 </style>
 </head>
@@ -165,7 +172,7 @@
   runs on.</p>
   <div class="guides">
   <a class="guide-card" href="/guides/parent-plus-senior-year">
-    <b>The Parent PLUS cap nobody mentions until senior year</b><span>Everyone quotes the annual cap. The total is the one that bites — and it bites in the year you have the least room to react.</span>
+    <b>The Parent PLUS cap nobody mentions until senior year</b><span>Everyone quotes the annual cap. The total is the one that bites, and it bites in the year you have the least room to react.</span>
     <time datetime="2026-08-11">2026-08-11</time></a>
   </div>
 </section>
