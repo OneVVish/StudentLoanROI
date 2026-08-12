@@ -296,6 +296,80 @@ const EDGE_CACHED = [
   { prefix: "/app/static", ttl: 3600, immutable: false },
 ];
 
+// A cacheable static asset, stored through the Cache API so that WE decide what
+// gets kept, on the way in AND on the way out.
+//
+// The previous version passed `cf: { cacheEverything: true, cacheTtl }` to
+// fetch(), which tells the edge to store the response WHATEVER ITS STATUS. The
+// 2xx guard sat below that call and only chose the cache-control header handed
+// back to the browser, so a 404 or a 502 from the origin was pinned at the edge
+// for the full TTL -- an hour for /app/static. The comment there stated the
+// right rule ("caching an origin error would outlive the outage that caused
+// it") and the code applied it in the one place it could not take effect.
+//
+// It is not a hypothetical failure and it is not rare: it fires whenever a page
+// referencing a new asset goes live before the asset does, which is the normal
+// order here, because the guide HTML ships with `npx wrangler deploy` and the
+// images ship with a git push to Streamlit Cloud. Verifying the deploy is
+// enough to trigger it. That is exactly how it was found, on 2026-08-12: the
+// counselor guide's hero 404ed for an hour after the images were demonstrably
+// present at the origin, and the same URL with a query string appended -- a
+// different cache key -- returned the image immediately.
+//
+// Three properties worth keeping:
+//
+//   1. ONLY 2xx IS STORED. Anything else goes back to the visitor and is
+//      forgotten, so the next request re-asks the origin.
+//   2. A NON-2xx ALREADY IN THE CACHE IS DROPPED, not served. This is what
+//      heals entries the old code pinned, without a purge: the first request
+//      after this deploys evicts the bad entry and refetches. Without it the
+//      fix would only stop NEW poisoning and leave the existing hour to run.
+//   3. `cacheTtlByStatus` would express (1) declaratively and is documented as
+//      Enterprise-only, so it is deliberately not used here.
+//
+// Failure is still a bare 503 rather than Cloudflare's 1101 page, and the
+// websocket never reaches this function -- /_stcore returns above it.
+async function serveCachedAsset(request, ctx, policy) {
+  const cache = caches.default;
+  // The Cache API keys on GET. A HEAD still passes through, just uncached.
+  const cacheable = request.method === "GET";
+
+  if (cacheable) {
+    const hit = await cache.match(request);
+    if (hit && hit.ok) {
+      return hit;
+    }
+    if (hit) {
+      ctx.waitUntil(cache.delete(request));
+    }
+  }
+
+  let resp;
+  try {
+    resp = await fetch(request);
+  } catch (err) {
+    return new Response(null, {
+      status: 503,
+      headers: { "retry-after": "60", "cache-control": "no-store" },
+    });
+  }
+  if (!cacheable || !resp.ok) {
+    return resp;
+  }
+
+  // Assert the policy on the response, so the browser holds the asset as long
+  // as the edge does. cache.put() reads this same header for its own TTL, so
+  // the two cannot disagree.
+  const out = new Response(resp.body, resp);
+  out.headers.set("cache-control",
+    `public, max-age=${policy.ttl}` + (policy.immutable ? ", immutable" : ""));
+  // clone() before put(): a body can only be read once, and put() consumes it.
+  // put() rejects some responses outright (a Set-Cookie, a 206); catching keeps
+  // an uncacheable asset serving rather than failing the request for it.
+  ctx.waitUntil(cache.put(request, out.clone()).catch(() => {}));
+  return out;
+}
+
 function busyResponse() {
   return new Response(BUSY_PAGE, {
     status: 503,
@@ -584,20 +658,11 @@ export default {
         return fetch(request);
       }
       const cached = EDGE_CACHED.find((p) => url.pathname.startsWith(p.prefix));
+      if (cached) {
+        return serveCachedAsset(request, ctx, cached);
+      }
       try {
-        const resp = await fetch(request, cached ? {
-          cf: { cacheEverything: true, cacheTtl: cached.ttl },
-        } : undefined);
-        if (cached && resp.ok) {
-          // Assert the policy on the response too, so the browser holds the
-          // asset as long as the edge does. Only on 2xx: caching an origin
-          // error would outlive the outage that caused it.
-          const out = new Response(resp.body, resp);
-          out.headers.set("cache-control",
-            `public, max-age=${cached.ttl}` +
-            (cached.immutable ? ", immutable" : ""));
-          return out;
-        }
+        const resp = await fetch(request);
         return resp;
       } catch (err) {
         return new Response(null, {
