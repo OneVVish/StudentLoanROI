@@ -88,9 +88,25 @@
     border-top: 1px solid var(--rule); margin-top: 40px; padding: 26px 0 40px;
     color: var(--muted); font-size: 14px;
   }
+  /* Guide cards render on BOTH the landing page and the guides index, so these
+     live in SITE_CSS rather than ARTICLE_CSS. They were in ARTICLE_CSS, which
+     only the guide pages include -- so the landing page emitted the markup with
+     no rules at all and the card collapsed into one run-on underlined link:
+     title, summary and date with nothing separating them. The display:block on
+     b/time is what does the separating, so a card without this CSS is not
+     merely unstyled, it is unreadable. */
+  .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
+    display: block; text-decoration: none; color: inherit; }
+  .guide-card b { display: block; color: var(--deep); font-size: 18px;
+    margin-bottom: 6px; }
+  .guide-card span { color: var(--muted); font-size: 15px; }
+  .guide-card time { display: block; color: var(--muted); font-size: 13px;
+    margin-top: 10px; }
   @media (max-width: 720px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
+    .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
   }
@@ -125,15 +141,6 @@
   .likes button:focus-visible { outline: 3px solid var(--blue);
     outline-offset: 2px; }
   .likes .count { color: var(--muted); font-size: 15px; }
-  .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-  .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
-    display: block; text-decoration: none; color: inherit; }
-  .guide-card b { display: block; color: var(--deep); font-size: 18px;
-    margin-bottom: 6px; }
-  .guide-card span { color: var(--muted); font-size: 15px; }
-  .guide-card time { display: block; color: var(--muted); font-size: 13px;
-    margin-top: 10px; }
-  @media (max-width: 700px) { .guides { grid-template-columns: 1fr; } }
 
 </style>
 </head>
@@ -168,21 +175,21 @@
 <p>If you are planning to use Parent PLUS loans for a student starting college in 2026 or later, there are two numbers in the new federal rules. Almost every article mentions the first one. The second is the one that decides what your senior year looks like.</p>
 <h2>The two numbers</h2>
 <p>The cap everyone quotes is <strong>$20,000 per year</strong>. The one underneath it is <strong>$65,000 in total, per dependent student</strong>.</p>
-<p>Those do not fit together. Four years at the annual maximum would be $80,000 — $15,000 more than a family is allowed to borrow in total. So the annual figure is not a plan you can repeat four times. It runs out.</p>
+<p>Those do not fit together. Four years at the annual maximum would be $80,000, $15,000 more than a family is allowed to borrow in total. So the annual figure is not a plan you can repeat four times. It runs out.</p>
 <p>Borrow the full amount for the first three years and the arithmetic is brutal:</p>
 <div class='table-scroll'><table><thead><tr><th>College year</th><th>Parent PLUS available</th></tr></thead><tbody><tr><td>Freshman</td><td>$20,000</td></tr><tr><td>Sophomore</td><td>$20,000</td></tr><tr><td>Junior</td><td>$20,000</td></tr><tr><td><strong>Senior</strong></td><td><strong>$5,000</strong></td></tr></tbody></table></div>
 <p>Sixty thousand borrowed, five thousand left. In the year tuition is due and there is no time left to change schools, transfer credits, or restructure anything.</p>
 <h2>What fills the gap</h2>
-<p>Nothing federal. The student's own Direct loan is capped separately and is already small — $5,500 as a freshman, rising to $7,500 by junior year. Once PLUS is exhausted, the remaining cost is private borrowing: a credit check, a co-signer, a rate set by the market rather than by statute, and none of the income-driven repayment or forgiveness that federal loans carry.</p>
+<p>Nothing federal. The student's own Direct loan is capped separately and is already small: $5,500 as a freshman, rising to $7,500 by junior year. Once PLUS is exhausted, the remaining cost is private borrowing: a credit check, a co-signer, a rate set by the market rather than by statute, and none of the income-driven repayment or forgiveness that federal loans carry.</p>
 <p>That is the real cost of the senior-year cliff. It is not only that the money is harder to find. It is that the money you find is worse money.</p>
 <h2>The number to actually plan with</h2>
 <p>If Parent PLUS is part of how you are paying for a four-year degree, the figure to write down is not $20,000. It is:</p>
-<blockquote><strong>$16,250 a year</strong> — $65,000 spread evenly across four years.</blockquote>
+<blockquote><strong>$16,250 a year</strong>, which is $65,000 spread evenly across four years.</blockquote>
 <p>Plan at that level and the fourth year is like the other three. Plan at $20,000 and you have quietly borrowed your senior year's funding in advance.</p>
 <h2>The whole federal picture</h2>
 <p>Student Direct loans and Parent PLUS together, for a dependent undergraduate under the 2026 rules:</p>
 <p><img src="/app/static/borrowing-1080x1350.png" alt="Federal borrowing limits for a dependent undergraduate, 2026 rules" loading="lazy"></p>
-<p>These are ceilings, not offers. A school costing more than the combined maximum is a school with a private-loan gap built into it from the start — which is worth knowing in March, when there is still a choice to make, rather than in August.</p>
+<p>These are ceilings, not offers. A school costing more than the combined maximum is a school with a private-loan gap built into it from the start, which is worth knowing in March, when there is still a choice to make, rather than in August.</p>
 <h2>Run it for your own schools</h2>
 <p>The calculator applies these caps automatically to any school and major you pick, then shows the monthly payment and where you stand ten years out. It is free, takes about two minutes, and asks for nothing about you.</p>
 
@@ -192,7 +199,7 @@
   </div>
 
   <div class="cta" style="padding:34px 0">
-    <a class="btn big" href="/?go=1&amp;from=guide">Run your own numbers — free</a>
+    <a class="btn big" href="/?go=1&amp;from=guide">Run your own numbers, free</a>
     <div class="trust">Free · anonymous · no sign-up</div>
   </div>
 </article>

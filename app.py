@@ -662,7 +662,7 @@ def hs_young_wage_disclosure() -> str:
     return (
         f" In Census microdata for that exact group, {article} "
         f"{low}-to-{high}-year-old high school graduate working full time earns "
-        f"about **{(1 - ratio) * 100:.0f}% less** than that — roughly "
+        f"about {(1 - ratio) * 100:.0f}% less than that, roughly "
         f"{fmt_money(HS_GRAD_SALARY * ratio)} against the baseline above."
     )
 
@@ -929,7 +929,7 @@ def graduate_salary_disclosure(typical_education: str, major_name: str = None) -
         f"BLS says this career is entered with a {level}, so the cost above "
         f"includes {extra} more years of school on top of a bachelor's, and "
         "the comparison runs from high school. The salary is what people "
-        f"already in this job earn — it is not a bachelor's salary that the "
+        f"already in this job earn. It is not a bachelor's salary that the "
         f"{level} then raises, and the app cannot model what the degree adds "
         "on its own."
     )
@@ -977,17 +977,17 @@ def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) ->
         if rate is not None:
             pct_phrase = bold(f"{rate:.0f}% who end up in jobs that don't require a college degree")
             return (
-                f"The salary above isn't a best-case number — it's what people who studied "
+                f"The salary above isn't a best-case number. It's what people who studied "
                 f"{major_name} actually earn on average, and that average includes the "
                 f"{pct_phrase} (and usually earn less). Those lower earners are counted in, not "
-                f"left out, so this reflects the real range of outcomes for {major_name} graduates "
-                f"— not just the ones who land a job in their field."
+                f"left out, so this reflects the real range of outcomes for {major_name} "
+                f"graduates, not just the ones who land a job in their field."
             )
 
     base = (
         f"Every salary here assumes you work in the field you picked. Nationally, "
-        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of college graduates are {ital('underemployed')} — working a job "
-        f"that doesn't require a degree — ranging from {UNDEREMPLOYMENT_MIN_PCT:.0f}% "
+        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of college graduates are {ital('underemployed')}, meaning they work "
+        f"a job that doesn't require a degree, ranging from {UNDEREMPLOYMENT_MIN_PCT:.0f}% "
         f"({UNDEREMPLOYMENT_MIN_MAJOR}) to {UNDEREMPLOYMENT_MAX_PCT:.0f}% ({UNDEREMPLOYMENT_MAX_MAJOR}) "
         f"depending on major. This calculator assumes you're in the {100 - UNDEREMPLOYMENT_OVERALL_PCT:.0f}% "
         f"who aren't."
@@ -1013,7 +1013,7 @@ CCB_FIELD_EARNINGS_NOTES = {
     "43": "in criminal justice the study finds no gap, and higher earners did "
           "slightly better",
     "52": "in business the study finds little to no gap",
-    "11": "in computing this is the study's LARGEST gap — around $30,000 a year "
+    "11": "in computing this is the study's largest gap, around $30,000 a year "
           "at the median",
     "15": "in engineering technology the study finds one of its largest gaps",
     "01": "in agriculture the study finds a meaningful gap",
@@ -1046,13 +1046,13 @@ def ccb_earnings_disclosure(major_name: str = None, for_pdf: bool = False) -> st
         f"{bold('On what CCB graduates earn:')} the first national study of these "
         f"degrees found their graduates earn about {bold(f'{CCB_MEDIAN_GAP_VS_BA_PCT:.1f}% less')} "
         "a year than people with the same degree in the same field from a "
-        "four-year school — and clearly more than people who stopped at an "
+        "four-year school, and clearly more than people who stopped at an "
         "associate's."
     )
     if field_clause:
         base += f" That average hides a lot: {field_clause}."
     else:
-        base += (" That average hides a lot — some fields show no gap at all and "
+        base += (" That average hides a lot: some fields show no gap at all and "
                  "others show a very large one.")
     base += (
         " Those figures are one year after graduation and describe who chose "
@@ -1092,9 +1092,9 @@ def render_major_careers(major_name: str, compact: bool = False) -> None:
     examples = careers_for_major(group, CAREERS_CSV_PATH_NATIONAL)
     if not examples:
         return
-    lines = "  \n".join(f"• {title} — {fmt_money(median)} median" for title, median in examples)
+    lines = "  \n".join(f"• {title}: {fmt_money(median)} median" for title, median in examples)
     caption = (
-        f"Example occupations in the **{label}** field — a representative sample "
+        f"Example occupations in the **{label}** field. This is a representative sample "
         "from the U.S. Bureau of Labor Statistics, not an exhaustive or guaranteed "
         "list. A major spreads across many paths; these are common destinations, "
         "shown at national median pay."
@@ -1192,14 +1192,14 @@ def render_wage_geography_note(occupation_name: str) -> None:
     level = entry.get("wage_geography_level")
     if level == "metro":
         st.caption(
-            f"💡 Salaries are **{city}**'s own BLS figures, not national ones — so this "
+            f"💡 Salaries are **{city}**'s own BLS figures, not national ones, so this "
             f"weighs {city}'s pay against {city}'s cost of living."
         )
     elif level == "state":
         st.caption(
             f"💡 BLS doesn't publish a separate **{occupation_name}** wage for {city} (too "
             f"few workers to report there), so the salary above is "
-            f"**{entry.get('wage_geography')}**'s statewide figure — closer than a "
+            f"**{entry.get('wage_geography')}**'s statewide figure, closer than a "
             f"national average, and adjusted for {city}'s cost of living."
         )
     else:
@@ -1220,7 +1220,7 @@ def render_wage_geography_note(occupation_name: str) -> None:
 # apex pinned to the median, so height carries no worker count. Nothing here
 # may imply it does.
 WAGE_DISTRIBUTION_CAPTION = (
-    "The median is the midpoint — half of these workers earn less, half earn "
+    "The median is the midpoint: half of these workers earn less, half earn "
     "more. The curve shows the range around it: it runs from what the "
     "lowest-paid 10% earn up to what the top 10% earn. "
     "[BLS OEWS percentiles; see Methodology]"
@@ -1707,21 +1707,21 @@ def cc_path_options(program_years: int, ccb_available: bool = False) -> tuple:
         return (
             ["none", "associate", "parttime"],
             {
-                "none": "None — earn the whole degree at the school above",
-                "associate": f"Full-time community college — the entire "
+                "none": "None: earn the whole degree at the school above",
+                "associate": f"Full-time community college: the entire "
                              f"{program_years}-year degree, no transfer",
-                "parttime": "Part-time community college while working — no transfer",
+                "parttime": "Part-time community college while working, no transfer",
             },
         )
     options = ["none", "fulltime", "parttime"]
     labels = {
-        "none": "None — start at the 4-year school",
+        "none": "None: start at the 4-year school",
         "fulltime": "Full-time community college, then transfer (2+2)",
         "parttime": "Part-time community college while working, then transfer",
     }
     if ccb_available:
         options.append("ccb")
-        labels["ccb"] = (f"Bachelor's awarded by the community college — all "
+        labels["ccb"] = (f"Bachelor's awarded by the community college: all "
                          f"{program_years} years there, no transfer")
     return options, labels
 
@@ -2939,8 +2939,8 @@ def resolve_shared_strategy(shared_value, options) -> str:
 STUDENT_MODE_FIRST = "Straight from high school"
 STUDENT_MODE_RETURNING = "Going back to school"
 STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
-RETURNING_STOP_WORK = "No — I'll study full-time"
-RETURNING_KEEP_WORKING = "Yes — evenings, online or part-time"
+RETURNING_STOP_WORK = "No, I'll study full-time"
+RETURNING_KEEP_WORKING = "Yes, evenings, online or part-time"
 RETURNING_ENROLLMENT_OPTIONS = [RETURNING_KEEP_WORKING, RETURNING_STOP_WORK]
 
 
@@ -3367,7 +3367,7 @@ def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
     if waived > 0:
         st.caption(
             f"RAP waived {fmt_money(waived)} of interest your payments didn't "
-            "cover — that is the plan's subsidy, and it is already reflected in "
+            "cover. That is the plan's subsidy, and it is already reflected in "
             "the interest figure above.".replace("$", chr(92) + "$")
         )
     forgiven = repayment_result.get("forgiven_amount", 0) or 0
@@ -3381,8 +3381,8 @@ def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
     plan = "RAP" if is_rap else "IDR"
     if compact:
         st.warning(
-            f"{fmt_money(forgiven)} forgiven after {term} years — "
-            "taxable as income that year, and not modelled here."
+            f"{fmt_money(forgiven)} forgiven after {term} years, "
+            "taxable as income that year and not modelled here."
             .replace("$", chr(92) + "$")
         )
         return
@@ -3390,7 +3390,7 @@ def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
         f"Under {plan}, {fmt_money(forgiven)} of principal remains unpaid after "
         f"{term} years and is forgiven. **Since January 1, 2026 a "
         "discharged balance is taxed as ordinary income in the year it is "
-        "discharged**, so this is a bill deferred rather than cancelled — the "
+        "discharged**, so this is a bill deferred rather than cancelled. The "
         "tax on it is not included in any figure on this page."
         .replace("$", chr(92) + "$")
     )
@@ -3435,7 +3435,7 @@ def render_parent_plus_note(coa_match, container=None) -> bool:
     families = (f" ({int(count):,} families)" if pd.notna(count) and count > 0 else "")
     target.caption(
         f"**Parents borrowed too.** Families of completers at this school who took "
-        f"Parent PLUS borrowed a median of {fmt_money_md(float(median))}{families} — "
+        f"Parent PLUS borrowed a median of {fmt_money_md(float(median))}{families}, "
         "separately from the figure above, which is the student's own loan. Parent "
         "PLUS is the parent's debt: no income-driven repayment, no forgiveness for "
         "the student. Congress capped it on July 1, 2026, so these families borrowed "
@@ -3461,14 +3461,14 @@ def render_financing_note(financing: dict) -> None:
             "student in Direct PLUS, on top of the student's own Direct limit. Anything "
             "beyond that has to come from a private lender, family money, or not at all. "
             "Private loans are credit-priced and usually cost more than the rate modelled "
-            "here, and they carry no income-driven repayment or forgiveness — so this "
+            "here, and they carry no income-driven repayment or forgiveness, so this "
             "estimate is, if anything, optimistic.".replace("$", r"\$")
         )
     if financing.get("gap_share", 0) > 0.4:
         st.warning(
             f"About {fmt_pct(financing['gap_share'] * 100)} of this loan is Direct PLUS or "
             "private. Those carry the higher rate above and are **not** eligible for "
-            "income-driven repayment or forgiveness — under an IDR or RAP strategy they are "
+            "income-driven repayment or forgiveness. Under an IDR or RAP strategy they are "
             "repaid in full on an ordinary fixed schedule alongside the federal part, and "
             "nothing about them is written off at the end of the term."
         )
@@ -4142,14 +4142,14 @@ STANDALONE_TOOLS = {
     "repayment": {
         "action": "pageview_repayment",
         "title": "💸 Compare Student Loan Repayment Plans",
-        "caption": "**Free · anonymous · no sign-up** — an educational estimate, "
+        "caption": "**Free · anonymous · no sign-up.** An educational estimate, "
                    "not financial advice. For a balance you already owe.",
         "label": "Compare repayment plans",
     },
     "schools": {
         "action": "pageview_schools",
         "title": "🔎 Find Schools That Fit a Budget",
-        "caption": "**Free · anonymous · no sign-up** — real published costs from "
+        "caption": "**Free · anonymous · no sign-up.** Real published costs from "
                    "the U.S. Department of College Scorecard, priced for where "
                    "you live.",
         "label": "Find schools that fit a budget",
@@ -4169,7 +4169,7 @@ STANDALONE_TOOLS = {
         # every one of those sentences is wrong for a graduate programme.
         "action": "pageview_gradschools",
         "title": "🎓 Find Graduate Schools That Fit a Budget",
-        "caption": "**Free · anonymous · no sign-up** — published graduate "
+        "caption": "**Free · anonymous · no sign-up.** Published graduate "
                    "tuition from IPEDS beside what graduates in your field "
                    "actually borrowed. Tuition and fees only: no federal "
                    "source publishes graduate living costs.",
@@ -5689,7 +5689,7 @@ def render_graduate_debt_caption(debt, credential_key, school_name, container=No
         return
     cap = GRADUATE_AGGREGATE_LIMIT
     text = (f"{fmt_money(debt)} median debt at graduation for this field at "
-            f"{school_name} — what graduates actually borrowed, so already net "
+            f"{school_name}. This is what graduates actually borrowed, so already net "
             "of scholarships and assistantships. Not a sticker price.")
     if debt > cap:
         text += (f" {fmt_money(debt - cap)} of it is above the {fmt_money(cap)} "
@@ -5717,7 +5717,7 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
         if carried:
             school = applied_program_price_school(
                 professional_program_for(major_name))
-            return (f"Using {fmt_money(carried)} — the published tuition and fees "
+            return (f"Using {fmt_money(carried)}, the published tuition and fees "
                     f"for {school} across the programme, not a debt figure. That "
                     f"school publishes no borrowing median, so this is a sticker "
                     f"price before any aid and reads high.")
@@ -5734,7 +5734,7 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
                       f"school debt")
             advice = " Pick your school to use its own figure."
         elif program_key in PROGRAMMES_WITHOUT_OWN_DEBT:
-            source = (f"{fmt_money(national)} — no school publishes a "
+            source = (f"{fmt_money(national)}, because no school publishes a "
                       f"{program_key}-specific debt figure anywhere in federal "
                       f"data, so this is the median at the schools that teach "
                       f"it, filed under Medicine")
@@ -5744,7 +5744,7 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
                       "published price instead.")
         else:
             listed = len(professional_schools_for(program_key))
-            source = (f"{fmt_money(national)} — the median across the {listed} "
+            source = (f"{fmt_money(national)}, the median across the {listed} "
                       f"schools that publish a {program_key} debt figure "
                       f"(College Scorecard)")
             advice = " Pick your school to use its own figure."
@@ -5752,7 +5752,7 @@ def professional_debt_caption(major_name: str, school_name: str, debt: float) ->
     delta = debt - national
     direction = "above" if delta > 0 else "below"
     over_cap = max(debt - PROFESSIONAL_AGGREGATE_LIMIT, 0)
-    text = (f"{fmt_money(debt)} median debt at {school_name} — "
+    text = (f"{fmt_money(debt)} median debt at {school_name}, "
             f"{fmt_money(abs(delta))} {direction} the national average.")
     if over_cap > 0:
         # The part that cannot be a federal loan at all is the actionable half
@@ -5788,7 +5788,7 @@ OPTIONAL_RESIDENCY = {
         1, 60000,
         "about 6,000 PGY-1 places were filled in the 2025 ASHP match against "
         "11,386 PharmD degrees conferred, so roughly half of graduates take "
-        "one — it is required for most hospital and clinical roles, and for "
+        "one. It is required for most hospital and clinical roles, and for "
         "almost no community-pharmacy ones"),
     # The money in these sentences is written {money:...} and formatted through
     # fmt_money_md below. Two raw dollar signs in one markdown string are a
@@ -5803,7 +5803,7 @@ OPTIONAL_RESIDENCY = {
     "Optometrists": (
         1, 47274,
         "538 funded residency places existed in 2024-25 against 1,712 OD "
-        "graduates, at an average stipend of {money:47274} (ASCO) — under a "
+        "graduates, at an average stipend of {money:47274} (ASCO), so under a "
         "third, and concentrated in hospital and specialty practice"),
 }
 
@@ -6511,7 +6511,7 @@ def graduate_apply_target(professional: bool, level_key: str, family: str,
     if MAJOR_TO_CIP_FAMILY.get(major_name) != family:
         return None, (
             f"Your scenario is studying **{major_name}**, which is a different "
-            f"field from the one you searched — the sidebar's Graduate school "
+            f"field from the one you searched. The sidebar's Graduate school "
             f"picker only lists schools for your own field. Change the major "
             f"first, then apply a school.")
     return ("grad_school_a", school_name,
@@ -6914,7 +6914,7 @@ def get_coa_confirmation_caption(school_name: str, match, in_state: bool):
     label = "In-state" if in_state else "Out-of-state"
     coa_value = match["in_state_coa"] if in_state else match["out_of_state_coa"]
     return (
-        f"✅ {match['INSTNM']} ({match['control_type']}) — {label} COA: {fmt_money(coa_value)}/year"
+        f"✅ {match['INSTNM']} ({match['control_type']}) · {label} COA: {fmt_money(coa_value)}/year"
     ).replace("$", r"\$")
 
 
@@ -8778,10 +8778,10 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     # unanchored "this path" and the reader can't tell which path.
     if result["status"] == "never":
         return {
-            "headline": "No — not at any loan amount",
+            "headline": "No, not at any loan amount",
             "detail": (
                 f"Over {years} years, this path earns less than {_cf['baseline_noun']} "
-                f"does — even with no loan at all. Borrowing less doesn't change "
+                f"does, even with no loan at all. Borrowing less doesn't change "
                 f"that; only a longer horizon or a different path would."
             ),
             "status": "never", "breakeven_loan": None, "headroom": None,
@@ -8789,12 +8789,12 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         }
     if result["status"] == "beyond_search_max":
         return {
-            "headline": "Yes — at any realistic loan amount",
+            "headline": "Yes, at any realistic loan amount",
             "detail": (
                 f"Over {years} years this path stays ahead of {_cf['baseline_noun']} "
                 f"even past {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven "
                 f"Repayment that's usually because the payment is capped by your income rather "
-                f"than your balance — the debt outlives this window rather than disappearing."
+                f"than your balance. The debt outlives this window rather than disappearing."
             ),
             "status": "beyond_search_max", "breakeven_loan": None, "headroom": None,
             "positive": True, "label": "Good news",
@@ -8831,23 +8831,23 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         # occupation, singular verb. The major goes in the detail's
         # prepositional slot instead.
         if multiple is not None and multiple >= 2:
-            headline = f"Yes — comfortably worth your {fmt_money(loan_amount)} loan"
+            headline = f"Yes, comfortably worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out well ahead of {_cf['baseline_noun']} "
-                f"over {years} years — it earns back more than the loan costs you. "
+                f"over {years} years, because it earns back more than the loan costs you. "
                 f"It would take {fmt_money(breakeven)} of loans, about {multiple:.0f}× what "
                 f"you're borrowing, before that stopped being true."
             )
         elif multiple is not None and multiple >= 1.5:
-            headline = f"Yes — worth your {fmt_money(loan_amount)} loan"
+            headline = f"Yes, worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out ahead of {_cf['baseline_noun']} "
-                f"over {years} years — it earns back more than the loan costs you. It would take "
+                f"over {years} years, because it earns back more than the loan costs you. It would take "
                 f"{fmt_money(breakeven)} of loans, about half again what you're borrowing, before "
                 f"that stopped being true."
             )
         else:
-            headline = f"Yes, but only just — worth your {fmt_money(loan_amount)} loan"
+            headline = f"Yes, but only just: worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out ahead of {_cf['baseline_noun']} "
                 f"over {years} years, but the margin is thin: it stops being worth it at "
@@ -8860,11 +8860,11 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         # is already OVER the line, so naming the cap points toward LESS debt,
         # which is the safe direction. "Keep loans under $X" is the one number
         # a student in this case can actually act on.
-        headline = f"No — not at {fmt_money(loan_amount)}"
+        headline = f"No, not at {fmt_money(loan_amount)}"
         detail = (
             f"For {major_name}, this falls behind {_cf['baseline_noun']} over "
             f"{years} years. To come out ahead, total loans would need to stay under "
-            f"{fmt_money(breakeven)} — you're {fmt_money(abs(headroom))} above that ceiling. "
+            f"{fmt_money(breakeven)}, and you're {fmt_money(abs(headroom))} above that ceiling. "
             f"A longer horizon, a cheaper school, or Income-Driven Repayment can each move the line."
         )
     return {"headline": headline, "detail": detail, "status": "ok",
@@ -9197,7 +9197,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
     if not tranche_frame.empty:
         fig = px.area(
             tranche_frame, x="year", y="amount", color="component",
-            title="Loan Balance Over Time — by loan type",
+            title="Loan Balance Over Time: by loan type",
             labels={"year": DURATION_AXIS_TITLE, "amount": "Remaining Balance ($)",
                     "component": ""},
             color_discrete_map=stack_color_map(TRANCHE_LABELS),
@@ -9225,7 +9225,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches
             {"principal_balance": "Principal", "interest_balance": "Unpaid interest"})
         fig = px.area(
             stacked, x="year", y="amount", color="component",
-            title="Loan Balance Over Time — principal vs unpaid interest",
+            title="Loan Balance Over Time: principal vs unpaid interest",
             labels={"year": DURATION_AXIS_TITLE, "amount": "Remaining Balance ($)",
                     "component": ""},
             color_discrete_map={"Principal": SERIES_BLUE,
@@ -9346,7 +9346,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
                               var_name="component", value_name="payment")
         fig = px.area(
             stacked, x="year", y="payment", color="component",
-            title=f"Monthly Payment Over Time — {label}",
+            title=f"Monthly Payment Over Time: {label}",
             labels={"year": DURATION_AXIS_TITLE, "payment": "Monthly payment ($)",
                     "component": ""},
             color_discrete_map=stack_color_map(labels),
@@ -9371,7 +9371,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
 
     series = payment_series(result)
     fig = px.line(series, x="year", y="payment",
-                  title=f"Monthly Payment Over Time — {label}",
+                  title=f"Monthly Payment Over Time: {label}",
                   labels={"year": DURATION_AXIS_TITLE, "payment": "Monthly payment ($)"})
     fig.update_traces(line=dict(width=3))
     fig.update_layout(hovermode="x unified", title_font_size=14)
@@ -9523,7 +9523,7 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         fig.add_annotation(
             x=0, y=1.10, xref="paper", yref="paper", showarrow=False,
             xanchor="left", font=dict(size=11, color="#666666"),
-            text=(f"Baseline starts {baseline_head_start_years} years ahead — "
+            text=(f"Baseline starts {baseline_head_start_years} years ahead: "
                   f"{counterfactual_vocab()['head_start']}."),
         )
     fig.update_xaxes(dtick=1 if roi_window_years <= 15 else 5)
@@ -9725,7 +9725,7 @@ def salary_flow_headline(take_home: dict, monthly_payment: float,
     nothing. The matplotlib twin escapes the remaining sign anyway."""
     gross = float(take_home.get("gross") or 0)
     if gross <= 0:
-        return "No income at this stage — still in training"
+        return "No income at this stage, still in training"
     annual_payment = max(float(monthly_payment) * 12, 0)
     kept = take_home["net_take_home"] - annual_payment
     divisor = divisor or 1.0
@@ -9735,7 +9735,7 @@ def salary_flow_headline(take_home: dict, monthly_payment: float,
     if kept < 0:
         return (f"The payment is {fmt_money(-kept / divisor)} {period} more "
                 f"than the whole take-home")
-    return (f"You keep {fmt_money(kept / divisor)} {period} — "
+    return (f"You keep {fmt_money(kept / divisor)} {period}, "
             f"{kept / gross:.0%} of the salary")
 
 
@@ -9813,7 +9813,7 @@ def salary_flow_caption(drawable_payments) -> str:
     payments = [p for p in drawable_payments if p]
     if len(payments) > 1 and max(payments) - min(payments) < 1:
         return (base + " The loan payment is the same dollar amount at every "
-                "stage — what changes is how much of the pay it takes, and how "
+                "stage. What changes is how much of the pay it takes, and how "
                 "it measures against the tax bites beside it.")
     return (base + " The loan payment sits beside the tax bites it is "
             "competing with, at each stage's own pay.")
@@ -10153,7 +10153,7 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
     _x_hi = max(r["xs"][-1] for r in rows)
     _x_pad = (_x_hi - _x_lo) * 0.13
     fig.update_layout(
-        title=f"Where {occupation_name} pay actually lands — {where}"
+        title=f"Where {occupation_name} pay actually lands: {where}"
                + (" vs the U.S." if len(rows) > 1 else ""),
         title_font_size=14,
         # Pad the x-range rather than relying on margins alone. The p10/p90
@@ -11079,7 +11079,7 @@ def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
                      bbox=dict(facecolor="white", edgecolor="none", alpha=0.78, pad=1.4))
 
     where = rows[0]["label"]
-    title = f"Where {occupation_name} pay actually lands - {where}"
+    title = f"Where {occupation_name} pay actually lands: {where}"
     if len(rows) > 1:
         title += " vs the U.S."
     ax.set_title(title, fontsize=10.5, pad=16)
@@ -11173,7 +11173,7 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
                      # translucent screen value -- a PDF page is white.
                      edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper right", fontsize=8)
-        ax.set_title("Loan Balance Over Time - by loan type")
+        ax.set_title("Loan Balance Over Time: by loan type")
     elif balance_split_is_informative(schedule_df):
         ax.stackplot(schedule_df["year"],
                      schedule_df["principal_balance"],
@@ -11182,7 +11182,7 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
                      colors=[SERIES_BLUE, SERIES_RED],
                      edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper left", fontsize=8)
-        ax.set_title("Loan Balance Over Time — principal vs unpaid interest")
+        ax.set_title("Loan Balance Over Time: principal vs unpaid interest")
     else:
         ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
         ax.set_title("Loan Balance Over Time")
@@ -11230,7 +11230,7 @@ def build_pdf_payment_chart(result: dict, label: str,
                     xycoords=("data", "axes fraction"),
                     ha="right" if when > (_xlo + _xhi) / 2 else "left",
                     fontsize=7, color="#666666")
-    ax.set_title(f"Monthly Payment Over Time - {label}",
+    ax.set_title(f"Monthly Payment Over Time: {label}",
                  pad=18 if events else None)
     apply_pdf_duration_axis(ax, _x_years)
     ax.set_ylabel("Monthly payment ($)")
@@ -11294,7 +11294,7 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
     if baseline_head_start_years:
         ax.annotate(
-            f"Baseline starts {baseline_head_start_years} years ahead — "
+            f"Baseline starts {baseline_head_start_years} years ahead: "
             f"{counterfactual_vocab()['head_start']}.",
             xy=(0.0, 1.02), xycoords="axes fraction", ha="left",
             fontsize=8, color="#666666")
@@ -11805,7 +11805,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         # together (~570pt of the 648pt content height -- the chart width
         # below is trimmed to keep that true).
         PageBreak(),
-        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {major} in {city}"), styles["section"]),
+        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home: {major} in {city}"), styles["section"]),
         # One row per career stage, matching the on-screen block, which renders
         # them side by side rather than behind a selector.
         _pdf_table(full_width=True, rows=[
@@ -11863,8 +11863,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         PageBreak(),
         Paragraph(_strip_emoji(f"📊 {roi_window_years}-Year Financial Position"), styles["section"]),
         _pdf_table([
-            [f"{_cf['metric_label']} — {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
-             f"{major} — {roi_window_years}-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
+            [f"{_cf['metric_label']}: {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
+             f"{major}: {roi_window_years}-Yr Net Position", "Earnings Premium (COL-Adjusted)"],
             [fmt_money(roi_result["hs_net_position"]), fmt_money(roi_result["major_net_position"]),
              fmt_money(roi_result["earnings_premium"])],
         ]),
@@ -12240,7 +12240,7 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     # applied to prose).
     if strategy is not None:
         story.append(Spacer(1, 10))
-        story.append(Paragraph("Commit or ride -- the fork, in numbers",
+        story.append(Paragraph("Commit or ride: the fork, in numbers",
                                styles["section"]))
         for sentence in strategy_verdict_sentences(strategy):
             story.append(Paragraph(sentence, styles["body"]))
@@ -12333,7 +12333,7 @@ def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
         # the compare twin of the PageBreak in generate_pdf_report_single --
         # change one, change the other.
         PageBreak(),
-        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home — {city}"),
+        Paragraph(_strip_emoji(f"🏙️ Real-World Take-Home: {city}"),
                   styles["section"]),
     ]
     for panel_label, scenario, stages in (
@@ -12613,6 +12613,83 @@ st.markdown(
             min-width: 100% !important;
         }
     }
+    </style>""",
+    unsafe_allow_html=True,
+)
+
+# The three action buttons above the results (PDF, Share, Image) carry the
+# brand's CTA colour, so the calculator and the welcome page look like one
+# product rather than two. Everything else stays on Streamlit's default
+# secondary button: making EVERY button orange would leave nothing for these
+# three to stand out from, which is the whole point of styling them.
+#
+# Scoped by `.st-key-<key>` -- the container class Streamlit stamps on any
+# widget given a key. That is what makes this targeted rather than a blanket
+# `.stButton button` rule, and like the column-wrapping CSS above it is
+# VERSION-SPECIFIC (Streamlit 1.58, pinned): re-verify the class prefix on any
+# bump, because a rename fails silently, leaving the buttons merely unstyled.
+#
+# BOTH arms are listed. The single-scenario and Compare Mode branches render
+# their own copies of these buttons, and styling one arm and not the other is
+# an H2 confound the same way a missing disclosure is -- see the both-branches
+# rule in section 5c.
+#
+# Colour follows brand/palette.json's own light/dark `cost` pair (#eb6834 /
+# #d95926) rather than one hardcoded value, because the app renders in either
+# scheme. White on those is 3.3:1 and 3.9:1 -- fine for a bold button label
+# under WCAG's large-text rule, and identical to what the welcome page already
+# ships; a darker orange would buy contrast at the cost of the brand match.
+# The widget keys, not the selectors, are the thing to maintain: the rules
+# below are generated from this list, so adding a button is one entry rather
+# than several hand-repeated CSS blocks that can fall out of step.
+#
+# Every standalone tool names its pair `<tool>_pdf` / `<tool>_share` --
+# _search_actions derives `tool` from is_graduate, and the repayment tool
+# spells the same shape out literally -- so the tool half is DERIVED from
+# STANDALONE_TOOLS rather than listed. A tool added to that registry gets its
+# action buttons styled for free, the same way it already gets its pageview
+# action, traffic split and cross-links. A registry entry that renders no such
+# buttons simply matches nothing.
+#
+# The calculator's trio stays explicit: it is named per result branch, not per
+# tool, so it does not fit the pattern. A wildcard over `st-key-` would cover
+# both but would also catch keys nobody meant to style.
+ACTION_BUTTON_KEYS = (
+    # Calculator, both result branches (see the arm-parity note above).
+    "download_pdf_single", "download_pdf_compare",
+    "share_scenario_single", "share_scenario_compare",
+    "share_card_single", "share_card_compare",
+    # repayment / schools / gradschools, from the registry.
+    *(f"{_tool}_{_action}"
+      for _tool in STANDALONE_TOOLS
+      for _action in ("pdf", "share")),
+)
+_ACTION_BTN = ", ".join(f".st-key-{k} button" for k in ACTION_BUTTON_KEYS)
+_ACTION_TXT = ", ".join(f".st-key-{k} button *" for k in ACTION_BUTTON_KEYS)
+_ACTION_HOV = ", ".join(f".st-key-{k} button:hover" for k in ACTION_BUTTON_KEYS)
+st.markdown(
+    f"""<style>
+    {_ACTION_BTN} {{
+        background-color: #eb6834;
+        border: 1px solid #eb6834;
+        border-radius: 10px;
+        font-weight: 700;
+    }}
+    {_ACTION_TXT} {{ color: #ffffff !important; }}
+    {_ACTION_HOV} {{
+        background-color: #d2592b;
+        border-color: #d2592b;
+    }}
+    @media (prefers-color-scheme: dark) {{
+        {_ACTION_BTN} {{
+            background-color: #d95926;
+            border-color: #d95926;
+        }}
+        {_ACTION_HOV} {{
+            background-color: #c04d1f;
+            border-color: #c04d1f;
+        }}
+    }}
     </style>""",
     unsafe_allow_html=True,
 )
@@ -13231,8 +13308,8 @@ if simplified_available:
         "Loan estimate (both scenarios)",
         options=["Simplified", "Detailed"],
         format_func=lambda m: {
-            "Simplified": "Simplified — use the school's reported debt",
-            "Detailed": "Detailed — estimate from my cost & aid",
+            "Simplified": "Simplified: use the school's reported debt",
+            "Detailed": "Detailed: estimate from my cost & aid",
         }[m],
         key="loan_mode", on_change=lambda: mark_interaction("loan_mode"),
         help="Simplified uses the median debt graduates who borrowed leave this "
@@ -13250,13 +13327,13 @@ else:
     # returns if a reported figure does.
     _sb_pay.radio(
         "Loan estimate (both scenarios)", options=["Detailed"],
-        format_func=lambda m: "Detailed — estimate from my cost & aid",
+        format_func=lambda m: "Detailed: estimate from my cost & aid",
         key="loan_mode_unavailable_display", disabled=True,
         help="Simplified needs a school with reported debt in College Scorecard. "
              "We don't have one for this selection, so the loan is estimated from "
              "your cost & aid below.",
     )
-    _sb_pay.caption("Simplified is unavailable for this school — using Detailed.")
+    _sb_pay.caption("Simplified is unavailable for this school, so this uses Detailed.")
     effective_loan_mode = "Detailed"
 
 # Dependent vs independent sets the federal Direct borrowing cap, which decides
@@ -13402,7 +13479,7 @@ else:
                 f"🎓 {school_name_a} awards its own bachelor's in "
                 f"{', '.join(_ccb_fields_a[:4])}"
                 + (" and others" if len(_ccb_fields_a) > 4 else "")
-                + " — check that yours is one of them before choosing that path."
+                + ". Check that yours is one of them before choosing that path."
             )
     # The escalating price structure: some community colleges charge more for
     # junior/senior coursework than for freshman/sophomore. Only meaningful for
@@ -13583,7 +13660,7 @@ if cc_mode_a == "ccb":
         f"({fmt_money(effective_cc_coa_per_year_a)}/yr"
         + (f", rising {CCB_UPPER_DIVISION_PREMIUM * 100:.0f}% for upper-division years"
            if cc_premium_a else "")
-        + ", financed) — it awards the bachelor's itself, so there is no transfer. "
+        + ", financed). It awards the bachelor's itself, so there is no transfer. "
     )
 elif cc_transfer_a:
     cc_note_a = (
@@ -13594,7 +13671,7 @@ elif cc_transfer_a:
         # transfer into, and university_years_a is 0.
         + (f", then {university_years_a} yrs at the 4-year school "
            f"({fmt_money(effective_coa_per_year_a)}/yr, financed). "
-           if university_years_a else " — the whole program. ")
+           if university_years_a else ", the whole program. ")
     )
 else:
     cc_note_a = ""
@@ -13728,7 +13805,7 @@ elif loan_basis_a == "reported_scaled":
     # that sentence describes the raw figure, and the raw figure is shown.
     _sb_pay.caption((
         f"Estimated: College Scorecard reports {fmt_money(reported_debt_a)} for "
-        f"{school_name_a} — institution-wide, across completers of every credential "
+        f"{school_name_a}, institution-wide, across completers of every credential "
         f"length. Scaled to {fmt_money(default_loan_a)} for this {program_years_a}-year "
         "program. An estimate, not a reported figure."
     ).replace("$", r"\$"))
@@ -14094,7 +14171,7 @@ if is_returning:
         _sb_who.warning(
             "You've said you'll stop working, but **foregone earnings are "
             "switched off** below. The salary you'd give up is usually the "
-            "biggest cost of going back — these figures leave it out entirely."
+            "biggest cost of going back, and these figures leave it out entirely."
         )
 
     # Says which comparison is actually running. Without this the visitor sees
@@ -14117,7 +14194,7 @@ dataset_mode = _sb_study.radio(
 )
 if dataset_mode == DATASET_MODE_MAJOR:
     _sb_study.caption(
-        "Salaries reflect everyone who studied this — including the "
+        "Salaries reflect everyone who studied this, including the "
         f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
     )
 else:
@@ -14295,7 +14372,7 @@ if _program_key_a:
     _carried_school_a = applied_program_price_school(_program_key_a)
     if _carried_price_a and st.session_state["prof_school_a"] == PROFESSIONAL_SCHOOL_NATIONAL:
         _sb_study.caption(
-            f"Using {fmt_money_md(_carried_price_a)} — the published tuition and "
+            f"Using {fmt_money_md(_carried_price_a)}, the published tuition and "
             f"fees for **{_carried_school_a}** across the programme, which you "
             f"picked in the graduate search. That school publishes no borrowing "
             f"figure, so it is not in the list above; this is a **sticker price "
@@ -14355,7 +14432,7 @@ if is_returning and major in MAJOR_DATA:
     )
     _sb_study.caption(
         f"The {fmt_money(_bls_start)} pre-filled here is what **everyone** in this "
-        "occupation earns at entry level — not what someone entering it mid-career "
+        "occupation earns at entry level, not what someone entering it mid-career "
         "earns in year one. Career-changers commonly start below it, and some never "
         "reach the median. If you have a real offer or a local posting, that number "
         "is better than this one.".replace("$", chr(92) + "$")
@@ -14435,7 +14512,7 @@ city = _sb_where.selectbox(
 if st.session_state.get("_city_inferred") == (school_name_a, city):
     _sb_where.caption(
         f"Set to {city} because {school_name_a} is there. This is where you'd "
-        "*work*, not where you study — change it if you plan to leave. It "
+        "*work*, not where you study, so change it if you plan to leave. It "
         "re-sets whenever you pick a different school."
     )
 # Computed here (not just where it's first used, further down) so it's
@@ -14933,7 +15010,7 @@ if compare_mode:
                 f"({fmt_money(effective_cc_coa_per_year_b)}/yr"
                 + (f", rising {CCB_UPPER_DIVISION_PREMIUM * 100:.0f}% for upper-division years"
                    if cc_premium_b else "")
-                + ", financed) — it awards the bachelor's itself, no transfer. "
+                + ", financed). It awards the bachelor's itself, no transfer. "
             )
         elif cc_transfer_b:
             cc_note_b = (
@@ -14941,7 +15018,7 @@ if compare_mode:
                 f"{fmt_money(effective_cc_coa_per_year_b)}/yr, no loan → {fmt_money(cc_oop_b)} out-of-pocket)"
                 + (f", then {university_years_b} yrs at the 4-year school "
                    f"({fmt_money(effective_coa_per_year_b)}/yr, financed). "
-                   if university_years_b else " — the whole program. ")
+                   if university_years_b else ", the whole program. ")
             )
         else:
             cc_note_b = ""
@@ -15026,7 +15103,7 @@ if compare_mode:
         elif loan_basis_b == "reported_scaled":
             st.caption((
                 f"Estimated: College Scorecard reports {fmt_money(reported_debt_b)} for "
-                f"{school_name_b} — institution-wide, across every credential length. "
+                f"{school_name_b}, institution-wide, across every credential length. "
                 f"Scaled to {fmt_money(default_loan_b)} for this {program_years_b}-year "
                 "program. An estimate, not a reported figure."
             ).replace("$", r"\$"))
@@ -15460,7 +15537,7 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     # servicer actually compares against.
     federal_standard_monthly = std["monthly_payment"]
     rows.append(("Standard (10-year)", with_private(std),
-                 "Qualifies for PSLF — but it also clears the loan in exactly 120 "
+                 "Qualifies for PSLF, but it also clears the loan in exactly 120 "
                  "payments, so there is nothing left to forgive."
                  if pslf else "Fixed payment. No forgiveness."))
     ext = fixed_over(EXTENDED_STANDARD_TERM_YEARS)
@@ -15922,7 +15999,7 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         # visitor types here; the feature exists anyway, so the warning has to
         # be where the decision is.
         st.warning(
-            "**That link contains the numbers you entered** — your balance, "
+            "**That link contains the numbers you entered**: your balance, "
             "interest rate, income, dependants and payment count. Anyone you "
             "send it to, and anyone they forward it to, can read them. Send it "
             "the way you would send a screenshot of this page."
@@ -15975,12 +16052,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                      expanded=always_open):
         st.caption(
             "For a balance you already owe. Everything else on this page is "
-            "about whether to borrow in the first place — this is about what "
+            "about whether to borrow in the first place. This is about what "
             "to do once you have."
         )
         if not always_open:
             st.caption(
-                "Comparing plans is a question of its own — "
+                "Comparing plans is a question of its own: "
                 f"[open this as its own page]({internal_tool_url('repayment')})."
             )
         # Three subsections: who you are, then the FEDERAL plans the page
@@ -16046,7 +16123,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         if len(fed_loans) > 1:
             st.caption((
                 f"{len(fed_loans)} loans, {fmt_money_md(balance)} total at a "
-                f"weighted {rate:.2f}% — the income-driven plans treat these "
+                f"weighted {rate:.2f}%. The income-driven plans treat these "
                 "as one balance with one payment, and the fixed plans bill "
                 "each on its own schedule."
             ))
@@ -16067,8 +16144,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "federal system entirely, so the income-driven rows are hidden.")
 
         st.caption(
-            "Your income and dependants change the **income-driven** rows only "
-            "— RAP and IBR size their payment from them. The fixed-payment "
+            "Your income and dependants change the **income-driven** rows only, "
+            "because RAP and IBR size their payment from them. The fixed-payment "
             "plans ignore both, and so does any private balance below."
         )
 
@@ -16096,7 +16173,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         if not forgivable:
             st.caption(
                 "PSLF is unavailable here: it covers Direct Loans only. Parent PLUS "
-                "for parents — and any consolidation containing one — cannot qualify."
+                "for parents, and any consolidation containing one, cannot qualify."
             )
 
         # Months, not years: servicers report a qualifying-payment COUNT, and
@@ -16106,7 +16183,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             step=1, key="existing_prior_payments", disabled=not forgivable,
             help="From your servicer or the IDR tracker on StudentAid.gov. "
                  "Payments you made under ANY income-driven plan count toward "
-                 "discharge under RAP, so they shorten what is left — the "
+                 "discharge under RAP, so they shorten what is left: the "
                  "income-driven rows below already subtract them. Leave at 0 if "
                  "you have never been on an income-driven plan, or don't know. "
                  "The fixed-term plans ignore this: they forgive nothing, so "
@@ -16191,8 +16268,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             priv_loans = []
 
         if not fed_loans:
-            st.info("Add at least one federal loan — a balance and its rate — "
-                    "to compare plans.")
+            st.info("Add at least one federal loan, with a balance and its "
+                    "rate, to compare plans.")
             return
 
         # A payment count that has already reached a plan's term means the
@@ -16209,7 +16286,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                    f"({RAP_MAX_TERM_YEARS * 12})."
                    if prior_payments >= RAP_MAX_TERM_YEARS * 12 else ".")
                 + " If those payments qualified, the remaining balance should "
-                "already be dischargeable — the near-zero payoff figures below "
+                "already be dischargeable, and the near-zero payoff figures below "
                 "are that, not a real repayment period. Check your count with "
                 "your servicer rather than acting on this page."
             )
@@ -16240,13 +16317,13 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # unchanging loan; combined last because it is the bill, and reading
             # it before the two halves makes the halves look like a breakdown of
             # a decision rather than the decision itself.
-            st.markdown("**Federal plans** — this is the choice you're making")
+            st.markdown("**Federal plans**, the choice you're making")
             st.dataframe(_repayment_table(plan_rows, federal_only=True),
                          hide_index=True, use_container_width=True)
 
             st.markdown("**Private / non-federal loan"
                         + ("s" if len(priv_loans) > 1 else "")
-                        + "** — the same under every plan above")
+                        + "**, the same under every plan above")
             st.dataframe(_repayment_table([private_row]),
                          hide_index=True, use_container_width=True)
             # What the aggressive pace is worth, from the required_pace pair
@@ -16266,7 +16343,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                         f"At **{fmt_money_md(_actual_monthly)}/mo** instead of the "
                         f"required {fmt_money_md(_pace['monthly_payment'])}, this "
                         f"clears in **{private_row[1]['payoff_years']:.1f} years** "
-                        f"instead of {_pace['payoff_years']:.1f} — saving "
+                        f"instead of {_pace['payoff_years']:.1f}, saving "
                         f"{fmt_money_md(_saved)} in interest."
                     ))
                 else:
@@ -16274,11 +16351,11 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                         f"The actual payment you entered is at or below the "
                         f"required payment of "
                         f"{fmt_money_md(_pace['monthly_payment'])}, so the rows "
-                        "use the required payment — a lender does not accept "
-                        "less as a plan."
+                        "use the required payment, since a lender does not "
+                        "accept less as a plan."
                     ))
 
-            st.markdown("**Combined** — what you actually pay")
+            st.markdown("**Combined**, what you actually pay")
             st.dataframe(_repayment_table(plan_rows),
                          hide_index=True, use_container_width=True)
 
@@ -16297,7 +16374,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 st.warning(
                     f"**Moving to RAP is close to a one-way door for you.** None of "
                     f"the {_back['total']} RAP payments modelled above would count "
-                    f"toward IBR/ICR/PAYE if you switched back — a month only counts "
+                    f"toward IBR/ICR/PAYE if you switched back. A month only counts "
                     f"when the RAP payment is at least the 10-year Standard payment "
                     f"of {fmt_money_md(_back['threshold'])}, and at this income "
                     f"RAP never reaches it. The lower your payment, the more you "
@@ -16308,7 +16385,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     f"**Switching back would cost you some credit.** "
                     f"{_back['counting']} of {_back['total']} RAP payments "
                     f"({_back['share']:.0%}) would count toward IBR/ICR/PAYE if you "
-                    f"returned — only months where the RAP payment reaches the "
+                    f"returned, because only months where the RAP payment reaches the "
                     f"10-year Standard payment of {fmt_money_md(_back['threshold'])} "
                     f"count."
                 )
@@ -16338,7 +16415,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.info(
                 "**If you're on SAVE, a clock may already be running.** Your "
                 "servicer's notice to leave SAVE starts a 90-day window to "
-                "choose a plan. Miss it and you are enrolled automatically — "
+                "choose a plan. Miss it and you are enrolled automatically "
                 "into Standard or the new Tiered Standard, "
                 f"{fmt_money_md(_std_fed['monthly_payment'])} and "
                 f"{fmt_money_md(_tiered_fed['monthly_payment'])} a month on "
@@ -16349,7 +16426,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 + ". Neither is income-driven and neither forgives "
                 "anything, so the automatic outcome is the one that ignores "
                 "your income. **The window runs from your servicer's notice, "
-                "not a fixed national date** — check yours rather than this "
+                "not a fixed national date.** Check yours rather than this "
                 "page. Source: TICAS, *Upcoming Changes to Income-Driven "
                 "Repayment Plans*."
             )
@@ -16358,7 +16435,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         if forgivable:
             st.caption(
                 ("" if not priv_loans else
-                 f"**Each row is your total bill** — the federal plan plus the "
+                 f"**Each row is your total bill**: the federal plan plus the "
                  f"{fmt_money_md(_priv_total)} of private balance"
                  + ("s" if len(priv_loans) > 1 else "")
                  + ", each repaid on its own term. No plan forgives private "
@@ -16367,19 +16444,19 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  f"loan clears**, which is why a row can outlast the federal "
                  f"term in its own name.  \n")
                 + f"**Payoff is time from today**, not from when you first borrowed"
-                + (f" — the {prior_payments} payments you have already made are "
+                + (f", and the {prior_payments} payments you have already made are "
                    "subtracted from the income-driven rows." if prior_payments else ".")
                 + "  \n**Switching plans is not symmetric.** Payments you made "
                 "under any income-driven plan count toward discharge under RAP, "
                 "but moving to RAP also moves your finish line out to RAP's 30 "
-                "years — a PAYE borrower 20 years in does not finish sooner by "
+                "years, so a PAYE borrower 20 years in does not finish sooner by "
                 "switching. Going the other way, RAP payments count toward "
                 "IBR/ICR/PAYE only in months where the RAP payment was at least "
                 "the 10-year Standard payment, which for most income-driven "
                 "borrowers is never.  \n"
                 "**And the way back is closing.** ICR and PAYE terminate on "
                 "July 1, 2028, leaving IBR as the only plan RAP credit could "
-                "return to — and IBR is itself shut to loans originated on or "
+                "return to, and IBR is itself shut to loans originated on or "
                 "after July 1, 2026. Sources: studentaid.gov OBBBA "
                 "definitions, *Repayment Assistance Plan*; TICAS, *Upcoming "
                 "Changes to Income-Driven Repayment Plans*."
@@ -16452,7 +16529,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             key="existing_payment_chart")
         if "payment" not in chosen_result.get("schedule", pd.DataFrame()).columns:
             st.caption(
-                "A fixed-payment plan, so this line is flat by construction — it "
+                "A fixed-payment plan, so this line is flat by construction. It "
                 "is here to be compared against the income-driven plans, whose "
                 "payment moves with income."
             )
@@ -16460,7 +16537,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.caption(
                 f"This plan clears your {fmt_money(accrued)} of unpaid interest early, "
                 "so the chart shows a single balance from then on. It still costs you "
-                "less than the same balance would as principal — interest is charged on "
+                "less than the same balance would as principal, because interest is charged on "
                 "principal only, and unpaid interest does not compound while it sits "
                 "there.".replace("$", chr(92) + "$")
             )
@@ -16469,8 +16546,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.success(
                 f"**PSLF changes which plan wins.** The income-driven rows above now "
                 f"forgive at {PSLF_QUALIFYING_PAYMENTS} payments instead of 20 or 30 "
-                "years, so the plan with the LOWEST payment usually costs least overall "
-                "— the opposite of the answer without PSLF. Standard 10-Year qualifies "
+                "years, so the plan with the LOWEST payment usually costs least overall, "
+                "the opposite of the answer without PSLF. Standard 10-Year qualifies "
                 "but retires the loan in exactly 120 payments, leaving nothing to "
                 "forgive; Extended and Tiered Standard do not qualify at all.\n\n"
                 "Unlike an income-driven discharge, studentaid.gov attaches its "
@@ -16488,7 +16565,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # plan extras go avalanche-style, highest-rate note first. Renders
         # for Parent PLUS too -- no income-driven rows exist there, but the
         # avalanche fork on the fixed rows is exactly as real.
-        st.markdown("**🧭 Commit or ride — the fork, in numbers**")
+        st.markdown("**🧭 Commit or ride: the fork, in numbers**")
         st.number_input(
             "Extra you could put toward the federal balance each month ($)",
             min_value=0, max_value=50_000, step=25,
@@ -16496,13 +16573,13 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             help="Optional, added on top of the automatic pivot of freed "
                  "private payments. On an income-driven plan it joins the "
                  "payment (under RAP, extra that covers the interest also "
-                 "forfeits that month's subsidy — the simulation prices "
+                 "forfeits that month's subsidy, and the simulation prices "
                  "that). On a fixed plan it targets the highest-rate note "
                  "first and rolls down as each clears.")
         if strategy_analysis is None:
             st.caption(
-                "Enter your income above — and either a private loan to "
-                "pivot from or an extra amount here — and this panel "
+                "Enter your income above, plus either a private loan to "
+                "pivot from or an extra amount here, and this panel "
                 "prices the fork: stay on the plan's minimum, or pay the "
                 "balance down."
             )
@@ -16520,7 +16597,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                         > max(l["rate"] for l in fed_loans)):
                 st.caption(
                     "Your highest interest rate is on a **private** loan, so "
-                    "extra dollars there first beat any federal targeting — "
+                    "extra dollars there first beat any federal targeting. "
                     "model that by raising that loan's **Actual $/mo** in "
                     "the grid above."
                 )
@@ -16534,12 +16611,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 )
 
         st.caption(
-            "Simplified models of the real plans, not your servicer's figures — payments "
+            "Simplified models of the real plans, not your servicer's figures. Payments "
             "here come from this app's own formulas and your actual bill will differ. "
             "Forgiven balances are taxable as ordinary income in the year they are "
             "discharged; that tax is **not** in the tables above, but the commit-or-ride "
-            "panel prices it. Extra payments are modelled only where entered — the "
-            "private grid's Actual column and the panel above — and under RAP an extra "
+            "panel prices it. Extra payments are modelled only where entered, in the "
+            "private grid's Actual column and the panel above, and under RAP an extra "
             "payment forfeits the subsidy in any month it covers the interest, which "
             "the simulation accounts for."
         )
@@ -16575,7 +16652,7 @@ def render_rap_subsidy_answer(rows: list) -> None:
         st.info(
             "**RAP's interest subsidy is worth nothing to you.** It only waives interest "
             "your payment fails to cover, and at this income your payment covers all of "
-            "it. RAP may still win on the monthly figure — but not for that reason."
+            "it. RAP may still win on the monthly figure, but not for that reason."
         )
 
 
@@ -17262,7 +17339,7 @@ if active_tool:
 else:
     st.title("🎓 Student Loan Payoff & Major ROI Calculator")
     st.caption(
-        "**Free · anonymous · no sign-up** — an educational estimate, not financial "
+        "**Free · anonymous · no sign-up.** An educational estimate, not financial "
         "advice. Salary and cost figures are illustrative."
     )
     # On a phone Streamlit collapses the sidebar to a bare ">>" arrow in the
@@ -17288,7 +17365,7 @@ else:
         unsafe_allow_html=True,
     )
 if st.session_state.get("test_mode"):
-    st.warning("🧪 **Test mode** (`?test=1`) — this session's interactions are **not** being logged to the research dataset.")
+    st.warning("🧪 **Test mode** (`?test=1`): this session's interactions are **not** being logged to the research dataset.")
 elif get_write_queue().breaker_is_open():
     # One line, and only while the breaker is open. The calculator does not
     # depend on the database at all -- every number on this page comes from
@@ -17298,7 +17375,7 @@ elif get_write_queue().breaker_is_open():
     # wondering whether their results are affected.
     st.caption(
         "📋 Usage logging is paused while the research database is "
-        "unavailable. Nothing on this page depends on it — every figure is "
+        "unavailable. Nothing on this page depends on it, and every figure is "
         "computed locally."
     )
 
@@ -17558,7 +17635,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     _seed_high = int(st.session_state.get("coa_per_year_a", 25_000))
     min_coa, max_coa = st.slider(
         ("Graduate tuition and fees per year" if is_graduate
-         else "School Cost of Attendance (COA) — tuition, housing, everything"),
+         else "School Cost of Attendance (COA): tuition, housing, everything"),
         min_value=0, max_value=100_000,
         value=(0, min(max(_seed_high, 1_000), 100_000)), step=1_000,
         format="$%d", key=budget_key,
@@ -17567,8 +17644,8 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
               "graduate living costs, so housing and food are on top. "
               if is_graduate else
               "The whole yearly cost, not just tuition. ")
-             + "Drag the LEFT handle up to hide the cheapest schools — "
-               "results are the cheapest matches, so raising the floor is "
+             + "Drag the LEFT handle up to hide the cheapest schools. "
+               "Results are the cheapest matches, so raising the floor is "
                "how you surface pricier ones rather than raising the ceiling.",
     )
     budget = max_coa
@@ -17669,7 +17746,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
             disabled=not adm_available,
             on_change=lambda: mark_interaction("search_adm_rate_on"),
             help="Narrow the list by how selective a school is. Available for "
-                  "bachelor's degrees only — see the note when it is greyed out.")
+                  "bachelor's degrees only; see the note when it is greyed out.")
         # NOT a read of the checkbox. Streamlit keeps a widget's value in
         # session_state after it stops being rendered OR becomes disabled, so a
         # visitor who ticks this on a bachelor's search and switches to
@@ -17684,7 +17761,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
             st.caption(
                 f"Admit rate is a **bachelor's-only** filter here. It comes from "
                 f"each school's undergraduate admission rate, and below a "
-                f"bachelor's most schools publish none — 74% of bachelor's "
+                f"bachelor's most schools publish none: 74% of bachelor's "
                 f"institutions report one against 35% at associate's and under a "
                 f"quarter for certificates. Filtering on it at this level would "
                 f"drop most of the list for having nothing on file rather than "
@@ -17699,7 +17776,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
                 on_change=lambda: mark_interaction(adm_range_key),
                 help="Drag either handle to limit how selective the schools are. "
                       "While this filter is on, schools that report no admit rate "
-                      "are excluded at any width — an unknown rate cannot be shown "
+                      "are excluded at any width, because an unknown rate cannot be shown "
                       "to fall inside a band. It never changes the order: the list "
                       "stays cheapest-first.",
             )
@@ -17722,7 +17799,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
             and st.session_state.get(family_key)):
         st.caption(
             "⚠️ Schools that report no admit rate are **not** in this list, "
-            "and most of them admit nearly everyone — so a high floor hides "
+            "and most of them admit nearly everyone, so a high floor hides "
             "the very schools that are easiest to get into. Drop the left "
             "handle back to 0% to see them again."
         )
@@ -17783,7 +17860,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     known, priced = coverage or (0, 0)
     st.caption(
         f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
-        f"**Per year** is tuition and required fees — *not* a full cost of "
+        f"**Per year** is tuition and required fees, *not* a full cost of "
         f"attendance. No federal source publishes graduate living costs, so "
         f"housing, food and books are on top of every figure here, and this is "
         f"not comparable with the undergraduate cost the sidebar uses."
@@ -17827,7 +17904,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         + (f"{credential} " if professional
            else f"an {credential} " if programme_key
            else f"a {credential.lower()} ")
-        + "— real programmes vary, and part-time study changes it completely."
+        + ". Real programmes vary, and part-time study changes it completely."
     )
     # Osteopathic and podiatric medicine have no CIP of their own anywhere in
     # Scorecard -- those students are reported under 5112 "Medicine." -- so the
@@ -17838,7 +17915,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         _cap(
             f"**Graduates borrowed here is not {level_key}-specific.** Federal "
             f"data has no separate field for this programme at any level, so a "
-            f"figure shown is the school's *Medicine* row — which at a school "
+            f"figure shown is the school's *Medicine* row, which at a school "
             f"that teaches only this programme is these same graduates, and at "
             f"one that also runs an MD school is a mix. The price beside it is "
             f"programme-specific; the borrowing is not."
@@ -17857,7 +17934,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     if professional:
         _cap(
             "**Per year is this programme's own price**, not the school's "
-            "graduate average — IPEDS publishes nine professional programmes "
+            "graduate average. IPEDS publishes nine professional programmes "
             "separately, and they charge well above the average their "
             "university reports for graduate study as a whole."
         )
@@ -17879,7 +17956,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
         _cap(
             "**Per year is an institution-wide average.** IPEDS publishes one "
             "graduate tuition per school, so an MBA and a teaching master's at "
-            "the same university show the same figure — and the professional "
+            "the same university show the same figure, and the professional "
             "schools charge well above it."
         )
     if known and priced < known:
@@ -17901,15 +17978,15 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
             "**Graduates borrowed is the MBA's own median**, not the business "
             "rollup's. The two describe the same students at every school here "
             "and disagree sharply"
-            + (f" — {_eg[0]} reads {fmt_money_md(_eg[1])} through the field "
+            + (f": {_eg[0]} reads {fmt_money_md(_eg[1])} through the field "
                f"rollup and {fmt_money_md(_eg[2])} as an MBA" if _eg else "")
-            + " — because the rollup medians every business master's together. "
+            + ", because the rollup medians every business master's together. "
               "Never add or average them."
         )
     else:
         _cap(
             "And this list is schools that publish a **debt** figure for this "
-            "field — roughly a fifth of school-and-field combinations at master's "
+            "field, roughly a fifth of school-and-field combinations at master's "
             "level and a sixteenth at doctoral. Absence here is usually missing "
             "data, not a missing programme."
         )
@@ -17920,7 +17997,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
 
     picker_ids = [int(uid) for uid in results["UNITID"]]
     picker_labels = {
-        int(row["UNITID"]): f"{row['INSTNM']} — {fmt_money(row['coa_per_year'])}/yr"
+        int(row["UNITID"]): f"{row['INSTNM']}: {fmt_money(row['coa_per_year'])}/yr"
         for _, row in results.iterrows()}
     st.session_state["grad_search_pick"] = reconcile_search_pick(
         st.session_state.get("grad_search_pick"), picker_ids)
@@ -17935,7 +18012,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
                      if professional else "Graduate school")
     _cap(
         f"This fills the sidebar's **{_target_label}** picker, not the college "
-        "field above it — that one is your undergraduate school. It only exists "
+        "field above it, which is your undergraduate school. It only exists "
         "when your scenario is already on this path, so set the major first if "
         "you have not."
     )
@@ -18037,12 +18114,12 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                       expanded=always_open):
         if not always_open:
             st.caption(
-                "Graduate cost is its own question — "
+                "Graduate cost is its own question: "
                 f"[open this as its own page]({internal_tool_url('gradschools')})."
             )
         st.caption(
             "Sorted by price, and by nothing else. Every salary in this app comes "
-            "from the occupation or major you picked — never from the school — so "
+            "from the occupation or major you picked, never from the school, so "
             "this cannot tell you which of these leads to higher pay."
         )
         # coa_df supplies the state and sector option lists on both pages. It
@@ -18154,7 +18231,7 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                 if cheapest > controls["max_budget"]:
                     st.caption(
                         f"The cheapest one that matches everything else is "
-                        f"**{fmt_money_md(cheapest)}/year** — raise the ceiling "
+                        f"**{fmt_money_md(cheapest)}/year**. Raise the ceiling "
                         f"to that and it appears. This is a price, not a "
                         f"verdict on the programme."
                     )
@@ -18194,7 +18271,7 @@ def _search_filter_summary(controls: dict, is_graduate: bool) -> list:
         ("Price per year",
          f"{money(controls.get('min_budget'))} to {money(controls.get('max_budget'))}"),
         ("Priced for a resident of", controls.get("home_state") or
-         "nowhere given — everything shown at out-of-state rates"),
+         "nowhere given, so everything is shown at out-of-state rates"),
         ("Limited to states", ", ".join(controls.get("states") or []) or "any"),
         ("School type", ", ".join(controls.get("control_types") or []) or "any"),
     ]
@@ -18240,7 +18317,7 @@ def _search_actions(results, table, captions, is_graduate: bool,
                 results, table, captions,
                 title=("Graduate schools that fit this budget" if is_graduate
                        else "Schools that fit this budget"),
-                subtitle=(f"{len(results)} schools, cheapest first — "
+                subtitle=(f"{len(results)} schools, cheapest first, "
                           f"{CIP_FAMILY_TITLES.get(family, level or 'all fields')}"),
                 is_graduate=is_graduate,
                 filters=(_search_filter_summary(controls, is_graduate)
@@ -18259,7 +18336,7 @@ def _search_actions(results, table, captions, is_graduate: bool,
                                    **build_search_share_params(is_graduate)})
         log_usage_event(f"search_share:{tool}:{stamp}")
         components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
-        st.success("Link copied — it reopens this search, filters and all.")
+        st.success("Link copied. It reopens this search, filters and all.")
 
 
 def render_school_search(always_open: bool = False) -> None:
@@ -18290,12 +18367,12 @@ def render_school_search(always_open: bool = False) -> None:
     with st.expander("🔎 Find schools that fit a budget", expanded=always_open):
         if not always_open:
             st.caption(
-                "Searching by budget is a question of its own — "
+                "Searching by budget is a question of its own: "
                 f"[open this as its own page]({internal_tool_url('schools')})."
             )
         st.caption(
             "Sorted by cost, and by nothing else. Every salary in this app comes "
-            "from the occupation or major you picked — never from the school — so "
+            "from the occupation or major you picked, never from the school, so "
             "this can't tell you which of these leads to higher pay. What it can "
             "tell you is which ones teach your field at a price you could cover."
         )
@@ -18319,7 +18396,7 @@ def render_school_search(always_open: bool = False) -> None:
             st.caption(
                 "⚠️ Every school below is priced at its **out-of-state** rate, "
                 "because you haven't said where you live. Public schools in your "
-                "own state will be cheaper than shown — often by several thousand "
+                "own state will be cheaper than shown, often by several thousand "
                 "a year."
             )
 
@@ -18369,7 +18446,7 @@ def render_school_search(always_open: bool = False) -> None:
             if control_types:
                 narrowings.append(f"at {' or '.join(control_types)} schools")
             if adm_filtered:
-                narrowings.append(f"admitting {adm_low}–{adm_high}% of applicants")
+                narrowings.append(f"admitting {adm_low}% to {adm_high}% of applicants")
             st.warning(
                 f"No schools teach **{CIP_FAMILY_TITLES[family]}** at that level "
                 f"for {fmt_money(budget)}/year"
@@ -18377,14 +18454,14 @@ def render_school_search(always_open: bool = False) -> None:
                 + ". "
                 + ("Widening those filters or raising"
                     if narrowings else "Raising")
-                + " the budget will find some — and the fact that this "
+                + " the budget will find some, and the fact that this "
                 "combination has none is itself worth knowing."
             )
             return
 
         st.caption(
             f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
-            "These are **sticker prices before aid** — a pricier school can end up "
+            "These are **sticker prices before aid**, so a pricier school can end up "
             "cheaper once grants are applied, so treat this as a starting list and "
             "run the **Net price** calculator on any school you're serious about."
         )
@@ -18512,21 +18589,21 @@ def render_school_search(always_open: bool = False) -> None:
                 # query string, and the widest one sets the column width.
                 "Net price": st.column_config.LinkColumn(
                     "Net price", display_text="Calculate ↗", width="small",
-                    help="The school's own net price calculator — what someone "
+                    help="The school's own net price calculator, showing what someone "
                           "with your family's finances actually pays, as opposed "
                           "to the sticker price in this table."),
             })
         _cap(
             "**Rate** is which price you'd be charged"
             + (f", based on living in {home_state}. " if home_state else ". ")
-            + "*Same either way* means the school charges one price regardless — "
+            + "*Same either way* means the school charges one price regardless, "
             "true of most private schools. **Admits** is the share of applicants "
             "accepted; **—** means the school reports none, usually because it "
             "admits nearly everyone."
-            + (f" You've limited this to {adm_low}–{adm_high}%, so every row "
+            + (f" You've limited this to {adm_low}% to {adm_high}%, so every row "
                "reports a rate and any school that reports none is excluded. "
                if adm_filtered else " ")
-            + "It is never what the list is sorted by — the order is cost, always."
+            + "It is never what the list is sorted by: the order is cost, always."
         )
         # The three things render_parent_plus_note's docstring forbids doing
         # with this figure, said once below the table rather than 25 times
@@ -18536,18 +18613,18 @@ def render_school_search(always_open: bool = False) -> None:
         # A bare money column would silently assert the opposite of all three.
         _cap(
             "**Avg net price** is what students who received federal aid "
-            "actually paid, on average, after grants and scholarships — cost "
+            "actually paid, on average, after grants and scholarships: cost "
             "of attendance minus the aid awarded, from College Scorecard. It "
             "is usually well below the sticker beside it: about "
             f"{fmt_money_md(7063)}/year lower at the median school, and less "
             "than half the sticker at 1,388 of the 5,035 schools here. **The "
-            "list is filtered and sorted on the sticker, not on this** — it is "
+            "list is filtered and sorted on the sticker, not on this**, because it is "
             "an average over aided students, so it is what usually happens "
             "rather than what you are guaranteed. **—** means unreported."
         )
         _cap(
             "**Finish** is the share of first-time, full-time students who "
-            "completed within 150% of the normal time — six years for a "
+            "completed within 150% of the normal time, so six years for a "
             "four-year degree. It matters here because everything else on "
             "this page assumes you graduate: the cost is charged in full and "
             "the salary is a graduate's. It **undercounts** real completion, "
@@ -18557,7 +18634,7 @@ def render_school_search(always_open: bool = False) -> None:
         )
         _cap(
             "**Parents borrowed** is what families of *completers* at that school "
-            "who took Parent PLUS borrowed in total, at the median — the parent's "
+            "who took Parent PLUS borrowed in total, at the median. It is the parent's "
             "own debt, separate from every cost column here and from any loan this "
             "app models for the student. It is not what a typical family borrows: "
             "families who borrowed nothing are not in it. Congress capped Parent "
@@ -18574,13 +18651,13 @@ def render_school_search(always_open: bool = False) -> None:
                 f"debt at graduation for people who completed "
                 f"**{CIP_FAMILY_TITLES.get(family, 'this field')}** *at that "
                 f"school*, already net of scholarships and family money. It is "
-                f"per field rather than per school, which is the point — within "
+                f"per field rather than per school, which is the point: within "
                 f"one subject it ranges from about "
                 f"{fmt_money_md(4049)} to {fmt_money_md(45268)} depending on "
                 f"where you study. Federal loans only, so private borrowing is "
                 f"not in it, and it is **not** a cost: never add it to the price "
                 f"columns. **—** means this school publishes no figure for this "
-                f"field, which is ordinary — coverage runs from about half of "
+                f"field, which is ordinary: coverage runs from about half of "
                 f"schools in engineering and computing to four in five in "
                 f"business and psychology."
             )
@@ -18608,7 +18685,7 @@ def render_school_search(always_open: bool = False) -> None:
 
         picker_ids = [int(uid) for uid in results["UNITID"]]
         picker_labels = {
-            int(row["UNITID"]): f"{row['INSTNM']} — "
+            int(row["UNITID"]): f"{row['INSTNM']}: "
                                 f"{fmt_money(row['coa_per_year'])}/yr"
             for _, row in results.iterrows()}
         # Reconcile BEFORE the widget exists, the reconcile_cc_mode pattern:
@@ -18765,37 +18842,37 @@ with st.expander("❓ New here? Start with this"):
         f"""
 This is a free, anonymous calculator for one of the biggest money decisions
 of your life: **is this degree, at this school, with this loan, actually worth
-it?** It runs on real government data — salaries, college costs, taxes, and the
-2026 federal student-loan rules — and answers in plain dollars.
+it?** It runs on real government data (salaries, college costs, taxes, and the
+2026 federal student-loan rules) and answers in plain dollars.
 
 **What it shows.** Two futures, side by side: you, after this degree and this
-loan — versus someone who skipped college and went straight to work. Real salary
+loan, versus someone who skipped college and went straight to work. Real salary
 data, real taxes, adjusted for your city.
 
-**How to use it.** Work down the sidebar — **About you → What you'll study →
+**How to use it.** Work down the sidebar: **About you → What you'll study →
 School & city → Paying for it**. The loan fills in automatically, and every
-number updates as you change things — there's no calculate button. Nothing is
+number updates as you change things, so there's no calculate button. Nothing is
 saved and you can't break it, so try every path you're considering. (Know
 your own costs? Switch **Loan estimate** to **Detailed**.)
 
 **Two settings change the answer most:**
 
-- **Major vs Career.** *Major* is what everyone who studied it earns —
+- **Major vs Career.** *Major* is what everyone who studied it earns,
   including graduates working jobs that don't use the degree. *Career* is
   people actually doing that job, shown with the full range of what they
-  earn — from the 10th to the 90th percentile, not just one average.
+  earn, from the 10th to the 90th percentile rather than one average.
   Default choice is Major.
 - **How far ahead to look.** Careers with long
   training flip with time: at 10 years, medicine is still $146,000 *behind* a
-  high school grad — by 30 it's $3.5 million *ahead*.
+  high school grad. By 30 it's $3.5 million *ahead*.
 
 **Two more tools, under 🧰 More tools at the bottom of the page:**
 🔎 **Find schools that fit a budget** shows every US college your budget
-covers, priced at what *you'd* actually pay — and 💸 **Already have loans?
+covers, priced at what *you'd* actually pay. 💸 **Already have loans?
 Compare repayment plans** takes a balance you or your family already owe and
 compares every current federal plan on it.
 
-**Keep in mind.** These are averages, not predictions about you — and "worth it
+**Keep in mind.** These are averages, not predictions about you, and "worth it
 financially" isn't the same as "worth it to you." Sources are in
 **📚 Methodology & Sources** at the bottom.
         """
@@ -18808,7 +18885,7 @@ financially" isn't the same as "worth it to you." Sources are in
 # survive any rewrite: it is the only pointer a phone visitor gets to the
 # collapsed sidebar.
 st.caption(
-    "👈 **Set up your scenario in the sidebar** — everything updates instantly, "
+    "👈 **Set up your scenario in the sidebar.** Everything updates instantly, "
     "no button to press. On a phone, tap the red **» Inputs** pill at the top left."
 )
 
@@ -18881,7 +18958,7 @@ def render_share_card_button(scenario_pairs: list, verdict: dict,
         "🖼️ Download image", data=png,
         file_name="worth-my-degree.png", mime="image/png",
         use_container_width=True, key=key,
-        help="A single image of this verdict — headline, chart and sources — "
+        help="A single image of this verdict, with headline, chart and sources, "
               "sized for a message or a post.",
         on_click=lambda: log_usage_event(
             f"share_card:major={scenario_pairs[0][0]}"
@@ -18909,7 +18986,7 @@ def render_school_lookup(container, school_name: str, label: str, unitid=None):
 
         if coa_match is not None:
             coa_text = (
-                f"**{scenario_prefix}{coa_match['INSTNM']}** ({coa_match['control_type']}) — "
+                f"**{scenario_prefix}{coa_match['INSTNM']}** ({coa_match['control_type']}) · "
                 f"In-state Cost of Attendance: {fmt_money(coa_match['in_state_coa'])} | "
                 f"Out-of-state Cost of Attendance: {fmt_money(coa_match['out_of_state_coa'])} "
                 f"({now_local().year})"
@@ -18973,7 +19050,7 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
     st.subheader("🎯 Get Your Real Numbers")
     st.caption(
         "The cost and aid figures here are school-wide averages. For a decision this "
-        "big, it's worth five minutes replacing them with your own — both tools below "
+        "big, it's worth five minutes replacing them with your own. Both tools below "
         "are free, official, and only need a few inputs. They're separate government "
         "sites, not part of this app."
     )
@@ -18994,9 +19071,9 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
         else:
             st.markdown(_npc_link_markdown(school_name_a))
         st.caption(
-            "Gives your **net price** — the cost after grants & scholarships. Enter that "
+            "Gives your **net price**, the cost after grants & scholarships. Enter that "
             "number as **Cost of Attendance** in the sidebar, and set **Grants & "
-            "Scholarships to \\$0** (the net price already subtracted them — leaving a "
+            "Scholarships to \\$0** (the net price already subtracted them, so leaving a "
             "grants figure in would subtract aid twice)."
         )
 
@@ -19004,10 +19081,10 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
         st.markdown("**🎓 Your family contribution (SAI)**")
         st.markdown(f"[Open the Federal Student Aid Estimator →]({SAI_ESTIMATOR_URL})")
         st.caption(
-            "Estimates your **Student Aid Index (SAI)** — what your family is expected to "
+            "Estimates your **Student Aid Index (SAI)**, what your family is expected to "
             "put toward each year. Enter it as **Personal Contribution (per year)** in the "
             "sidebar. This lowers your loan on top of the net price above, and that's "
-            "correct — net price doesn't remove the family contribution, so it's not "
+            "correct: net price doesn't remove the family contribution, so it's not "
             "double-counting."
         )
 
@@ -19133,7 +19210,7 @@ def render_salary_flow_charts(rows, key_prefix: str, columns: bool = True) -> No
     # one chart is labelled and nothing about the model.
     st.radio("Show these as", list(SALARY_FLOW_PERIODS),
              key=SALARY_FLOW_PERIOD_KEY, horizontal=True,
-             help="The same bar in either unit — dividing by twelve "
+             help="The same bar in either unit. Dividing by twelve "
                   "changes the numbers, not the proportions.")
     divisor = salary_flow_divisor(selected_salary_flow_period())
     axis_max = salary_flow_axis_max([figs for _label, figs in entries], divisor)
@@ -19202,7 +19279,7 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
     the only reason that branch exists.
     """
     if heading:
-        st.subheader(f"🏙️ Real-World Take-Home — {major_name} in {city_name}")
+        st.subheader(f"🏙️ Real-World Take-Home: {major_name} in {city_name}")
 
     stages = list(CAREER_STAGE_OPTIONS.items())
     results = [(label, takehome_figures(scenario, major_name, key, city))
@@ -19250,7 +19327,7 @@ def _render_takehome_stage(figs: dict, major_name: str, verbose: bool = True) ->
 
     if gross == 0:
         st.info(f"At this career stage, {major_name} has $0 gross income "
-                "(still in training) — see Methodology for why.")
+                "because you're still in training. Methodology explains why.")
 
     st.metric("Gross Salary", fmt_money(gross))
     st.metric(
@@ -19316,8 +19393,8 @@ def _render_takehome_stage(figs: dict, major_name: str, verbose: bool = True) ->
     if figs.get("loan_retired_before_snapshot"):
         st.caption(
             "The $0 here means the loan is already repaid **within the first "
-            "year** — this snapshot is taken at month 12. The early months do "
-            "carry the payment shown in the Loan Information section above."
+            "year**, and this snapshot is taken at month 12. The early months "
+            "do carry the payment shown in the Loan Information section above."
         )
 
 
@@ -19338,7 +19415,7 @@ def render_cc_path_note(cc_mode: str, major_name: str = None) -> None:
     if cc_mode == "ccb":
         st.caption(
             "🏫 **Community-college path:** the entire bachelor's degree at the "
-            "community college — it awards the degree itself, so there is no "
+            "community college. It awards the degree itself, so there is no "
             "transfer and no four-year school. Unlike the other paths, these "
             "years **are** financed."
         )
@@ -19347,15 +19424,15 @@ def render_cc_path_note(cc_mode: str, major_name: str = None) -> None:
     if cc_mode == "fulltime":
         st.caption(
             f"🏫 **Community-college path:** {COMMUNITY_COLLEGE_YEARS} years at a "
-            "community college, then transfer to finish the same degree — the "
+            "community college, then transfer to finish the same degree. The "
             "community-college years are paid out of pocket, not financed."
         )
     elif cc_mode == "associate":
         st.caption(
             "🏫 **Community-college path:** the entire degree at a community "
-            "college — no transfer, because this profession is entered with a "
-            "degree a community college awards on its own. Paid out of pocket, "
-            "not financed."
+            "college, with no transfer, because this profession is entered with "
+            "a degree a community college awards on its own. Paid out of "
+            "pocket, not financed."
         )
     elif cc_mode == "parttime":
         st.caption(
@@ -19396,7 +19473,7 @@ def render_payoff_age(scenario: dict, current_age, program_years: int,
         return
     if age >= retirement_age:
         st.warning(
-            f"You'd be **{age:.0f}** when this is repaid — past the "
+            f"You'd be **{age:.0f}** when this is repaid, past the "
             f"{retirement_age} most people plan to retire at. The debt outlasts "
             "the working years you were counting on."
         )
@@ -19499,7 +19576,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
     provoke.
     """
     with column:
-        panel_heading(f"Scenario {label}: {scenario['major']} — {scenario['strategy_label']}")
+        panel_heading(f"Scenario {label}: {scenario['major']}, {scenario['strategy_label']}")
         render_cc_path_note(cc_mode, scenario["major"])
 
         for caption in get_investment_captions(scenario):
@@ -19549,7 +19626,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             st.caption(
                 f"Includes {fmt_money(scenario['existing_debt'])} of student debt you "
                 "already owe. That is in the payment and the payoff date, but not "
-                "charged against this degree — you'd be repaying it either way."
+                "charged against this degree, since you'd be repaying it either way."
                 .replace("$", chr(92) + "$")
             )
         render_financing_note(scenario.get("financing"))
@@ -19563,10 +19640,10 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # split, and Streamlit allows one level of column nesting.
         _cf = counterfactual_vocab()
         st.metric(
-            f"{_cf['metric_label']} — {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
+            f"{_cf['metric_label']}: {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
             fmt_money(roi_result["hs_net_position"]),
         )
-        st.metric(f"{scenario['major']} — {roi_window_years}-Yr Net Position",
+        st.metric(f"{scenario['major']}: {roi_window_years}-Yr Net Position",
                   fmt_money(roi_result["major_net_position"]))
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
@@ -19643,13 +19720,14 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
     if dataset_mode == DATASET_MODE_MAJOR:
         st.caption(
             "In Major mode this is shown for the occupation group each major most "
-            "commonly leads to — a representative approximation, since a major spreads "
-            "across many jobs. Switch to Career mode to score a specific occupation."
+            "commonly leads to. It's a representative approximation, since a major "
+            "spreads across many jobs. Switch to Career mode to score a specific "
+            "occupation."
         )
 
     def _render_one(name):
         info = get_ai_exposure_for_major(name)
-        st.markdown(f"**{name}** — {info['label']}")
+        st.markdown(f"**{name}**: {info['label']}")
         st.metric(
             "AI Task Exposure",
             f"{info['score']}/100" if info["score"] is not None else "N/A",
@@ -19771,7 +19849,7 @@ if compare_mode:
     # income, which made the two arms differ by more than the contrast H2
     # claims to measure. Charts off -- the columns are narrow and the same
     # split is stated numerically by the ratio metric.
-    st.subheader(f"🏙️ Real-World Take-Home — {city}")
+    st.subheader(f"🏙️ Real-World Take-Home: {city}")
     th_col_a, th_col_b = st.columns(2)
     # Returns captured for the PDF below, same as the single branch does --
     # the compare report renders these stages as tables.
@@ -19978,7 +20056,7 @@ else:
 
     # ---- 5c-1. Loan Information --------------------------------------------
 
-    st.subheader(f"💳 Loan Information — {strategy_label}")
+    st.subheader(f"💳 Loan Information: {strategy_label}")
 
     render_cc_path_note(cc_mode_a, major)
 
@@ -20011,7 +20089,7 @@ else:
                                      program_years_a, simplified_scale_a)
     else:
         st.caption(
-            "Here's how your loan builds up year by year -- Cost of Attendance "
+            "Here's how your loan builds up year by year. Cost of Attendance "
             "grows by the estimated inflation rate each year, while Personal "
             "Contribution and Grants & Scholarships stay the same."
         )
@@ -20066,7 +20144,7 @@ else:
         st.caption(
             f"Includes {fmt_money(scenario['existing_debt'])} of student debt you already "
             "owe. That is in the payment and the payoff date, but not charged against "
-            "this degree — you'd be repaying it either way.".replace("$", chr(92) + "$")
+            "this degree, since you'd be repaying it either way.".replace("$", chr(92) + "$")
         )
 
     render_financing_note(scenario.get("financing"))
@@ -20113,10 +20191,10 @@ else:
 
     position_cols = st.columns(3)
     position_cols[0].metric(
-        f"{_cf['metric_label']} — {roi_horizon_years}-Yr Net Position{_cf['no_loan_suffix']}",
+        f"{_cf['metric_label']}: {roi_horizon_years}-Yr Net Position{_cf['no_loan_suffix']}",
         fmt_money(roi_result["hs_net_position"]),
     )
-    position_cols[1].metric(f"{major} — {roi_horizon_years}-Yr Net Position", fmt_money(roi_result["major_net_position"]))
+    position_cols[1].metric(f"{major}: {roi_horizon_years}-Yr Net Position", fmt_money(roi_result["major_net_position"]))
     position_cols[2].metric(
         "Earnings Premium (COL-Adjusted)",
         fmt_money(roi_result["earnings_premium"]),
@@ -20579,22 +20657,26 @@ with st.expander("📚 Methodology & Sources"):
     # escaped below to stop Streamlit from swallowing text between an
     # accidental pair of them into a garbled math span.
     methodology_text = """
-**Major salary data.** For each major, we look up two real numbers from
+### Where the salary numbers come from
+
+#### Major salary data
+
+For each major, we look up two real numbers from
 the U.S. Bureau of Labor Statistics (BLS): what someone new to that career
 typically earns starting out, and what someone earns after being in that
 career for a while. *Starting Salary* is the 25th-percentile annual wage
-for that occupation — meaning 25% of workers in that job earn less than
-this, a reasonable stand-in for "what a typical new grad makes." *Growth
+for that occupation, meaning 25% of workers in that job earn less than this.
+It's a reasonable stand-in for what a typical new grad makes. *Growth
 Rate* is how much pay would need to grow every year, for 10 years straight,
 to climb from that starting number up to the occupation's median (the
 middle-of-the-pack wage): `(median / entry) ** (1/10) - 1`.
 
 Why the 25th percentile instead of the 10th? BLS's 10th percentile mixes
 in a lot of part-time workers and some data quirks that can make pay look
-unrealistically low for certain careers — most noticeably physicians (see
+unrealistically low for certain careers, most noticeably physicians (see
 below). The 25th percentile is a more realistic floor for "typical new
 grad" pay. This growth rate is our own estimate built from real BLS wage
-data, not something BLS itself publishes — BLS doesn't track how any one
+data, not something BLS itself publishes. BLS doesn't track how any one
 person's paycheck actually changes over 10 years.
 
 | Major | BLS Occupation (SOC) | 25th Pctile | Median |
@@ -20614,7 +20696,9 @@ person's paycheck actually changes over 10 years.
 Source: [bls.gov/oes/2025/may](https://www.bls.gov/oes/2025/may/) (occupation
 profile pages by SOC code).
 
-**Careers beyond the 11 majors above.** The dropdown also includes
+#### Careers beyond the 11 majors above
+
+The dropdown also includes
 hundreds of other real jobs, pulled straight from a BLS government data
 file (cleaned by a script called `data_pipeline.py`) instead of being
 hand-picked one at a time. Each gets the same Starting Salary/Growth Rate
@@ -20637,93 +20721,101 @@ Entry" data ([bls.gov/oes/additional.htm](https://www.bls.gov/oes/additional.htm
 selecting a profession that typically requires less than a bachelor's
 degree shows a disclosure, since this app's Cost of Attendance/loan model
 otherwise assumes 4 years of undergraduate cost for every major. It's
-kept in the dropdown rather than removed -- it's still a real career a
+kept in the dropdown rather than removed, since it's still a real career a
 student might be evaluating. Where BLS does publish a standard length, the
 model uses it: an associate's degree is charged two years, and a job needing no
 degree at all is charged none. See "How long we assume you're enrolled" below.
 
-**Which geography a salary comes from.** You don't pick this — it follows the
-city you pick. For each occupation we take the finest geography BLS actually
-publishes: your **metro** if it reports that job, otherwise your **state**,
-otherwise the **national** figure. Every one of those is real government data
-for that place, not a national number scaled up, and the page says underneath
-the salary which of the three you're looking at.
+#### Which geography a salary comes from
 
-The fallbacks matter more than they sound. BLS won't publish a wage for a job
-in a metro where too few people do it, and that's roughly a fifth of
-occupations in a typical city — 227 of 836 in Austin, for instance. Those used
-to drop straight to a national average; now all but 41 of them land on Texas's
+You don't pick this. It follows the
+city you pick. For each occupation we take the finest geography BLS actually
+publishes: your metro if it reports that job, otherwise your state, otherwise
+the national figure. Every one of those is real government data for that
+place, not a national number scaled up, and the page says underneath the
+salary which of the three you're looking at.
+
+Those fallbacks do more work than you'd think. BLS won't publish a wage for a
+job in a metro where too few people do it, and that's roughly a fifth of
+occupations in a typical city: 227 of 836 in Austin, for instance. Those used
+to drop straight to a national average. Now all but 41 of them land on Texas's
 own statewide figure first, which is much closer to the truth. Only when both
 the metro and the state suppress a job do you see a national number, and it's
 labelled as one.
 
 This replaced a "Career Salary Data: National / California" control that let
 you choose a wage basis independently of your city. That combination could
-disagree with itself — picking California while living in New York showed
+disagree with itself. Picking California while living in New York showed
 California wages for the jobs New York doesn't report, while the page called
 them national figures.
 
-**How long a degree beyond a bachelor's is charged for.** The years come from
+### How long school takes, and what that changes
+
+#### How long a degree beyond a bachelor's is charged for
+
+The years come from
 the path, not from a single figure for "doctoral": four for medical, dental,
 pharmacy, veterinary, optometry, podiatry and chiropractic school, three for
-law, two for a master's. Where this app has no length for a graduate path — 93
-of the occupations in the dropdown, mostly research doctorates — it falls back
-to five years, which is a placeholder rather than an estimate of anything, and
-is labelled as such wherever it appears.
+law, two for a master's. Where this app has no length for a graduate path (93
+of the occupations in the dropdown, mostly research doctorates), it falls back
+to five years. That five is a placeholder rather than an estimate of anything,
+and is labelled as such wherever it appears.
 
 That matters beyond the tuition: the years also set the federal graduate limit
 ($20,500 a year), how many years of wages you give up, and the age this
 comparison starts the high-school baseline at. Charging five where a programme
-runs four is not conservative — it inflates the cost AND the borrowing capacity
+runs four is not conservative. It inflates the cost and the borrowing capacity
 at the same time.
 
-**Majors that need school beyond a 4-year degree.** In real life,
+#### Majors that need school beyond a 4-year degree
+
+In real life,
 Athletic Training, Medicine, and Law don't pay a professional salary
-right after a 4-year degree — you need more school first. This calculator
+right after a 4-year degree. You need more school first. This calculator
 models that delay honestly instead of pretending everyone starts earning
 right away:
 
 - **Athletic Training**: 2 years with no income, representing the
   master's degree BLS says is now typically required for this job.
 - **Medicine**: 4 years with no income (medical school), then 3 years
-  earning a flat $65,000/year (a stand-in for a medical resident's real
-  pay, which actually rises a bit each year — simplified here to one
-  number; source: AAMC's 2024 median first-year resident stipend). After
+  earning a flat $65,000/year. That stands in for a medical resident's real
+  pay, which actually rises a bit each year, simplified here to one number
+  (source: AAMC's 2024 median first-year resident stipend). After
   that, the real Family Medicine Physician salary from the table above
-  kicks in. On top of your loan we add medical school's own debt — **your
-  school's median if you name one in the sidebar**, otherwise a national
-  **$205,000** from AAMC's 2024 data
+  kicks in. On top of your loan we add medical school's own debt: your
+  school's median if you name one in the sidebar, otherwise a national
+  $205,000 from AAMC's 2024 data
   ([source](https://www.aamc.org/data-reports/students-residents/report/physician-education-debt-and-cost-attend-medical-school)).
 - **Law**: 3 years with no income (law school), then the real Lawyer
   salary from the table above kicks in. We add law school's debt on top of
-  your loan — your school's median where you name one, otherwise a national
-  **$130,000** from the ABA's 2024 survey
+  your loan: your school's median where you name one, otherwise a national
+  $130,000 from the ABA's 2024 survey
   ([source](https://www.americanbar.org/groups/young_lawyers/resources/after-the-bar/personal-financial/young-lawyers-significantly-impacted-by-high-debt-burdens/)).
 
 - **Dentistry and law beyond the specialties.** *Dentists, General* and
-  *Lawyers* — the two largest professional occupations here — are charged
+  *Lawyers*, the two largest professional occupations here, are charged
   dental school and law school like their specialist counterparts. Judges,
   magistrates and administrative law judges are too, since the degree is
-  required, with one caveat worth stating: this calculator models everyone
-  entering their occupation the year they finish training, and nobody is
+  required. One caveat there: this calculator models everyone entering their
+  occupation the year they finish training, and nobody is
   appointed a judge at 25. Their earnings therefore arrive a career too early,
   which the debt on the other side does not offset.
 - **Pharmacy, veterinary medicine, optometry, podiatry and chiropractic**:
   four years of school with no income, then the real salary from the table
-  above — except podiatry, below. Debt is your school's median where the
-  sidebar lets you name one, otherwise a national figure. Those national
-  figures are **not** an association average like the two above: no such figure
-  is curated here, so each is the **median of the per-school medians College
-  Scorecard publishes** for that programme — pharmacy $142,122 across 88
+  above. Podiatry is the exception, below. Debt is your school's median where
+  the sidebar lets you name one, otherwise a national figure. Those national
+  figures are *not* an association average like the two above. No such figure
+  is curated here, so each is the median of the per-school medians College
+  Scorecard publishes for that programme: pharmacy $142,122 across 88
   schools, veterinary $162,726 across 26, optometry $172,132 across 16,
   chiropractic $193,488 across 10
   ([source](https://collegescorecard.ed.gov/data/)). **Podiatry has no figure
-  of its own anywhere in federal data** — Scorecard publishes no CIP for it at
-  any level, so its students are counted under *Medicine*; the $239,574 shown
+  of its own anywhere in federal data.** Scorecard publishes no CIP for it at
+  any level, so its students are counted under *Medicine*. The $239,574 shown
   is the median at the schools that teach podiatry, which at a school with no
   MD programme is these graduates and at one with both is a mix.
 - **Podiatry adds 3 years of residency at $65,000**, on the same footing as
-  medicine, because it is the one of these five that is **required**: the
+  medicine, because it is the one of these five that is *required*: the
   Council on Podiatric Medical Education standardised podiatric postgraduate
   training as a single 36-month Podiatric Medicine and Surgery Residency in
   2011, and the American Board of Podiatric Medicine certifies only its
@@ -20731,31 +20823,32 @@ right away:
   ([CPME](https://www.cpme.org/residencies/cpme-faqs-residency-programs/),
   [ABPM](https://podiatryboard.org/ufaq/)). Podiatric residents are hospital
   house staff paid on the institution's own scale, so they take the same
-  stipend this calculator uses for medical residents — AAMC's 2024 median
+  stipend this calculator uses for medical residents: AAMC's 2024 median
   first-post-MD-year figure. Published 2025-26 podiatric PGY-1 salaries run
   from about $67,400 to $86,900, so $65,000 is at or below the bottom of that
   range rather than a flattering estimate.
 - **Pharmacy, veterinary medicine and optometry have residencies too, and this
   calculator charges nobody for one.** All three are optional and none is a
-  majority path, so folding one in would misprice the typical graduate — the
-  same call the underemployment figure gets, and for the same reason. What
+  majority path, so folding one in would misprice the typical graduate. That's
+  the same call the underemployment figure gets, and for the same reason. What
   they cost if you do one:
-  **Pharmacy** — about 6,000 PGY-1 places were filled in the 2025 ASHP match
+  In pharmacy, about 6,000 PGY-1 places were filled in the 2025 ASHP match
   against 11,386 PharmD degrees conferred in 2024, so roughly half of
   graduates take one; it is required for most hospital and clinical roles and
   for almost no community-pharmacy ones.
-  **Veterinary** — 28% of 2025 graduates accepted advanced-education offers, at
-  a mean $58,874 against the $129,000 mean starting salary for classmates going
+  In veterinary medicine, 28% of 2025 graduates accepted advanced-education
+  offers, at a mean $58,874 against the $129,000 mean starting salary for
+  classmates going
   straight into practice
   ([AVMA](https://www.avma.org/news/inflation-continues-dampen-gains-veterinarian-salaries-fewer-new-grads-entering-full-time)).
-  **Optometry** — 538 funded places existed in 2024-25 against 1,712 OD
+  In optometry, 538 funded places existed in 2024-25 against 1,712 OD
   graduates in 2025, at an average stipend of $47,274
   ([ASCO](https://optometriceducation.org/wp-content/uploads/2025/04/ASCOResFundingPromotionsSur24-25.pdf)).
-  **Chiropractic has none to disclose**: the field has no accredited
+  Chiropractic has none to disclose: the field has no accredited
   postgraduate residency requirement.
-- **All five qualify for the federal professional loan limit** — $50,000 a year
-  up to a $200,000 aggregate — because Pharmacy (Pharm.D.), Veterinary Medicine
-  (D.V.M.), Chiropractic (D.C.), Optometry (O.D.) and Podiatry (D.P.M.) are each
+- **All five qualify for the federal professional loan limit** of $50,000 a
+  year up to a $200,000 aggregate, because Pharmacy (Pharm.D.), Veterinary
+  Medicine (D.V.M.), Chiropractic (D.C.), Optometry (O.D.) and Podiatry (D.P.M.) are each
   named in the Department of Education's own examples of a professional degree,
   on the original list rather than the one a June 2026 court stay temporarily
   expanded
@@ -20766,47 +20859,56 @@ right away:
   reading the cap would be $165,000 and about $28,000 of the median debt would
   be private borrowing instead.
 
-During those unpaid years, this calculator shows $0 income — and any loan
+During those unpaid years, this calculator shows $0 income, and any loan
 you've taken out is still quietly racking up interest the whole time,
-since you're not making payments yet. That's on purpose, not a bug: it's
-the whole point of showing this stuff honestly. A first-year med student
-really does earn $0, not a doctor's salary.
+since you're not making payments yet. That's on purpose, not a bug. A
+first-year med student really does earn $0, not a doctor's salary.
 
-**The biggest assumption here: that you work in your field.** Every salary
-on this page is what someone in that career actually earns — and it assumes
+### What the salary figures assume
+
+#### The biggest assumption here: that you work in your field
+
+Every salary
+on this page is what someone in that career actually earns, and it assumes
 you become one of them. Nationally, that's true for only about 6 in 10
 college graduates. The Federal Reserve Bank of New York tracks
-*underemployment* — graduates working jobs that don't require a degree at
-all — and finds **39% overall**, ranging from **13% (Nursing)** to **66%
-(Criminal Justice)** across 73 majors
+*underemployment*, meaning graduates working jobs that don't require a degree
+at all, and finds 39% overall, ranging from 13% (Nursing) to 66%
+(Criminal Justice) across 73 majors
 ([Source: NY Fed](https://www.newyorkfed.org/research/college-labor-market),
 updated February 2026, from Census ACS and DOL O*NET data).
 
 We show that as a disclosure rather than folding it into the math, and the
 reason is worth being straight about. That data is organized by *major*
 (Psychology), while this calculator is organized by *career* (Clinical and
-Counseling Psychologists) — so applying a per-career underemployment rate
+Counseling Psychologists), so applying a per-career underemployment rate
 would mean guessing at which majors feed which careers. We'd rather tell
 you the assumption than invent a number to hide it. Read every figure below
 as "if you land the job," not "you will land the job."
 
-**"Careers this major commonly leads to" (Major mode).** Beside that
+#### "Careers this major commonly leads to" (Major mode)
+
+Beside that
 disclosure we list a few example occupations for the selected major, each at
 its national median pay. These are real BLS occupations drawn from the same
 occupation major group the major maps to (the SOC group described in the AI
-module note below) — a **representative sample of the field, not an
-exhaustive or guaranteed list**, since a major spreads across many jobs.
+module note below). It's a representative sample of the field, not an
+exhaustive or guaranteed list, since a major spreads across many jobs.
 Wages are the national BLS medians already used throughout this app, shown at
 the national level regardless of your selected city so the "leads to" set
 stays stable. Occupations that a four-year degree doesn't
 typically lead to (those BLS marks as needing less than a bachelor's) are
-filtered out. This is our own summary of public BLS data — it is not drawn
+filtered out. This is our own summary of public BLS data. It is not drawn
 from any subscription careers guide.
 
-**How long we assume you're enrolled.** Cost of Attendance is a per-year
+### Program length, and what it costs
+
+#### How long we assume you're enrolled
+
+Cost of Attendance is a per-year
 figure, so turning it into a total needs a program length. We use four years
-for a bachelor's — and **two years for an occupation BLS says is typically
-entered with an associate's degree**, because charging four years of tuition
+for a bachelor's, and two years for an occupation BLS says is typically
+entered with an associate's degree, because charging four years of tuition
 to reach a two-year credential roughly doubles the debt, and against a private
 four-year sticker price it overstates it by far more. That shorter length
 flows through everything: the loan total, the federal borrowing cap (which is
@@ -20814,14 +20916,16 @@ set per year in school), the foregone-earnings option, and the break-even.
 Picking the community-college path on a two-year program covers the whole
 program rather than half of it.
 
-**And zero years for a job that needs no degree.** BLS says 430 of the 825
-occupations here are entered with a high school diploma or no credential at all
-— 52% of the list — and until recently every one of them was charged four years
-of tuition and four years of given-up wages for a degree the job never asks
-for. They're now charged none: no loan, no enrollment gap, no break-even. What
-doesn't change is the pay comparison, and that's the point — a nuclear power
-reactor operator needs no degree and still earns far above the high-school
-median. The cost side goes to zero; the earnings side stands.
+#### Zero years for a job that needs no degree
+
+ BLS says 430 of the 825
+occupations here are entered with a high school diploma or no credential at
+all, 52% of the list, and until recently every one of them was charged four
+years of tuition and four years of given-up wages for a degree the job never
+asks for. They're now charged none: no loan, no enrollment gap, no
+break-even. What doesn't change is the pay comparison, and that's the point.
+A nuclear power reactor operator needs no degree and still earns far above
+the high-school median. The cost side goes to zero; the earnings side stands.
 
 We still don't guess at the remaining two levels. "Postsecondary nondegree
 award" covers everything from a six-week certificate to an eighteen-month
@@ -20829,15 +20933,17 @@ program, and "some college, no degree" has no defined end at all. Those still
 get four years, say so on screen, and have their break-even suppressed rather
 than printing a number built on a length we don't believe.
 
-**One more place length matters: the Simplified loan.** In Simplified mode the
+#### One more place length matters: the Simplified loan
+
+In Simplified mode the
 loan is the school's median completer debt from College Scorecard. That is a
-single institution-wide number covering everyone who finished — two-year and
-four-year completers together — and it carries no per-year or per-credential
+single institution-wide number covering everyone who finished, two-year and
+four-year completers together, and it carries no per-year or per-credential
 breakdown at all. For a two-year career at a four-year school, handing it over
 unchanged charges roughly double. So we scale it by the ratio of cumulative
 federal Direct borrowing limits, two years against four (44%), on the grounds
 that the Scorecard figure counts federal loans only and federal limits are what
-bound federal borrowing. It's shown as an **estimate**, with the raw published
+bound federal borrowing. It's shown as an estimate, with the raw published
 figure beside it.
 
 We do not scale it at a community college. There, "institution-wide" already
@@ -20846,25 +20952,29 @@ halving it would introduce the very error we're trying to remove. The test is
 the school's predominant credential, not the career's length.
 
 Why not just look up debt for two-year programs directly? Scorecard does
-publish it, per program of study — but only per individual CIP program, never
+publish it, per program of study, but only per individual CIP program, never
 rolled up to a school-level associate's figure, and it's suppressed wherever
 too few borrowers finished that exact program. At the community colleges where
-this matters most, that's often every program. An estimate we can explain beat
+this matters most, that's often every program. An estimate we can explain beats
 a real number we mostly can't get.
 
-**Where the pay actually lands (Target Profession mode).** Under the salary
+### Where the pay lands, and what you're compared against
+
+#### Where the pay actually lands (Target Profession mode)
+
+Under the salary
 figures we draw the spread of what people in that occupation really earn. BLS
-publishes five points for each one — the 10th, 25th, 50th, 75th and 90th
-percentile wage — and no individual worker records at all, so a true
+publishes five points for each one, the 10th, 25th, 50th, 75th and 90th
+percentile wage, and no individual worker records at all, so a true
 count-the-people histogram isn't something anyone can build from it, us
 included. What the percentiles *do* fix exactly is how many workers sit
 between any two of them: a quarter of the workforce earns between the 25th and
 the 50th, by definition. The curve is drawn through those five points and peaks
 at the median, matching the style O*NET uses for the same data. Read it for
-**position and spread** — where this job's pay sits, and how far it ranges — not
-as a count of people: its height is illustrative, and it is deliberately the
-same for every curve so that comparing two of them is a purely left-right
-comparison. When your city has its own published figures, the national curve is
+position and spread: where this job's pay sits, and how far it ranges. Don't
+read it as a count of people. Its height is illustrative, and it is
+deliberately the same for every curve so that comparing two of them is a
+purely left-right comparison. When your city has its own published figures, the national curve is
 drawn beneath it, so you can see both how much higher local pay runs and how
 much wider it spreads. The bottom and top 10% have no published cutoff on the
 far side, so we state them in words rather than inventing a width for them.
@@ -20873,17 +20983,20 @@ for that metro. There's no equivalent for Intended Major mode: a major isn't
 an occupation, and the wage data behind it has no percentiles, so the chart
 simply doesn't appear there.
 
-**What if you skip college? The high school graduate baseline.** This section
+#### What if you skip college? The high school graduate baseline
+
+This section
 describes the *Straight from high school* mode. In *Going back to school* the
-baseline is not this figure at all — it's the two salaries you enter yourself
+baseline is not this figure at all. It's the two salaries you enter yourself
 (now, and in ten years without the degree), interpolated between, because
 someone returning at 49 was never choosing against a teenager. Everything
 below applies to the first-time path.
 
 Every major
-is compared against what a high school graduate earns, anchored to $51,688/year
-— real median pay for full-time workers 25 and older who only finished high
-school (based on $994/week in the second quarter of 2026, annualized). That
+is compared against what a high school graduate earns, anchored to
+$51,688/year, the real median pay for full-time workers 25 and older who only
+finished high school (based on $994/week in the second quarter of 2026,
+annualized). That
 anchor sets the level; the next section explains why the figure actually used
 in each year varies with age rather than sitting flat.
 [Source: BLS Current Population Survey, series LEU0252917300](https://www.bls.gov/news.release/wkyeng.htm).
@@ -20891,8 +21004,10 @@ We assume this grows a modest 2%/year (a stand-in for normal raises and
 cost-of-living bumps) since BLS doesn't publish a real year-by-year
 trajectory for this group the way it does for individual careers.
 
-**One thing to know about that baseline: it's an all-ages figure.** $51,688
-is the median across *every* high school graduate aged 25 and up — someone
+#### One thing to know about that baseline: it's an all-ages figure
+
+$51,688
+is the median across *every* high school graduate aged 25 and up: someone
 two years out of school and someone thirty years into a career, averaged
 together. Earnings typically peak in the late 40s and early 50s, so that
 blended median sits above what a young worker actually takes home. Meanwhile
@@ -20902,18 +21017,20 @@ window.""" + hs_young_wage_disclosure() + """
 Using that flat figure anyway would cut both ways. Early on it is too
 generous, which makes the degree look *worse* than it is. Later on it is too
 stingy, since 2%/year is slower than real pay climbs in one's twenties. The two
-errors run in opposite directions and partly cancel — but "partly cancel" is
+errors run in opposite directions and partly cancel, but "partly cancel" is
 not the same as "cancel", and neither error is one we have to accept.
 
-**So the baseline follows an age curve, and that is now the default.** Rather
+#### The baseline follows an age curve, and that is now the default
+
+ Rather
 than one flat figure for every year, each year of the comparison uses that
 age's own share of the all-ages median, from the same Census records: about
 $32,000 at 18, $41,000 at 24, reaching the published all-ages figure around 36.
-The BLS number still sets the *level* — only the *shape* comes from the
-microdata — so refreshing one doesn't invalidate the other.
+The BLS number still sets the *level* and only the *shape* comes from the
+microdata, so refreshing one doesn't invalidate the other.
 
-Be clear about which way this cuts. It **raises every degree's earnings
-premium**, because the thing being compared against is no longer overstated in
+Be clear about which way this cuts. It raises every degree's earnings
+premium, because the thing being compared against is no longer overstated in
 the years when a student is enrolled and earning nothing. It can move a major
 from "never worth it" to positive. That is the direction that flatters this
 tool's own conclusion, so it is worth saying plainly why we do it anyway: a
@@ -20922,7 +21039,7 @@ median for 25-to-65-year-olds is simply the wrong number to compare an
 order to look cautious, would be its own kind of dishonesty.
 
 There is no setting for this. It briefly shipped as one, and that was the wrong
-shape for it — an option implies the two answers are both defensible, and here
+shape for it. An option implies the two answers are both defensible, and here
 one of them isn't. If you want to see the comparison against the flat published
 figure, the numbers are all above: the baseline would be $51,688 in every year
 instead of climbing from about $32,000, which would make every degree on this
@@ -20936,43 +21053,48 @@ We still headline the published BLS number, because it's the one a reader can
 look up and check. BLS itself only breaks earnings out by education for ages
 25 and up, so there's no official under-25 figure for high school graduates;
 the one quoted above comes from the underlying Census survey records rather
-than a published table. What we won't do is manufacture a starting wage by running
-our own 2%/year assumption backwards — that 2% describes how wages drift over
-*calendar time*, not how one person's pay climbs with *age*, and the two
-aren't interchangeable. So read
+than a published table. What we won't do is manufacture a starting wage by
+running our own 2%/year assumption backwards. That 2% describes how wages
+drift over *calendar time*, not how one person's pay climbs with *age*, and
+the two aren't interchangeable. So read
 this comparison as "a degree versus a typical working adult without one,"
 rather than "versus your classmate who skipped college." It's the more
 demanding of the two tests.
 
-**How your loan payment is calculated.** *Standard 10-Year* just means a
+### How repayment is modelled
+
+#### How your loan payment is calculated
+
+*Standard 10-Year* just means a
 fixed payment every month for 10 years, using the standard math lenders
 use to make sure your last payment fully pays off both what you borrowed
 and the interest on it (this is called "amortization"). *Income-Driven
 Repayment (IDR)* works differently: your payment is 10% of your
-"discretionary income" — basically your salary minus a $22,000 living
-allowance — and after 20 years, whatever's still unpaid gets forgiven.
+"discretionary income", basically your salary minus a $22,000 living
+allowance, and after 20 years, whatever's still unpaid gets forgiven.
 This is a simplified version of real federal IDR plans, not an exact
 copy of federal rules. For Medicine, Law, and Athletic Training, both
 options are calculated using your loan *plus* the extra training debt
-described above — not just the loan by itself.
+described above, not just the loan by itself.
 
-**Which income-driven plan you can actually get depends on when you borrow.**
-The IDR option above is modelled on **IBR**, and IBR is closed to loans
+#### Which income-driven plan you can actually get depends on when you borrow
+
+The IDR option above is modelled on IBR, and IBR is closed to loans
 originated on or after **July 1, 2026** (the 2014 version covers loans from
 July 1, 2014 to July 1, 2026; the original version, at 25 years, covers loans
 before July 1, 2014). For borrowing from July 1, 2026 the income-driven plan
-is the **Repayment Assistance Plan (RAP)**: 30 years rather than 20, **1–10%
-of total income** rather than 10% of income above an allowance, a $10/month
+is the Repayment Assistance Plan (RAP): 30 years rather than 20, 1% to 10%
+of total income rather than 10% of income above an allowance, a $10/month
 minimum, all unpaid interest waived for the full term, and a $50/month
-principal match. **The dropdown offers the plans you could actually be repaid under.** For a
-start year of 2026 or later — which is every scenario the app can build, since
-the start-year list begins at the current year — those are OBBBA's two, and
-only those:
+principal match. **The dropdown offers the plans you could actually be repaid
+under.** For a start year of 2026 or later, which is every scenario the app
+can build since the start-year list begins at the current year, those are
+OBBBA's two, and only those:
 
-- **Repayment Assistance Plan (RAP)**, the default. 1–10% of total income, all
-  unpaid interest waived, remainder forgiven at 30 years (and taxed). The
-  payment never falls below **$10/month**, including after the $50-per-dependent
-  reduction — so unlike IBR, RAP has no $0 payment. Below about $10,000 of
+- **Repayment Assistance Plan (RAP)**, the default. 1% to 10% of total income,
+  all unpaid interest waived, remainder forgiven at 30 years (and taxed). The
+  payment never falls below $10/month, including after the $50-per-dependent
+  reduction, so unlike IBR, RAP has no $0 payment. Below about $10,000 of
   income the $10 floor *is* the payment.
 - **2026 Tiered Standard Plan.** A fixed term of 10/15/20/25 years depending on
   loan balance. Forgives nothing, so nothing is taxed either.
@@ -20984,30 +21106,33 @@ borrowers transitioning by July 1, 2028. Sources: U.S. Dept. of Education,
 Repayment"](https://www.ed.gov/about/news/press-release/fact-sheet-trump-administration-simplifying-student-loan-repayment),
 corroborated by Congressional Research Service In Focus IF13075, and
 [studentaid.gov's OBBBA definitions](https://studentaid.gov/announcements-events/big-updates/definitions#rap).
-Like this app's IDR model these are **administratively simplified, not an exact
-copy of federal rules** — confirm current terms at studentaid.gov before relying
+Like this app's IDR model these are administratively simplified, not an exact
+copy of federal rules. Confirm current terms at studentaid.gov before relying
 on them for a real decision.
 
-**Switching between income-driven plans is not symmetric**, and the repayment
-comparison models both directions. Payments made under any income-driven plan
-count toward discharge under RAP — so the "Qualifying payments already made"
-input subtracts them from the income-driven rows — but enrolling in RAP also
+#### Switching between income-driven plans is not symmetric
+
+The repayment comparison models both directions. Payments made under any income-driven plan
+count toward discharge under RAP, so the "Qualifying payments already made"
+input subtracts them from the income-driven rows. But enrolling in RAP also
 extends the repayment period to RAP's 30 years. In the other direction, RAP
 payments count toward IBR/ICR/PAYE only in months where the RAP payment was at
 least the 10-year Standard payment; for most income-driven borrowers that never
 happens, which the page states in the terms of the visitor's own figures.
 
-**SAVE borrowers are on a servicer-set clock.** Servicers issue a notice to
+#### SAVE borrowers are on a servicer-set clock
+
+Servicers issue a notice to
 leave SAVE that starts a 90-day window to choose a plan; a borrower who does
-not choose is enrolled automatically into Standard or the new Tiered Standard —
-both fixed-payment plans that forgive nothing, so the automatic outcome is the
-one that ignores income. This app states the window but deliberately prints **no
-date**: the source describes it as "the 90-day period communicated by their
+not choose is enrolled automatically into Standard or the new Tiered Standard.
+Both are fixed-payment plans that forgive nothing, so the automatic outcome is
+the one that ignores income. This app states the window but deliberately prints
+no date: the source describes it as "the 90-day period communicated by their
 servicer", which is per-borrower, and a fixed national date would claim a
 precision the source does not have.
 
 That return route is also time-limited: **ICR and PAYE terminate on July 1,
-2028**, after which IBR is the only plan RAP credit could count toward — and
+2028**, after which IBR is the only plan RAP credit could count toward. And
 IBR is closed to loans originated on or after July 1, 2026, so a borrower whose
 loans start after that date has RAP as their only income-driven option and no
 plan to switch back to at all. Sources: studentaid.gov guidance on changing IDR
@@ -21015,36 +21140,43 @@ plans
 ([studentaid.gov OBBBA definitions, "Repayment Assistance Plan"](https://studentaid.gov/announcements-events/big-updates/definitions#rap));
 TICAS, *Upcoming Changes to Income-Driven Repayment Plans* (ticas.org).
 
-**Standard 10-Year and IBR-style IDR are not offered**, because a loan
-originated on or after July 1, 2026 cannot be repaid under either. They are
-still modelled — tick **Compare against pre-2026 repayment plans** under
-Advanced Analysis to add them back — but as a comparison against the old rules,
-not as choices. A shared link naming a superseded plan is mapped to the plan
+#### Standard 10-Year and IBR-style IDR are not offered
+
+A loan originated on or after July 1, 2026 cannot be repaid under either. They are
+still modelled: tick **Compare against pre-2026 repayment plans** under
+Advanced Analysis to add them back. But they are there as a comparison against
+the old rules, not as choices. A shared link naming a superseded plan is mapped to the plan
 that replaced it (Standard 10-Year → Tiered Standard, IDR → RAP) rather than
 being dropped to whatever happens to be first. **Parent PLUS is not eligible
 for RAP**, which is why it sits in the non-forgivable pool described above.
 
-One simplification: the plan follows the **start** year, while in reality each
+One simplification: the plan follows the *start* year, while in reality each
 year's loans are judged by their own disbursement date, so a 2025 starter's
 later years would fall under RAP. OBBBA's interim exception keeps such a
 borrower on the old limits for up to three years, which is why the start year
 is a defensible proxy rather than an arbitrary one.
 
-**Forgiveness is taxed.** Since **January 1, 2026**, a balance discharged at
-the end of an income-driven plan is **taxed as ordinary income in the year it
-is discharged** — under RAP, IBR and the original IBR alike. This app does
-**not** model that tax: it lands twenty or thirty years out, at a rate set by
+#### Forgiveness is taxed
+
+Since **January 1, 2026**, a balance discharged at
+the end of an income-driven plan is taxed as ordinary income in the year it
+is discharged, under RAP, IBR and the original IBR alike. This app does
+*not* model that tax: it lands twenty or thirty years out, at a rate set by
 income and by tax law neither of which is knowable now, and a made-up figure
 would be worse than naming the liability. But it means a forgiveness figure is
-a bill deferred, not a bill cancelled, and on a professional degree — where the
-forgiven balance can exceed the amount borrowed — the tax alone can be a
+a bill deferred, not a bill cancelled. On a professional degree, where the
+forgiven balance can exceed the amount borrowed, the tax alone can be a
 six-figure event. Read every forgiveness number on this page with that in mind.
 [Source: TICAS, "Comparing Income-Driven Repayment Plans", September 16,
 2025](https://ticas.org/wp-content/uploads/2025/09/IDR-Plan-Chart-9.16.25.pdf).
 
-**Cumulative Gross Pay minus loan payments.** These figures are **before
-tax**. The ROI model sums each year's gross salary and subtracts the loan
-payments made in that window — it never applies income tax, because tax
+### Earnings, ROI and the net-position chart
+
+#### Cumulative Gross Pay minus loan payments
+
+These figures are *before
+tax*. The ROI model sums each year's gross salary and subtracts the loan
+payments made in that window. It never applies income tax, because tax
 depends on where you live and filing status, and applying it to one side of
 a comparison and not the other would distort it. The Real-World Take-Home
 section above is where tax is modelled, on a single year at a time. The same
@@ -21055,62 +21187,70 @@ The chart under the headline figures plots each path's position at the end
 of every year, not just at year 10. That's
 there because "who is ahead after ten years" and "when did they get ahead" are
 different questions, and the second one is usually the one being decided. A
-path that trains before it earns — medicine most of all — sits below zero for
+path that trains before it earns, medicine most of all, sits below zero for
 years and then climbs steeply; an endpoint alone reports that as a single
 verdict and hides the shape entirely. Every point is the same calculation as
 the headline number with the window shortened to that year, so the last point
 on the chart is exactly the figure above it, by construction rather than by
 coincidence. With *Count foregone earnings* on, the baseline starts several
-years ahead — whoever you are being compared against was earning while you
-were enrolled, whether that is the high school graduate or the job you left —
-and the chart says so above the plot, because that head start otherwise looks
-like the degree simply being behind.
+years ahead, because whoever you are being compared against was earning while
+you were enrolled, whether that is the high school graduate or the job you
+left. The chart says so above the plot, because that head start otherwise
+looks like the degree simply being behind.
 
-**How we calculate 10-Year ROI (return on investment).** We add up 10
+#### How we calculate 10-Year ROI (return on investment)
+
+We add up 10
 years of a major's earnings, subtract whatever loan payments you made
 during that time, and compare the result to what a debt-free high school
 graduate would have earned over the same 10 years. ROI% specifically
-compares that result to your *total investment* — not just your loan.
+compares that result to your *total investment*, not just your loan.
 Total investment means your effective loan principal (your loan, plus any
 extra training debt like medical school) *plus* whatever you type into
 **Personal Contribution ($)**: savings, scholarships, or family money that
 went toward school without being borrowed. Personal Contribution only
-affects this ROI% comparison — it's never added to the loan itself,
+affects this ROI% comparison. It's never added to the loan itself,
 since you don't pay interest on money you never borrowed. This means two
 people with the exact same major and loan, but different Personal
-Contributions, will see different ROI% numbers — on purpose. ROI here
+Contributions, will see different ROI% numbers, on purpose. ROI here
 means "return on everything you actually put in," not just "return on
 your loan."
 
-**Why we adjust for cost of living.** A dollar goes a lot further in
+### Cost of living, taxes and take-home pay
+
+#### Why we adjust for cost of living
+
+A dollar goes a lot further in
 Columbus than it does in San Francisco. So both sides of the ROI
-comparison — the major's outcome and the high-school-grad baseline — get
+comparison, the major's outcome and the high-school-grad baseline, get
 adjusted for the cost of living in whatever City/Metro Area you picked
 (we assume the high school grad lives in the same city, since this app
 only has one city selector). That's what **"(COL-Adjusted)"** means next
 to "10-Year Earnings Premium" and the ROI charts. Picking "National
 Average" is the same as not adjusting at all. One thing that does *not*
 get cost-of-living adjusted: your total investment (debt + personal
-contribution) — you owe a fixed dollar amount no matter where you live,
+contribution). You owe a fixed dollar amount no matter where you live,
 so that number stays as-is. In Compare Mode, both scenarios share one
 city selector rather than each getting their own.
 
-**Taxes.** A salary is the amount *before* taxes, but what actually pays a
-loan is your **take-home pay** — what's left after taxes come out of each
-paycheck — so we subtract real taxes to get there. We use the actual 2024
+#### Taxes
+
+A salary is the amount *before* taxes, but what actually pays a
+loan is your take-home pay, meaning what's left after taxes come out of each
+paycheck, so we subtract real taxes to get there. We use the actual 2024
 federal income-tax rates for someone filing on their own with no kids (IRS
-Rev. Proc. 2023-34), plus **FICA** — the Social Security and Medicare taxes
+Rev. Proc. 2023-34), plus **FICA**, the Social Security and Medicare taxes
 taken out of every U.S. paycheck (6.2% for Social Security, up to a $168,600
 income cap, and 1.45% for Medicare). To keep it simple we don't model
 itemized deductions, tax credits, or the extra Medicare tax on income above
 $200K (none of the careers here pay that much). For state tax, we
-use real tax brackets for New York, California, Ohio, and Minnesota — a
+use real tax brackets for New York, California, Ohio, and Minnesota, because a
 single flat rate would badly overstate what most people actually pay
 (New York's top rate of 10.9%, for example, only kicks in above $25
 million). Illinois, Georgia, Colorado, Texas, Pennsylvania, Arizona,
 Michigan, North Carolina, and Massachusetts are genuinely flat-rate
 states (Massachusetts also has a 4% surtax above $1M, which we skip for
-the same reason we skip the federal Additional Medicare Tax — no major's
+the same reason we skip the federal Additional Medicare Tax: no major's
 trajectory here gets close); Florida, Washington, and Tennessee charge no
 state income tax at all. New York City's local tax is approximated as a
 flat 3.5%
@@ -21118,42 +21258,51 @@ flat 3.5%
 depending on income, so 3.5% is a reasonable stand-in).
 [Source: Tax Foundation, 2024 State Income Tax Rates](https://taxfoundation.org/data/all/state/state-income-tax-rates-2024/).
 
-**How "cost of living" is measured.** Each city's cost-of-living number
+#### How "cost of living" is measured
+
+Each city's cost-of-living number
 comes from real government data on how far a dollar actually goes in each
 city (the U.S. Bureau of Economic Analysis's Regional Price Parities, 2023),
 by way of the Tax Foundation's "Real Value of $100 by Metro" report. In
 short: if $100 buys less in a city than the national average, that city's
 cost-of-living number goes up. "National Average" doesn't correspond to
-any one state, which is why we show its tax rate as "N/A" instead of "$0"
-— those mean different things.
+any one state, which is why we show its tax rate as "N/A" instead of "$0".
+Those mean different things.
 
-**What the two career stages in Real-World Take-Home mean.** That section
+#### What the two career stages in Real-World Take-Home mean
+
+That section
 shows "Starting (Year 1)" and "Mid-Career (Year 10)" side by side. They are
 two windows into one story, not two different stories: your loan payoff
 schedule and your ROI numbers always simulate a full, real year-by-year path
 from year 1, and neither stage restarts it from a different point. Year 1 is
-the harder year — the loan payment takes its largest bite out of take-home
-pay then — which is why the charts below the figures describe that stage.
+the harder year, because the loan payment takes its largest bite out of
+take-home pay then, which is why the charts below the figures describe that
+stage.
 
-**How the "Student Loan Payment / Take-Home Ratio" color coding works.** This
-percentage (shown below the take-home chart) is color-coded against two real, commonly-cited
-guidelines — Green ("Manageable") means your loan payment is at or under 10%
-of your gross (before-tax) monthly income, a widely-cited student-loan
-budgeting guideline
+#### How the "Student Loan Payment / Take-Home Ratio" color coding works
+
+This
+percentage (shown below the take-home chart) is color-coded against two real,
+commonly-cited guidelines. Green ("Manageable") means your loan payment is at
+or under 10% of your gross (before-tax) monthly income, a widely-cited
+student-loan budgeting guideline
 (e.g. [SoFi](https://www.sofi.com/learn/content/percentage-of-income-towards-student-loans/)).
-Red ("High") means it's over 36% — the limit mortgage lenders use for *all*
+Red ("High") means it's over 36%, the limit mortgage lenders use for *all*
 of a borrower's debt payments added together, so at that level this one
 student loan is already eating the entire share of income a lender expects
 to cover every debt you have. Orange ("Elevated") is everything in between.
 Those guidelines are normally written as a percentage of *before-tax*
 income, but this app measures the payment against your *take-home* (after-tax)
-pay — the money you'd actually have to make the payment with. So we shift both
+pay, the money you'd actually have to make the payment with. So we shift both
 cutoffs onto a take-home basis using this scenario's real tax rate (the share
 of income that goes to taxes), rather than a one-size-fits-all guess. Hover
 over the percentage to see the exact cutoffs for your scenario.
 
-**How "Compare Two Scenarios" works.** Comparing two scenarios runs the
-exact same calculations described above, just twice — once for each
+#### How "Compare Two Scenarios" works
+
+Comparing two scenarios runs the
+exact same calculations described above, just twice, once for each
 scenario, with no shortcuts or different math. Right now, comparisons
 only cover loan payoff and 10-Year ROI; take-home pay and cost of living
 aren't compared side by side yet, since that would need each scenario to
@@ -21162,35 +21311,41 @@ sidebar inputs; turning on Compare Mode adds Scenario B next to it rather
 than replacing anything, so turning it back off never loses what you've
 entered.
 
-**Where school cost and debt numbers come from.** Cost of Attendance and
+### School cost and how your loan is built
+
+#### Where school cost and debt numbers come from
+
+Cost of Attendance and
 debt figures come from the U.S. Department of Education's College
 Scorecard ([collegescorecard.ed.gov/data](https://collegescorecard.ed.gov/data/)).
 In-state and out-of-state Cost of Attendance are pre-calculated for over
 5,000 real U.S. schools (see `clean_college_scorecard.py` for exactly how)
-rather than looked up live each time. Typical debt-at-graduation — the
-median federal loan debt that graduates who borrowed leave with — is
+rather than looked up live each time. Typical debt-at-graduation, the
+median federal loan debt that graduates who borrowed leave with, is
 looked up live instead, so it works for any school in College Scorecard's
 database. Cost of Attendance is shown for context, but the debt figure now
-does double duty: it's also the **default loan amount** (see the next
+does double duty: it's also the default loan amount (see the next
 section). Each scenario has its own school
 field, so Compare Mode can hold, say, "Computer Science at School A"
 against "Computer Science at School B." When your school is found, Cost
 of Attendance below auto-fills using in-state or out-of-state pricing,
 based on whether you ticked **I'd pay in-state tuition**. If your school isn't
 found, or you'd rather enter your own number, typing over the auto-filled
-value always works — it won't get overwritten later.
+value always works, and it won't get overwritten later.
 
-**How your loan amount is actually calculated.** A **Loan estimate** toggle
+#### How your loan amount is actually calculated
+
+A **Loan estimate** toggle
 in the sidebar lets you choose how the loan is built, and applies to both
 scenarios in Compare Mode:
 
-*Simplified* (the default) uses the school's **median completer debt** from
-College Scorecard — the median federal loan debt that graduates of that
+*Simplified* (the default) uses the school's median completer debt from
+College Scorecard, the median federal loan debt that graduates of that
 school who borrowed actually leave with. Because it's a real-world outcome,
 you get a realistic answer just by picking a school, without entering any
 cost or aid. One caveat: it counts federal loans among students who borrowed
 *and* completed, so it can understate the total for someone who will also
-take private or parent loans, or who won't finish — switch to Detailed to
+take private or parent loans, or who won't finish. Switch to Detailed to
 model those.
 
 *Detailed* builds the loan from your own **Cost of Attendance, Personal
@@ -21205,32 +21360,37 @@ debt (one that reports none, the College Tier estimator, or the live lookup
 being unavailable), Simplified isn't offered and Detailed is used.
 
 Either way, whatever ends up in the **Total Loan Amount** field is what every
-calculation on the page uses — you can also type any amount directly (e.g. a
+calculation on the page uses. You can also type any amount directly (e.g. a
 real financial aid offer) to override it.
 
-**Federal caps and gap financing (Detailed mode).** Federal Direct
-(Subsidized/Unsubsidized) loans are capped: about **$5,500 / $6,500 /
-$7,500 / $7,500** per year for a dependent undergraduate (higher if
+#### Federal caps and gap financing (Detailed mode)
+
+Federal Direct
+(Subsidized/Unsubsidized) loans are capped: about $5,500 / $6,500 /
+$7,500 / $7,500 per year for a dependent undergraduate (higher if
 independent), so roughly **$27,000 over four years** ($45,000 independent).
-Need above that limit can't be met with Direct loans — it comes from **Direct
-PLUS or private/alternative loans** at a higher rate, plus origination fees
-(1.057% on Direct Subsidized/Unsubsidized, 4.228% on Direct PLUS — stable
+Need above that limit can't be met with Direct loans. It comes from Direct
+PLUS or private/alternative loans at a higher rate, plus origination fees
+(1.057% on Direct Subsidized/Unsubsidized, 4.228% on Direct PLUS, both stable
 since October 2020). So Detailed mode splits your loan into the capped federal
-tranche (at your **Federal loan interest rate**) and a **gap tranche** (at your **Rate on loans
-above the federal cap**), grosses each up for its fee, and repays the combined balance
-at the principal-weighted **blended** rate — the breakdown is shown under the
+tranche (at your **Federal loan interest rate**) and a gap tranche (at your
+**Rate on loans above the federal cap**), grosses each up for its fee, and
+repays the combined balance at the principal-weighted blended rate. The
+breakdown is shown under the
 loan metrics. The **FAFSA dependency** toggle sets the cap; professional-school
-debt (medicine, dentistry, law) is handled separately — see below. Interest
-rates reset every July 1: for loans first disbursed in **2026–27** the
-undergraduate Direct rate is **6.52%**, graduate/professional Direct
-Unsubsidized is **8.07%**, and Direct PLUS is **9.07%**. The app defaults to
+debt (medicine, dentistry, law) is handled separately, see below. Interest
+rates reset every July 1: for loans first disbursed in 2026-27 the
+undergraduate Direct rate is 6.52%, graduate/professional Direct
+Unsubsidized is 8.07%, and Direct PLUS is 9.07%. The app defaults to
 6.5% and 8.5% as round placeholders, so enter your own. Loan limits, rates, and fees: U.S. Department of Education / Federal
 Student Aid ([studentaid.gov/understand-aid/types/loans/interest-rates](https://studentaid.gov/understand-aid/types/loans/interest-rates)
 and [.../subsidized-unsubsidized](https://studentaid.gov/understand-aid/types/loans/subsidized-unsubsidized)).
 
-**The gap is no longer all federally borrowable (OBBBA, July 1, 2026).** Direct
+#### The gap is no longer all federally borrowable (OBBBA, July 1, 2026)
+
+Direct
 PLUS for parents used to be limited only by *cost of attendance minus other
-aid* — in practice no ceiling, which is how the gap tranche above was
+aid*, in practice no ceiling, which is how the gap tranche above was
 originally modelled. It is now capped at **$20,000 per year** and **$65,000 in
 total** for one student, across both parents combined. Both halves bind, and
 the aggregate is the one that decides a four-year degree: four years at the
@@ -21239,92 +21399,104 @@ undergraduate can therefore borrow about **$27,000 Direct + $65,000 Parent
 PLUS = $92,000** of federal money for a four-year program; anything above that
 is private borrowing, and the app now says so rather than quietly financing it
 as though a federal loan existed. **Parent PLUS does not exist for an
-independent student** — nobody is borrowing on their behalf — so their entire
-gap above the $45,000 Direct limit is private. Undergraduate Direct limits
-themselves are unchanged by OBBBA. Not modelled: the **interim exception**,
+independent student**, since nobody is borrowing on their behalf, so their
+entire gap above the $45,000 Direct limit is private. Undergraduate Direct
+limits themselves are unchanged by OBBBA. Not modelled: the interim exception,
 which preserves the old limits for a student already enrolled on June 30, 2026
-who had already taken a Direct Loan — it can only loosen the cap, and it can't
+who had already taken a Direct Loan. It can only loosen the cap, and it can't
 apply to someone deciding where to enrol now.
-[Source: studentaid.gov, OBBBA – Important Definitions, "PLUS loans for parents"
+[Source: studentaid.gov, OBBBA "Important Definitions", "PLUS loans for parents"
 annual and aggregate tables](https://studentaid.gov/announcements-events/big-updates/definitions).
 
-**Professional school: no more Grad PLUS (OBBBA, July 1, 2026).** Medical,
+### Graduate and professional school
+
+#### Professional school: no more Grad PLUS (OBBBA, July 1, 2026)
+
+Medical,
 dental and law school debt used to be borrowed as $20,500/year unsubsidized
 with everything above that on **Grad PLUS** at *cost of attendance minus other
-aid* — no ceiling — which is why this app modelled it as gap financing. Direct
-PLUS for graduate and professional borrowers **no longer exists**. The
-unsubsidized limit rose to **$50,000/year** with a **$200,000 aggregate** for
+aid*, with no ceiling, which is why this app modelled it as gap financing.
+Direct PLUS for graduate and professional borrowers **no longer exists**. The
+unsubsidized limit rose to $50,000/year with a $200,000 aggregate for
 professional study, and there is nothing federal behind it. So that debt is now
 split at its own cap, at the published graduate/professional Direct rate
 (8.07%), with the remainder private:
 
-Against the national averages that gives **$5,000 private** for Medicine
-($205,000 vs a $200,000 ceiling), **$93,900** for Dentistry ($293,900), and
+Against the national averages that gives $5,000 private for Medicine
+($205,000 vs a $200,000 ceiling), $93,900 for Dentistry ($293,900), and
 nothing for Law ($130,000 against 3 × $50,000 = $150,000). **Name your actual
 school in the sidebar and these change**, often a lot: across the schools that
-publish a figure, **43% of medical and 78% of dental schools** sit above the
+publish a figure, 43% of medical and 78% of dental schools sit above the
 $200,000 ceiling, so for many the private share is larger than the national
-average implies — and for some it is nothing at all.
+average implies. For some it is nothing at all.
 
-**Graduate degrees (master's and doctoral).** BLS publishes the education a
+#### Graduate degrees (master's and doctoral)
+
+BLS publishes the education a
 career is normally *entered* with, and for **113 of the 825 occupations here**
-that is a master's or a doctorate — Statisticians, Economists, Epidemiologists,
+that is a master's or a doctorate: Statisticians, Economists, Epidemiologists,
 School Psychologists, Education Administrators and others. Those paths are
-modelled as a bachelor's **plus** the graduate degree: **6 years** for a
-master's, **9** for a doctorate. Everything follows from that — the tuition
+modelled as a bachelor's *plus* the graduate degree, so 6 years for a
+master's and 9 for a doctorate. Everything follows from that: the tuition
 charged, the years of foregone earnings, and the age the debt-free high school
 graduate is compared from (24 and 27 rather than 22).
 
 The **loan limits differ too**, and by more than the length does. Graduate
-Direct Unsubsidized is **$20,500/year against a $100,000 aggregate** — one flat
-annual figure, not the $5,500/$6,500/$7,500 undergraduate ladder — at the
-graduate Direct rate of **8.07%**. And there is **no Parent PLUS**: it exists
+Direct Unsubsidized is $20,500/year against a $100,000 aggregate, one flat
+annual figure rather than the $5,500/$6,500/$7,500 undergraduate ladder, at the
+graduate Direct rate of 8.07%. And there is **no Parent PLUS**: it exists
 only for dependent undergraduates, and Grad PLUS, which used to fill that gap,
 was abolished by OBBBA. Anything above the graduate ceiling is private
 borrowing.
 
 In **Intended Major** mode there is no BLS education level to read (a major is
 not an occupation), so the sidebar asks. The doctoral default of 5 years is a
-placeholder — real programmes run 4 to 8 — and is editable.
+placeholder, since real programmes run 4 to 8, and it is editable.
 
-**What the app cannot tell you**, and this matters for reading the premium: it
-does not model what a graduate degree *adds*. The salary shown is what people
+#### What the app cannot tell you
+
+This matters for reading the premium: the app does not model what a graduate
+degree *adds*. The salary shown is what people
 already in that occupation earn, which is a figure that already includes their
 credential. So the earnings premium is the return on the whole path from high
 school, not the return on the master's by itself. Separating those would need
 salary data by credential *within* an occupation, which BLS does not publish.
 
-**Where a graduate cost figure comes from, when there is one.** There is no
+#### Where a graduate cost figure comes from, when there is one
+
+There is no
 graduate cost of attendance in any federal dataset. What Scorecard does publish
-is median **debt at graduation** by school and field, so where you name a school
-and your field publishes a figure, that is offered as the loan — already net of
-scholarships and assistantships, and overridable. Only about **a fifth** of
-school-and-field combinations publish a master's median and **a sixteenth** a
+is median debt at graduation by school and field, so where you name a school
+and your field publishes a figure, that is offered as the loan, already net of
+scholarships and assistantships, and overridable. Only about a fifth of
+school-and-field combinations publish a master's median and a sixteenth a
 doctoral one, so most of the time you will be entering your own cost. Same
 caveats as the professional figures below: they include Grad PLUS, which no
 longer exists, and they are pooled across award years.
 
-**Where the school-specific figures come from.** College Scorecard publishes
+#### Where the school-specific figures come from
+
+College Scorecard publishes
 cumulative debt at graduation for each school × field of study × credential
 level. This app uses the **First Professional** level for medicine, law and
-dentistry — 381 schools that publish a figure. The definition is the one this
+dentistry, which is 381 schools that publish a figure. The definition is the one this
 model needs: *"cumulative loan debt only includes loans disbursed at the same
 academic level as the evaluated credential level"*, so it is graduate borrowing
 only and excludes the undergraduate loan charged separately above. It measures
-what graduates actually **borrowed**, not what the school charges, so it is
-already net of scholarships and family money — which is why Harvard's medical
-school shows **$99,160** against a $205,000 national average, and why the
-overall range runs from about **$48,000 to $330,000**.
+what graduates actually borrowed, not what the school charges, so it is
+already net of scholarships and family money. That's why Harvard's medical
+school shows $99,160 against a $205,000 national average, and why the
+overall range runs from about $48,000 to $330,000.
 
 Three limits worth knowing:
 
 - **These medians include Grad PLUS**, which OBBBA abolished on July 1, 2026.
-  So every figure describes borrowing that a student starting now **cannot
-  replicate federally** — the app applies the new $200,000 ceiling to it and
+  So every figure describes borrowing that a student starting now cannot
+  replicate federally. The app applies the new $200,000 ceiling to it and
   shows the excess as private, which is the honest translation, but the
   underlying number came from a world with a loan that no longer exists.
-- **Not every school publishes one.** Small programs are privacy-suppressed —
-  Yale Law is one — so they are absent from the picker and fall back to the
+- **Not every school publishes one.** Small programs are privacy-suppressed,
+  Yale Law among them, so they are absent from the picker and fall back to the
   national average rather than showing a wrong number.
 - **The data is pooled across award years and is a few years old.** Treat it as
   a reliable signal of how schools differ *from each other*, and a rough one
@@ -21332,29 +21504,29 @@ Three limits worth knowing:
 [Source: College Scorecard, Most Recent Data by Field of Study, released
 June 10, 2026](https://collegescorecard.ed.gov/data/).
 
-There is **no graduate cost-of-attendance** anywhere in College Scorecard —
-`COSTT4_A` and the tuition fields are undergraduate figures — which is why this
+There is **no graduate cost-of-attendance** anywhere in College Scorecard.
+`COSTT4_A` and the tuition fields are undergraduate figures, which is why this
 uses debt rather than cost. The undergraduate Cost of Attendance in the sidebar
 prices the bachelor's degree only.
 
-The aggregate covers graduate and professional study only — undergraduate
+The aggregate covers graduate and professional study only. Undergraduate
 borrowing does not count against it, though the pre-OBBBA $138,500 limit it
 replaced did. Graduate (non-professional) study has its own lower limits
 ($20,500/year, $100,000 aggregate); no path in this app carries graduate debt
 that isn't professional, so those don't apply to anything shown here. There is
 also a **$257,500 lifetime maximum** on a student's own borrowing, which the
 caps above already keep every path in this app well below.
-[Source: studentaid.gov, OBBBA – Important Definitions, "Professional students"
+[Source: studentaid.gov, OBBBA "Important Definitions", "Professional students"
 tables](https://studentaid.gov/announcements-events/big-updates/definitions).
 
-*Worth knowing:* which programs count as "professional" is partly unsettled.
-The Department of Education initially limited it to **11 fields**; on **June 24,
+*Still unsettled:* which programs count as "professional".
+The Department of Education initially limited it to 11 fields; on **June 24,
 2026** a court stayed part of that definition and temporarily expanded the list
 to include nursing (M.S.N./D.N.P.), physical and occupational therapy, athletic
 training, the psychology doctorates and others. The Department is appealing,
 final briefing is due **December 4**, and if the stay is lifted the list reverts
 to the original 11. **Medicine, dentistry and law appear on both lists**, so the
-figures above hold either way — but a student in one of the temporarily-added
+figures above hold either way. But a student in one of the temporarily-added
 programs could see their limit fall back to the graduate $20,500/year, possibly
 mid-year. NASFAA's guidance is to have a backup plan before borrowing the full
 $50,000 on the strength of the stay.
@@ -21362,19 +21534,21 @@ $50,000 on the strength of the stay.
 July 30, 2026](https://www.nasfaa.org/uploads/documents/OB3_Temp_Changes_Prof_Degree.pdf).
 
 *One more ceiling this app can't see:* $50,000/year is the federal maximum, not
-an entitlement — **schools may set their own lower limits** for a program, and
+an entitlement. **Schools may set their own lower limits** for a program, and
 have the authority to do so. The model assumes the full amount is available, so
 where a school caps it lower the private shortfall is larger than shown.
 
-*A simplification worth knowing:* both non-federal tranches are priced at your
+*A simplification:* both non-federal tranches are priced at your
 single **Rate on loans above the federal cap**. Real private loans are credit-priced and
 generally cost more than Direct PLUS, so the private portion above is if
-anything *understated* — the app has one non-federal rate input and inventing
+anything *understated*. The app has one non-federal rate input, and inventing
 a spread would be a made-up number. The origination fee is applied to the PLUS
 portion only, since private lenders generally charge none.
 
-**Only federal Direct loans are forgiven.** Under **Income-Driven Repayment**
-or **RAP**, whatever is left at the end of the term is written off — but that
+#### Only federal Direct loans are forgiven
+
+Under **Income-Driven Repayment**
+or **RAP**, whatever is left at the end of the term is written off, but that
 applies to the student's own Direct loans only. **Parent PLUS is the parent's
 loan and is not IDR-eligible; private loans are outside the federal system
 entirely.** So the app amortises the two pools separately: the federal part on
@@ -21382,61 +21556,71 @@ the income-driven plan with forgiveness at the end, the PLUS-and-private part
 on an ordinary fixed schedule that runs to completion. The payment you see is
 the sum of both, and the payoff date is when the *later* one clears.
 
-This matters more than it sounds. The model used to repay one blended balance,
-which forgave private money along with federal — and because income-driven
+That separation does real work. The model used to repay one blended balance,
+which forgave private money along with federal, and because income-driven
 payments can sit below the interest, the balance grew and the imaginary
-write-off grew with it. On the Berkeley example above that was a **$464,000**
+write-off grew with it. On the Berkeley example above that was a $464,000
 forgiveness that could never happen. Under OBBBA the non-forgivable share is
 larger than it used to be, so this would only have got worse.
 
 Simplified mode's median debt is **federal loans only** and excludes
 PLUS/private entirely, so no split applies there.
 
-**Getting your own numbers instead of school averages.** The Cost of
-Attendance we auto-fill is a school-wide *average sticker price* — what a
-typical student is charged before aid. Two free, official tools give you
+### Getting numbers specific to you
+
+#### Getting your own numbers instead of school averages
+
+The Cost of
+Attendance we auto-fill is a school-wide *average sticker price*, meaning what
+a typical student is charged before aid. Two free, official tools give you
 your own figures, and the **🎯 Get Your Real Numbers** section near the top
 links to both. Your school's **Net Price Calculator** (each U.S. college is
 federally required to host one; find yours through the Department of
 Education's directory at
 [collegecost.ed.gov/net-price](https://collegecost.ed.gov/net-price)) returns
-your *net price* — cost after grants and scholarships — which you enter as
-Cost of Attendance while setting Grants & Scholarships to $0. The federal
+your *net price*, meaning cost after grants and scholarships, which you enter
+as Cost of Attendance while setting Grants & Scholarships to $0. The federal
 [Student Aid Estimator](https://studentaid.gov/aid-estimator/) estimates your
 Student Aid Index (SAI), which you enter as Personal Contribution. These
 compose correctly: net price removes grants but not the family contribution,
 so subtracting the SAI on top of it is not double-counting.
 
-**Community-college path ("2+2").** The "Community college path" selector
+### The community-college paths
+
+#### The "2+2" transfer path
+
+The "Community college path" selector
 models spending the first """ + str(COMMUNITY_COLLEGE_YEARS) + """ years at a community college and then
 transferring to the 4-year school to finish the **same** bachelor's degree.
 The degree, earnings, and the ~4-year enrollment timeline are identical to
-the direct-to-4-year path — only the cost and how it's paid change. There
-are two on modes:
+the direct-to-4-year path. Only the cost and how it's paid change. There
+are two modes:
 
 - **Full-time, then transfer.** You attend community college full-time for
   """ + str(COMMUNITY_COLLEGE_YEARS) + """ years, then transfer. These are still foregone-earnings years (you're
   enrolled, not working), exactly like the direct path.
 - **Part-time while working, then transfer.** You work full-time and attend
-  community college part-time, so those years are **not** foregone earnings —
-  you're earning roughly a high-school-graduate wage — and then you attend the
+  community college part-time, so those years are *not* foregone earnings.
+  You're earning roughly a high-school-graduate wage, and then you attend the
   4-year school full-time to finish. This is usually the most financially
   favorable path. Its earnings advantage only shows up when *Count foregone
   earnings during enrollment* is on (which puts every path on one age-18
   timeline); its lower debt shows up either way.
 
 When the profession you picked is entered with an **associate's degree**, there
-is nothing to transfer to — a community college awards that degree itself — so
-the selector offers **"the entire degree, no transfer"** in place of the 2+2
+is nothing to transfer to, since a community college awards that degree itself,
+so the selector offers **"the entire degree, no transfer"** in place of the 2+2
 option. Choosing it puts the whole program at community-college prices, which
 is what most people in these fields actually do, and typically brings the loan
 to **$0**. The comparison is still against the same high-school-graduate
 baseline, so this isn't a way to make a career look good by spending less: the
 earnings side is untouched.
 
-**Bachelor's awarded by the community college (CCB).** A fourth option appears
+#### Bachelor's awarded by the community college (CCB)
+
+A fourth option appears
 only when the school you picked actually awards its own bachelor's degrees
-while still granting mostly sub-bachelor's credentials — that is, when it is a
+while still granting mostly sub-bachelor's credentials. That is, when it is a
 community college offering a *community college baccalaureate*. Twenty-four
 states now allow this, and the share of community colleges doing it rose from
 about 2% in 2004 to roughly 17% in 2022. It is a genuinely different thing from
@@ -21448,10 +21632,10 @@ Two consequences the model takes seriously:
 - **These years are financed.** Every other community-college path here assumes
   the years are covered by Pell, work and savings, which is defensible for two
   years at a few thousand dollars each. A whole four-year degree is not, so a
-  CCB path builds an ordinary loan — and it carries the same federal Direct and
+  CCB path builds an ordinary loan, and it carries the same federal Direct and
   Parent PLUS limits as a degree earned anywhere else.
 - **Pricing may escalate.** Some community colleges charge a higher per-credit
-  rate for junior and senior coursework — about 40% more — while others charge
+  rate for junior and senior coursework, about 40% more, while others charge
   one rate throughout. The default here is one rate; the checkbox models the
   other. Check your college's tuition page, because it changes the total by
   roughly $3,000.
@@ -21460,7 +21644,7 @@ Two consequences the model takes seriously:
 these degrees (Acton, Morales, Cortes, Turner & Miller, NBER Working Paper
 34684, 2026) finds CCB graduates earning about 5.5% less a year than people
 with the same degree in the same field from a four-year school, and clearly
-more than people who stopped at an associate's — with enormous variation by
+more than people who stopped at an associate's, with enormous variation by
 field, from no gap at all in nursing and criminal justice to roughly $30,000 a
 year in computing. Those figures are measured one year after graduation and
 describe *who chose each path*, not what the choice did to them. This
@@ -21469,8 +21653,10 @@ them to your earnings: every salary here comes from the occupation or major you
 chose and never from the school, and a descriptive gap is not a licence to
 break that.
 
-**Community college is assumed paid without loans.** In both modes the
-community-college years add **$0 to the loan** — most community-college
+#### Community college is assumed paid without loans
+
+In both modes the
+community-college years add **$0 to the loan**, because most community-college
 students don't borrow (it's low-cost, and Pell grants or part-time work
 cover it). Only the two university years are financed. The community-college
 tuition is still counted as a real cost: it enters the ROI as an out-of-pocket
@@ -21478,9 +21664,11 @@ tuition is still counted as a real cost: it enters the ROI as an out-of-pocket
 **not** double-counted against your per-year Personal Contribution, which the
 model applies only to the financed university years.
 
-**State-level community-college cost.** Community-college tuition varies
-widely by state — from roughly $1,400/yr (California) to $8,000/yr (South
-Dakota) — so the **Community College State** dropdown sets the default cost
+#### State-level community-college cost
+
+Community-college tuition varies
+widely by state, from roughly $1,400/yr (California) to $8,000/yr (South
+Dakota), so the **Community College State** dropdown sets the default cost
 from average annual in-district tuition & fees for that state (national
 average **""" + fmt_money(COMMUNITY_COLLEGE_COA_DEFAULT) + """/yr**). It defaults to your selected 4-year school's
 state (then your work city's state), on the assumption you attend community
@@ -21489,49 +21677,58 @@ Statistics (NCES), Digest of Education Statistics, via the Education Data
 Initiative (educationdata.org), 2025. These are tuition & fees, not a full
 Cost of Attendance, so the modeled figure reflects the tuition a transfer
 student living at home pays; the field is editable for any other situation.
-This deliberately does **not** apply a transfer-student earnings penalty —
-the resulting degree is treated as identical to one earned by starting at the
+This deliberately does *not* apply a transfer-student earnings penalty.
+The resulting degree is treated as identical to one earned by starting at the
 4-year school (optimistic but common; real transfer outcomes vary). To
 compare paths directly, set a different path in each scenario in Compare
 Mode.
 
-**Accounting for a delayed start.** "Year Starting Undergraduate School"
+### Timing, overrides and inflation
+
+#### Accounting for a delayed start
+
+"Year Starting Undergraduate School"
 lets you model not starting college right away. If you pick a future year,
 the Cost of Attendance you entered (today's price) is first projected
 forward to that year using the same estimated COA inflation rate described
-above, *before* it's grown further across the 4 years of enrollment —
+above, *before* it's grown further across the 4 years of enrollment:
 `Effective Year-1 COA = Cost of Attendance × (1 + inflation rate)^(years
 until start)`. Leaving it at the current year changes nothing. Note that
-only Cost of Attendance is projected this way — starting/mid-career
+only Cost of Attendance is projected this way. Starting/mid-career
 salaries, taxes, take-home pay, and cost-of-living figures throughout this
 tool are intentionally kept in **today's real dollars**, not projected
 forward, since there's no equally well-sourced wage-inflation estimate to
 apply the same way. This makes every dollar figure here a real (inflation-
 adjusted), apples-to-apples comparison rather than a nominal one.
 
-**Overriding the Total Loan Amount.** The "Total Loan Amount ($)" field
-(just above the Federal Direct rate) is pre-filled for you — with the
+#### Overriding the Total Loan Amount
+
+The "Total Loan Amount ($)" field
+(just above the Federal Direct rate) is pre-filled for you, with the
 school's reported median debt in **Simplified** mode, or the cost-based
-per-year total in **Detailed** mode — but you can type over it with any
+per-year total in **Detailed** mode. But you can type over it with any
 other number, for example the real total from an actual financial aid offer
 letter. Once you do, every calculation on this page uses your typed number
 instead (in Detailed, the per-year table still shows the calculated
 breakdown, for reference). Your override sticks across reruns, but refreshes
 back to the pre-filled default the next time you change something that moves
-it — switching schools or the Loan estimate mode, or (in Detailed) editing
-Cost of Attendance, Personal Contribution, or Grants & Scholarships — the
+it: switching schools or the Loan estimate mode, or (in Detailed) editing
+Cost of Attendance, Personal Contribution, or Grants & Scholarships. That's the
 same way the Cost of Attendance field itself auto-fills from a school lookup
 until you type over it.
 
-**Why Grants & Scholarships and Personal Contribution are treated
-differently.** Personal Contribution counts toward your "total
+#### Why Grants & Scholarships and Personal Contribution are treated differently
+
+Personal Contribution counts toward your "total
 investment" (the ROI% comparison) because it's money you or your family
-actually gave up — a real cost to you. Grants & Scholarships is free
+actually gave up, a real cost to you. Grants & Scholarships is free
 money from someone else: it shrinks how much you have to borrow, but
 since it was never your money to begin with, it's left out of your "total
 investment" on purpose.
 
-**How we estimate tuition inflation for your specific school.** We
+#### How we estimate tuition inflation for your specific school
+
+We
 compare a school's real Cost of Attendance in 2018 versus 2022 (from
 College Scorecard) and calculate the steady yearly growth rate that would
 turn one into the other: `(coa_2022 / coa_2018) ** (1/4) - 1`. This kind
@@ -21545,12 +21742,16 @@ the type of school: **2.7%/year** for public schools, **3.9%/year** for
 private non-profit schools (both from the College Board's 2024 tuition
 pricing report). **Private for-profit schools** don't have an equally
 solid recent number available, so we use **2.5%/year** as an educated
-estimate based on general inflation trends — this one is a judgment call,
+estimate based on general inflation trends. This one is a judgment call,
 not a number we found in a report. If we don't even know what type of
 school it is, we default to the public-school rate.
 
-**The two questions at the top of the page.** If you answer them, we save
-your answers straight away — before you submit anything else — because the
+### What this app records
+
+#### The two questions at the top of the page
+
+If you answer them, we save
+your answers straight away, before you submit anything else, because the
 whole point is to record what you thought *before* you saw the numbers. If
 you skip them, we record that you skipped, which is a different fact from
 never having been asked. Either way the calculator behaves identically; the
@@ -21560,14 +21761,16 @@ Those questions are research, so they're for people 18 and over. If you tell
 us you're a student under 18, we don't ask them and we don't show the survey
 at the bottom either. Everything else still works.
 
-**What we save when you submit the survey.** Each anonymous response
+#### What we save when you submit the survey
+
+Each anonymous response
 saves who's answering (Student/Parent/Counselor/Teacher/Other), an expected
 high school graduation year, the two questions from the top asked a second
-time — so a change can be measured rather than remembered — plus your exact
+time, so a change can be measured rather than remembered, plus your exact
 inputs and results at
 that moment: school, major, loan amount, personal contribution, interest
 rate, repayment strategy, your
-major's starting salary, and something called `dti_ratio` — short for
+major's starting salary, and something called `dti_ratio`, short for
 "debt-to-income ratio," which just means your loan amount divided by your
 starting salary, a common way to describe how big a loan is relative to
 what you'll earn. We also save your monthly payment (blank for IDR, since
@@ -21575,25 +21778,29 @@ that payment amount changes over time), payoff timeline, total interest,
 10-year earnings premium, and ROI%. If Compare Mode was on when you
 submitted, we save all of that for Scenario B too, plus the difference
 between the two scenarios' ROI%. None of this is tied to your name or
-any personal identifying information — it's used to help a companion
+any personal identifying information. It's used to help a companion
 research paper understand how tools like this one affect students'
 thinking about college and careers.
 
-**What gets recorded even if you never answer anything.** Opening the page
+#### What gets recorded even if you never answer anything
+
+Opening the page
 records that a page was opened, and changing your major or school records the
-new selection. That happens as you browse, not when you submit — so it is
+new selection. That happens as you browse, not when you submit, so it is
 recorded whether or not you touch either set of questions. It carries no name,
 no email, no IP address and no account. Each visit gets a random ID that is
 thrown away when you close the tab, so two visits can't be linked to each
 other or to you.
 
-**Advanced Analysis Settings (optional, off by default).** Four extra
+### Advanced Analysis Settings
+
+These are optional and off by default. Four extra
 modules live in a sidebar expander. Each one is opt-in, and the calculator
 behaves exactly as described above when all four are left off.
 
 - **Compare against pre-2026 repayment plans.** Adds Standard 10-Year and
   IBR-style IDR back into the "How you'll repay" list, as a comparison
-  against the old rules — see the repayment-plans section above for why
+  against the old rules. See the repayment-plans section above for why
   they are not offered as choices for a 2026+ start.
 
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
@@ -21601,23 +21808,23 @@ behaves exactly as described above when all four are left off.
   Regional Public, Out-of-State Public/Mid-Tier Private). The *cost* side is
   just a sticker-price bucket. The *salary* side applies a modeled premium
   (Tier 1: 1.10x, Tier 2: 1.05x, Tier 4: 1.03x, Tier 3: 1.00x baseline) to
-  your major's starting/median salary — and this number is genuinely
+  your major's starting/median salary. This number is genuinely
   contested in real research, so we've been deliberately conservative about
   it. Chetty et al. (Opportunity Insights, "Mobility Report Cards" /
   "Diversifying Society's Leaders?", [opportunityinsights.org](https://opportunityinsights.org/))
   find a real, observable earnings gap by college selectivity tier. But Dale
   & Krueger (NBER Working Paper 7322, 2002; 2011 update) found that gap
   shrinks toward zero once you control for the student's *own* ability and
-  motivation — the kind of student admitted to and attending an Ivy-plus
+  motivation. The kind of student admitted to and attending an Ivy-plus
   school likely would have earned close to the same wage regardless of where
   they went. These multipliers sit well below the raw observational gap
   Chetty et al. report, as a deliberate middle ground between the two
   findings. **This is a modeled estimate, not a causal claim about any
-  specific school** — attending a "Tier 1" school does not guarantee this
+  specific school.** Attending a "Tier 1" school does not guarantee this
   salary bump.
 - **AI Employability Risk Analysis.** Rather than inventing a precise
   0-100 score for your specific major (which no one could actually back up),
-  this models AI "task exposure" at the SOC *occupation group* level — the
+  this models AI "task exposure" at the SOC *occupation group* level, the
   same real classification level published research on this topic actually
   uses. Sources: Felten, Raj & Seamans, "AI Occupational Exposure" ([NBER
   Working Paper 28959](https://www.nber.org/papers/w28959)), and Eloundou,
@@ -21629,22 +21836,22 @@ behaves exactly as described above when all four are left off.
   least. Risk Level and score are banded (Low≈20, Medium≈50, High≈80), not a
   unique number per major, to avoid implying false precision. **Important:
   "exposure" measures task overlap with current AI tools, not a prediction
-  that a job will disappear** — high exposure often means parts of a job get
+  that a job will disappear.** High exposure often means parts of a job get
   AI-assisted, not that the whole job is automated. Any "lower-exposure
   alternative" suggested is picked from majors already in this app's own
-  dataset by closest starting salary — never invented. In **Career mode** each
+  dataset by closest starting salary, never invented. In **Career mode** each
   occupation has its own SOC group directly. In **Major mode**, a major isn't an
   occupation, so each major is mapped to the occupation group it most commonly
   leads to (e.g. Accounting → Business & Financial Operations, Mechanical
   Engineering → Architecture & Engineering) and the exposure shown is for that
-  group — a representative approximation, clearly labeled as such, since a major
-  spreads across many jobs. A few majors that span the whole labor market
+  group. It's a representative approximation, clearly labeled as such, since a
+  major spreads across many jobs. A few majors that span the whole labor market
   (Interdisciplinary Studies, Liberal Arts) are left unmapped and show no level.
 - **Count foregone earnings during enrollment.** By default this calculator
   starts its earnings clock at *graduation*: it compares a graduate's first
   N years of post-degree salary against a high-school graduate's same N
   years, and captures only the *tuition/debt* cost of the degree. But the
-  largest real cost of a bachelor's degree is usually not tuition — it's the
+  largest real cost of a bachelor's degree is usually not tuition. It's the
   roughly four years of wages given up while enrolled full-time, during which
   the debt-free high-school graduate is already working, earning raises, and
   banking that income. Turning this option on adds those foregone years to the
@@ -21657,11 +21864,11 @@ behaves exactly as described above when all four are left off.
   enrollment, and a career that needs no degree is never charged for time it
   didn't spend in school. This lowers each degree's earnings premium and
   break-even, often by a lot, and is the more complete way to compare. It
-  only changes the *earnings* side of the comparison — the tuition and debt
-  you put in stay the same — so the ROI% still reads as "how much you come out
+  only changes the *earnings* side of the comparison, since the tuition and
+  debt you put in stay the same, so the ROI% still reads as "how much you come out
   ahead for every dollar of tuition," now counting the wages you skipped to be
   in school. One simplification to know about: the totals are just each year's
-  real (inflation-adjusted) dollars added up — the model doesn't treat a dollar
+  real (inflation-adjusted) dollars added up. The model doesn't treat a dollar
   earned 10 years from now as worth less than a dollar today (what economists
   call "discounting"). It's a straightforward apples-to-apples earnings
   comparison, not a formal net-present-value calculation.
