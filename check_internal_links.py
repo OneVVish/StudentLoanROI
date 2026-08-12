@@ -86,9 +86,13 @@ def check_landing_ctas_tagged(ns, fail):
              f"reject every welcome click and return \"\", so the landing's "
              f"CTAs would log nothing")
     for href in _re.findall(r'href="(/[^"]*)"', html):
-        # Home links (bare "/") point AT this page and take no origin; the
-        # llms.txt link leaves the app entirely.
-        if href == "/" or "llms.txt" in href:
+        # Three kinds of link need no origin tag:
+        #   * bare "/" points AT this page;
+        #   * /guides/* are EDGE pages -- the app never sees the request, so
+        #     from= would be meaningless. The Worker logs those reads itself
+        #     as guide_view rows;
+        #   * llms.txt leaves the site entirely.
+        if href == "/" or href.startswith("/guides") or "llms.txt" in href:
             continue
         if f"from={ns['NAV_WELCOME']}" not in href:
             fail(f"landing CTA {href!r} does not carry from={ns['NAV_WELCOME']} "
@@ -105,15 +109,24 @@ def check_landing_action_separate(ns, fail):
     survey-rate denominator, silently, from one date onward. Exactly the
     whole-string-match hazard this file already guards for nav: values.
     """
+    for prefix in ns["EDGE_ACTION_PREFIXES"]:
+        for action in ns["PAGEVIEW_ACTIONS"]:
+            if action.startswith(prefix) or prefix.startswith(action):
+                fail(f"PAGEVIEW_ACTIONS contains {action!r}, which collides "
+                     f"with the edge prefix {prefix!r} -- edge rows would be "
+                     f"counted as app pageviews")
     prefix = ns["LANDING_ACTION_PREFIX"]
-    for action in ns["PAGEVIEW_ACTIONS"]:
-        if action.startswith(prefix) or prefix.startswith(action):
-            fail(f"PAGEVIEW_ACTIONS contains {action!r}, which collides with "
-                 f"the edge landing prefix {prefix!r} -- landings would be "
-                 f"counted as app pageviews")
     # And the Worker must actually emit that prefix: a rename on one side only
     # makes the admin panel silently empty forever.
     worker = open("infra/worker.js").read()
+    if f'GUIDE_ACTION = "{ns["GUIDE_ACTION_PREFIX"]}"' not in worker:
+        fail(f"infra/worker.js does not emit GUIDE_ACTION = "
+             f"{ns['GUIDE_ACTION_PREFIX']!r} -- guide reads would stop being "
+             f"counted and the like column would lose its denominator")
+    if f'LIKE_ACTION = "{ns["LIKE_ACTION_PREFIX"]}"' not in worker:
+        fail(f"infra/worker.js does not emit LIKE_ACTION = "
+             f"{ns['LIKE_ACTION_PREFIX']!r} -- the guide-reactions panel "
+             f"would stay empty with no error anywhere")
     if f'LANDING_ACTION = "{prefix}"' not in worker:
         fail(f"infra/worker.js does not emit LANDING_ACTION = {prefix!r} -- "
              f"app.py's LANDING_ACTION_PREFIX and the Worker have drifted, so "

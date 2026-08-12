@@ -3,32 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Is the degree worth the loan? — worthmydegree.com</title>
-<meta name="description" content="Free, anonymous calculator: pick a major, school, and loan; see the 10-year outcome under the 2026 federal repayment rules. 5,035 real schools, no sign-up.">
-<link rel="canonical" href="https://worthmydegree.com/">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Is the degree worth the loan? — worthmydegree.com">
-<meta property="og:description" content="Free, anonymous calculator: pick a major, school, and loan; see the 10-year outcome under the 2026 federal repayment rules. 5,035 real schools, no sign-up.">
-<meta property="og:url" content="https://worthmydegree.com/">
+<title>Guides — worthmydegree.com</title>
+<meta name="description" content="Plain-English guides to the 2026 federal student loan rules, college costs, and whether a degree pays for itself.">
+<link rel="canonical" href="https://worthmydegree.com/guides">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Guides — worthmydegree.com">
+<meta property="og:description" content="Plain-English guides to the 2026 federal student loan rules, college costs, and whether a degree pays for itself.">
+<meta property="og:url" content="https://worthmydegree.com/guides">
 <meta property="og:image" content="https://worthmydegree.com/app/static/feature-og-1200x630.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://worthmydegree.com/app/static/feature-og-1200x630.png">
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IndvcnRobXlkZWdyZWUuY29tIj4KICA8dGl0bGU+d29ydGhteWRlZ3JlZS5jb208L3RpdGxlPgogIDxnIHN0eWxlPSItLXN1cmZhY2U6ICNmZmZmZmYiPgogICAgPHBhdGggZD0iTSA4LjAgMzguMCBMIDI0LjAgNTQuMCBMIDM1LjgyNiAzOC4wIiBmaWxsPSJub25lIiBzdHJva2U9IiNlYjY4MzQiIHN0cm9rZS13aWR0aD0iOS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICAgIDxwYXRoIGQ9Ik0gMzUuODI2IDM4LjAgTCA1OC4wIDguMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMmE3OGQ2IiBzdHJva2Utd2lkdGg9IjkuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPC9nPgo8L3N2Zz4K">
-<script type="application/ld+json">{
-  "@context": "https://schema.org",
-  "@graph": [
-    {"@type": "Organization", "@id": "https://worthmydegree.com/#org",
-      "name": "WorthMyDegree", "url": "https://worthmydegree.com/"},
-    {"@type": "WebApplication", "@id": "https://worthmydegree.com/#app",
-      "name": "WorthMyDegree — Student Loan Payoff & Major ROI Calculator",
-      "url": "https://worthmydegree.com/",
-      "applicationCategory": "FinanceApplication", "operatingSystem": "Web",
-      "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
-      "publisher": {"@id": "https://worthmydegree.com/#org"}}
-  ]
-}</script>
 <style>
   :root {
     --deep: #12335c; --blue: #2a78d6; --orange: #eb6834;
@@ -109,11 +94,51 @@
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
   }
+
+  article { max-width: 68ch; margin: 0 auto; }
+  article h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.12;
+    color: var(--deep); font-weight: 800; margin: 8px 0 6px;
+    text-wrap: balance; }
+  article .meta { color: var(--muted); font-size: 15px; margin-bottom: 26px; }
+  article h2 { font-size: 25px; color: var(--deep); margin: 34px 0 8px; }
+  article p { margin-bottom: 16px; }
+  article ul { margin: 0 0 16px 22px; }
+  article li { margin-bottom: 6px; }
+  article img { width: 100%; border-radius: 12px; margin: 20px 0; }
+  article blockquote { border-left: 4px solid var(--orange);
+    background: var(--tint); border-radius: 0 10px 10px 0;
+    padding: 14px 18px; margin: 20px 0; font-size: 18px; }
+  article hr { border: 0; border-top: 1px solid var(--rule); margin: 30px 0; }
+  article table { width: 100%; border-collapse: collapse; margin: 18px 0; }
+  article thead th { background: var(--deep); color: #fff; padding: 9px 10px;
+    text-align: left; font-size: 15px; }
+  article tbody td { padding: 9px 10px; border-bottom: 1px solid var(--rule);
+    font-variant-numeric: tabular-nums; }
+  .likes { display: flex; align-items: center; gap: 12px; margin: 34px 0 8px;
+    padding: 16px 0; border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule); }
+  .likes button { font: inherit; font-weight: 700; cursor: pointer;
+    background: var(--surface); color: var(--deep);
+    border: 2px solid var(--deep); border-radius: 99px; padding: 8px 20px; }
+  .likes button[disabled] { background: var(--tint); border-color: var(--orange);
+    color: var(--orange); cursor: default; }
+  .likes button:focus-visible { outline: 3px solid var(--blue);
+    outline-offset: 2px; }
+  .likes .count { color: var(--muted); font-size: 15px; }
+  .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
+    display: block; text-decoration: none; color: inherit; }
+  .guide-card b { display: block; color: var(--deep); font-size: 18px;
+    margin-bottom: 6px; }
+  .guide-card span { color: var(--muted); font-size: 15px; }
+  .guide-card time { display: block; color: var(--muted); font-size: 13px;
+    margin-top: 10px; }
+  @media (max-width: 700px) { .guides { grid-template-columns: 1fr; } }
+
 </style>
 </head>
 <body>
 <div class="wrap">
-
 <header>
   <a class="logo" href="/" aria-label="worthmydegree.com"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 461 64"  role="img" aria-label="worthmydegree.com">
   <title>worthmydegree.com</title>
@@ -131,152 +156,23 @@
   </g>
 </svg>
 </a>
-  <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
+  <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
-
-<div class="hero">
-  <h1>Is the degree<br>worth the loan?</h1>
-  <div class="accent"></div>
-  <p class="sub">Pick a school and a major. See the real loan, the monthly
-  payment under the 2026 federal rules, and where you stand ten years out —
-  before anyone signs anything.</p>
-  <a class="btn big" href="/?go=1&amp;from=welcome">Run your numbers — free</a>
-  <div class="trust">Free · anonymous · no sign-up · no ads</div>
-</div>
-
-<div class="stats">
-  <div class="stat"><b>5,035</b><span>real schools, published costs</span></div>
-  <div class="stat"><b>836</b><span>careers with federal wage data</span></div>
-  <div class="stat"><b>73</b><span>majors, NY Fed outcomes</span></div>
-  <div class="stat"><b>23</b><span>metro areas, local pay &amp; prices</span></div>
-</div>
-
 <section>
-  <h2>The numbers colleges don't put on the brochure</h2>
-  <p class="deck">Sticker price predicts almost nothing. These are the ones
-  that decide how the next decade feels.</p>
-  <div class="grid">
-    <div class="tile"><b>📊 The loan you'd actually sign</b>
-      <p>Median borrowing at your school — or build it from cost, aid and the
-      federal caps. Berkeley's sticker is $45,619/yr; its
-      median borrower leaves with $13,000.</p></div>
-    <div class="tile"><b>💸 The payment, not just the debt</b>
-      <p>The 2026 RAP income-driven plan against the fixed plans, month by
-      month, including what gets waived and what gets forgiven.</p></div>
-    <div class="tile"><b>🏙️ Ten years out, where you'll live</b>
-      <p>Metro wages and cost of living, not a national average — the same
-      salary is a different life in San Francisco and in Columbus.</p></div>
-    <div class="tile"><b>🔀 Two paths, side by side</b>
-      <p>UC vs CSU, nursing vs CS, or the same degree with two community-college
-      years first. One page, same math on both sides.</p></div>
-    <div class="tile"><b>🎓 Graduate &amp; professional</b>
-      <p>Medicine, dentistry, law, the MBA and five more — priced per school
-      from federal data, residency years modelled.</p></div>
-    <div class="tile"><b>📄 Take it with you</b>
-      <p>Every result exports as a PDF report or a shareable image, sourced
-      down to the footnote.</p></div>
-  </div>
-</section>
-
-<section>
-  <h2>Know before you borrow</h2>
-  <p class="deck">Starting college in 2026 or later, federal
-  borrowing for a dependent undergraduate has hard ceilings. This is the whole
-  table:</p>
-  <div class="table-scroll">
-  <table>
-    <thead><tr><th>College year</th><th>Student Direct loan</th>
-      <th>Parent PLUS max</th><th>Maximum combined</th></tr></thead>
-    <tbody>
-        <tr><td>Freshman</td><td>$5,500</td><td>$20,000</td><td>$25,500</td></tr>
-        <tr><td>Sophomore</td><td>$6,500</td><td>$20,000</td><td>$26,500</td></tr>
-        <tr><td>Junior</td><td>$7,500</td><td>$20,000</td><td>$27,500</td></tr>
-        <tr><td>Senior</td><td>$7,500</td><td>$5,000*</td><td>$12,500</td></tr>
-    </tbody>
-    <tfoot><tr><td>4-year total</td><td>$27,000</td>
-      <td>$65,000</td><td>$92,000</td></tr></tfoot>
-  </table>
-  </div>
-  <p class="note">*Parent PLUS is capped at $65,000 in
-  total per dependent student — borrow $20,000 in each of the
-  first three years and only $5,000 remains for senior year. These
-  are ceilings, not offers; anything a school costs beyond them is private
-  borrowing.</p>
-  <div class="callout">Planning around PLUS? The steady number is
-  $16,250 a year — not $20,000.
-  The calculator applies these caps automatically to any school you pick.</div>
-</section>
-
-<section>
-  <h2>Guides</h2>
-  <p class="deck">The rules that decide what a degree costs, in plain English —
-  same federal data the calculator runs on.</p>
+  <h2 style="font-size:32px">Guides</h2>
+  <p class="deck">The rules that decide what a degree costs, written out in
+  plain English. Every figure comes from the same federal data the calculator
+  runs on.</p>
   <div class="guides">
-    <a class="guide-card" href="/guides/parent-plus-senior-year">
-      <b>The Parent PLUS cap nobody mentions until senior year</b><span>Everyone quotes the annual cap. The total is the one that bites — and it bites in the year you have the least room to react.</span>
-      <time datetime="2026-08-11">2026-08-11</time></a>
-  </div>
-  <p class="deck" style="margin-top:14px"><a href="/guides"
-    style="color:var(--blue);font-weight:600;text-decoration:none">All
-    guides&nbsp;→</a></p>
-</section>
-
-<section class="tools">
-  <h2>Three tools, one dataset</h2>
-  <div class="grid">
-    <div class="tile"><b>🎓 The calculator</b>
-      <p>School + major + loan → the 10-year verdict.
-      <a href="/?go=1&amp;from=welcome">Open&nbsp;→</a></p></div>
-    <div class="tile"><b>🔎 Schools that fit a budget</b>
-      <p>Every school teaching your field, cheapest first, priced for your
-      state. <a href="/?tool=schools&amp;from=welcome">Search&nbsp;→</a></p></div>
-    <div class="tile"><b>💸 Already have loans?</b>
-      <p>Compare the 2026 repayment plans on the balance you already owe.
-      <a href="/?tool=repayment&amp;from=welcome">Compare&nbsp;→</a></p></div>
+  <a class="guide-card" href="/guides/parent-plus-senior-year">
+    <b>The Parent PLUS cap nobody mentions until senior year</b><span>Everyone quotes the annual cap. The total is the one that bites — and it bites in the year you have the least room to react.</span>
+    <time datetime="2026-08-11">2026-08-11</time></a>
   </div>
 </section>
-
-<div class="cta">
-  <h2>Two minutes. Zero forms.</h2>
-  <p class="deck" style="margin:8px auto 22px">The most expensive decision most
-  families ever finance deserves ten real minutes of arithmetic.</p>
-  <a class="btn big" href="/?go=1&amp;from=welcome">Open the calculator</a>
-</div>
-
 <footer>
-  Built from Bureau of Labor Statistics, New York Fed, College Scorecard,
-  IPEDS and CPS ASEC data — every figure traceable to its source in the app's
-  Methodology section. A student research project. Educational estimate, not
-  financial advice.<br>
-  <a href="/llms.txt" style="color:inherit">Plain-text summary</a> ·
-  <a href="/" style="color:inherit">worthmydegree.com</a>
+  <a href="/" style="color:inherit">worthmydegree.com</a> · A student research
+  project. Educational estimate, not financial advice.
 </footer>
-
 </div>
-<script>
-/* Carry the visitor's query string (?src= attribution, ?test=) onto every
-   internal link, so a tagged arrival stays tagged when they click through --
-   the same rule the app's own internal_tool_url enforces.
-
-   Every app-bound link already carries ?go=1: the worker serves THIS page on
-   a parameter-less "/", so a bare href="/" would loop a clean visitor back
-   here instead of opening the calculator. go=1 means nothing to the app --
-   it exists purely to make the click-through distinguishable from a fresh
-   arrival at the edge.
-
-   They also carry from=welcome: the app validates that against NAV_ORIGINS
-   and logs `nav:from=welcome:to=<destination>`, which is what turns "someone
-   landed" into "someone landed and went to the schools search". Drop the
-   param from a link and that link silently stops being counted --
-   check_internal_links.py asserts every app-bound href still carries it. */
-(function () {
-  var qs = location.search.replace(/^\?/, "");
-  if (!qs) return;
-  document.querySelectorAll('a[href^="/"]').forEach(function (a) {
-    if (a.getAttribute("href").indexOf("llms.txt") !== -1) return;
-    a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;
-  });
-})();
-</script>
 </body>
 </html>
