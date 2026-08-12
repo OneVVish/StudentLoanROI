@@ -254,21 +254,6 @@
 
 </div>
 <script>
-/* Carry the visitor's query string (?src= attribution, ?test=) onto every
-   internal link, so a tagged arrival stays tagged when they click through --
-   the same rule the app's own internal_tool_url enforces.
-
-   Every app-bound link already carries ?go=1: the worker serves THIS page on
-   a parameter-less "/", so a bare href="/" would loop a clean visitor back
-   here instead of opening the calculator. go=1 means nothing to the app --
-   it exists purely to make the click-through distinguishable from a fresh
-   arrival at the edge.
-
-   They also carry from=welcome: the app validates that against NAV_ORIGINS
-   and logs `nav:from=welcome:to=<destination>`, which is what turns "someone
-   landed" into "someone landed and went to the schools search". Drop the
-   param from a link and that link silently stops being counted --
-   check_internal_links.py asserts every app-bound href still carries it. */
 (function () {
   var qs = location.search.replace(/^\?/, "");
   if (!qs) return;
