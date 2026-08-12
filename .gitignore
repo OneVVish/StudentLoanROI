@@ -29,6 +29,12 @@ presentation/
 # send logs) -- kept local for the same reason as presentation/
 marketing/
 
+# Agent tooling: skills, settings, worktrees. Local working aids, not part of
+# the app -- same reasoning as CLAUDE.md, which is also deliberately untracked.
+# Ignored rather than merely untracked because commits here are routinely
+# staged with `git add -A`, which would sweep them back in silently.
+.claude/
+
 # Everything feeding the research paper stays local, same as the draft above:
 # scope/limitations notes, paper structure outlines, and any future drafts.
 # Ignored rather than merely untracked -- this repo's commits are routinely
