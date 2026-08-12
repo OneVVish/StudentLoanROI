@@ -4292,6 +4292,42 @@ def internal_tool_url(tool: str = "") -> str:
     return "./?" + urlencode(params) if params else "./"
 
 
+def guides_url(slug: str = "") -> str:
+    """A link from the app OUT to the edge-served guides.
+
+    Not internal_tool_url: that builds `./?tool=x`, a query on the app's own
+    path, and a guide is a different PATH (`/guides`) served by the Worker
+    rather than by Streamlit. An absolute path is therefore required, with the
+    consequence that this link 404s under a bare `streamlit run` -- the guides
+    only exist behind the edge. That is a local-development wart and not a
+    production one.
+
+    Carries `test` and `src` for the same reason internal_tool_url does, and
+    the reason is sharper here because the return leg leaves Streamlit
+    entirely: a developer on ?test=1 who reads a guide and clicks "Open the
+    calculator" would come back as an untagged production visitor and start
+    writing live rows. The return half is already handled -- `CARRY_QS_JS` in
+    infra/build_site.py copies the whole query string onto every internal link
+    on a guide page -- so this only has to get the params OUT of the app. Do
+    not add a second forwarder on the guide side; one existed before this link
+    did, and two would append the params twice.
+
+    NOT an SEO device, and it should not be described as one. Streamlit renders
+    through a websocket, so a crawler never sees this markup at all; the
+    crawlable link to every guide is on the static landing page the Worker
+    serves at `/`. This exists for the reader who is already inside the
+    calculator and has no route to the writing.
+    """
+    params = {}
+    if st.session_state.get("test_mode"):
+        params["test"] = "1"
+    src = get_traffic_source()
+    if src:
+        params["src"] = src
+    path = f"/guides/{slug}" if slug else "/guides"
+    return f"{path}?{urlencode(params)}" if params else path
+
+
 def pageview_action() -> str:
     """The landing action for this visit."""
     tool = requested_tool()
@@ -20377,6 +20413,13 @@ if not enable_prestige_mode:
     render_school_search()
     render_graduate_school_search()
     render_existing_loan_comparison()
+    # The one route from the calculator to the writing. Every guide links here
+    # and nothing linked back, so a reader deep in the sidebar had no way to
+    # reach the plain-English explanation of the rules the page is applying.
+    # Outside both result branches, so it cannot become an H2 arm asymmetry.
+    st.markdown(
+        f"📖 **[Guides]({guides_url()})** — the 2026 loan rules, what a degree "
+        "costs, and how to read an aid letter, in plain English.")
 
 # ---- 5e. Anonymous Impact Survey ------------------------------------------
 

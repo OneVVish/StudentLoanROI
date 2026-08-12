@@ -14,6 +14,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://worthmydegree.com/app/static/feature-og-1200x630.png">
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IndvcnRobXlkZWdyZWUuY29tIj4KICA8dGl0bGU+d29ydGhteWRlZ3JlZS5jb208L3RpdGxlPgogIDxnIHN0eWxlPSItLXN1cmZhY2U6ICNmZmZmZmYiPgogICAgPHBhdGggZD0iTSA4LjAgMzguMCBMIDI0LjAgNTQuMCBMIDM1LjgyNiAzOC4wIiBmaWxsPSJub25lIiBzdHJva2U9IiNlYjY4MzQiIHN0cm9rZS13aWR0aD0iOS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KICAgIDxwYXRoIGQ9Ik0gMzUuODI2IDM4LjAgTCA1OC4wIDguMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMmE3OGQ2IiBzdHJva2Utd2lkdGg9IjkuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+CiAgPC9nPgo8L3N2Zz4K">
+
 <style>
   :root {
     --deep: #12335c; --blue: #2a78d6; --orange: #eb6834;
@@ -121,6 +122,44 @@
   article ul { margin: 0 0 16px 22px; }
   article li { margin-bottom: 6px; }
   article img { width: 100%; border-radius: 12px; margin: 20px 0; }
+  /* ===== Hero: live text over a background image =====
+     The headline is a real heading element, so it follows the clamp below and
+     reflows on a phone. Baking it in was tried and measured on 2026-08-12: the
+     picture scales with the column, so the words came out at 13.6px on a phone
+     against a 30px heading. See build_guide_graphics.compose_hero. */
+  article > header.guide-hero {
+    position: relative; margin: 0 0 26px; border-radius: 14px; overflow: hidden;
+    background-size: cover; background-position: center 30%;
+    background-color: var(--deep);   /* holds the shape if the image 404s */
+  }
+  /* A scrim over the whole band, not a gradient from one side. A generated
+     background can be bright anywhere, so contrast has to survive whatever came
+     back rather than the region we hoped would be dark.
+     NEUTRAL, not navy. This was rgba(18,51,92,0.72) and the brand tint was the
+     loudest thing about every hero: it pushed the whole photograph blue, so a
+     warm afternoon interior read as a cold one and two different scenes looked
+     like the same picture. A neutral scrim darkens without repainting, and the
+     brand is already carried by the mark, the type and the rules.
+     0.55 is not a taste value either. Worst case is this scrim over a PURE
+     WHITE patch of photo: 0.50 gives 3.98:1, which clears AA for the 44px
+     heading and FAILS it for the small date line; 0.55 gives 4.76:1. It is
+     also LIGHTER than what it replaces, keeping 45% of the photo's luminance
+     against the old 28%, because black does the darkening more efficiently
+     than a mid-tone navy does. Contrast is guaranteed HERE and nowhere else --
+     compose_hero deliberately bakes no tint, so this one number can be tuned
+     without regenerating an image. */
+  article > header.guide-hero::before {
+    content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55);
+  }
+  article > header.guide-hero .guide-hero-in { position: relative; padding: 46px 34px 34px; }
+  article > header.guide-hero h1 { color: #fff; margin: 6px 0 10px;
+    font-size: clamp(30px, 5vw, 44px); text-transform: none;
+    font-weight: 600; line-height: 1.12; }
+  article > header.guide-hero .meta,
+  article > header.guide-hero .meta a { color: rgba(255, 255, 255, 0.92); }
+  @media (max-width: 620px) {
+    article > header.guide-hero .guide-hero-in { padding: 30px 20px 24px; }
+  }
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
@@ -171,6 +210,12 @@
   plain English. Every figure comes from the same federal data the calculator
   runs on.</p>
   <div class="guides">
+  <a class="guide-card" href="/guides/for-parents-run-the-numbers">
+    <b>For parents: how to run your student's numbers in one sitting</b><span>A cost of attendance tells you almost nothing on its own. Here is the order to work in, whether you are shortlisting schools or holding three offers.</span>
+    <time datetime="2026-08-12">2026-08-12</time></a>
+  <a class="guide-card" href="/guides/for-counselors-the-money-conversation">
+    <b>For counselors: the money conversation, in the time you actually have</b><span>You are asked to be a financial advisor without the licence, the training or the hour it would take. Here is what to hand a student instead.</span>
+    <time datetime="2026-08-12">2026-08-12</time></a>
   <a class="guide-card" href="/guides/parent-plus-senior-year">
     <b>The Parent PLUS cap nobody mentions until senior year</b><span>Everyone quotes the annual cap. The total is the one that bites, and it bites in the year you have the least room to react.</span>
     <time datetime="2026-08-11">2026-08-11</time></a>
