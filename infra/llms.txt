@@ -63,5 +63,19 @@ transparency changes college decisions.
 
 ## Guides
 
-Plain-English explainers on the 2026 federal loan rules and what a degree
-costs, at https://worthmydegree.com/guides -- each one ends at the calculator.
+Plain-English explainers on the 2026 federal loan rules and what a
+degree costs, indexed at https://worthmydegree.com/guides. Each one
+ends at the calculator.
+
+- [For parents: how to run your student's numbers in one sitting](https://worthmydegree.com/guides/for-parents-run-the-numbers):
+  A step-by-step walkthrough for parents. Turn a cost of attendance
+  into a monthly payment, a break-even number, and a PDF you can both
+  read.
+- [For counselors: the money conversation, in the time you actually have](https://worthmydegree.com/guides/for-counselors-the-money-conversation):
+  A free, no-login tool your students can use alone or in a meeting.
+  What changed under the 2026 federal rules, and the three
+  conversations it makes shorter.
+- [The Parent PLUS cap nobody mentions until senior year](https://worthmydegree.com/guides/parent-plus-senior-year):
+  The 2026 rules cap Parent PLUS at $20,000 a year — and $65,000 in
+  total. Those two numbers don't fit together, and the gap lands in
+  your final year.

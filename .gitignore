@@ -70,3 +70,36 @@ pppub*.csv
 # Never contains the token itself -- that lives in ~/.wrangler -- but it is
 # per-machine and has no business in the repo.
 .wrangler/
+
+# Guide imagery: build output in brand/, SERVED copy in static/. Only the
+# served copy is committed -- the pair is byte-identical and 4.7MB, and
+# carrying both means every regeneration writes the same bytes to git twice.
+#
+# Nothing is lost. The two diagrams rebuild from brand/build_guide_graphics.py
+# with no credentials, and the AI heroes are not regenerable anyway (a rerun of
+# build_ai_hero.py costs an API call and, for a changed prompt, returns a
+# different photograph) -- so static/ is the archive, and `--cards-only` reads
+# its social cards back out of static/ rather than out of brand/.
+#
+# The nine OLDER brand/*.png are already tracked and stay that way: an ignore
+# rule does not untrack a tracked file, and quietly deleting published assets
+# is not what "stop carrying duplicates" asked for.
+brand/guide-*.png
+
+# Two generated files in static/ that nothing serves, kept on disk but out of
+# git so they do not read as published assets:
+#   guide-hero-1600x460.png              build_guide_graphics.build()'s
+#                                        credential-free fallback hero. Every
+#                                        post now names a real hero, so this is
+#                                        only proof the repo builds with no
+#                                        Cloudflare credentials present.
+#   guide-hero-for-parents-run-the-numbers.png
+#                                        the pre-AI flat-navy hero for that
+#                                        post, superseded by the -klein4b one.
+#                                        Committing it would put TWO heroes in
+#                                        static/ for one slug, which is exactly
+#                                        what broke build_ai_hero --cards-only
+#                                        when it globbed instead of reading
+#                                        front matter.
+static/guide-hero-1600x460.png
+static/guide-hero-for-parents-run-the-numbers.png

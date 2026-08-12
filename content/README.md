@@ -6,11 +6,19 @@
 > than from memory. This file is the human version of the same thing.
 
 ```bash
-$EDITOR content/posts/my-new-guide.md     # write it
-python3 infra/build_site.py               # build pages + sitemap + worker
-python3 check_content.py                  # will refuse anything broken
-git add -A && git commit && git push      # merge, then: npx wrangler deploy
+$EDITOR content/posts/my-new-guide.md       # write it
+python3 infra/build_site.py --preview       # LOOK at it -- writes nothing
+python3 infra/build_site.py                 # build pages + sitemap + worker
+python3 check_content.py                    # will refuse anything broken
+git add -A && git commit && git push        # merge, then: npx wrangler deploy
 ```
+
+**Preview before you build.** `--preview` renders through the same code the real
+build uses and serves it on `localhost:8787`, but writes nothing at all: no
+`landing.html`, no `worker.js` injection, no sitemap. Building is what arms the
+next `wrangler deploy`, so previewing first keeps "let me look at it" and "ship
+it" as separate acts. It maps `/app/static/*` to the real `static/` directory,
+so inline images resolve exactly as they will in production.
 
 The filename is the URL: `my-new-guide.md` → `worthmydegree.com/guides/my-new-guide`.
 
@@ -42,6 +50,15 @@ renders a deliberate subset instead:
 Anything else — ordered lists, nested lists, fenced code, raw HTML — is a
 **build error**, not a silently mis-rendered paragraph. `check_content.py`
 names the file, the line and the construct.
+
+A bullet **may** wrap across lines; indented continuation lines fold into the
+item above. That was not always true. Before 2026-08-12 the list loop stopped at
+the continuation, closed the `<ul>`, rendered the rest as its own paragraph and
+opened a second list for the next bullet — one list became two with a stray
+sentence between them. It produced valid HTML and a plausible page, `check_content.py`
+passed it (verified), and only the preview showed it. If you add a construct to
+the subset, check that the guard rejects the old form, or the next one fails the
+same silent way.
 
 ## Rules worth knowing
 

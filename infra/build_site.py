@@ -31,9 +31,12 @@ itself, so it renders complete even if the origin is down. That is the point:
 this page is served from the edge and survives anything.
 """
 import base64
+import datetime
+import hashlib
 import json
 import re
 import sys
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -271,7 +274,21 @@ def render_markdown(body: str) -> str:
         elif line.startswith("- "):
             items, i = [], i
             while i < len(lines) and lines[i].startswith("- "):
-                items.append(f"<li>{_inline(lines[i][2:])}</li>"); i += 1
+                item = lines[i][2:]
+                i += 1
+                # A WRAPPED bullet. Without this the loop stopped at the
+                # continuation line, closed the <ul>, rendered the remainder as
+                # its own paragraph, and opened a SECOND <ul> for the next
+                # bullet -- one list became two with a stray sentence between
+                # them. It fails silently: valid HTML, plausible-looking page,
+                # and only obvious beside the source. Found in preview on
+                # 2026-08-12 in the parent guide's Result list.
+                while (i < len(lines) and lines[i].strip()
+                       and lines[i][:1] in " \t"
+                       and not lines[i].lstrip().startswith("- ")):
+                    item += " " + lines[i].strip()
+                    i += 1
+                items.append(f"<li>{_inline(item)}</li>")
             html.append("<ul>" + "".join(items) + "</ul>")
         elif line.strip() == "---":
             html.append("<hr>"); i += 1
@@ -531,6 +548,44 @@ ARTICLE_CSS = """
   article ul { margin: 0 0 16px 22px; }
   article li { margin-bottom: 6px; }
   article img { width: 100%; border-radius: 12px; margin: 20px 0; }
+  /* ===== Hero: live text over a background image =====
+     The headline is a real heading element, so it follows the clamp below and
+     reflows on a phone. Baking it in was tried and measured on 2026-08-12: the
+     picture scales with the column, so the words came out at 13.6px on a phone
+     against a 30px heading. See build_guide_graphics.compose_hero. */
+  article > header.guide-hero {
+    position: relative; margin: 0 0 26px; border-radius: 14px; overflow: hidden;
+    background-size: cover; background-position: center 30%;
+    background-color: var(--deep);   /* holds the shape if the image 404s */
+  }
+  /* A scrim over the whole band, not a gradient from one side. A generated
+     background can be bright anywhere, so contrast has to survive whatever came
+     back rather than the region we hoped would be dark.
+     NEUTRAL, not navy. This was rgba(18,51,92,0.72) and the brand tint was the
+     loudest thing about every hero: it pushed the whole photograph blue, so a
+     warm afternoon interior read as a cold one and two different scenes looked
+     like the same picture. A neutral scrim darkens without repainting, and the
+     brand is already carried by the mark, the type and the rules.
+     0.55 is not a taste value either. Worst case is this scrim over a PURE
+     WHITE patch of photo: 0.50 gives 3.98:1, which clears AA for the 44px
+     heading and FAILS it for the small date line; 0.55 gives 4.76:1. It is
+     also LIGHTER than what it replaces, keeping 45% of the photo's luminance
+     against the old 28%, because black does the darkening more efficiently
+     than a mid-tone navy does. Contrast is guaranteed HERE and nowhere else --
+     compose_hero deliberately bakes no tint, so this one number can be tuned
+     without regenerating an image. */
+  article > header.guide-hero::before {
+    content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55);
+  }
+  article > header.guide-hero .guide-hero-in { position: relative; padding: 46px 34px 34px; }
+  article > header.guide-hero h1 { color: #fff; margin: 6px 0 10px;
+    font-size: clamp(30px, 5vw, 44px); text-transform: none;
+    font-weight: 600; line-height: 1.12; }
+  article > header.guide-hero .meta,
+  article > header.guide-hero .meta a { color: rgba(255, 255, 255, 0.92); }
+  @media (max-width: 620px) {
+    article > header.guide-hero .guide-hero-in { padding: 30px 20px 24px; }
+  }
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
@@ -554,7 +609,68 @@ ARTICLE_CSS = """
 """
 
 
-def _page_head(title, description, canonical, image, favicon):
+DEFAULT_OG_IMAGE = "feature-og-1200x630.png"
+
+
+def og_image_for(post: dict) -> str:
+    """The social card for one guide.
+
+    Every guide used to share `feature-og-1200x630.png`, so a link to the
+    counselor piece previewed identically to the parent piece -- in a feed or a
+    group chat, which is where a guide aimed at a named audience actually gets
+    passed around, the card is most of what a reader sees before deciding
+    whether to click. `card:` in front matter overrides; otherwise a post with a
+    hero gets the card built from that same photograph, so the preview and the
+    page a reader lands on are recognisably the same thing.
+
+    The name is derived rather than declared: the card is generated FROM the
+    hero (brand/build_ai_hero.py) and a second front-matter field would be one
+    more thing to keep in step. If the file is absent the build fails through
+    missing_static() rather than serving a broken card.
+    """
+    if post.get("card"):
+        return post["card"]
+    if post.get("hero"):
+        return f"guide-og-{post['slug']}.png"
+    return DEFAULT_OG_IMAGE
+
+
+def article_jsonld(post: dict, canonical: str, image: str, lastmod: str) -> str:
+    """schema.org Article for one guide.
+
+    The Worker injects Organization/WebApplication into the APP shell, but a
+    guide is returned verbatim from the GUIDES constant and never passed
+    through that path, so these pages carried no structured data at all. That
+    is the half a search engine reads for a headline, a publish date and a
+    modified date -- everything a guide has and the calculator does not.
+
+    Built as a dict and serialised with json.dumps, never an f-string: a title
+    holding an apostrophe or a quote would otherwise break out of the literal
+    and produce invalid JSON-LD, which is ignored silently rather than
+    reported.
+    """
+    data = {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": post["title"],
+        "description": post["description"],
+        "datePublished": post["date"],
+        "dateModified": lastmod,
+        "url": canonical,
+        "mainEntityOfPage": {"@type": "WebPage", "@id": canonical},
+        "image": f"https://worthmydegree.com/app/static/{image}",
+        "inLanguage": "en-US",
+        "isAccessibleForFree": True,
+        "author": {"@type": "Organization", "name": "worthmydegree.com",
+                   "url": "https://worthmydegree.com/"},
+        "publisher": {"@type": "Organization", "name": "worthmydegree.com",
+                      "url": "https://worthmydegree.com/"},
+    }
+    return ('<script type="application/ld+json">'
+            + json.dumps(data, ensure_ascii=False) + "</script>")
+
+
+def _page_head(title, description, canonical, image, favicon, jsonld=""):
     """One <head> for every page on the edge site, so a guide and the landing
     carry the same card, the same icon and the same theme handling."""
     return f'''<meta charset="utf-8">
@@ -570,13 +686,14 @@ def _page_head(title, description, canonical, image, favicon):
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://worthmydegree.com/app/static/{image}">
 <link rel="icon" href="data:image/svg+xml;base64,{favicon}">
+{jsonld}
 <style>
 {SITE_CSS}
 {ARTICLE_CSS}
 </style>'''
 
 
-def build_guide_html(post, logo_svg, favicon) -> str:
+def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
     """One article page. Same shell as the landing, plus the like control.
 
     The like button is progressive: it is a plain button that works the moment
@@ -587,11 +704,39 @@ def build_guide_html(post, logo_svg, favicon) -> str:
     """
     body = render_markdown(post["body"])
     canonical = f"https://worthmydegree.com/guides/{post['slug']}"
+
+    # A hero is a BACKGROUND with the real <h1> on top, never an <img> with the
+    # headline baked into it. Measured 2026-08-12: `article img { width: 100% }`
+    # scales the image, so pixel text shrinks with the container instead of
+    # reflowing -- 13.6px on a 390pt phone against a live h1 of 30px, and
+    # already smaller than the heading on desktop. Live text also stays
+    # selectable, translatable and reachable by a screen reader, and it means a
+    # generated background never has to render a word, which diffusion models
+    # do badly. `hero:` in the front matter opts a post in; without it the
+    # header is exactly what it was.
+    hero = post.get("hero")
+    if hero:
+        head = (f'<header class="guide-hero" '
+                f'style="background-image:url(/app/static/{hero})">\n'
+                f'  <div class="guide-hero-in">\n'
+                f'    <p class="meta"><a href="/guides">← All guides</a></p>\n'
+                f'    <h1>{_inline(post["title"])}</h1>\n'
+                f'    <p class="meta"><time datetime="{post["date"]}">'
+                f'{post["date"]}</time> · worthmydegree.com</p>\n'
+                f'  </div>\n</header>')
+    else:
+        head = (f'<p class="meta"><a href="/guides" '
+                f'style="color:var(--blue);text-decoration:none">\n'
+                f'    ← All guides</a></p>\n'
+                f'  <h1>{_inline(post["title"])}</h1>\n'
+                f'  <p class="meta"><time datetime="{post["date"]}">'
+                f'{post["date"]}</time>\n    · worthmydegree.com</p>')
     return f'''<!doctype html>
 <html lang="en">
 <head>
 {_page_head(post["title"] + " — worthmydegree.com", post["description"],
-            canonical, post.get("image", "feature-og-1200x630.png"), favicon)}
+            canonical, og_image_for(post), favicon,
+            article_jsonld(post, canonical, og_image_for(post), lastmod or post["date"]))}
 </head>
 <body>
 <div class="wrap">
@@ -601,11 +746,7 @@ def build_guide_html(post, logo_svg, favicon) -> str:
 </header>
 
 <article>
-  <p class="meta"><a href="/guides" style="color:var(--blue);text-decoration:none">
-    ← All guides</a></p>
-  <h1>{post["title"]}</h1>
-  <p class="meta"><time datetime="{post["date"]}">{post["date"]}</time>
-    · worthmydegree.com</p>
+  {head}
 {body}
 
   <div class="likes">
@@ -738,11 +879,139 @@ def inject_guides(worker_src: str, pages: dict) -> str:
                   lambda _m: block, worker_src, count=1, flags=re.S)
 
 
+LLMS_PATH = ROOT / "infra" / "llms.txt"
+LLMS_START = "// {{LLMS_START}}"
+LLMS_END = "// {{LLMS_END}}"
+LLMS_GUIDES_HEADING = "## Guides"
+
+
+def llms_guides_section(posts: list) -> str:
+    """The `## Guides` section of llms.txt, one entry per post.
+
+    It used to name the INDEX and nothing else, so an agent asked what this
+    site says about Parent PLUS had one URL to fetch and a list of card titles
+    to guess from. llms.txt exists to save exactly that hop: the whole point is
+    that the useful URLs are enumerated, with enough description to choose
+    between them without fetching each one.
+
+    The description is the post's own `description` -- the same string the
+    <title>'s meta description and the JSON-LD carry, so an agent and a search
+    engine are told the same thing about the same page.
+    """
+    lines = [LLMS_GUIDES_HEADING, "",
+             "Plain-English explainers on the 2026 federal loan rules and what a",
+             "degree costs, indexed at https://worthmydegree.com/guides. Each one",
+             "ends at the calculator.", ""]
+    for post in posts:
+        url = f"https://worthmydegree.com/guides/{post['slug']}"
+        # The link stays on ONE line however long it runs. Wrapping a URL
+        # across a newline breaks it for anything reading this as text, which
+        # is every consumer of this file.
+        lines.append(f"- [{post['title']}]({url}):")
+        lines += textwrap.wrap(post["description"], width=70,
+                               initial_indent="  ", subsequent_indent="  ")
+    return "\n".join(lines) + "\n"
+
+
+LLMS_GUIDES_HEADING = "## Guides"
+
+
+def render_llms(posts: list) -> str:
+    """infra/llms.txt with its guide list regenerated. The file is the source;
+    the Worker's LLMS constant is built from this by inject_llms().
+
+    The section is bounded by its own heading and the NEXT `## ` heading (or
+    end of file), which is a closing boundary in the sense inject_sitemap's
+    docstring demands: it cannot run past the following section the way a
+    single-marker DOTALL sweep once ate three static URLs. A rename of the
+    heading makes the substitution match nothing, so the count is checked --
+    silently leaving a stale list is the failure this whole change is fixing.
+    """
+    text = LLMS_PATH.read_text()
+    new, n = re.subn(r"^" + re.escape(LLMS_GUIDES_HEADING) + r"\n.*?(?=\n## |\Z)",
+                     lambda _m: llms_guides_section(posts).rstrip("\n"),
+                     text, count=1, flags=re.S | re.M)
+    if n != 1:
+        sys.exit(f"infra/llms.txt: no {LLMS_GUIDES_HEADING!r} section to "
+                 f"regenerate -- restore the heading or update this builder")
+    return new.rstrip("\n") + "\n"
+
+
+def inject_llms(worker_src: str, text: str) -> str:
+    """The llms.txt body into the Worker, as a JSON string rather than the
+    backtick template literal it used to be.
+
+    That swap is the point. A template literal makes every backtick and every
+    `${` in the prose live syntax, so a future guide title containing either
+    would break the Worker at parse time -- the whole site down, from a
+    punctuation mark in a headline. json.dumps has no such characters, which is
+    why LANDING and GUIDES are already written this way.
+
+    It also retires the "change both halves in the same PR" instruction on this
+    file: infra/llms.txt is now the only copy anyone edits.
+    """
+    if LLMS_START not in worker_src:
+        sys.exit(f"worker.js is missing {LLMS_START} -- add the marker block first")
+    block = (f"{LLMS_START}\n"
+             f"// GENERATED by infra/build_site.py from infra/llms.txt.\n"
+             f"const LLMS = {json.dumps(text)};\n"
+             f"{LLMS_END}")
+    return re.sub(re.escape(LLMS_START) + r".*?" + re.escape(LLMS_END),
+                  lambda _m: block, worker_src, count=1, flags=re.S)
+
+
+LASTMOD_PATH = ROOT / "content" / "lastmod.json"
+
+
+def resolve_lastmod(posts: list, manifest: dict, today: str):
+    """`{slug: lastmod}` for the sitemap and the JSON-LD, plus the manifest to
+    persist. Pure: the caller does the reading and the writing.
+
+    WHY THIS IS NOT THE FRONT-MATTER DATE. It was, and that field is the
+    PUBLISH date -- an author who fixes a wrong figure in a published guide has
+    no reason to touch it, so `lastmod` went on claiming the original day and
+    crawlers had no signal to come back for the correction. The failure is
+    silent in the direction that matters: the sitemap stays valid, the page
+    stays served, and only the re-crawl never happens.
+
+    WHY A HASH AND NOT THE FILE MTIME. git does not preserve mtimes, so a fresh
+    clone stamps every post with the checkout time and the next build would
+    announce that all of them changed today. The hash is of the MARKDOWN BODY
+    only, so a CSS edit, a template change or a re-run does not move a date --
+    which is what keeps the build byte-identical across runs, the property that
+    makes a size change meaningful rather than noise.
+
+    An unknown slug takes its publish date rather than today, so importing an
+    older post does not backdate-then-bump it on the following build.
+    """
+    out, man, changed = {}, dict(manifest), []
+    for post in posts:
+        sha = hashlib.sha1(post["body"].encode("utf-8")).hexdigest()
+        rec = manifest.get(post["slug"])
+        if rec is None:
+            lastmod = post["date"]          # first time we have seen it
+        elif rec.get("sha") == sha:
+            lastmod = rec.get("lastmod", post["date"])   # body unchanged
+        else:
+            lastmod = today                # body changed, and we know when
+            changed.append(post["slug"])
+        out[post["slug"]] = lastmod
+        man[post["slug"]] = {"sha": sha, "lastmod": lastmod}
+    # A deleted post leaves the manifest, deliberately: restoring it should
+    # restore its history rather than read as brand new.
+    #
+    # `changed` is returned rather than derived by the caller from the dates.
+    # Deriving it was the first version and it lied on the day a post was
+    # published: lastmod equals today because the PUBLISH date is today, and
+    # the build announced "body changed" for a post it had never seen before.
+    return out, man, changed
+
+
 SITEMAP_START = "<!--GUIDES-->"
 SITEMAP_END = "<!--/GUIDES-->"
 
 
-def inject_sitemap(text: str, posts: list) -> str:
+def inject_sitemap(text: str, posts: list, lastmod: dict = None) -> str:
     """Guide URLs into both sitemap halves, replacing whatever was there.
 
     Regenerated from the posts every build, so deleting a post removes its URL
@@ -757,8 +1026,9 @@ def inject_sitemap(text: str, posts: list) -> str:
     entries = ["  <url>\n    <loc>https://worthmydegree.com/guides</loc>\n"
                "    <changefreq>weekly</changefreq>\n"
                "    <priority>0.7</priority>\n  </url>"]
+    lastmod = lastmod or {}
     entries += [f"  <url>\n    <loc>https://worthmydegree.com/guides/{p['slug']}</loc>\n"
-                f"    <lastmod>{p['date']}</lastmod>\n"
+                f"    <lastmod>{lastmod.get(p['slug'], p['date'])}</lastmod>\n"
                 f"    <changefreq>monthly</changefreq>\n"
                 f"    <priority>0.6</priority>\n  </url>" for p in posts]
     inner = ("\n" + "\n".join(entries)) if posts else ""
@@ -767,7 +1037,15 @@ def inject_sitemap(text: str, posts: list) -> str:
                   lambda _m: block, text, count=1, flags=re.S)
 
 
-def main():
+def render_all():
+    """Every page, built in memory and returned. No writes.
+
+    main() and preview() both go through here, so a preview cannot drift from
+    what deploys. A second renderer for previewing would be the chart-twin trap
+    from CLAUDE.md wearing different clothes: two implementations of one output,
+    diverging quietly, with the preview being the one nobody checks against
+    production.
+    """
     facts = app_facts()
     print("facts:", {k: v for k, v in facts.items() if k not in ("cap_rows", "cap_total")})
     posts = load_posts()
@@ -778,36 +1056,199 @@ def main():
     favicon = base64.b64encode(
         (ROOT / "brand/favicon-light.svg").read_bytes()).decode()
 
-    html = build_html(facts, posts)
-    OUT.write_text(html)
-    print(f"  wrote infra/landing.html  ({len(html):,} bytes)")
+    manifest = (json.loads(LASTMOD_PATH.read_text())
+                if LASTMOD_PATH.exists() else {})
+    today = datetime.date.today().isoformat()
+    lastmod, manifest, changed = resolve_lastmod(posts, manifest, today)
+    if changed:
+        print(f"  lastmod -> {today} (body changed): {', '.join(changed)}")
 
+    html = build_html(facts, posts)
     pages = {}
-    guide_dir = ROOT / "infra" / "guides"
-    guide_dir.mkdir(exist_ok=True)
     if posts:
         pages["/guides"] = build_guides_index_html(posts, logo_svg, favicon)
         for post in posts:
             pages[f"/guides/{post['slug']}"] = build_guide_html(
-                post, logo_svg, favicon)
-        for path, page in pages.items():
-            name = (path.rsplit("/", 1)[-1] or "index") + ".html"
-            (guide_dir / name).write_text(page)
-            print(f"  wrote infra/guides/{name}  ({len(page):,} bytes)")
+                post, logo_svg, favicon, lastmod.get(post["slug"]))
+    return html, pages, posts, lastmod, manifest
+
+
+def check_worker_syntax(worker_src: str) -> None:
+    """Refuse to write a worker.js that is not JavaScript.
+
+    Four constants are injected by regex into a file that also CONTAINS the
+    XML, markdown and HTML it serves, so a marker string can appear somewhere
+    it was never meant to be a marker. That is not hypothetical: a comment in
+    worker.js that mentioned `<!--` + `GUIDES` + `-->` in prose became the
+    first match for inject_sitemap, which then replaced everything from the
+    comment to the real closing marker with sitemap XML. The file was no longer
+    parseable, and every check in this repo still passed -- they read the
+    generated PAGES, and the pages were fine. Only `node --check` saw it.
+
+    Skipped, with a warning, when node is absent: a missing toolchain must cost
+    a check and not the build. Deploying is `npx wrangler deploy`, so anyone in
+    a position to ship this has node.
+    """
+    import shutil as _shutil
+    import subprocess
+    import tempfile
+
+    if not _shutil.which("node"):
+        print("  WARNING: node not found, worker.js syntax NOT verified")
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(worker_src)
+        tmp = fh.name
+    try:
+        proc = subprocess.run(["node", "--check", tmp],
+                              capture_output=True, text=True)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+    if proc.returncode != 0:
+        raise SystemExit("  FAILED: the generated worker.js is not valid "
+                         "JavaScript, so it was NOT written:\n"
+                         + proc.stderr.strip())
+
+
+def missing_static(html: str, pages: dict) -> list:
+    """Every /app/static/<file> a built page references that is not on disk.
+
+    Cheap, and it catches the one failure a preview would otherwise still let
+    through to production: an image whose path is right in the markdown and
+    whose file was never copied into static/. The page renders, the alt text
+    shows, and nothing errors.
+    """
+    refs = set()
+    for doc in (html, *pages.values()):
+        refs |= set(re.findall(r'/app/static/([^"\')\s]+)', doc))
+    return sorted(r for r in refs if not (ROOT / "static" / r).exists())
+
+
+def main():
+    html, pages, posts, lastmod, manifest = render_all()
+
+    gone = missing_static(html, pages)
+    if gone:
+        raise SystemExit("  FAILED: referenced but absent from static/: "
+                         + ", ".join(gone))
+
+    OUT.write_text(html)
+    print(f"  wrote infra/landing.html  ({len(html):,} bytes)")
+
+    guide_dir = ROOT / "infra" / "guides"
+    guide_dir.mkdir(exist_ok=True)
+    for path, page in pages.items():
+        name = (path.rsplit("/", 1)[-1] or "index") + ".html"
+        (guide_dir / name).write_text(page)
+        print(f"  wrote infra/guides/{name}  ({len(page):,} bytes)")
+
+    llms = render_llms(posts)
+    LLMS_PATH.write_text(llms)
 
     worker = inject(WORKER.read_text(), html)
     worker = inject_guides(worker, pages)
-    worker = inject_sitemap(worker, posts)
+    worker = inject_sitemap(worker, posts, lastmod)
+    worker = inject_llms(worker, llms)
+    check_worker_syntax(worker)
     WORKER.write_text(worker)
-    print("  injected LANDING and GUIDES into infra/worker.js")
+    print("  injected LANDING, GUIDES and LLMS into infra/worker.js")
+    print(f"  llms.txt: {len(posts)} guide URL(s), {len(llms):,} bytes")
+
+    # Written HERE and not in render_all(), so --preview stays a read. A
+    # preview that recorded a hash would mark the post as seen without ever
+    # publishing it, and the build that followed would find nothing changed.
+    LASTMOD_PATH.parent.mkdir(exist_ok=True)
+    LASTMOD_PATH.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
     # The reference copy beside the Worker, kept in step by the same call --
     # the two halves used to be a "change both in one PR" comment, and a
     # generated section is one less thing asking a human to remember.
     ref = ROOT / "infra" / "sitemap.xml"
-    ref.write_text(inject_sitemap(ref.read_text(), posts))
+    ref.write_text(inject_sitemap(ref.read_text(), posts, lastmod))
     print(f"  sitemap: {len(posts) + 1} guide URL(s) in both halves")
 
 
+def preview(port: int = 8787):
+    """Serve the site from memory, writing NOTHING.
+
+    Exists because building was the only way to see a guide, and building also
+    injects LANDING and GUIDES into infra/worker.js. That made "let me look at
+    it" and "arm the next deploy" the same command: anyone who ran
+    `npx wrangler deploy` afterwards shipped whatever the last person had been
+    previewing. This path touches no file, so it cannot do that.
+
+    Routing mirrors worker.js for the paths a preview needs, which is the point.
+    In particular /app/static/* is served from the real static/ directory,
+    because guide images resolve there in production; without it every image in
+    a guide is broken here and the preview teaches you nothing about the one
+    thing you most wanted to look at.
+
+    NOT a substitute for the real thing. It does not run the edge logic, the
+    canonical headers, the 503 page, the redirects or the landing logger, and
+    localhost is not the Fireglass-proxied network the top of CLAUDE.md warns
+    about. It shows you the PAGES.
+    """
+    import http.server
+    import mimetypes
+    import urllib.parse
+
+    html, pages, posts, _lastmod, _manifest = render_all()
+    gone = missing_static(html, pages)
+
+    routes = {"/": html}
+    for path, page in pages.items():
+        routes[path] = page
+        routes[path + "/"] = page
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):            # quiet; the summary below is enough
+            pass
+
+        def _send(self, body: bytes, ctype: str):
+            self.send_response(200)
+            self.send_header("content-type", ctype)
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = urllib.parse.urlparse(self.path).path
+            if path in ("/welcome", "/welcome/"):
+                path = "/"                     # the alias worker.js serves
+            if path in routes:
+                return self._send(routes[path].encode(), "text/html; charset=utf-8")
+            if path.startswith("/app/static/"):
+                target = ROOT / "static" / path[len("/app/static/"):]
+                if target.is_file():
+                    ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+                    return self._send(target.read_bytes(), ctype)
+            self.send_error(404, f"not in the preview: {path}")
+
+    # flush=True on every line: stdout block-buffers when redirected, so a
+    # backgrounded preview printed its URL into a buffer that never drained
+    # while serve_forever held the process. The one thing this command exists
+    # to tell you was the one thing you could not see.
+    say = lambda s="": print(s, flush=True)
+    say()
+    if gone:
+        say("  WARNING: referenced but absent from static/ "
+            f"({len(gone)}): {', '.join(gone)}")
+    say(f"  preview on http://localhost:{port}  (nothing written to disk)")
+    say("    /            the landing page")
+    for path in pages:
+        say(f"    {path:<13}{'the guides index' if path == '/guides' else ''}")
+    say("  Ctrl-C to stop. Re-run to pick up edits.")
+    try:
+        http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    except KeyboardInterrupt:
+        print("\n  stopped")
+
+
 if __name__ == "__main__":
-    main()
+    args = sys.argv[1:]
+    if "--preview" in args:
+        rest = [a for a in args if a != "--preview"]
+        preview(int(rest[0]) if rest else 8787)
+    else:
+        main()
