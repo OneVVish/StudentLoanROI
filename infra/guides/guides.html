@@ -174,5 +174,15 @@
   project. Educational estimate, not financial advice.
 </footer>
 </div>
+<script>
+(function () {
+  var qs = location.search.replace(/^\?/, "");
+  if (!qs) return;
+  document.querySelectorAll('a[href^="/"]').forEach(function (a) {
+    if (a.getAttribute("href").indexOf("llms.txt") !== -1) return;
+    a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;
+  });
+})();
+</script>
 </body>
 </html>

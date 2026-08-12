@@ -47,6 +47,18 @@ UNSUPPORTED = (
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# A line from CARRY_QS_JS, quoted here rather than imported from the builder --
+# reading the constant under test would only assert that it equals itself, the
+# same flaw recorded against the first versions of check_chart_axes and the
+# residency guard. Deleting the script from a template must fail this.
+#
+# It exists because the landing page carried this from the start and the guide
+# templates shipped without it (fixed 2026-08-11). Nothing looked wrong: the
+# guide read was logged WITH its src, and only the click into the app lost the
+# tag -- so the funnel showed reads and no conversions, which reads as a
+# content problem rather than a measurement one.
+CARRY_MARKER = 'a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;'
+
 
 def load_builder():
     spec = importlib.util.spec_from_file_location(
@@ -132,6 +144,12 @@ def main() -> int:
         if "from=guide" not in page:
             fail(f"{where}: the built page has no from=guide link -- clicks "
                  f"into the app would not be attributed to the guide")
+        if CARRY_MARKER not in page:
+            fail(f"{where}: the built page does not carry the query string "
+                 f"onto its internal links -- a visitor arriving on "
+                 f"?src=<channel> would read the guide tagged and then land "
+                 f"in the calculator as untagged organic traffic. Include "
+                 f"CARRY_QS_JS in the template.")
 
     # The sitemap regeneration must not eat the static entries (it did once).
     for required in ("https://worthmydegree.com/</loc>",

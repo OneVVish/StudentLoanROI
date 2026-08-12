@@ -68,6 +68,34 @@ SUPPORTED_MARKDOWN = """
   ---             horizontal rule (on its own line, outside a table)
 """
 
+# Shared by the landing page, every guide and the guides index -- one copy,
+# because two copies is how the guides came to lack it. The landing had this
+# from the start; the guide templates did not, so a counselor arriving on
+# /guides/<slug>?src=ccounselors read the article tagged and then landed in the
+# calculator as untagged organic traffic. The read was counted and the thing
+# worth counting was not.
+#
+# It carries the WHOLE query string onto internal links, not a chosen subset:
+# ?src= is attribution and ?test=1 keeps a developer's click-through out of
+# production Supabase, and both fail silently rather than loudly when dropped.
+#
+# Every app-bound link already carries ?go=1 (the worker serves the landing on
+# a parameter-less "/", so a bare href="/" would loop a clean visitor back
+# instead of opening the calculator) and ?from=welcome or ?from=guide, which
+# the app validates against NAV_ORIGINS and logs as `nav:from=X:to=Y`. Drop
+# either and the link silently stops being counted --
+# check_internal_links.py asserts app-bound hrefs still carry them.
+CARRY_QS_JS = """<script>
+(function () {
+  var qs = location.search.replace(/^\\?/, "");
+  if (!qs) return;
+  document.querySelectorAll('a[href^="/"]').forEach(function (a) {
+    if (a.getAttribute("href").indexOf("llms.txt") !== -1) return;
+    a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;
+  });
+})();
+</script>"""
+
 SITE_CSS = """  :root {
     --deep: #12335c; --blue: #2a78d6; --orange: #eb6834;
     --ink: #14161a; --muted: #5c636d; --rule: #dfe3e8;
@@ -471,31 +499,7 @@ def build_html(f: dict, posts: list = ()) -> str:
 </footer>
 
 </div>
-<script>
-/* Carry the visitor's query string (?src= attribution, ?test=) onto every
-   internal link, so a tagged arrival stays tagged when they click through --
-   the same rule the app's own internal_tool_url enforces.
-
-   Every app-bound link already carries ?go=1: the worker serves THIS page on
-   a parameter-less "/", so a bare href="/" would loop a clean visitor back
-   here instead of opening the calculator. go=1 means nothing to the app --
-   it exists purely to make the click-through distinguishable from a fresh
-   arrival at the edge.
-
-   They also carry from=welcome: the app validates that against NAV_ORIGINS
-   and logs `nav:from=welcome:to=<destination>`, which is what turns "someone
-   landed" into "someone landed and went to the schools search". Drop the
-   param from a link and that link silently stops being counted --
-   check_internal_links.py asserts every app-bound href still carries it. */
-(function () {{
-  var qs = location.search.replace(/^\\?/, "");
-  if (!qs) return;
-  document.querySelectorAll('a[href^="/"]').forEach(function (a) {{
-    if (a.getAttribute("href").indexOf("llms.txt") !== -1) return;
-    a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;
-  }});
-}})();
-</script>
+{CARRY_QS_JS}
 </body>
 </html>
 """
@@ -647,6 +651,7 @@ def build_guide_html(post, logo_svg, favicon) -> str:
   }});
 }})();
 </script>
+{CARRY_QS_JS}
 </body>
 </html>
 '''
@@ -686,6 +691,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   project. Educational estimate, not financial advice.
 </footer>
 </div>
+{CARRY_QS_JS}
 </body>
 </html>
 '''
