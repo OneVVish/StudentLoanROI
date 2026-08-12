@@ -1587,3 +1587,59 @@ alter table scenario_events
 -- of PAGEVIEW_ACTIONS; app.py filters them from every app-activity panel and
 -- check_internal_links.py asserts the separation. Any query counting sessions,
 -- pageviews or survey rates must exclude EDGE_ACTION_PREFIXES.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-12 -- VISITOR-FACING COPY WAS REWRITTEN APP-WIDE, no DDL.
+--
+-- No column changed and no row is invalid. This is a WORDING seam: from this
+-- date the sentences a visitor reads are not the sentences earlier visitors
+-- read, on the calculator, the sidebar, the repayment tool, both school
+-- searches, the Methodology footer and the edge-served welcome page.
+--
+-- What actually changed, and what did not:
+--   * PUNCTUATION AND EMPHASIS, mostly. Every em dash in a rendered string
+--     became a period, comma or colon, and mid-sentence boldface in the
+--     Methodology dropped from 201 spans to 137. Sentences were split and
+--     rejoined around those edits.
+--   * The Methodology footer gained 15 section and 50 subsection headings. It
+--     previously had none; the whole 11,000 words ran as one flat block.
+--   * NO FIGURE MOVED. Every dollar amount, percentage, URL, SOC code and year
+--     in the Methodology was diffed against the previous revision and is
+--     identical. Nothing in section 1's constants, no simulator, no ROI path
+--     was touched, so every logged earnings_premium, roi_pct, monthly_payment
+--     and payoff figure means exactly what it meant on 2026-08-11.
+--
+-- WHY THIS IS RECORDED AT ALL. The paper's H1/H2 outcomes are survey answers
+-- and behaviour, both of which respond to wording. A visitor on 2026-08-13 was
+-- asked to act on differently-phrased captions than one on 2026-08-10, so a
+-- comparison spanning this date is not measuring the same instrument twice.
+-- Condition on the date, or say in the write-up that copy was held constant
+-- only within each side of it.
+--
+-- THE EXPERIMENT ARMS ARE UNAFFECTED RELATIVE TO EACH OTHER. Both result
+-- branches were edited identically, deliberately -- the single-scenario and
+-- Compare Mode copies of each string moved together, and the shared helpers
+-- (breakeven_summary, counterfactual_vocab, render_takehome_block) are shared
+-- by construction. So H2's contrast between arms is preserved across the seam;
+-- what shifts is the common baseline both arms sit on. A between-arms
+-- comparison is safe to pool; a before/after comparison of either arm alone is
+-- not.
+--
+-- THE RESEARCH INSTRUMENT ITSELF WAS NOT TOUCHED, on purpose. The pre-survey
+-- question text, PRESURVEY_BORROWING_OPTIONS and the exit survey were left
+-- exactly as they were, dashes and all, precisely so that this seam does not
+-- reach the questions. Their stored codes (s0..s5plus, n0, b1..b5) are
+-- unchanged and remain comparable across the whole series. If that text is
+-- ever reworded, THAT needs its own entry here and it is a much harder seam
+-- than this one.
+--
+-- ALSO ON THIS DATE, and harmless to analysis: the PDF/Share/Image buttons
+-- took the brand's orange (a CSS change, no new event, no key renamed, so
+-- pdf_download and scenario_share rows are unaffected), and four PDF section
+-- labels were brought back into step with their on-screen twins. Any
+-- click-rate comparison on those three buttons across this date is measuring
+-- a colour change as well as anything else.
+--
+-- Edge half went live 2026-08-12 (Worker version a721cf27); the app half
+-- lands whenever PR #44 merges and Streamlit Community Cloud redeploys, so
+-- the app-side seam is the MERGE date, not this one. Fill it in when known.
