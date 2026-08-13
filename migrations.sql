@@ -1643,3 +1643,81 @@ alter table scenario_events
 -- Edge half went live 2026-08-12 (Worker version a721cf27); the app half
 -- lands whenever PR #44 merges and Streamlit Community Cloud redeploys, so
 -- the app-side seam is the MERGE date, not this one. Fill it in when known.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-13 -- A FOURTH EDGE ACTION in usage_logs, no DDL.
+--
+-- Every guide gained a Share button, beside Helpful at the foot of the
+-- article, and the Worker writes:
+--     'article_share:slug=<slug>'   the link left the page
+-- session_id NULL, UTC timestamp, traffic_source from ?src= -- the same shape
+-- as landing_view / guide_view / article_like, and no column changed.
+--
+-- IT IS THE SOFTEST SIGNAL IN THIS DATABASE. Read the qualifiers before using
+-- the column for anything:
+--   * a row is written when navigator.share RESOLVES or the link reaches the
+--     clipboard. NEITHER PROVES DELIVERY. Some browsers resolve the share
+--     sheet on invoke rather than on send, and a copied link can be pasted
+--     nowhere;
+--   * a cancelled share sheet (AbortError) writes NOTHING, deliberately, and
+--     neither does the last-resort branch that reveals the link on the page --
+--     so the count under-reports as well as over-reporting, in different
+--     directions, and the two do not cancel;
+--   * there is NO dedupe of any kind. article_like at least has a localStorage
+--     guard; this has none, because sharing a guide with two people twice is a
+--     real act and nothing on the client can tell it from a fidget. One reader
+--     can be many rows;
+--   * the endpoint is public and unauthenticated, like the like endpoint.
+--
+-- So: an UPPER BOUND on intent to pass a guide on. Never a count of people,
+-- never a rate against guide_view, and not in the paper.
+--
+-- SHARES BEFORE THIS DATE DO NOT EXIST AS ZEROES -- there was no button. A
+-- per-guide comparison across this date is comparing a feature's absence with
+-- its presence, and the two older guides (for-parents-run-the-numbers,
+-- parent-plus-senior-year) have accumulated reads since 2026-08-11 with no
+-- share control on the page at all.
+--
+-- SHARE_ACTION_PREFIX joins EDGE_ACTION_PREFIXES, so every existing exclusion
+-- (pageview rates, survey denominators, app-activity panels) picks it up
+-- automatically. check_internal_links.py asserts app.py and the Worker still
+-- agree on the string, and that the article pages POST to the route the
+-- Worker answers on -- a rename on one side alone would leave the admin
+-- column reading zero, which is exactly what an unshared guide looks like.
+--
+-- ALSO ON THIS DATE, harmless to analysis: the site footer changed from
+-- "Built from ..." to "Source: ...", and the Share button was right-justified
+-- within the reactions bar. No event, no key, no column.
+--
+-- SAME DATE, TWO FIXES TO THE REACTION ENDPOINTS -- both pre-dated the Share
+-- button and both applied to article_like from 2026-08-11. No DDL.
+--
+-- 1. traffic_source WAS ALWAYS NULL ON EVERY article_like ROW, and the NULL
+--    does not mean "organic". The page POSTed to a bare /api/like, so the
+--    Worker's url.searchParams.get("src") had nothing to read -- CARRY_QS_JS
+--    rewrites <a href> only, never a fetch. The tag was being read off the
+--    wrong URL, not dropped by the visitor.
+--
+--    The article pages now POST to /api/like and /api/share WITH
+--    location.search, so from this date a reaction carries the same tag its
+--    guide_view does. DO NOT read a pre-2026-08-13 like as untagged traffic,
+--    and do not pool the two eras when asking which channel a reaction came
+--    from -- every earlier row is structurally NULL. Reads (guide_view) are
+--    unaffected and were tagged correctly throughout.
+--
+-- 2. THE REACTION ENDPOINTS IGNORED ?test=1 AND src=selftest. That check
+--    lives in logEdgeView, which handleLike never went through, so tapping
+--    Helpful while verifying production wrote a real, untagged row -- the
+--    contamination CLAUDE.md records for pageviews, arriving in a per-guide
+--    count instead. excludedFromLogging() is now shared by logEdgeView,
+--    handleLike and handleShare, and also refuses declared crawlers.
+--
+--    An excluded tap returns EXACTLY what a real one does (the like count is
+--    still read and returned), so the button being verified still behaves as
+--    it ships. The reads are deliberately not excluded: a count writes
+--    nothing, and blanking it in test mode would hide the thing being checked.
+--
+--    Nothing can be done about likes already recorded this way. There are few,
+--    they are per-guide counts rather than research data, and they cannot be
+--    told apart from real ones -- the same irreversibility as the untagged
+--    pageviews of 2026-07-30/31.
