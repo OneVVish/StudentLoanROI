@@ -127,6 +127,21 @@ def check_landing_action_separate(ns, fail):
         fail(f"infra/worker.js does not emit LIKE_ACTION = "
              f"{ns['LIKE_ACTION_PREFIX']!r} -- the guide-reactions panel "
              f"would stay empty with no error anywhere")
+    if f'SHARE_ACTION = "{ns["SHARE_ACTION_PREFIX"]}"' not in worker:
+        fail(f"infra/worker.js does not emit SHARE_ACTION = "
+             f"{ns['SHARE_ACTION_PREFIX']!r} -- the Shares column would read "
+             f"zero for every guide, which is exactly what a guide nobody "
+             f"shares looks like")
+    # And the article pages must POST to the endpoint the Worker answers on. A
+    # button that fires into a 404 still confirms to the reader, so the only
+    # symptom is a column that never moves.
+    if '"/api/share"' not in worker:
+        fail("infra/worker.js has no /api/share route -- every share POST "
+             "would fall through to the app origin and be lost")
+    guides = open("infra/build_site.py").read()
+    if 'fetch("/api/share"' not in guides:
+        fail("infra/build_site.py does not POST to /api/share -- the Share "
+             "button would work perfectly and count nothing")
     if f'LANDING_ACTION = "{prefix}"' not in worker:
         fail(f"infra/worker.js does not emit LANDING_ACTION = {prefix!r} -- "
              f"app.py's LANDING_ACTION_PREFIX and the Worker have drifted, so "

@@ -68,10 +68,21 @@ same silent way.
 - **Every guide ends at the calculator.** The CTA carries `from=guide`, so the
   click is attributed. The guard fails a page without one — an article that
   cannot send anyone anywhere is a dead end.
-- **Reads and likes are counted at the edge**, by the Worker, and shown on the
-  admin page. Neither is a measurement of people: an edge read has no session,
-  and a like has no identity at all. They are warm signals for what to write
-  next.
+- **Reads, likes and shares are counted at the edge**, by the Worker, and shown
+  on the admin page. None is a measurement of people: an edge read has no
+  session, and a like has no identity at all. They are warm signals for what to
+  write next.
+- **Every guide carries a Share button**, right-justified in the reactions bar
+  at the foot of the article. It offers the phone's own share sheet where one
+  exists and copies the link everywhere else. It shares the **canonical** URL,
+  never the address bar: a reader who arrived on `?src=<channel>` would
+  otherwise stamp the recipient with the sharer's recruitment tag, which is the
+  fabricated attribution that keeps `src` out of the app's share links too.
+- **A share is the softest number on that page**, softer than a like. It is
+  written when the share sheet resolves or the link reaches the clipboard, and
+  neither proves anyone received it; a cancelled sheet writes nothing; there is
+  no dedupe, so one enthusiastic reader is several rows. Upper bound on intent,
+  never a rate. `migrations.sql` carries the full list of caveats.
 - **The sitemap regenerates from the posts.** Deleting a post removes its URL,
   which is right — a sitemap listing a 301 is worse than one listing nothing.
 

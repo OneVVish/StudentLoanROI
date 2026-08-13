@@ -4227,6 +4227,17 @@ LANDING_ACTION_PREFIX = "landing_view"
 # landing rows are.
 LIKE_ACTION_PREFIX = "article_like"
 
+# Guide shares, same shape: "article_share:slug=<slug>", written when the
+# browser's share sheet resolves or the link reaches the clipboard.
+#
+# WEAKER THAN A LIKE, specifically. A resolved share sheet is not proof of
+# delivery (some browsers resolve on invoke), a copied link may be pasted
+# nowhere, and there is no localStorage guard at all -- a second share is a
+# second row, because sharing a guide with two people IS two acts and nothing
+# can tell that from a fidget. Read it as an upper bound on intent to pass a
+# guide on. Never a count of people, and never a rate against reads.
+SHARE_ACTION_PREFIX = "article_share"
+
 # Guide reads, also from the Worker: "guide_view:slug=<slug>". These give the
 # like count a denominator -- 14 reactions means one thing against 20 readers
 # and quite another against 2,000.
@@ -4235,7 +4246,7 @@ GUIDE_ACTION_PREFIX = "guide_view"
 # Everything the edge writes directly. These rows never ran the app, carry no
 # session_id, and must be kept out of any panel that means "app activity".
 EDGE_ACTION_PREFIXES = (LANDING_ACTION_PREFIX, LIKE_ACTION_PREFIX,
-                        GUIDE_ACTION_PREFIX)
+                        SHARE_ACTION_PREFIX, GUIDE_ACTION_PREFIX)
 
 
 def requested_tool() -> str:
@@ -16868,23 +16879,29 @@ def _admin_welcome_destinations(usage_df: pd.DataFrame) -> pd.DataFrame:
     return table
 
 
-def _admin_guide_likes(usage_df: pd.DataFrame) -> pd.DataFrame:
-    """Reactions per guide, newest-liked first.
+def _admin_guide_reactions(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """Reads, likes and shares per guide, most-read first.
 
-    Deliberately just a count and a slug: there is no identity behind a like
-    (see LIKE_ACTION_PREFIX), so a rate, a share or a per-visitor figure would
-    all dress an unauthenticated tap as a measurement.
+    Named for what it holds rather than for likes alone -- it carried a Shares
+    column from 2026-08-13 and a helper called _admin_guide_likes returning
+    three of them is the kind of small lie the next reader has to work around.
+
+    Deliberately just counts and a slug: there is no identity behind any of
+    these (see LIKE_ACTION_PREFIX and SHARE_ACTION_PREFIX), so a rate or a
+    per-visitor figure would dress unauthenticated taps as a measurement.
     """
     if usage_df.empty or "action" not in usage_df.columns:
         return pd.DataFrame()
     actions = usage_df["action"].astype(str)
     likes = actions[actions.str.startswith(LIKE_ACTION_PREFIX)]
+    shares = actions[actions.str.startswith(SHARE_ACTION_PREFIX)]
     views = actions[actions.str.startswith(GUIDE_ACTION_PREFIX)]
-    if likes.empty and views.empty:
+    if likes.empty and shares.empty and views.empty:
         return pd.DataFrame()
     table = pd.DataFrame({
         "Reads": views.str.split("slug=").str[-1].value_counts(),
         "Likes": likes.str.split("slug=").str[-1].value_counts(),
+        "Shares": shares.str.split("slug=").str[-1].value_counts(),
     }).fillna(0).astype(int)
     # The index page is a read, not a guide -- counting it as one would put a
     # row with no article behind it at the top of the table.
@@ -17185,19 +17202,24 @@ def render_admin_dashboard() -> None:
             )
             st.dataframe(_dests, use_container_width=True, hide_index=True)
 
-    _likes = _admin_guide_likes(usage_df)
-    if not _likes.empty:
+    _reactions = _admin_guide_reactions(usage_df)
+    if not _reactions.empty:
         st.markdown("#### 📖 Guides")
         st.caption(
             "Reads counted at the edge; likes are taps on the Helpful button. "
-            "**Neither is a measurement of people** — an edge read has no "
-            "session, and a like has no identity at all (the browser guard is "
-            "localStorage, which anyone can clear, and nothing stops a "
+            "**None of these is a measurement of people** — an edge read has "
+            "no session, and a like has no identity at all (the browser guard "
+            "is localStorage, which anyone can clear, and nothing stops a "
             "script). Read them as warm signals for what to write next, never "
             "as data. The guides index page is excluded — it is a read with "
-            "no article behind it."
+            "no article behind it.\n\n"
+            "**Shares are the softest column of the three.** One is written "
+            "when the share sheet closes or the link reaches the clipboard, "
+            "neither of which proves it was sent to anyone, and repeat shares "
+            "are not de-duplicated. Treat it as an upper bound on how often a "
+            "guide was worth passing on, and never as a share *rate*."
         )
-        st.dataframe(_likes, use_container_width=True, hide_index=True)
+        st.dataframe(_reactions, use_container_width=True, hide_index=True)
 
     st.markdown("#### 🔗 Traffic by source")
     st.caption(

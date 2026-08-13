@@ -1643,3 +1643,48 @@ alter table scenario_events
 -- Edge half went live 2026-08-12 (Worker version a721cf27); the app half
 -- lands whenever PR #44 merges and Streamlit Community Cloud redeploys, so
 -- the app-side seam is the MERGE date, not this one. Fill it in when known.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-13 -- A FOURTH EDGE ACTION in usage_logs, no DDL.
+--
+-- Every guide gained a Share button, beside Helpful at the foot of the
+-- article, and the Worker writes:
+--     'article_share:slug=<slug>'   the link left the page
+-- session_id NULL, UTC timestamp, traffic_source from ?src= -- the same shape
+-- as landing_view / guide_view / article_like, and no column changed.
+--
+-- IT IS THE SOFTEST SIGNAL IN THIS DATABASE. Read the qualifiers before using
+-- the column for anything:
+--   * a row is written when navigator.share RESOLVES or the link reaches the
+--     clipboard. NEITHER PROVES DELIVERY. Some browsers resolve the share
+--     sheet on invoke rather than on send, and a copied link can be pasted
+--     nowhere;
+--   * a cancelled share sheet (AbortError) writes NOTHING, deliberately, and
+--     neither does the last-resort branch that reveals the link on the page --
+--     so the count under-reports as well as over-reporting, in different
+--     directions, and the two do not cancel;
+--   * there is NO dedupe of any kind. article_like at least has a localStorage
+--     guard; this has none, because sharing a guide with two people twice is a
+--     real act and nothing on the client can tell it from a fidget. One reader
+--     can be many rows;
+--   * the endpoint is public and unauthenticated, like the like endpoint.
+--
+-- So: an UPPER BOUND on intent to pass a guide on. Never a count of people,
+-- never a rate against guide_view, and not in the paper.
+--
+-- SHARES BEFORE THIS DATE DO NOT EXIST AS ZEROES -- there was no button. A
+-- per-guide comparison across this date is comparing a feature's absence with
+-- its presence, and the two older guides (for-parents-run-the-numbers,
+-- parent-plus-senior-year) have accumulated reads since 2026-08-11 with no
+-- share control on the page at all.
+--
+-- SHARE_ACTION_PREFIX joins EDGE_ACTION_PREFIXES, so every existing exclusion
+-- (pageview rates, survey denominators, app-activity panels) picks it up
+-- automatically. check_internal_links.py asserts app.py and the Worker still
+-- agree on the string, and that the article pages POST to the route the
+-- Worker answers on -- a rename on one side alone would leave the admin
+-- column reading zero, which is exactly what an unshared guide looks like.
+--
+-- ALSO ON THIS DATE, harmless to analysis: the site footer changed from
+-- "Built from ..." to "Source: ...", and the Share button was right-justified
+-- within the reactions bar. No event, no key, no column.

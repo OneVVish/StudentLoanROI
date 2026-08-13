@@ -169,17 +169,37 @@
     text-align: left; font-size: 15px; }
   article tbody td { padding: 9px 10px; border-bottom: 1px solid var(--rule);
     font-variant-numeric: tabular-nums; }
-  .likes { display: flex; align-items: center; gap: 12px; margin: 34px 0 8px;
-    padding: 16px 0; border-top: 1px solid var(--rule);
+  /* The reactions bar. Named for what it holds rather than for the like
+     button alone: it carries Helpful AND Share, and a rule set called .likes
+     styling a share control is the kind of small lie the next reader has to
+     work around. flex-wrap because two pills plus the count overflow a 320px
+     phone in one line. */
+  .reactions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+    margin: 34px 0 8px; padding: 16px 0; border-top: 1px solid var(--rule);
     border-bottom: 1px solid var(--rule); }
-  .likes button { font: inherit; font-weight: 700; cursor: pointer;
+  .reactions button { font: inherit; font-weight: 700; cursor: pointer;
     background: var(--surface); color: var(--deep);
     border: 2px solid var(--deep); border-radius: 99px; padding: 8px 20px; }
-  .likes button[disabled] { background: var(--tint); border-color: var(--orange);
+  .reactions button[disabled] { background: var(--tint); border-color: var(--orange);
     color: var(--orange); cursor: default; }
-  .likes button:focus-visible { outline: 3px solid var(--blue);
+  .reactions button:focus-visible { outline: 3px solid var(--blue);
     outline-offset: 2px; }
-  .likes .count { color: var(--muted); font-size: 15px; }
+  .reactions .count { color: var(--muted); font-size: 15px; }
+  /* Share sits at the right edge, away from Helpful. The count is the middle
+     element in source order for that reason -- pushing the button with
+     margin-left:auto needs everything it is being pushed past to come BEFORE
+     it, and putting the button last in the DOM instead would leave the
+     revealed fallback link stranded to its right. */
+  .reactions #share { margin-left: auto; }
+  /* The last-resort share fallback: the link itself, shown only when both copy
+     mechanisms failed. `user-select: all` makes one click take the whole URL,
+     so the keyboard copy the button suggests has something to act on -- and it
+     stays put rather than flashing, because a reader who got this far is
+     copying by hand. */
+  .reactions .sharelink { flex-basis: 100%; color: var(--muted);
+    font-size: 15px; word-break: break-all;
+    user-select: all; -webkit-user-select: all; }
+  .reactions .sharelink[hidden] { display: none; }
 
 </style>
 </head>
@@ -232,9 +252,11 @@
 <h2>Run it for your own schools</h2>
 <p>The calculator applies these caps automatically to any school and major you pick, then shows the monthly payment and where you stand ten years out. It is free, takes about two minutes, and asks for nothing about you.</p>
 
-  <div class="likes">
+  <div class="reactions">
     <button id="like" data-slug="parent-plus-senior-year">♥ Helpful</button>
     <span class="count" id="likecount">&nbsp;</span>
+    <button id="share" type="button">🔗 Share</button>
+    <span class="sharelink" id="sharelink" hidden></span>
   </div>
 
   <div class="cta" style="padding:34px 0">
@@ -244,7 +266,7 @@
 </article>
 
 <footer>
-  Built from Bureau of Labor Statistics, New York Fed, College Scorecard,
+  Source: Bureau of Labor Statistics, New York Fed, College Scorecard,
   IPEDS and CPS ASEC data. A student research project. Educational estimate,
   not financial advice.<br>
   <a href="/guides" style="color:inherit">All guides</a> ·
@@ -278,6 +300,112 @@
     }).then(function (r) { return r.json(); })
       .then(function (d) { if (typeof d.count === "number") render(d.count); })
       .catch(function () {});
+  });
+})();
+</script>
+<script>
+(function () {
+  // Share. The native sheet where the browser has one -- which is the phone,
+  // and a guide written for parents and counselors is forwarded far more often
+  // than it is posted -- and a clipboard copy everywhere else.
+  //
+  // The URL is the CANONICAL one baked in at build time, never location.href.
+  // A reader who arrived on ?src=<channel> would otherwise hand the recipient
+  // the sharer's own recruitment tag, and that recipient was never recruited
+  // through it: the same fabricated attribution that keeps src out of the
+  // app's share links. It also drops ?test=1 and any junk in the address bar.
+  var btn = document.getElementById("share");
+  if (!btn) return;
+  var url = "https://worthmydegree.com/guides/parent-plus-senior-year";
+  var title = "The Parent PLUS cap nobody mentions until senior year";
+  var label = btn.textContent;
+  var timer = null;
+  var slug = document.getElementById("like").dataset.slug;
+  function record() {
+    // Called ONLY where the link actually left the page: the share sheet
+    // resolved, or the clipboard took it. Not on the cancel (the reader
+    // changed their mind) and not on the reveal fallback (we showed them a
+    // link and cannot know whether they took it) -- a counter that fires on
+    // the click alone counts curiosity as sharing.
+    //
+    // keepalive because the native sheet backgrounds the page on a phone, and
+    // an ordinary fetch is cancelled when it does. Failure is silent all the
+    // way down: this is a statistic and the reader is mid-article.
+    try {
+      fetch("/api/share", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({slug: slug}),
+        keepalive: true,
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function flash(text) {
+    btn.textContent = text;
+    clearTimeout(timer);
+    // Back to the label rather than staying on the confirmation: the button
+    // has to be usable a second time, on a different device or a second chat.
+    timer = setTimeout(function () { btn.textContent = label; }, 2400);
+  }
+  function revealLink() {
+    // Everything automatic failed. Put the link on the page, selected, and say
+    // so -- naming a keyboard shortcut with nothing selected (which is what
+    // this did first) asks the reader to copy air, and it names the wrong key
+    // on two platforms out of three.
+    var out = document.getElementById("sharelink");
+    out.textContent = url;
+    out.hidden = false;
+    try {
+      var range = document.createRange();
+      range.selectNodeContents(out);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) {}
+    flash("Copy this link:");
+  }
+  function legacyCopy() {
+    // execCommand is deprecated and is the only thing that works when
+    // navigator.clipboard is absent or refused (it needs a secure context and
+    // can still be denied by permission). Failure is SAID, not swallowed: a
+    // button that looks like it copied and did not is worse than one that
+    // admits it, because the reader pastes nothing and blames themselves.
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = url;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-1000px";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) { record(); flash("✓ Link copied"); } else { revealLink(); }
+    } catch (e) {
+      revealLink();
+    }
+  }
+  function copy() {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(
+        function () { record(); flash("✓ Link copied"); }, legacyCopy);
+    } else {
+      legacyCopy();
+    }
+  }
+  btn.addEventListener("click", function () {
+    if (navigator.share) {
+      // AbortError is the reader closing the sheet -- a decision, not a
+      // failure, and falling back to a copy there would put a link on their
+      // clipboard that they just declined to send. Anything else IS a
+      // failure, and the copy is the useful answer to it.
+      navigator.share({title: title, url: url}).then(record, function (err) {
+        if (err && err.name === "AbortError") return;
+        copy();
+      });
+      return;
+    }
+    copy();
   });
 })();
 </script>
