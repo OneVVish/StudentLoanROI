@@ -247,7 +247,7 @@ TOPIC_VOCAB = {
         "phrases": ("rap", "repayment assistance", "idr", "income driven",
                     "income-driven", "ibr", "save plan", "standard plan",
                     "which repayment"),
-        "backing": "simulate_rap_schedule / simulate_idr_schedule / "
+        "backing": "simulate_rap_schedule / calculate_idr_repayment / "
                    "calculate_standard_repayment, verified against "
                    "studentaid.gov's published table by "
                    "check_rap_payment_table.py. SCOPE.md #9: 166 of 203 majors "
@@ -388,6 +388,50 @@ TOPIC_VOCAB = {
                    "net-price calculator link. NOT sourceable: where to find an "
                    "award, or the odds of winning one",
         "answerable": ANSWERABLE_ADJACENT,
+    },
+    # Third pair added from the leads section: "paid off · off #num · paid" and
+    # "still owe · over #num · owe #num" were both emergent clusters with real
+    # engagement and no entry behind them.
+    "paying-it-off-early": {
+        "label": "Paying more than the minimum, and what it buys",
+        "phrases": ("paid off", "paid it off", "paid in full", "debt free",
+                    "debt-free", "final payment", "last payment", "payoff",
+                    "loan free", "snowball", "avalanche", "extra payment",
+                    "extra payments", "pay it off early", "pay extra",
+                    "lump sum"),
+        "strong": ("paid in full", "debt free", "final payment", "avalanche",
+                   "snowball", "extra payment", "lump sum"),
+        "backing": "calculate_standard_repayment's monthly_payment_override "
+                   "models a borrower paying MORE than required, and "
+                   "simulate_fixed_avalanche targets the surplus at the "
+                   "highest-rate note while retired notes roll their payment "
+                   "forward. pivot_strategy_analysis prices the whole fork: "
+                   "ride the minimum to a taxed discharge, or redirect the "
+                   "freed payment at the balance. existing_extra_monthly (?rx=) "
+                   "is the input. NOTE the modelled limit: extra payments on "
+                   "the income-driven side change RAP's waiver and the "
+                   "forgiveness clocks and are deliberately NOT modelled there",
+        "answerable": ANSWERABLE_BACKED,
+    },
+    "balance-going-up": {
+        "label": "Owing more than you borrowed",
+        "phrases": ("negative amortization", "negative amortisation",
+                    "balance went up", "balance grew", "balance keeps growing",
+                    "owe more than", "owe more now", "still owe",
+                    "never going down", "growing balance",
+                    "interest outpaces"),
+        "strong": ("negative amortization", "negative amortisation",
+                   "balance went up", "balance grew", "owe more than",
+                   "balance keeps growing"),
+        "backing": "balance_split_is_informative and the stacked balance chart "
+                   "exist for exactly this case: on $190,000 at 6.5% for a "
+                   "$38,000 earner, principal sits at $190,000 for NINETEEN "
+                   "YEARS while unpaid interest grows to $366,046. "
+                   "calculate_idr_repayment carries the two-pool accounting "
+                   "(starting_interest splits the balance), and simulate_rap_"
+                   "schedule waives the interest a payment does not cover, "
+                   "which is why RAP is the one plan where this cannot happen",
+        "answerable": ANSWERABLE_BACKED,
     },
     "roi-horizon": {
         "label": "Whether the answer depends on how far out you look",
@@ -1914,6 +1958,52 @@ def fixture_posts(asof_ts: float) -> list:
     return rows
 
 
+_CITED_IDENTIFIER_RE = re.compile(r"\b(?:[a-z][a-z0-9]*_[a-z0-9_]+|[A-Z][A-Z0-9]*_[A-Z0-9_]+)\b")
+_CITED_PATH_RE = re.compile(r"\bdata/[\w./-]+\.csv\b")
+
+# Words that look like identifiers and are not. Kept explicit rather than
+# loosening the pattern, because every entry here is a place the check has been
+# deliberately switched off.
+_NOT_IDENTIFIERS = frozenset({
+    "net_price", "cost_of_attendance", "in_state", "out_of_state",
+})
+
+
+def unresolved_citations() -> list:
+    """Backing strings that name a function, constant or dataset app.py and
+    data/ do not contain.
+
+    Substring presence in the source is enough: this is asking "can a reader
+    open this", not "is it in scope here". A false pass on a name that appears
+    in a comment is cheap; a false FAIL would make the check something people
+    switch off.
+    """
+    app_path = Path(__file__).parent / "app.py"
+    try:
+        source = app_path.read_text()
+    except OSError:                                        # pragma: no cover
+        return []
+    problems = []
+    for key, entry in TOPIC_VOCAB.items():
+        backing = entry.get("backing") or ""
+        for name in set(_CITED_IDENTIFIER_RE.findall(backing)):
+            if name in _NOT_IDENTIFIERS:
+                continue
+            if name not in source:
+                problems.append(
+                    f"TOPIC_VOCAB[{key!r}] cites {name!r}, which does not "
+                    f"appear anywhere in app.py -- a citation nobody can open "
+                    f"is inert, not broken: the digest prints it with "
+                    f"confidence and the drafting session goes looking for a "
+                    f"function that is not there")
+        for path in set(_CITED_PATH_RE.findall(backing)):
+            if not (Path(__file__).parent / path).exists():
+                problems.append(
+                    f"TOPIC_VOCAB[{key!r}] cites the dataset {path!r}, which "
+                    f"does not exist")
+    return problems
+
+
 def self_test() -> int:
     """The whole pipeline over the fixture, with named assertions.
 
@@ -2037,6 +2127,18 @@ def self_test() -> int:
             failures.append(f"TOPIC_VOCAB[{key!r}] claims answerable 1.0 with "
                             f"no backing -- 'the app can answer this' must "
                             f"always be a citation")
+    # 9b. ...and a citation must name something that EXISTS.
+    #
+    # This check exists because it caught a live one: repayment-plan-choice
+    # cited `simulate_idr_schedule`, which app.py has never contained (the
+    # function is calculate_idr_repayment). A backing that names a function
+    # nobody can open is inert rather than broken -- it reads as a source, the
+    # digest prints it with confidence, and the drafting session goes looking
+    # for a file that is not there. Same failure as a mapping keyed on an
+    # occupation title that does not exist: everything succeeds, and the thing
+    # it was supposed to guarantee silently is not true.
+    for bad in unresolved_citations():
+        failures.append(bad)
     for key, entry in CANNOT_ANSWER.items():
         if not entry.get("why"):
             failures.append(f"CANNOT_ANSWER[{key!r}] has no `why` -- declining "
