@@ -1688,3 +1688,36 @@ alter table scenario_events
 -- ALSO ON THIS DATE, harmless to analysis: the site footer changed from
 -- "Built from ..." to "Source: ...", and the Share button was right-justified
 -- within the reactions bar. No event, no key, no column.
+--
+-- SAME DATE, TWO FIXES TO THE REACTION ENDPOINTS -- both pre-dated the Share
+-- button and both applied to article_like from 2026-08-11. No DDL.
+--
+-- 1. traffic_source WAS ALWAYS NULL ON EVERY article_like ROW, and the NULL
+--    does not mean "organic". The page POSTed to a bare /api/like, so the
+--    Worker's url.searchParams.get("src") had nothing to read -- CARRY_QS_JS
+--    rewrites <a href> only, never a fetch. The tag was being read off the
+--    wrong URL, not dropped by the visitor.
+--
+--    The article pages now POST to /api/like and /api/share WITH
+--    location.search, so from this date a reaction carries the same tag its
+--    guide_view does. DO NOT read a pre-2026-08-13 like as untagged traffic,
+--    and do not pool the two eras when asking which channel a reaction came
+--    from -- every earlier row is structurally NULL. Reads (guide_view) are
+--    unaffected and were tagged correctly throughout.
+--
+-- 2. THE REACTION ENDPOINTS IGNORED ?test=1 AND src=selftest. That check
+--    lives in logEdgeView, which handleLike never went through, so tapping
+--    Helpful while verifying production wrote a real, untagged row -- the
+--    contamination CLAUDE.md records for pageviews, arriving in a per-guide
+--    count instead. excludedFromLogging() is now shared by logEdgeView,
+--    handleLike and handleShare, and also refuses declared crawlers.
+--
+--    An excluded tap returns EXACTLY what a real one does (the like count is
+--    still read and returned), so the button being verified still behaves as
+--    it ships. The reads are deliberately not excluded: a count writes
+--    nothing, and blanking it in test mode would hide the thing being checked.
+--
+--    Nothing can be done about likes already recorded this way. There are few,
+--    they are per-guide counts rather than research data, and they cannot be
+--    told apart from real ones -- the same irreversibility as the untagged
+--    pageviews of 2026-07-30/31.

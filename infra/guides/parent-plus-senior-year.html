@@ -294,7 +294,13 @@
     if (btn.disabled) return;
     btn.disabled = true; btn.textContent = "♥ Thanks";
     try { localStorage.setItem(key, "1"); } catch (e) {}
-    fetch("/api/like", {
+    // location.search rides along, and both halves of it matter: ?src= is the
+    // recruitment tag (read straight off the page URL, exactly as the Worker
+    // reads it for a guide_view -- without this the column was NULL for every
+    // reaction ever recorded), and ?test=1 / ?src=selftest are what let the
+    // Worker refuse to log the author's own verification taps. CARRY_QS_JS
+    // rewrites <a href> only; a fetch has to do it itself.
+    fetch("/api/like" + location.search, {
       method: "POST", headers: {"content-type": "application/json"},
       body: JSON.stringify({slug: slug}),
     }).then(function (r) { return r.json(); })
@@ -332,7 +338,10 @@
     // an ordinary fetch is cancelled when it does. Failure is silent all the
     // way down: this is a statistic and the reader is mid-article.
     try {
-      fetch("/api/share", {
+      // location.search carries the ?src= tag and the ?test=1 / ?src=selftest
+      // exclusions -- see the like POST above for why a fetch must do this
+      // itself.
+      fetch("/api/share" + location.search, {
         method: "POST",
         headers: {"content-type": "application/json"},
         body: JSON.stringify({slug: slug}),
