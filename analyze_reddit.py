@@ -341,6 +341,54 @@ TOPIC_VOCAB = {
         "strong": ("community college",),
         "answerable": ANSWERABLE_BACKED,
     },
+    # Added after the first real harvest: the emergent pass surfaced
+    # "#num interest · interest rate · interest" as its own cluster with no
+    # vocabulary entry behind it, so it was capped at UNCHECKED_ANSWERABLE
+    # despite the app modelling this in detail. That is the feedback loop the
+    # UNMATCHED section exists for, working as intended.
+    "interest-rates": {
+        "label": "What the interest actually costs, and when it capitalises",
+        "phrases": ("interest rate", "interest rates", "accrued interest",
+                    "unpaid interest", "interest accrues", "capitalized",
+                    "capitalised", "capitalization", "origination fee",
+                    "compound interest", "interest"),
+        "strong": ("interest rate", "accrued interest", "capitalization",
+                   "origination fee", "unpaid interest"),
+        "backing": "DEFAULT_FEDERAL_RATE 6.5% and DEFAULT_GAP_RATE 8.5% as the "
+                   "two modelled tranches, PROFESSIONAL_DIRECT_RATE 8.07% "
+                   "(studentaid.gov), and ORIGINATION_FEE 1.057% federal / "
+                   "4.228% PLUS applied as a principal gross-up. "
+                   "split_loan_financing splits the loan across those rates and "
+                   "every simulator reports total_interest; RAP waives the "
+                   "interest a payment does not cover",
+        "answerable": ANSWERABLE_BACKED,
+    },
+    # Also emergent on the first harvest ("full ride · ride · scholarship").
+    #
+    # ADJACENT, NOT BACKED, and the distinction is the point. The app can price
+    # what an award DOES -- grants reduce the cost, personal contribution comes
+    # out of the ROI denominator without being borrowed. It cannot tell anyone
+    # where to find a scholarship or whether they will win one, and there is no
+    # scholarship dataset in this repo. An article that promised the second
+    # would be sourced from memory, which the editorial rule forbids.
+    "scholarships-and-aid": {
+        "label": "What an award is actually worth against the price",
+        "phrases": ("scholarship", "scholarships", "full ride", "full-ride",
+                    "merit aid", "merit scholarship", "pell", "pell grant",
+                    "grant", "grants", "aid package", "financial aid package",
+                    "need based aid", "need-based aid"),
+        "strong": ("full ride", "full-ride", "merit aid", "pell grant",
+                   "scholarship", "aid package"),
+        "backing": "grants_per_year reduces the modelled cost directly, and "
+                   "personal_contribution enters the ROI denominator WITHOUT "
+                   "being borrowed (see get_effective_principal -- you pay no "
+                   "interest on money you never borrowed). "
+                   "data/college_coa_clean.csv gives the price the award is "
+                   "measured against, and every school row carries its federal "
+                   "net-price calculator link. NOT sourceable: where to find an "
+                   "award, or the odds of winning one",
+        "answerable": ANSWERABLE_ADJACENT,
+    },
     "roi-horizon": {
         "label": "Whether the answer depends on how far out you look",
         # NOT bare "10 years" / "30 years". Those fired on six threads and not
@@ -1481,6 +1529,27 @@ def build_clusters(posts: list, asof_ts: float, own_signal: dict = None,
     for i, cluster in enumerate(ranked, 1):
         cluster["cluster_id"] = i
 
+    # Vocabulary matching is multi-label, so one thread can support several
+    # clusters -- and it inflates breadth in every one of them. Undisclosed,
+    # that presents a single piece of evidence as though it were two
+    # independent ones. Computed after the ids are assigned so the note can
+    # name the other cluster the way the reader sees it.
+    for cluster in ranked:
+        mine = set(cluster["members"])
+        if not mine:
+            continue
+        shared = []
+        for other in ranked:
+            if other is cluster or not other["members"]:
+                continue
+            common = len(mine & set(other["members"]))
+            if common:
+                shared.append((common, other["cluster_id"], other["label"]))
+        shared.sort(reverse=True)
+        cluster["overlaps"] = "; ".join(
+            f"shares {n} thread(s) with #{cid} ({label[:28]})"
+            for n, cid, label in shared[:2])
+
     matched = len(claimed | out_claimed)
     return {
         "ranked": ranked,
@@ -1606,6 +1675,8 @@ def render_digest(result: dict, meta: dict, limit: int = 20) -> str:
             "specific", cluster["specific"],
             f"{cluster['numeric_share']:.0%} name a figure · "
             f"{cluster['question_share']:.0%} are questions"))
+        if cluster.get("overlaps"):
+            lines.append(f"    {'overlaps':<11}        {cluster['overlaps']}")
         if cluster["posts"]:
             lines.append("")
             lines.append("    Evidence that this question is being ASKED "
@@ -1790,7 +1861,12 @@ FIXTURE_POSTS = [
     ("ApplyingToCollege", "Worth the debt or go to state school?", 190, 70, 77),
     # Emergent: a topic no vocabulary entry knows.
     ("ApplyingToCollege", "Is a gap year financially stupid if I keep my aid?", 184, 88, 12),
-    ("college", "Took a gap year, deferring enrollment, aid package changed", 96, 41, 22),
+    # Deliberately carries NO vocabulary phrase. It used to say "aid package
+    # changed", which the scholarships-and-aid entry then claimed -- correctly,
+    # but it pulled the post out of the emergent pass and collapsed the one
+    # cluster this fixture exists to prove. A control for the emergent path has
+    # to stay out of the vocabulary's reach as the vocabulary grows.
+    ("college", "Took a gap year, deferring enrollment, now reapplying", 96, 41, 22),
     ("ApplyingToCollege", "Gap year then reapply, does aid reset?", 88, 30, 35),
     # Singletons -- must land in the unranked leads section.
     ("college", "Anyone else's dining plan a total ripoff?", 140, 60, 15),
