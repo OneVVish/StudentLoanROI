@@ -3650,7 +3650,8 @@ def financing_summary_text(financing: dict) -> str:
 
 
 def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
-                             compact: bool = False) -> None:
+                             compact: bool = False, *,
+                             total_interest: float) -> None:
     """The forgiveness figure, and the fact that it is taxable income.
 
     Shared by both result branches. It was two inline copies saying only that
@@ -3679,14 +3680,30 @@ def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
     deferred_months = repayment_result.get("deferment_months", 0) or 0
     if deferred_months > 0:
         years = deferred_months // 12
-        st.caption(
-            f"Repayment starts after your {years} years of graduate school, not "
-            f"at your bachelor's: federal loans are in in-school deferment while "
-            f"you are enrolled at least half time, and private lenders defer too. "
-            f"That is not free. {fmt_money_md(capitalized)} of interest built up "
-            f"while you were enrolled and was added to the balance, which is why "
-            f"it climbs before it falls. Only subsidized federal loans escape "
-            f"that; everything else accrues."
+        # st.warning, not st.caption, and the lifetime figure leads. Deferment is
+        # the single most expensive thing in this model that looks like a favour:
+        # the visitor sees four years of $0 payments and a net-position line that
+        # stops falling, and the price of both is an interest total most of a
+        # million dollars on the default dentist. A grey caption under a metric
+        # that says the same number is not where that belongs.
+        #
+        # total_interest is a REQUIRED argument rather than read off
+        # repayment_result, because the metric above this reads
+        # `combined_repayment or repayment_result` and those differ the moment a
+        # visitor carries an existing balance. Quoting the new loan's figure
+        # under a metric showing the combined one is the contradiction this
+        # codebase keeps having to fix; a required argument makes the two the
+        # same number by construction.
+        st.warning(
+            f"**Deferring is not free.** Nothing is paid while you are enrolled, "
+            f"so {fmt_money_md(capitalized)} of interest is added to the balance "
+            f"before your first payment, and this loan costs "
+            f"{fmt_money_md(total_interest)} in interest over its life. "
+            f"Repayment starts after your {years} years of graduate school "
+            f"rather than at your bachelor's, because federal loans are in "
+            f"in-school deferment while you are enrolled at least half time and "
+            f"private lenders defer too. Only subsidized federal loans escape "
+            f"the interest; everything else accrues."
         )
     waived = repayment_result.get("waived_interest", 0) or 0
     if waived > 0:
@@ -20533,7 +20550,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                  "expensive it is to live in your chosen city, so this is a fair "
                  "comparison no matter where you live.",
         )
-        render_forgiveness_note(repayment_result, scenario.get("strategy_label"), compact=True)
+        render_forgiveness_note(repayment_result, scenario.get("strategy_label"),
+                                compact=True, total_interest=shown["total_interest"])
 
         # loan_amount/interest_rate/repayment_strategy are parameters rather
         # than globals because Scenario B has its own -- reading the globals
@@ -21036,7 +21054,8 @@ else:
 
     render_parent_plus_note(coa_match_a)
 
-    render_forgiveness_note(repayment_result, strategy_label)
+    render_forgiveness_note(repayment_result, strategy_label,
+                            total_interest=_shown["total_interest"])
 
     st.plotly_chart(
         build_balance_chart(repayment_result["schedule"], strategy_label,
