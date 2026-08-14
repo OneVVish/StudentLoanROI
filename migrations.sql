@@ -1801,3 +1801,49 @@ alter table scenario_events
 -- $200,000 federal professional ceiling becomes $79,900. Any stored
 -- roi_pct, earnings_premium, monthly_payment, payoff_years or dti_ratio for an
 -- unnamed-school dentistry scenario is not comparable across this date.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-14 -- PROFESSIONAL DEGREES WERE PAID FOR TWICE IN DETAILED MODE.
+-- No DDL. Third entry on this date and the largest of them.
+--
+-- additional_training_debt is added ON TOP of the undergraduate loan, so the
+-- cost model has to stop at the undergraduate years on a path that carries
+-- one. It did not. compute_loan_schedule_by_year was called with the WHOLE
+-- programme length, so a dermatologist at a $45,619 school was charged eight
+-- years of that COA ($364,952) and then had $205,000 of medical school debt
+-- added, for a $569,952 principal where the twelve already-modelled physician
+-- titles read $387,476.
+--
+-- Both halves looked right in isolation, which is why it survived: the cost
+-- model charged the length BLS says the path takes, and the debt is the figure
+-- AAMC publishes. What settles which gives way is Scorecard's own scoping,
+-- already quoted in build_professional_debt.py -- its per-school debt "only
+-- includes loans disbursed at the same academic level as the evaluated
+-- credential level", i.e. the undergraduate loan is charged separately, which
+-- only works if the undergraduate loan is undergraduate.
+--
+-- school_cost_years() is the rule, and check_school_search_filters.py asserts
+-- it in BOTH directions: a professional path must not be charged its graduate
+-- years, and a master's must still be, since nothing else pays for those and
+-- trimming them prices the degree at zero.
+--
+-- WHO IS AFFECTED. DETAILED MODE ONLY, on the ~30 occupations carrying
+-- additional_training_debt (the physician, dentist and law titles plus
+-- pharmacy, veterinary, optometry, podiatry and chiropractic). Simplified mode
+-- passes federal_cap=None, skips the split entirely and never built a cost
+-- schedule, so it is bit-identical. Master's paths and the 42 research and
+-- clinical doctorates in UNMODELLED_DOCTORAL_TITLES are bit-identical too.
+--
+--   Dermatologists   $569,952 -> $387,476
+--   Dentists, General $658,852 -> $462,376   (with the ADEA fix above)
+--   Lawyers          $449,190 -> $312,476
+--
+-- The federal cap moved with it: graduate_direct_cap now contributes 0 on
+-- these paths, because that borrowing is professional_debt_cap's job and
+-- counting both gave the undergraduate pool $82,000 of graduate capacity it
+-- does not have. The tranche split therefore changes as well as the total.
+--
+-- Any stored roi_pct, earnings_premium, monthly_payment, payoff_years or
+-- dti_ratio from a DETAILED-mode scenario on one of those occupations is not
+-- comparable across this date. loan_mode is stored, so the affected rows can
+-- be isolated exactly rather than by excluding the occupations wholesale.

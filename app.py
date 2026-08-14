@@ -1656,6 +1656,55 @@ def curated_school_years(title: str) -> int:
     return 0
 
 
+def curated_professional_debt(title: str) -> float:
+    """The professional-school debt curated for THIS occupation, or 0.
+
+    Section-1 constants only, for the same reason curated_school_years reads
+    them: this resolves BEFORE MAJOR_DATA exists, because Financing renders
+    above Career. It answers "does this path pay for its graduate years out of
+    a debt figure" rather than "how much" -- the amount is resolved later by
+    resolve_professional_debt, which can substitute a named school's own.
+    """
+    for source in (ADVANCED_TRAINING_OVERLAY, CURATED_MAJOR_DATA):
+        debt = source.get(title or "", {}).get("additional_training_debt")
+        if debt:
+            return float(debt)
+    return 0.0
+
+
+def school_cost_years(program_years: int, graduate_years: int,
+                      title: str = None) -> int:
+    """Years the SCHOOL'S cost of attendance should be charged for.
+
+    The whole programme, EXCEPT on a path whose graduate years are already
+    priced by additional_training_debt. There the debt figure IS the cost of
+    those years, so charging the undergraduate school's COA for them as well
+    counts the degree twice.
+
+    It was counted twice until 2026-08-14. A dermatologist at a $45,619 school
+    was charged eight years of that COA ($364,952) and then had $205,000 of
+    medical school debt added on top, for a $569,952 principal against the
+    $387,476 the twelve already-modelled physician titles read. The two halves
+    each looked right: the cost model charged the length BLS says the path
+    takes, and the debt figure is the one AAMC publishes.
+
+    Scorecard's own scoping is the argument for which one gives way. Its
+    per-school debt "only includes loans disbursed at the same academic level
+    as the evaluated credential level", so it is graduate borrowing and the
+    undergraduate loan is charged separately -- which only works if the
+    undergraduate loan is undergraduate. The debt figure wins because it is
+    also the better number: an undergraduate school's COA is not a price for
+    medical school, and the debt is already net of aid.
+
+    A MASTER'S PATH IS UNAFFECTED and must stay so: it carries no
+    additional_training_debt, so COA over its graduate years is the only cost
+    model available, and trimming those years would price the degree at zero.
+    """
+    if curated_professional_debt(title):
+        return max(int(program_years) - int(graduate_years), 0)
+    return int(program_years)
+
+
 def program_years_for_education(typical_education: str, title: str = None) -> int:
     """How many years of enrollment the cost model should charge for an
     occupation with this BLS typical-entry-education. UNDERGRAD_YEARS for
@@ -8201,7 +8250,8 @@ def ccb_school(coa_row, predominant_degree) -> bool:
     return len(bachl) / len(assoc) <= CCB_MAX_BACHELORS_TO_ASSOC_RATIO
 
 
-def loan_amount_label(loan_basis: str, program_years: int) -> str:
+def loan_amount_label(loan_basis: str, program_years: int,
+                      cost_years: int = None) -> str:
     """Label for the Total Loan Amount figure, matching how it was derived.
 
     The previous label was `f"Total Loan Amount (all {program_years} years)"`
@@ -8210,6 +8260,16 @@ def loan_amount_label(loan_basis: str, program_years: int) -> str:
     -- that median is cumulative debt at exit with no time dimension at all --
     and once associate's degrees started resolving to 2 it printed "all 2
     years" over an unscaled four-year institution-wide figure.
+
+    `cost_years` is the third way, and it arrived with the fix for it. Once a
+    professional path stopped being charged the school's COA for the years its
+    debt figure already pays for (see school_cost_years), this figure covered
+    the undergraduate years alone while the label went on naming the whole
+    programme: "Total Loan Amount (all 8 years)" over four years of a
+    dentist's tuition. Saying "all 4 years" instead would be true of the
+    arithmetic and still misread, because the programme IS eight years -- so
+    the label names which four they are, and the caption beneath it carries
+    the professional debt that covers the rest.
     """
     if loan_basis == "no_program":
         return "Total Loan Amount (no degree required)"
@@ -8222,6 +8282,8 @@ def loan_amount_label(loan_basis: str, program_years: int) -> str:
         # graduation for this field at this school, so naming a year count over
         # it would assert something Scorecard does not measure.
         return "Total Loan Amount (graduate, school-reported)"
+    if cost_years is not None and 0 < cost_years < program_years:
+        return f"Total Loan Amount ({cost_years} undergraduate years)"
     return f"Total Loan Amount (all {program_years} years)"
 
 
@@ -11915,7 +11977,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         # NOT recomputed here from program_years_for_major, which would be a
         # second independent derivation and exactly the twin-drift CLAUDE.md
         # warns about for the chart pairs.
-        Paragraph(f"{loan_amount_label(loan_basis_a, program_years_for_major(major))}: "
+        # cost_years from the same resolvers, so the printed label cannot say a
+        # different number of years than the screen it is a copy of.
+        Paragraph(f"{loan_amount_label(loan_basis_a, program_years_for_major(major), school_cost_years(program_years_for_major(major), graduate_years_for_major(major), major))}: "
                    f"{fmt_money(loan_amount)}", styles["body"]),
         *financing_line,
         Spacer(1, 6),
@@ -13314,11 +13378,16 @@ graduate_debt_a = (graduate_debt_for(_cip_family_early_a, _credential_key_early_
                    if _credential_key_early_a and _cip_family_early_a else None)
 program_years_b = resolve_program_years(
     "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b")
+_selected_title_b = resolve_selected_title(
+    "major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER], share_param="major_b")
 graduate_years_b = graduate_years_for_education(
     resolve_typical_education("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER],
                                share_param="major_b"),
-    resolve_selected_title("major_b", DEFAULT_SELECTION_B[DATASET_MODE_CAREER],
-                            share_param="major_b"))
+    _selected_title_b)
+# See Scenario A: the school charges for the graduate years only when nothing
+# else is already pricing them.
+cost_years_b = school_cost_years(program_years_b, graduate_years_b, _selected_title_b)
+_grad_cost_years_b = graduate_years_b if cost_years_b == program_years_b else 0
 
 
 if enable_prestige_mode:
@@ -13739,9 +13808,18 @@ effective_coa_per_year_a = coa_per_year_a * (1 + inflation_rate_a) ** years_unti
 effective_cc_coa_per_year_a = cc_coa_per_year_a * (1 + inflation_rate_a) ** years_until_start_a
 # Build the schedule once, then derive both the (university-only) loan and the
 # CC out-of-pocket from it -- single source of truth, no drift.
+# Years the SCHOOL charges for, which is the whole programme except on a path
+# whose graduate years are already priced by professional debt -- see
+# school_cost_years. _grad_cost_years_a is how many graduate years are IN this
+# schedule, which is 0 on those paths: pass graduate_years_a instead and
+# undergraduate_schedule trims rows that were never generated, and
+# graduate_direct_cap hands the undergraduate pool $82,000 of graduate capacity
+# that professional_debt_cap is already accounting for.
+cost_years_a = school_cost_years(program_years_a, graduate_years_a, _selected_title_a)
+_grad_cost_years_a = graduate_years_a if cost_years_a == program_years_a else 0
 _schedule_a = compute_loan_schedule_by_year(
     effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
-    years=program_years_a,
+    years=cost_years_a,
     cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a,
     finance_cc_years=cc_financed_a, cc_upper_division_premium=cc_premium_a)
 computed_loan_amount_a = sum(r["loan_amount"] for r in _schedule_a)
@@ -13762,8 +13840,8 @@ cc_oop_a = (0.0 if cc_financed_a else
 # federal_direct_cap contributes nothing and the graduate cap is the whole
 # capacity. The addition still holds; it is just 0 + graduate.
 federal_cap_a = (federal_direct_cap(
-                     undergraduate_schedule(_schedule_a, graduate_years_a), loan_dependency)
-                 + graduate_direct_cap(graduate_years_a)) if loan_source_a == "personal" else None
+                     undergraduate_schedule(_schedule_a, _grad_cost_years_a), loan_dependency)
+                 + graduate_direct_cap(_grad_cost_years_a)) if loan_source_a == "personal" else None
 # How much of the remainder a PARENT can still borrow federally. Paired with
 # federal_cap_a everywhere it travels -- omitting it silently restores the
 # pre-OBBBA "gap financing is unlimited" model for that one code path.
@@ -14623,13 +14701,27 @@ elif is_graduate_education(typical_education_a):
     # real lengths, which dropped them into the sub-bachelor's branch below --
     # telling a visitor that a Master's degree "is below a bachelor's degree".
     # They need their own sentence, saying the opposite thing.
-    _sb_study.caption((
-        f"ℹ️ The typical entry-level education for {major} (BLS: "
-        f"\"{typical_education_a}\") is ABOVE a bachelor's, so costs below cover "
-        f"{program_years_for_major(major)} years -- a bachelor's "
-        f"plus {graduate_years_for_major(major)} more -- and the "
-        "graduate loan limits apply."
-    ).replace("$", r"\$"))
+    # Two different sentences, because two different things are being paid for.
+    # Where the graduate years are priced by professional debt, the costs below
+    # are the BACHELOR'S ONLY and saying they cover nine years is simply false:
+    # the professional degree is a separate figure added on top. Where they are
+    # not (a master's), the costs really do cover the whole programme.
+    if curated_professional_debt(major):
+        _sb_study.caption((
+            f"ℹ️ {major} needs a professional degree after a bachelor's (BLS: "
+            f"\"{typical_education_a}\"). The costs below are the "
+            f"{school_cost_years(program_years_for_major(major), graduate_years_for_major(major), major)}"
+            f" undergraduate years only. The degree itself is priced separately "
+            f"from what its graduates actually borrowed, and added on top."
+        ).replace("$", r"\$"))
+    else:
+        _sb_study.caption((
+            f"ℹ️ The typical entry-level education for {major} (BLS: "
+            f"\"{typical_education_a}\") is ABOVE a bachelor's, so costs below cover "
+            f"{program_years_for_major(major)} years -- a bachelor's "
+            f"plus {graduate_years_for_major(major)} more -- and the "
+            "graduate loan limits apply."
+        ).replace("$", r"\$"))
 elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
     # Not a warning: the cost model matches the real program here, so this
     # says what it's charging rather than apologising for what it isn't.
@@ -15131,7 +15223,7 @@ if compare_mode:
         effective_cc_coa_per_year_b = cc_coa_per_year_b * (1 + inflation_rate_b) ** years_until_start_b
         _schedule_b = compute_loan_schedule_by_year(
             effective_coa_per_year_b, personal_contribution_per_year_b, grants_per_year_b, inflation_rate_b,
-            years=program_years_b,
+            years=cost_years_b,
             cc_years=cc_years_b, cc_coa_per_year=effective_cc_coa_per_year_b,
             finance_cc_years=cc_financed_b, cc_upper_division_premium=cc_premium_b)
         computed_loan_amount_b = sum(r["loan_amount"] for r in _schedule_b)
@@ -15139,8 +15231,8 @@ if compare_mode:
         cc_oop_b = (0.0 if cc_financed_b else
                     sum(r["coa"] for r in _schedule_b if r["phase"] == "community_college"))
         federal_cap_b = (federal_direct_cap(
-                             undergraduate_schedule(_schedule_b, graduate_years_b), loan_dependency)
-                         + graduate_direct_cap(graduate_years_b)
+                             undergraduate_schedule(_schedule_b, _grad_cost_years_b), loan_dependency)
+                         + graduate_direct_cap(_grad_cost_years_b)
                          if loan_source_b == "personal" else None)
         plus_cap_b = (parent_plus_cap(_schedule_b, loan_dependency, start_year_b,
                                       graduate_years=graduate_years_b)
@@ -19718,6 +19810,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
                            loan_basis: str = None, program_years: int = None,
+                           cost_years: int = None,
                            current_age: int = None,
                            loan_source: str = None, default_loan=None,
                            reported_debt=None, school_name: str = None,
@@ -19767,7 +19860,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # label honest for a Simplified-mode figure ("school-reported", which
         # has no time dimension) and for the 430 occupations needing no degree.
         if loan_basis is not None:
-            st.metric(loan_amount_label(loan_basis, program_years), fmt_money(loan_amount))
+            st.metric(loan_amount_label(loan_basis, program_years, cost_years),
+                      fmt_money(loan_amount))
             # The same what-this-figure-is prose the single branch shows.
             render_loan_basis_disclosure(loan_basis, loan_source, default_loan,
                                          reported_debt, school_name,
@@ -19978,7 +20072,7 @@ if compare_mode:
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
-        loan_basis=loan_basis_a, program_years=program_years_a,
+        loan_basis=loan_basis_a, program_years=program_years_a, cost_years=cost_years_a,
         current_age=st.session_state.get("current_age") if is_returning else None,
         loan_source=loan_source_a, default_loan=default_loan_a,
         reported_debt=reported_debt_a, school_name=school_name_a,
@@ -19991,7 +20085,7 @@ if compare_mode:
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
-        loan_basis=loan_basis_b, program_years=program_years_b,
+        loan_basis=loan_basis_b, program_years=program_years_b, cost_years=cost_years_b,
         current_age=st.session_state.get("current_age") if is_returning else None,
         loan_source=loan_source_b, default_loan=default_loan_b,
         reported_debt=reported_debt_b, school_name=school_name_b,
@@ -20238,9 +20332,13 @@ else:
     # function and the only thing keeping them equal is passing the same
     # arguments -- a hard-coded finance_cc_years here would print a schedule
     # that contradicts the total beside it.
+    # cost_years_a, not program_years_a: this table is the year-by-year build-up
+    # of the loan shown directly above it, so it has to be the SAME schedule the
+    # loan was summed from. With program_years it printed the professional
+    # years as rows whose amounts were not in the total.
     loan_schedule_a = compute_loan_schedule_by_year(
         effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
-        years=program_years_a,
+        years=cost_years_a,
         cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a,
         finance_cc_years=cc_financed_a, cc_upper_division_premium=cc_premium_a
     )
@@ -20266,7 +20364,8 @@ else:
              "Loan Amount This Year": fmt_money(row["loan_amount"])}
             for row in loan_schedule_a
         ]))
-    st.metric(loan_amount_label(loan_basis_a, program_years_a), fmt_money(loan_amount))
+    st.metric(loan_amount_label(loan_basis_a, program_years_a, cost_years_a),
+              fmt_money(loan_amount))
     # "Overridden" is measured against whichever default is active, so the note
     # only fires on a real manual change (not on the expected college-vs-personal
     # gap that exists by design).
