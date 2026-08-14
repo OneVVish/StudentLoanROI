@@ -700,7 +700,7 @@ def check_professional_cost_years(ns) -> list:
         scenario = ns["compute_scenario_results"](
             title, 13_000, 6.5, "Standard 10-Year", col_index=100.0,
             hs_wage_index=1.0, enrollment_years=0, working_years=0,
-            baseline_start_age=ns["baseline_start_age_for"](8, 0))
+            baseline_start_age=ns["baseline_start_age_for"](8, 0, title))
         label, value = ns["total_loan_metric"](scenario, 13_000, "reported", 8, 4)
         if abs(value - scenario["effective_principal"]) > 1:
             problems.append(

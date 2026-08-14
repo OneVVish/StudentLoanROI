@@ -136,8 +136,10 @@ def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str) -> dic
     # enrollment_years stays 0: this table is the default no-foregone-earnings
     # view, matching the app's default.
     program_years = ns["program_years_for_education"](
-        ns["MAJOR_DATA"].get(major, {}).get("typical_education"))
-    baseline_start_age = ns["baseline_start_age_for"](program_years, 0)
+        ns["MAJOR_DATA"].get(major, {}).get("typical_education"), major)
+    # The title is required: for the 74 occupations with a training overlay
+    # the earnings curve starts at the bachelor's and the baseline must too.
+    baseline_start_age = ns["baseline_start_age_for"](program_years, 0, major)
     result = ns["find_breakeven_loan"](major, rate, strategy,
                                         baseline_start_age=baseline_start_age)
     status = {"never": "never_breaks_even",
@@ -234,10 +236,10 @@ def print_window_sensitivity(ns: dict, rate: float):
             # so running it against a different baseline would compare the
             # horizon effect to the wrong thing.
             _py = ns["program_years_for_education"](
-                ns["MAJOR_DATA"].get(m, {}).get("typical_education"))
+                ns["MAJOR_DATA"].get(m, {}).get("typical_education"), m)
             roi = ns["calculate_roi"](m, repay["total_paid_in_roi_window"], principal or 1,
                                        years=h,
-                                       baseline_start_age=ns["baseline_start_age_for"](_py, 0))
+                                       baseline_start_age=ns["baseline_start_age_for"](_py, 0, m))
             cells += f"{roi['earnings_premium']:>16,.0f}"
         print(f"{m[:22]:22s}{cells}")
     print("\n  Medicine is negative at 10 years and strongly positive later: at year 10 it\n"
