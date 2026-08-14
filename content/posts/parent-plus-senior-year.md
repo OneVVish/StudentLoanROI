@@ -4,6 +4,7 @@ description: The 2026 rules cap Parent PLUS at $20,000 a year — and $65,000 in
 summary: Everyone quotes the annual cap. The total is the one that bites, and it bites in the year you have the least room to react.
 date: 2026-08-11
 image: borrowing-1080x1350.png
+hero: guide-hero-parent-plus-senior-year-klein4b.png
 ---
 
 If you are planning to use Parent PLUS loans for a student starting college in
