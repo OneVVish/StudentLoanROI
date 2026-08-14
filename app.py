@@ -10560,7 +10560,12 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
          "comparison is against a typical working adult without a degree — the more demanding test. "
          "Wage growth of 2%/yr is an assumption, not a BLS figure."],
         ["Cost of attendance & college debt",
-         "U.S. Department of Education, College Scorecard."],
+         "U.S. Department of Education, College Scorecard, institution file from "
+         "the release of June 10, 2026. The cost figures in that release are "
+         "data year 2024, which is as far forward as its cost fields reach: the "
+         "release is current and the costs it reports are two years behind it. "
+         "Verified by matching every committed figure against the API's "
+         "year-prefixed cost field for the same school."],
         ["Federal & state income tax",
          "IRS 2024 federal brackets and standard deduction; published 2024 state brackets."],
         ["Cost-of-living adjustment",

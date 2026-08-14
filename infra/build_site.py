@@ -585,7 +585,8 @@ def build_html(f: dict, posts: list = ()) -> str:
 
 <footer>
   Data Source: Bureau of Labor Statistics (May 2025), New York Fed
-  (February 2026), College Scorecard (2024), IPEDS (2023) and CPS ASEC (2025).
+  (February 2026), College Scorecard (2024 data,
+  released June 2026), IPEDS (2023) and CPS ASEC (2025).
   Educational estimate, not financial advice.<br>
   <a href="/llms.txt" style="color:inherit">Plain-text summary</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a>
@@ -845,7 +846,8 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
 
 <footer>
   Data Source: Bureau of Labor Statistics (May 2025), New York Fed
-  (February 2026), College Scorecard (2024), IPEDS (2023) and CPS ASEC (2025).
+  (February 2026), College Scorecard (2024 data,
+  released June 2026), IPEDS (2023) and CPS ASEC (2025).
   Educational estimate, not financial advice.<br>
   <a href="/guides" style="color:inherit">All guides</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a>
