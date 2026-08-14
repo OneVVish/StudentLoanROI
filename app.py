@@ -3184,8 +3184,17 @@ RAP_PRINCIPAL_MATCH_CAP = 50  # $/month government principal-match subsidy
 # [Source: TICAS, "Comparing Income-Driven Repayment Plans", 2025-09-16.]
 STANDARD_STRATEGY_LABEL = "Standard 10-Year"
 IDR_STRATEGY_LABEL = "Income-Driven Repayment (IDR)"
-RAP_STRATEGY_LABEL = "Repayment Assistance Plan (RAP)"
+RAP_STRATEGY_LABEL = "2026 RAP (Repayment Assistance Plan)"
 TIERED_STANDARD_STRATEGY_LABEL = "2026 Tiered Standard Plan"
+# What RAP was called before 2026-08-14. NOT dead code: this label rides a share
+# link BY VALUE (?strategy=), it is the stored value of a KEYED widget, and
+# Streamlit RAISES when a keyed widget's stored value is absent from its options
+# -- so a link built before the rename would hard-error on the recipient's
+# browser, and a latched session would error on the visitor's own next rerun.
+# resolve_shared_strategy maps it, which covers both paths. It is also the value
+# written to survey_responses/pdf_downloads/scenario_shares/scenario_events
+# before that date; see migrations.sql, and treat the two strings as one plan.
+LEGACY_RAP_STRATEGY_LABEL = "Repayment Assistance Plan (RAP)"
 RAP_FIRST_ORIGINATION_YEAR = 2026
 # The pre-OBBBA pair. Reachable only via the Advanced Analysis toggle, or on a
 # start year before the cutoff -- which the start-year list no longer offers.
@@ -3265,7 +3274,12 @@ def resolve_shared_strategy(shared_value, options) -> str:
     successor = LEGACY_STRATEGY_SUCCESSOR.get(shared_value)
     if successor in options:
         return successor
-    if shared_value in (IDR_STRATEGY_LABEL, RAP_STRATEGY_LABEL, "Income-Driven Repayment"):
+    # LEGACY_RAP_STRATEGY_LABEL is what makes a pre-rename link survive: without
+    # it "Repayment Assistance Plan (RAP)" is an unknown label and falls to
+    # options[0], which happens to be RAP today and would silently become
+    # whatever is listed first tomorrow.
+    if shared_value in (IDR_STRATEGY_LABEL, RAP_STRATEGY_LABEL,
+                        LEGACY_RAP_STRATEGY_LABEL, "Income-Driven Repayment"):
         return RAP_STRATEGY_LABEL if RAP_STRATEGY_LABEL in options else options[0]
     if shared_value in (STANDARD_STRATEGY_LABEL, TIERED_STANDARD_STRATEGY_LABEL):
         for candidate in (TIERED_STANDARD_STRATEGY_LABEL, STANDARD_STRATEGY_LABEL):
@@ -3396,15 +3410,33 @@ def fmt_money(value):
     return f"${value:,.0f}"
 
 
+# Where a money tick stops being written in thousands. NOT 1,000,000: it is the
+# value at which rounding to thousands would itself print four digits, so
+# "$1,000k" is unreachable and the k and M ranges cannot overlap on one axis.
+MONEY_TICK_MILLION_THRESHOLD = 999_500
+
+
 def fmt_money_k(value) -> str:
-    """A money axis tick in thousands: 250000 -> "$250k".
+    """A money axis tick: 250000 -> "$250k", 5000000 -> "$5.0M".
 
     Plotly picks its own SI prefix and flips to "M" once a series passes a
     million, so a ten-year net position read "$0.2M ... $1M" while the loan
     balance beside it read "$2k ... $10k" -- two money axes on one page in two
-    different units. Fixing the unit to thousands makes them directly
-    comparable, and "$250k" is the register the rest of this app already
-    speaks in.
+    different units. That is what this replaced, and the fix was never "thousands
+    forever": it was a FIXED threshold, so the same magnitude is written the same
+    way on every axis in the app. Plotly's prefix is chosen per axis from that
+    axis's own range, which is why two charts on one page disagreed.
+
+    THE MILLION BRANCH IS NOT A RELAXATION OF THAT RULE, it is the same rule
+    applied past the point where thousands stop being a unit anyone reads. The
+    35-year net-position chart labelled its top tick "$5,000k", and a 30-year
+    premium read "$3,690k" -- five significant digits and a suffix, where the
+    reader wants a magnitude. Above a million the unit is millions.
+
+    One decimal, always, so a tick set reads evenly: "$1.0M · $1.5M · $2.0M"
+    rather than "$1M · $1.5M · $2M". The switch happens at the point where
+    ROUNDING to thousands would print four digits (999,500, not 1,000,000), so
+    no axis can ever show "$1,000k" and "$1.0M" as neighbours.
 
     Sub-thousand values keep their dollars ("$500"), since rounding them to
     "$1k" or "$0k" would be worse than the inconsistency."""
@@ -3417,7 +3449,9 @@ def fmt_money_k(value) -> str:
     magnitude = abs(value)
     if magnitude < 1000:
         return f"{sign}${magnitude:,.0f}"
-    return f"{sign}${magnitude / 1000:,.0f}k"
+    if magnitude < MONEY_TICK_MILLION_THRESHOLD:
+        return f"{sign}${magnitude / 1000:,.0f}k"
+    return f"{sign}${magnitude / 1_000_000:,.1f}M"
 
 
 def duration_axis_end(data_max: float, tickvals) -> float:
@@ -8644,6 +8678,31 @@ def net_position_crossover(scenario: dict, col_index: float, hs_wage_index: floa
     return {"year": year, "age": age}
 
 
+def crossover_phrase(crossover: dict, max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> str:
+    """net_position_crossover as words: "age 28", "year 6", or "not within 40
+    years".
+
+    ONE wording, for every surface that states this fact -- the verdict list on
+    screen, the share card, and the compare report's summary table. It is the
+    single number the model exists to produce, and three renderers wording it
+    themselves is how "ahead at 40" and "ahead in year 18" end up on one page
+    describing the same moment.
+
+    Both Nones are real answers and neither may print as one. A missing YEAR is
+    a path that never gets ahead inside the search window, which is the finding.
+    A missing AGE is the flat pre-curve baseline (analyze_model.py), where the
+    model knows the year but nobody's age -- so the year is stated instead of
+    an age nobody has.
+    """
+    year = (crossover or {}).get("year")
+    age = (crossover or {}).get("age")
+    if year is None:
+        return f"not within {max_years} years"
+    if age is None:
+        return f"year {year}"
+    return f"age {age}"
+
+
 def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per_year: float,
                                    grants_per_year: float, inflation_rate: float,
                                    years: int = UNDERGRAD_YEARS,
@@ -9823,16 +9882,15 @@ def breakeven_points(loan_amount: float, ceiling: str, crossover: dict,
     else:
         points = [("Your loan", fmt_money(loan_amount)),
                   ("Worth it up to", ceiling)]
+    # The wording comes from crossover_phrase, shared with the share card and
+    # the compare report's summary row. Only the window note is added here: it
+    # is a fact about THIS page's horizon selector, which neither of the other
+    # two surfaces carries.
     year = (crossover or {}).get("year")
-    age = (crossover or {}).get("age")
-    if year is None:
-        ahead = f"not within {max_years} years"
-    elif age is None:
-        ahead = f"year {year}"
-    else:
-        ahead = f"age {age}"
-        if year > roi_window_years:
-            ahead += f" (past the {roi_window_years}-year window)"
+    ahead = crossover_phrase(crossover, max_years)
+    if year is not None and (crossover or {}).get("age") is not None \
+            and year > roi_window_years:
+        ahead += f" (past the {roi_window_years}-year window)"
     points.append(("Comes out ahead at", ahead))
     return points
 
@@ -12156,17 +12214,49 @@ SHARE_CARD_DISCLAIMER = ("An educational estimate, not financial advice. "
                           "individual's actual outcome.")
 
 
+def _elide_to_width(artist, renderer, text: str, limit: float) -> None:
+    """Trim a one-line matplotlib text until it fits `limit` pixels, ending in
+    an ellipsis when anything was dropped.
+
+    Measured, never counted. A character budget is wrong for the same reason it
+    was wrong for the salary-flow labels: width depends on the string, the font
+    and the figure size, and this card's deck carries proper nouns whose length
+    nothing bounds -- "News Analysts, Reporters, and Journalists" is one
+    occupation. It ran off the right edge of the PNG mid-word, which no guard
+    can see and no palette check covers.
+    """
+    artist.set_text(text)
+    if artist.get_window_extent(renderer).width <= limit:
+        return
+    low, high = 4, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        artist.set_text(text[:middle].rstrip(" ·") + "…")
+        if artist.get_window_extent(renderer).width <= limit:
+            low = middle
+        else:
+            high = middle - 1
+    artist.set_text(text[:low].rstrip(" ·") + "…")
+
+
 def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
                       major_name: str, school_name: str, strategy_label: str,
-                      roi_window_years: int) -> bytes:
+                      roi_window_years: int, crossovers: list) -> bytes:
     """One 16:9 PNG of this scenario's verdict, for sharing.
 
-    A THIRD consumer of the same two objects the screen and the PDF already
-    read -- `verdict` from breakeven_summary, `frame` from net_position_frame --
-    never a re-derivation. breakeven_summary's own docstring says it is shared
-    "so the two can't drift"; this makes it three, on the same terms. A card
-    that recomputed its own headline would be the one artifact that leaves the
-    session carrying a number the page never showed.
+    A consumer of objects the screen and the PDF already read -- `verdict` from
+    breakeven_summary, `frame` from net_position_frame, `crossovers` from
+    net_position_crossover -- never a re-derivation. breakeven_summary's own
+    docstring says it is shared "so the two can't drift"; this makes it three,
+    on the same terms. A card that recomputed its own headline would be the one
+    artifact that leaves the session carrying a number the page never showed.
+
+    `crossovers` is one net_position_crossover dict per scenario pair, in the
+    same order, and it is REQUIRED rather than optional: it is the fact the card
+    is now built around, and a default would let a call site drop the card's one
+    annotation silently. It is computed by the caller because that is where the
+    cost-of-living index and the wage index live, and because this function
+    renders prepared values rather than running the model.
 
     Every word naming the counterfactual comes from counterfactual_vocab().
     Writing "high school graduate" here would be wrong for a returning student,
@@ -12184,8 +12274,8 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
              color="#111111", va="top", ha="left", wrap=True)
     deck = " · ".join(part for part in (major_name, school_name, strategy_label)
                       if part)
-    fig.text(0.055, 0.815, deck, fontsize=13, color="#52514e",
-             va="top", ha="left")
+    deck_artist = fig.text(0.055, 0.815, deck, fontsize=13, color="#52514e",
+                           va="top", ha="left")
 
     # The plot. Recessive chrome, thin marks, direct labels at both ends -- a
     # legend as well, because there are two series and identity must never ride
@@ -12222,11 +12312,15 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
                     fontsize=11, fontweight="bold", color=colour,
                     va="bottom", ha="right")
     ax.axhline(0, color="#b8b8b4", linewidth=1, linestyle=(0, (2, 3)))
-    # Read off the FIRST scenario: with foregone earnings counted the timeline
-    # starts at enrolment, otherwise at graduation, and both scenarios on a
-    # comparison card share that setting.
-    _counts_enrolment = bool(scenario_pairs[0][1].get("enrollment_years"))
-    ax.set_xlabel(f"Years after {'starting' if _counts_enrolment else 'graduating'}",
+    # THE SAME TITLE THE CHART TWINS USE, from the same function. This read
+    # "Years after starting" or "Years after graduating", composed here from
+    # whether foregone earnings were counted -- which is not what the axis
+    # counts from. Year 0 is `baseline_start_age + enrollment_years` in BOTH
+    # toggle states, so on a dentist's card "after starting" named the year they
+    # began an undergraduate degree while the line began four years later, at
+    # dental school. net_position_axis_title is where that reasoning already
+    # lives, and it takes exactly the (label, scenario) pairs this has.
+    ax.set_xlabel(net_position_axis_title(scenario_pairs),
                   fontsize=10, color="#52514e")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.legend(loc="lower right", fontsize=9, frameon=False)
@@ -12240,18 +12334,80 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
     _lo, _hi = ax.get_ylim()
     ax.set_ylim(_lo, _hi + (_hi - _lo) * 0.12)
 
-    # THE ONE ANNOTATION: where this path passes the counterfactual. It is the
-    # single fact the whole model exists to produce, and on a card read out of
-    # context it has to be said in words rather than inferred from a crossing.
-    crossing = _share_card_crossing(frame)
+    # THE ONE ANNOTATION: where this path passes the counterfactual, and at what
+    # AGE. It is the single fact the whole model exists to produce, and on a card
+    # read out of context it has to be said in words rather than inferred from a
+    # crossing of two lines.
+    #
+    # The age, not only the year, because a year is counted from a moment the
+    # reader has to reconstruct from the axis title, and an age is not. The page
+    # already states it this way ("Comes out ahead at: age 40"); crossover_phrase
+    # is shared with it so a card and the page it came from cannot word the same
+    # moment two ways.
+    #
+    # THE CROSSING IS net_position_crossover's, NOT THE DRAWN FRAME'S. The card
+    # is drawn to the visitor's horizon, so a frame-derived crossing could only
+    # ever say "still behind at 10 years" for the paths where the question
+    # matters most -- a dentist is behind at ten years and ahead at 40, and the
+    # card said only the first half. It is also the STAYS-ahead definition: a
+    # path that leads in year 1 on salary alone, falls behind once payments
+    # start and recovers later is ahead from the recovery, not from year 1.
     first_year = float(frame["year"].min())
-    if crossing is not None and crossing > first_year:
-        # A real crossing: mark it and name the year. Annotated ABOVE the
-        # point -- below ran it into the x-axis label.
-        _cross_y = float(frame[frame["year"] == crossing]["Net Position"].max())
-        ax.plot([crossing], [_cross_y], marker="o", markersize=8,
-                markerfacecolor="white", markeredgecolor="#111111",
-                markeredgewidth=2, zorder=5)
+    last_year = float(frame["year"].max())
+    annotations = []
+    for index, (label, _scenario) in enumerate(scenario_pairs):
+        crossover = (crossovers or [None] * len(scenario_pairs))[index]
+        year = (crossover or {}).get("year")
+        colour = slots[index % len(slots)]
+        # One line per scenario, stacked, each in its own series colour. A single
+        # line could only describe one of two paths on a comparison card, and
+        # naming neither is what the colour and the prefix fix. In the single
+        # case there is no prefix and no colour to disambiguate -- the sentence
+        # is about the only line on the chart.
+        prefix = (f"{label if len(label) <= 22 else label[:21] + chr(8230)}: "
+                  if len(scenario_pairs) > 1 else "")
+        text_colour = colour if len(scenario_pairs) > 1 else "#111111"
+        # LONGEST WORDING FIRST, and the fallback drops the baseline's NAME
+        # rather than the finding. The name is the longest part of every one of
+        # these sentences ("a debt-free high school graduate" is 32 characters)
+        # and it is the part the chart's own legend already carries, while the
+        # age appears nowhere else on the card.
+        ahead = crossover_phrase(crossover)
+        if year is not None and year > first_year:
+            if year <= last_year:
+                # A crossing inside the drawn window: mark it on that scenario's
+                # own line. Annotated ABOVE the point -- below ran it into the
+                # x-axis label.
+                _own = frame[(frame["Series"] == label) & (frame["year"] == year)]
+                if not _own.empty:
+                    ax.plot([year], [float(_own["Net Position"].iloc[0])],
+                            marker="o", markersize=8, markerfacecolor="white",
+                            markeredgecolor=colour, markeredgewidth=2, zorder=5)
+                wordings = [f"ahead of {vocab['baseline_noun']} at {ahead}",
+                            f"ahead at {ahead}"]
+            else:
+                # Ahead, but after the card's own window closes. Both halves have
+                # to be said: the card draws a line that is still below the
+                # baseline at its right edge, so naming only the age would
+                # contradict the picture beside it.
+                wordings = [f"behind at {int(roi_window_years)} years, ahead of "
+                            f"{vocab['baseline_noun']} at {ahead}",
+                            f"behind at {int(roi_window_years)} years, ahead at {ahead}"]
+                text_colour = colour if len(scenario_pairs) > 1 else SERIES_RED
+        elif year is not None:
+            # Ahead from the first year on, so there is no crossing to point at.
+            # "Ahead from year 1" is true and says nothing; a marker on the axis
+            # edge would point at a moment that never happened. The claim worth
+            # making is that it never trails.
+            wordings = [f"ahead of {vocab['baseline_noun']} the whole way",
+                        "ahead the whole way"]
+        else:
+            # Never catches up, inside forty years -- which is the finding, and
+            # the one a card must not quietly omit.
+            wordings = [f"still behind {vocab['baseline_noun']} at "
+                        f"{NET_POSITION_CROSSOVER_MAX_YEARS} years",
+                        f"still behind at {NET_POSITION_CROSSOVER_MAX_YEARS} years"]
+            text_colour = colour if len(scenario_pairs) > 1 else SERIES_RED
         # The TEXT sits in a fixed slot; only the marker floats.
         #
         # Anchoring the label to the point was tried twice and collided twice:
@@ -12259,29 +12415,40 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
         # through the endpoint labels. A crossing can land anywhere in the plot,
         # so any offset from it is a collision waiting for the right scenario --
         # while the top-left corner is empty in every case (the legend sits
-        # bottom-right for exactly this reason), and it is where the other two
-        # branches already put their sentence, so the three read alike.
-        ax.annotate(f"ahead of {vocab['baseline_noun']} from year {crossing:.0f}",
-                    xy=(0.02, 0.94), xycoords="axes fraction",
-                    fontsize=10.5, fontweight="bold", color="#111111",
-                    ha="left", va="top")
-    elif crossing is not None:
-        # Ahead from the first year on, so there is no crossing to point at.
-        # "Ahead from year 1" is true and says nothing; a marker on the axis
-        # edge would point at a moment that never happened. The claim worth
-        # making is that it never trails.
-        ax.annotate(f"ahead of {vocab['baseline_noun']} the whole way",
-                    xy=(0.02, 0.94), xycoords="axes fraction",
-                    fontsize=10.5, fontweight="bold", color="#111111",
-                    ha="left", va="top")
-    else:
-        # Never catches up inside the window, which is the finding -- and the
-        # one a card must not quietly omit.
-        ax.annotate(f"still behind {vocab['baseline_noun']} "
-                    f"at {int(roi_window_years)} years",
-                    xy=(0.02, 0.94), xycoords="axes fraction",
-                    fontsize=10.5, fontweight="bold", color=SERIES_RED,
-                    ha="left", va="top")
+        # bottom-right for exactly this reason).
+        annotations.append((
+            ax.annotate(f"{prefix}{wordings[0]}",
+                        xy=(0.02, 0.94 - index * 0.085),
+                        xycoords="axes fraction",
+                        fontsize=10.5, fontweight="bold", color=text_colour,
+                        ha="left", va="top"),
+            [f"{prefix}{w}" for w in wordings]))
+
+    # SHORTEN A SENTENCE THAT DOES NOT FIT THE PLOT, measured rather than
+    # guessed. The beyond-the-window wording is the longest the card can
+    # produce and it ran off the axes into the endpoint money labels on a
+    # ten-year dentist card -- a character count would not have caught it,
+    # because the length depends on the string, the font and the figure size.
+    # Same treatment, and the same reason, as the salary-flow chart's in-bar
+    # labels. A renderer is needed, so this happens after a draw.
+    #
+    # THE BUDGET IS THREE QUARTERS OF THE PLOT, not the whole of it. The
+    # top-right corner is where the endpoint money labels sit, so a sentence
+    # that merely stays inside the axes still ends flush against "$472,033"
+    # with no gap -- which is what a ten-year dentist card actually rendered.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    # The deck, same treatment. Two occupation names, a school and a plan name
+    # is a line nothing bounds, and it ran off the right edge of the card on a
+    # comparison between two long ones. The margin mirrors the left inset.
+    _elide_to_width(deck_artist, renderer, deck,
+                    SHARE_CARD_SIZE[0] * SHARE_CARD_DPI * (1 - 0.055 - 0.055))
+    limit = ax.get_window_extent(renderer).width * 0.72
+    for artist, wordings in annotations:
+        for wording in wordings:
+            artist.set_text(wording)
+            if artist.get_window_extent(renderer).width <= limit:
+                break
 
     # Figures in the right-hand column. Stat tiles rather than more chart:
     # these are single numbers, and a single number is not improved by a plot.
@@ -12351,44 +12518,14 @@ def build_share_card(scenario_pairs: list, frame: pd.DataFrame, verdict: dict,
     return buffer.getvalue()
 
 
-def _share_card_series(frame: pd.DataFrame):
-    """(own series name, baseline series name) out of the net-position frame.
-
-    The baseline is whichever series is named by counterfactual_vocab, so this
-    follows the returning-student switch automatically instead of matching on
-    the words "high school".
-    """
-    names = list(dict.fromkeys(frame["Series"]))
-    baseline_name = counterfactual_vocab()["legend_label"]
-    baseline = next((n for n in names if n == baseline_name), None)
-    own = next((n for n in names if n != baseline), names[0] if names else None)
-    return own, baseline
-
-
-def _share_card_crossing(frame: pd.DataFrame):
-    """The year this path first passes THE COUNTERFACTUAL, or None.
-
-    Not the year it passes zero. The first version of this card annotated
-    "ahead from year 1" over a chart whose two lines did not meet until year 6,
-    because a positive net position is not the same claim as being ahead of the
-    person who skipped the degree -- and being ahead of that person is the only
-    thing this whole model computes.
-
-    None is a real answer the caller must handle: a path that never catches up
-    inside the window has no crossing, and annotating one at the window's edge
-    would assert something the model did not.
-    """
-    if frame.empty or "Net Position" not in frame.columns:
-        return None
-    own_name, baseline_name = _share_card_series(frame)
-    if baseline_name is None or own_name is None:
-        return None
-    wide = frame.pivot_table(index="year", columns="Series",
-                             values="Net Position", aggfunc="first")
-    if own_name not in wide.columns or baseline_name not in wide.columns:
-        return None
-    ahead = wide[wide[own_name] > wide[baseline_name]]
-    return float(ahead.index.min()) if not ahead.empty else None
+# _share_card_series / _share_card_crossing lived here until 2026-08-14. They
+# were a SECOND definition of "when does this path get ahead", derived from the
+# drawn frame: the first year the line leads, inside the visitor's own horizon.
+# net_position_crossover answers the same question for the rest of the app, and
+# answers it differently on purpose -- it looks forty years out, and it takes the
+# start of the final unbroken run rather than the first lead. Two definitions on
+# two surfaces meant a dentist's card said "still behind at 10 years" while the
+# page beside it said "comes out ahead at age 40". One question, one function.
 
 
 def build_pdf_wage_distribution_chart(percentiles: dict, occupation_name: str,
@@ -13710,16 +13847,39 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
     return buffer.getvalue()
 
 
-def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int) -> Table:
+def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int,
+                                 crossover: dict) -> Table:
+    """The compare report's per-scenario summary strip.
+
+    "Ahead at" sits beside "Payoff Timeline" because they are the two dates this
+    report exists to give and they are not the same date: one is when the debt is
+    gone, the other is when the degree has paid for itself against the person who
+    skipped it. On a training path they are years apart, and the second is the
+    later one.
+
+    It is stated here as well as in the break-even block below because the
+    on-screen page carries it on a surface this table mirrors, and because the
+    share card now leads with it -- a figure that headlines the image and is
+    missing from the printed report is exactly the drift the chart-twin rule
+    keeps recording. The wording is crossover_phrase's, shared with both, so
+    three surfaces cannot word one moment three ways.
+
+    `crossover` is REQUIRED and has no default on purpose: crossover_phrase reads
+    a missing crossover as "not within 40 years", which is a real and damning
+    finding, so a caller that forgot to pass one would print the worst answer the
+    model can give and look entirely normal doing it.
+    """
     repayment_result = scenario["repayment_result"]
     roi_result = scenario["roi_result"]
     return _pdf_table(full_width=True, rows=[
-        ["Total Loan", "Monthly Payment", "Payoff Timeline", "Total Interest Paid",
+        ["Total Loan", "Monthly Payment", "Payoff Timeline", "Ahead at",
+         "Total Interest Paid",
          f"{roi_window_years}-Yr Earnings Premium (COL-Adj.)"],
         [
             fmt_money(scenario["effective_principal"]),
             fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
             f"{repayment_result['payoff_years']:.1f} yrs",
+            crossover_phrase(crossover),
             fmt_money(repayment_result["total_interest"]),
             fmt_money(roi_result["earnings_premium"]),
         ],
@@ -13857,6 +14017,15 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     reason."""
     styles = _pdf_styles()
     _cf = counterfactual_vocab()
+    # ONE sweep per scenario, read by both the summary strip and the break-even
+    # block below it. net_position_crossover re-runs the ROI model for forty
+    # years, so computing it at each use would run it four times to print two
+    # numbers -- and two calls that drifted apart in their arguments would put
+    # two different ages in one report.
+    _crossover_a = net_position_crossover(scenario_a, col_index,
+                                          get_metro_wage_index(city))
+    _crossover_b = net_position_crossover(scenario_b, col_index,
+                                          get_metro_wage_index(city))
     story = [
         # Same cover treatment as the single-scenario report -- see the
         # comment there. The disclaimer isn't repeated in the body because
@@ -13894,7 +14063,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             header=False, full_width=True,
         ),
         Spacer(1, 6),
-        _pdf_scenario_metrics_table(scenario_a, roi_window_years),
+        _pdf_scenario_metrics_table(scenario_a, roi_window_years, _crossover_a),
         *_pdf_financing_flowables(scenario_a.get("financing"), styles),
         # Per-scenario break-even, mirroring the on-screen compare panels. The
         # single report had this and the compare one silently didn't -- the
@@ -13910,8 +14079,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               baseline_start_age=scenario_a["baseline_start_age"],
                               professional_debt=professional_debt_a,
                               federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_a,
-                              crossover=net_position_crossover(
-                                  scenario_a, col_index, get_metro_wage_index(city)),
+                              crossover=_crossover_a,
                               resolved_professional_debt=scenario_a.get("professional_debt") or 0.0,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario A"),
@@ -13927,7 +14095,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             header=False, full_width=True,
         ),
         Spacer(1, 6),
-        _pdf_scenario_metrics_table(scenario_b, roi_window_years),
+        _pdf_scenario_metrics_table(scenario_b, roi_window_years, _crossover_b),
         *_pdf_financing_flowables(scenario_b.get("financing"), styles),
         *_pdf_breakeven_block(
             breakeven_summary(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
@@ -13940,8 +14108,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               baseline_start_age=scenario_b["baseline_start_age"],
                               professional_debt=professional_debt_b,
                               federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_b,
-                              crossover=net_position_crossover(
-                                  scenario_b, col_index, get_metro_wage_index(city)),
+                              crossover=_crossover_b,
                               resolved_professional_debt=scenario_b.get("professional_debt") or 0.0,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario B"),
@@ -17204,7 +17371,12 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
         _rap_combined = with_private(rap)
         _rap_combined["countback"] = rap_months_counting_back(
             rap, federal_standard_monthly)
-        rows.append(("Repayment Assistance Plan (RAP)", _rap_combined,
+        # The calculator's own constant, not a second literal: the two surfaces
+        # name one plan, and a row label that drifted from the strategy label
+        # would have this tool and the calculator disagreeing about what the
+        # visitor is looking at. The row beside it already says "2026 Tiered
+        # Standard", so the year belongs on both or neither.
+        rows.append((RAP_STRATEGY_LABEL, _rap_combined,
                      f"Qualifies. Unpaid interest waived, remainder forgiven at "
                      f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
                      f"1-10% of total income, minimum ${RAP_MIN_PAYMENT}/month. "
@@ -20590,10 +20762,18 @@ def render_share_card_button(scenario_pairs: list, verdict: dict,
         # card handed to someone else must not do.
         frame = net_position_frame(scenario_pairs, col_index, hs_wage_index,
                                     roi_window_years)
+        # The crossover is resolved HERE, not in the card: this is where the
+        # cost-of-living and wage indices live, and the card renders prepared
+        # values rather than running the model. One dict per scenario, in the
+        # same order the card walks them -- it searches forty years, past the
+        # window the frame above is drawn to, which is the whole reason the card
+        # can now name a dentist's age instead of stopping at "still behind".
+        crossovers = [net_position_crossover(scenario, col_index, hs_wage_index)
+                      for _, scenario in scenario_pairs]
         return build_share_card(
             scenario_pairs, frame, verdict,
             " vs ".join(label for label, _ in scenario_pairs),
-            school_name, strategy_label, roi_window_years)
+            school_name, strategy_label, roi_window_years, crossovers)
 
     try:
         # Memoized on the same signature as the branch's PDF (the caller

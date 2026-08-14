@@ -40,8 +40,22 @@ import sys
 
 TOLERANCE = 1.0          # dollars
 COA, RATE, GAP_RATE = 45_619.0, 6.5, 8.5
-STRATEGIES = ("Standard 10-Year", "Repayment Assistance Plan (RAP)",
-              "Income-Driven Repayment")
+
+
+def strategies(ns):
+    """The three plans to defer, as app.py spells them TODAY.
+
+    Read from the app rather than written out, which is the opposite of the
+    rule this file's siblings follow for EXPECTED values -- and right here,
+    because these are INPUTS. compute_scenario_results dispatches on the label
+    and its final branch is IDR, so an unknown string is not an error: it
+    silently runs a different plan. These were literals until the RAP label was
+    renamed on 2026-08-14, at which point "Repayment Assistance Plan (RAP)"
+    would have fallen through to IDR and this guard would have tested IDR twice
+    and RAP never, while passing.
+    """
+    return (ns["STANDARD_STRATEGY_LABEL"], ns["RAP_STRATEGY_LABEL"],
+            ns["IDR_STRATEGY_LABEL"])
 
 
 def load_app_namespace():
@@ -88,7 +102,7 @@ def check_no_payment_while_enrolled(ns, paid_by_year=None):
     problems = []
     for title in deferred_titles(ns):
         enrolled = ns["overlay_school_years"](title)
-        for strategy in STRATEGIES:
+        for strategy in strategies(ns):
             scenario = build(ns, title, strategy)
             paid = paid_by_year(scenario["repayment_result"], enrolled + 2)
             if paid[enrolled - 1] > TOLERANCE:
