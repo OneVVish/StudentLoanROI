@@ -79,15 +79,15 @@ Some community colleges now award their own bachelor's degrees too. The first na
 
 The dollar figures are the easy part. What they point at is harder to put in a table.
 
-Start with the kind of debt rather than the amount. Federal loans come with things nobody mentions until you need them: a payment that moves with your income, a forgiveness clock at the end, and no credit check to get one. Money borrowed past the federal ceiling has none of that. A lender prices it on your family's credit, it does not shrink in a bad year, and nothing forgives it. So cutting the part that falls outside the federal system is worth more to you than cutting the same number of dollars inside it.
+The kind of debt matters more than the amount. Federal loans come with things nobody mentions until you need them: a payment that moves with your income, a forgiveness clock at the end, and no credit check to get one. Money borrowed past the federal ceiling has none of that. A lender prices it on your family's credit, it does not shrink in a bad year, and nothing forgives it. So cutting the part that falls outside the federal system is worth more to you than cutting the same number of dollars inside it.
 
-Then there is the part that never makes it onto a spreadsheet. You are making this call at seventeen, about a subject you have not studied, for a job you have not done. Two years is a cheaper thing to be wrong about than four. Honestly, that is most of the argument.
+You are making this call at seventeen, about a subject you have not studied, for a job you have not done. Two years is a cheaper thing to be wrong about than four. That never makes it onto a spreadsheet, and honestly, it is most of the argument.
 
-It also matters far more on some paths than others. If a degree clears its debt comfortably, how you financed it is a detail. If it does not, the financing is most of what happens to you.
+If a degree clears its debt comfortably, how you financed it is a detail. If it does not, the financing is most of what happens to you.
 
 Now the other side of it. Credits do not always transfer cleanly. Some colleges hand you a transfer plan in your first week and others leave you to work it out. And plenty of people who mean to transfer never get around to it. None of that is in a cost dataset, so nothing here prices it, and you should not read that silence as a zero. Ask the two colleges directly. A community college can tell you which of its credits the university accepts and how many of its students actually make the move, and the university can tell you what it does with transfer students once they arrive. Those are answers a calculator cannot give you and an admissions office can.
 
-That leaves the argument everyone starts with, which is whether the four-year school would have changed what you earn. Nothing here speaks to that. What you can find out is what believing it costs.
+The argument everyone starts with is whether the four-year school would have changed what you earn. Nothing here speaks to that. What you can find out is what believing it costs.
 
 ## Run it on your school
 
