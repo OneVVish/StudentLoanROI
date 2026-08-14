@@ -8070,6 +8070,59 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
     return points
 
 
+# How far past the visitor's own horizon to look for the crossover. 40 years
+# reaches age 62 on a four-year path, which is as far as "when do I catch up"
+# stays a real question. It is a search bound, not a claim: a path that has not
+# crossed by then is reported as not crossing, never as crossing later.
+NET_POSITION_CROSSOVER_MAX_YEARS = 40
+
+
+def net_position_crossover(scenario: dict, col_index: float, hs_wage_index: float,
+                            max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> dict:
+    """The age at which this path's net position passes the baseline's and
+    STAYS past it. {"year": int|None, "age": int|None}.
+
+    The break-even answers "how much debt can this carry", which is a different
+    question from "when am I ahead" -- and for a long training path the second
+    is the one being asked. A dentist is behind at the 10-year horizon and
+    catches up years later; the horizon selector is the only way to discover
+    that today, and only by guessing at it.
+
+    STAYS PAST IT is the load-bearing half. Taking the FIRST year the graduate
+    leads would be wrong for 6 of the 183 crossing scenarios sampled: several
+    paths lead in year 1 on salary alone, fall behind once loan payments start,
+    and recover later (Commercial Divers, Music Directors and Composers,
+    Architectural and Civil Drafters among them). Reporting year 1 there names
+    an age the reader is ahead at and does not stay ahead at, which is the
+    opposite of what the sentence promises. So this scans back from the end for
+    the start of the final unbroken run, and the search runs to `max_years`
+    rather than stopping early.
+
+    It is deliberately NOT stamped by compute_scenario_results, which is what
+    the rest of the scenario's derived values do. find_breakeven_loan bisects by
+    calling that function, so a sweep inside it would run once per bisection
+    step instead of once per render.
+
+    The age is `baseline_start_age + enrollment_years + year`, the same sum
+    net_position_axis_title uses -- the graduate's age at timeline year 0 in
+    both toggle states. None when the baseline carries no age at all
+    (analyze_model.py's flat pre-curve model), so the caller states a year.
+    """
+    points = build_net_position_series(scenario, col_index, hs_wage_index, max_years)
+    ahead = [p["major"] >= p["hs"] for p in points]
+    year = None
+    for index in range(len(ahead) - 1, -1, -1):
+        if not ahead[index]:
+            break
+        year = points[index]["year"]
+    if year is None:
+        return {"year": None, "age": None}
+    start_age = scenario.get("baseline_start_age")
+    age = (start_age + (scenario.get("enrollment_years") or 0) + year
+           if start_age is not None else None)
+    return {"year": year, "age": age}
+
+
 def compute_loan_schedule_by_year(coa_per_year: float, personal_contribution_per_year: float,
                                    grants_per_year: float, inflation_rate: float,
                                    years: int = UNDERGRAD_YEARS,
@@ -9099,6 +9152,33 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
     return {"status": "ok", "breakeven_loan": round((lo + hi) / 2, 2)}
 
 
+def crossover_sentence(crossover: dict, roi_window_years: int,
+                        max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> str:
+    """The one sentence naming when this path gets ahead and stays there.
+
+    Built here rather than at either render site so the on-screen verdict and
+    the PDF's cannot word it differently -- and so Compare Mode inherits it,
+    which is the H2 parity rule: a sentence in one result branch and not the
+    other is a confound in the paper, not a cosmetic gap.
+
+    It says "beyond the N-year window above" whenever the crossover falls past
+    the visitor's own horizon, because that is precisely the case where the
+    verdict says no and this sentence says a year: without naming the gap the
+    two read as contradicting each other rather than answering different
+    questions.
+    """
+    noun = counterfactual_vocab()["baseline_noun"]
+    if not crossover or crossover.get("year") is None:
+        return (f"Within the {max_years} years modelled here, this path never "
+                f"gets ahead of {noun} for good.")
+    year, age = crossover["year"], crossover.get("age")
+    when = f"at age {age}" if age is not None else f"in year {year}"
+    if year > roi_window_years:
+        return (f"It does get ahead of {noun} {when} and stay there, which is "
+                f"beyond the {roi_window_years}-year window above.")
+    return f"It gets ahead of {noun} {when} and stays there."
+
+
 def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        repayment_strategy: str, roi_window_years: int = ROI_WINDOW_YEARS,
                        col_index: float = 100.0,
@@ -9112,7 +9192,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                          professional_debt: float = None,
                        include_fees: bool = False,
                        baseline_salary_now: float = None,
-                       baseline_salary_in_10y: float = None) -> dict:
+                       baseline_salary_in_10y: float = None,
+                       *, crossover: dict) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
     borrowing, shared by the on-screen section and its PDF counterpart so
     the two can't drift.
@@ -9167,7 +9248,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
             "detail": (
                 f"Over {years} years, this path earns less than {_cf['baseline_noun']} "
                 f"does, even with no loan at all. Borrowing less doesn't change "
-                f"that; only a longer horizon or a different path would."
+                f"that; only a longer horizon or a different path would. "
+                + crossover_sentence(crossover, years)
             ),
             "status": "never", "breakeven_loan": None, "headroom": None,
             "positive": False, "label": "Worth a rethink",
@@ -9179,7 +9261,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                 f"Over {years} years this path stays ahead of {_cf['baseline_noun']} "
                 f"even past {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven "
                 f"Repayment that's usually because the payment is capped by your income rather "
-                f"than your balance. The debt outlives this window rather than disappearing."
+                f"than your balance. The debt outlives this window rather than disappearing. "
+                + crossover_sentence(crossover, years)
             ),
             "status": "beyond_search_max", "breakeven_loan": None, "headroom": None,
             "positive": True, "label": "Good news",
@@ -9252,6 +9335,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
             f"{fmt_money(breakeven)}, and you're {fmt_money(abs(headroom))} above that ceiling. "
             f"A longer horizon, a cheaper school, or Income-Driven Repayment can each move the line."
         )
+    # One append for all four detail strings above, rather than four copies --
+    # the same reason the sentence lives in its own function at all.
+    detail = f"{detail} {crossover_sentence(crossover, years)}"
     return {"headline": headline, "detail": detail, "status": "ok",
             "breakeven_loan": breakeven, "headroom": headroom,
             # positive drives the render: green success box vs amber warning.
@@ -12335,6 +12421,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         baseline_start_age=scenario["baseline_start_age"],
         professional_debt=professional_debt_a,
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
+        crossover=net_position_crossover(scenario, col_index,
+                                         get_metro_wage_index(city)),
             **breakeven_kwargs())
     story += _pdf_breakeven_block(breakeven, styles)
     story += _pdf_wage_distribution_block(major, styles)
@@ -12917,6 +13005,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               baseline_start_age=scenario_a["baseline_start_age"],
                               professional_debt=professional_debt_a,
                               federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
+                              crossover=net_position_crossover(
+                                  scenario_a, col_index, get_metro_wage_index(city)),
             **breakeven_kwargs()),
             styles, scenario_label="Scenario A"),
         PageBreak(),
@@ -12944,6 +13034,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               baseline_start_age=scenario_b["baseline_start_age"],
                               professional_debt=professional_debt_b,
                               federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=dependents, include_fees=include_fees,
+                              crossover=net_position_crossover(
+                                  scenario_b, col_index, get_metro_wage_index(city)),
             **breakeven_kwargs()),
             styles, scenario_label="Scenario B"),
         PageBreak(),
@@ -20206,6 +20298,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             working_years=scenario["working_years"],
             baseline_start_age=scenario["baseline_start_age"],
             federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees,
+            crossover=net_position_crossover(scenario, col_index, hs_wage_index),
             **breakeven_kwargs())
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
@@ -20770,6 +20863,8 @@ else:
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
+        crossover=net_position_crossover(scenario, city_info["col_index"],
+                                         get_metro_wage_index(city)),
             **breakeven_kwargs())
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than
