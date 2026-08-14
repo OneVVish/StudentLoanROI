@@ -3941,7 +3941,16 @@ def get_effective_principal(major_name: str, loan_amount: float,
     """The true total debt behind a major's salary, including any
     professional-school debt beyond the undergrad loan slider (e.g.
     Medicine's median medical school debt). Used as the actual loan
-    principal AND the ROI% denominator -- see calculate_roi."""
+    principal AND the ROI% denominator -- see calculate_roi.
+
+    `professional_debt` is a NUMBER the caller resolved, and 0.0 is one of the
+    numbers it can be: since the sidebar exposed that figure as an editable
+    field, a visitor on a scholarship can zero it and this returns the loan
+    alone. Do not reintroduce a truthiness test here -- `professional_debt or
+    MAJOR_DATA[...]` would silently re-add the national average to precisely
+    the scenario the visitor built to exclude it. Only None means "not
+    supplied".
+    """
     # professional_debt=None means "use the national figure" -- the pre-picker
     # behaviour, and what analyze_model.py gets by not passing one.
     if professional_debt is None:
@@ -5338,10 +5347,17 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
                           if professional_program_for(major) else None,
         "prof_school_b": st.session_state.get("prof_school_b")
                           if compare_mode and professional_program_for(major_b) else None,
-        "professional_debt_a": resolve_professional_debt(
-            major, st.session_state.get("prof_school_a")) or None,
-        "professional_debt_b": (resolve_professional_debt(
-            major_b, st.session_state.get("prof_school_b")) or None) if compare_mode else None,
+        # The debt figure the model actually used, read from the field rather
+        # than re-resolved: it is editable now, so re-resolving here would log
+        # the figure the visitor overrode instead of the one every number in
+        # the row was built from. NULL still means "this path attends no
+        # professional school"; 0 is a real answer meaning "it is paid for",
+        # and the two must not be pooled. See migrations.sql.
+        "professional_debt_a": (st.session_state.get("prof_debt_a")
+                                if professional_program_for(major) else None),
+        "professional_debt_b": (st.session_state.get("prof_debt_b")
+                                if compare_mode and professional_program_for(major_b)
+                                else None),
         # The horizon every roi_pct/earnings_premium below was computed over.
         # Without it those columns aren't comparable across rows: a 30-year
         # ROI and a 10-year ROI are different quantities wearing the same
@@ -5503,6 +5519,19 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     if compare_mode and st.session_state.get(
             "prof_school_b", PROFESSIONAL_SCHOOL_NATIONAL) != PROFESSIONAL_SCHOOL_NATIONAL:
         params["prof_school_b"] = st.session_state["prof_school_b"]
+    # The professional-school debt figure itself, which is editable and so is
+    # no longer implied by the school. A link that dropped it would rebuild the
+    # scenario at a debt the sharer had explicitly displaced -- the same
+    # failure ?pp= exists to prevent, and worse in the one direction that
+    # matters most: a scholarship shared as $279,900 of dental debt.
+    #
+    # Emitted only on a path that attends one. The key is popped the moment the
+    # major stops being professional, so its presence is the test.
+    if "prof_debt_a" in st.session_state and professional_program_for(major):
+        params["pdebt"] = str(int(st.session_state["prof_debt_a"]))
+    if (compare_mode and "prof_debt_b" in st.session_state
+            and professional_program_for(major_b)):
+        params["pdebt_b"] = str(int(st.session_state["prof_debt_b"]))
     # A price carried over from the graduate search for a school with no
     # published debt. It is not a widget, so nothing else in this pipeline
     # would emit it -- and it moves the whole loan: Cal Northern's $54,450
@@ -6380,6 +6409,83 @@ def resolve_professional_debt(major_name: str, school_name: str = None) -> float
         return national
     value = pd.to_numeric(match.iloc[0]["debt_median"], errors="coerce")
     return float(value) if pd.notna(value) and value > 0 else national
+
+
+# ---------------------------------------------------------------------------
+# The professional-school debt is an EDITABLE figure, and resolve_professional_debt
+# above only supplies its default.
+#
+# It used to be the value itself, which made two ordinary situations
+# inexpressible. A visitor on a full scholarship, or one whose family is paying
+# for dental school, has no way to say so: typing $0 into Total Loan Amount left
+# a dentist owing $279,900, a physician $205,000 and a lawyer $130,000, with the
+# number typed in and the number displayed disagreeing and nothing on the page
+# explaining the gap. "What if I do not borrow at all" is the cleanest sanity
+# check this tool offers and it was unavailable on exactly the 71 paths whose
+# debt is largest. The mirror case is just as common: undergraduate paid for
+# from savings, dental school not, which is $0 of slider PLUS the whole
+# professional figure -- so a zero-only special case could not have served it
+# either, and the field is a field rather than a switch.
+#
+# Everything the model does with the figure is unchanged; only where it comes
+# from is. It still resolves ONCE and is passed to all three consumers
+# (get_effective_principal, professional_debt_cap, split_loan_financing's
+# professional_principal) -- see resolve_professional_debt's docstring for what
+# routing it to only some of them costs.
+PROF_DEBT_BASIS_NATIONAL = "national"
+PROF_DEBT_BASIS_SCHOOL = "school"
+PROF_DEBT_BASIS_ENTERED = "entered"
+
+
+def professional_debt_autofill(entered, seen_default, resolved_default,
+                                on_path: bool = True) -> tuple:
+    """What the professional-school debt field should hold this run, as
+    (value, default_it_was_autofilled_from).
+
+    `entered` is what is in the field now (None before it has ever rendered),
+    `seen_default` the resolution it last autofilled from, `resolved_default`
+    the resolution NOW -- a school's own median, a price carried from the
+    graduate search, or the national figure.
+
+    An edited figure survives until the resolution moves under it, which is the
+    same rule the Cost of Attendance and community-college cost fields already
+    follow. It has to: a $279,900 dental figure left standing on a law scenario
+    is silent, and silent is how every bug this file's comments record got out.
+    Off a professional path there is nothing to hold at all -- (None, None), so
+    switching to Computer Science and back cannot resurrect a stale figure.
+
+    Zero is a real answer here and must survive: `entered or default` would
+    quietly re-inflate a scholarship back to the national average, and this
+    returns 0.0 for it rather than falling through. That distinction is the
+    whole point of the field, and it is why the value is passed explicitly
+    everywhere rather than being recovered from a truthiness test -- a falsy
+    debt reaching professional_debt_cap as "unset" is the two-wrong-answers
+    failure resolve_professional_debt already warns about.
+    """
+    if not on_path:
+        return None, None
+    if entered is None or seen_default is None or abs(float(seen_default) - float(resolved_default)) > 0.5:
+        return float(resolved_default), float(resolved_default)
+    return max(float(entered), 0.0), float(seen_default)
+
+
+def professional_debt_basis(debt, resolved_default, school_name: str = None) -> str:
+    """Where the figure in play came from, for the sentence that names it.
+
+    Three answers, because "est. average professional-school debt" and
+    "professional-school debt for the school you picked" were both false the
+    moment the field became editable, and a caption that names the wrong source
+    is worse than none: it tells the reader to go and check a number that did
+    not build what is on screen.
+    """
+    try:
+        if abs(float(debt) - float(resolved_default)) > 0.5:
+            return PROF_DEBT_BASIS_ENTERED
+    except (TypeError, ValueError):
+        return PROF_DEBT_BASIS_NATIONAL
+    if school_name and school_name != PROFESSIONAL_SCHOOL_NATIONAL:
+        return PROF_DEBT_BASIS_SCHOOL
+    return PROF_DEBT_BASIS_NATIONAL
 
 
 def search_schools_by_budget(cip_family: str, credential: str,
@@ -8190,7 +8296,7 @@ def cumulative_loan_paid_by_year(repayment_result: dict, years: int) -> list:
 
 
 def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: float,
-                               years: int) -> list:
+                               years: int, include_debt_free: bool = False) -> list:
     """Net position at the end of each year 1..years, for this scenario and for
     the high-school baseline it's measured against: [{year, major, hs}].
 
@@ -8203,6 +8309,20 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
 
     total_investment is passed as 0 because only the two net positions are
     read; roi_pct comes back None and is discarded.
+
+    `include_debt_free` adds a third value per point: the SAME path with the
+    loan payments zeroed. It is the same calculate_roi call with
+    total_loan_payments_in_window=0, never a subtraction done afterwards, for
+    exactly the reason the rest of this function exists -- a second formula
+    would be a fourth implementation of the model, and this one would sit on
+    the same chart as the first, where the disagreement would be visible and
+    unexplainable. It answers the question the chart could not: what the
+    BORROWING costs, as distinct from what the degree earns. Every other
+    comparison on this chart is against a different life.
+
+    personal_contribution deliberately stays IN that reference. Money paid out
+    of savings was paid on both sides; it is not borrowed, so it is not what
+    this line removes.
     """
     paid_by_year = cumulative_loan_paid_by_year(scenario["repayment_result"], years)
     # Rebuilt from the scalars the scenario was computed under, so the chart's
@@ -8218,18 +8338,23 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
         else None)
     points = []
     for year in range(1, years + 1):
-        result = calculate_roi(
-            scenario["major"], paid_by_year[year - 1], 0,
-            col_index=col_index, years=year, hs_wage_index=hs_wage_index,
-            personal_contribution=scenario["personal_contribution"],
-            enrollment_years=scenario["enrollment_years"],
-            working_years=scenario["working_years"],
-            baseline_start_age=scenario.get("baseline_start_age"),
-            baseline_curve=baseline_curve,
-        )
-        points.append({"year": year,
-                       "major": result["major_net_position"],
-                       "hs": result["hs_net_position"]})
+        def _run(loan_paid):
+            return calculate_roi(
+                scenario["major"], loan_paid, 0,
+                col_index=col_index, years=year, hs_wage_index=hs_wage_index,
+                personal_contribution=scenario["personal_contribution"],
+                enrollment_years=scenario["enrollment_years"],
+                working_years=scenario["working_years"],
+                baseline_start_age=scenario.get("baseline_start_age"),
+                baseline_curve=baseline_curve,
+            )
+        result = _run(paid_by_year[year - 1])
+        point = {"year": year,
+                 "major": result["major_net_position"],
+                 "hs": result["hs_net_position"]}
+        if include_debt_free:
+            point["debt_free"] = _run(0.0)["major_net_position"]
+        points.append(point)
     return points
 
 
@@ -8530,6 +8655,14 @@ def professional_debt_cap(major_name: str, professional_debt: float = None) -> f
     entry = MAJOR_DATA.get(major_name, {})
     debt = (entry.get("additional_training_debt", 0)
             if professional_debt is None else professional_debt)
+    # A debt of exactly 0 is now a REACHABLE input, not only a missing row: the
+    # sidebar field lets a visitor say their professional school is paid for.
+    # Returning 0 here is right in that case and not the trap this function's
+    # sibling warns about -- the trap was a 0 arriving while the PRINCIPAL still
+    # carried the debt, which split_loan_financing then read as a real cap and
+    # pushed entirely private. It cannot happen while one resolved figure feeds
+    # the principal, this cap and the tranche split: at 0 there is no
+    # professional tranche to cap, because there is none in the principal either.
     if not debt:
         return 0.0
     years = entry.get("unpaid_training_years", 0)
@@ -8942,6 +9075,7 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               plus_cap: float = None,
                               dependents: int = 0,
                               professional_debt: float = None,
+                              professional_debt_basis_key: str = None,
                               include_fees: bool = False,
                               baseline_salary_now: float = None,
                               baseline_salary_in_10y: float = None,
@@ -9250,6 +9384,13 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # professional-school debt: $244,450" on a $54,450 school. Same rule as
         # the three consumers inside this function: resolve once, pass it.
         "professional_debt": _professional_debt,
+        # And where that figure came from, for the sentence that names it. It
+        # travels WITH the number for the same reason the number is stamped:
+        # once the field is editable there is a third possible source ("the
+        # figure you entered"), and a caption cannot recover which of the three
+        # it was by comparing against a constant. None means the caller did not
+        # say, and the caption falls back to the pre-field school/national test.
+        "professional_debt_basis": professional_debt_basis_key,
         "personal_contribution": personal_contribution,
         "total_investment": total_investment,
         # Stamp the enrollment-cost assumptions onto the scenario so every
@@ -10243,7 +10384,8 @@ def net_position_axis_title(scenarios: list) -> str:
 
 
 def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
-                        roi_window_years: int) -> pd.DataFrame:
+                        roi_window_years: int,
+                        include_debt_free: bool = False) -> pd.DataFrame:
     """Tidy {year, Series, Net Position} frame for the net-position chart, from
     one or two (label, scenario) pairs.
 
@@ -10253,13 +10395,42 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
     earnings is on, since the baseline is credited the years the graduate spends
     enrolled. Rare, but drawing a single line then would quietly show one
     scenario's baseline as if it were both.
+
+    `include_debt_free` adds one reference line per scenario: the same path
+    carrying no loan. Built HERE rather than in each chart builder so the
+    Plotly view and its matplotlib twin get it from one place -- the
+    principal/unpaid-interest split shipped Plotly-only once, and this is the
+    same failure waiting in the same shape.
+
+    Its label comes from counterfactual_vocab(), never from a literal: a
+    returning student's baseline is their own salary and their existing loans
+    are owed on either path, so the honest suffix there is "(No New Loan)".
+    "Debt-free" would describe a person who is not in that comparison, which is
+    the exact bug that vocabulary exists to have ended.
+
+    A scenario that pays nothing gets no reference line, because it would be
+    drawn directly on top of its own -- two legend entries for one line, with
+    the reader left to work out that they coincide.
     """
     series = {}
     baselines = {}
+    debt_free = {}
+    no_loan_suffix = counterfactual_vocab()["no_loan_suffix"]
     for label, scenario in scenarios:
-        points = build_net_position_series(scenario, col_index, hs_wage_index, roi_window_years)
+        points = build_net_position_series(scenario, col_index, hs_wage_index,
+                                            roi_window_years,
+                                            include_debt_free=include_debt_free)
         series[label] = [p["major"] for p in points]
         baselines[label] = [p["hs"] for p in points]
+        if include_debt_free:
+            values = [p["debt_free"] for p in points]
+            if values != series[label]:
+                debt_free[f"{label}{no_loan_suffix}"] = values
+
+    # Added after the paths and before the baseline, so the legend reads in the
+    # order the chart is explained: each path, then the same path unborrowed,
+    # then what both are measured against.
+    series.update(debt_free)
 
     # The legend names the baseline too, and it is the one place a returning
     # student sees it plotted rather than described -- so it comes from the
@@ -10340,6 +10511,81 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         )
     fig.update_xaxes(dtick=1 if roi_window_years <= 15 else 5)
     return fig
+
+
+# The debt-free reference line is OPT-IN, and the toggle is a CHART control
+# rather than a scenario input -- the same class of widget as the take-home
+# Annual/Monthly selector, and it lives beside its chart for the same reason.
+#
+# Opt-in because Compare Mode already draws four series (two paths, and one or
+# two baselines); a reference line per scenario would make it six or seven, and
+# a chart nobody can read has not told anyone anything. Off by default it costs
+# a click; on by default it would cost the compare chart its legibility for
+# every visitor, half of whom are in that arm by coin flip.
+#
+# Being a main-page widget, it is invisible to check_share_coverage's sidebar
+# sweep -- so it must ride pdf_memo_signature's `extras` at both call sites, or
+# the Download PDF button serves a report drawn without the line the visitor is
+# looking at. Silent: the button downloads happily either way.
+NET_POSITION_REFERENCE_KEY = "net_position_reference"
+
+
+def net_position_reference_on() -> bool:
+    """Whether the debt-free reference line is switched on.
+
+    Read from session_state rather than passed down, because the PDF builders
+    need it too and are called from a container pinned near the top of the page
+    -- the same treatment selected_salary_flow_period() gets, and wrapped for
+    the same reason: the guards and analyze_model.py exec this section with no
+    session_state at all, where the answer is "off".
+    """
+    try:
+        return bool(st.session_state.get(NET_POSITION_REFERENCE_KEY, False))
+    except Exception:
+        return False
+
+
+def render_net_position_chart(scenario_pairs: list, col_index: float,
+                               hs_wage_index: float, roi_window_years: int,
+                               baseline_head_start_years: int = 0,
+                               container=None) -> None:
+    """The net-position chart and its one view control, for BOTH result
+    branches.
+
+    One renderer, not two call sites drawing the same chart, because the
+    checkbox holds a single widget key and Compare Mode is the randomly
+    assigned contrast arm of the paper's H2: a control offered in one branch
+    and not the other is an arm difference the study never intended, which is
+    the failure recorded against the break-even, the underemployment note and
+    take-home. It also makes rendering it twice in one run structurally
+    impossible -- that raises StreamlitDuplicateElementKey, the lesson
+    render_salary_flow_charts already carries.
+    """
+    target = container if container is not None else st
+    show_reference = target.checkbox(
+        "Show this path with no loan", key=NET_POSITION_REFERENCE_KEY,
+        help="Adds a line for the same career at the same salary, carrying no "
+             "loan at all. The gap between the two lines is what the borrowing "
+             "costs you, separately from what the degree earns. Everything else "
+             "on this chart compares you against a different life; this compares "
+             "you against yourself.",
+    )
+    frame = net_position_frame(scenario_pairs, col_index, hs_wage_index,
+                                roi_window_years,
+                                include_debt_free=show_reference)
+    target.plotly_chart(
+        build_net_position_chart(
+            frame, roi_window_years, net_position_axis_title(scenario_pairs),
+            baseline_head_start_years=baseline_head_start_years),
+        use_container_width=True, config=PLOTLY_CHART_CONFIG,
+    )
+    if show_reference:
+        target.caption(
+            "Each path now carries a second line for the same career with no "
+            "loan. The gap between the pair is what the borrowing costs. A path "
+            "that borrows nothing has only one line, because the two would be "
+            "the same line."
+        )
 
 
 def cc_chart_label_suffix(cc_mode) -> str:
@@ -12709,8 +12955,15 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             styles["caption"]),
         Spacer(1, 12),
         build_pdf_net_position_chart(
+            # The debt-free reference line rides into the report whenever the
+            # visitor had it switched on, the same treatment the take-home
+            # Annual/Monthly toggle gets: a static report cannot carry a
+            # control, so it prints the chart that was on screen when the
+            # button was pressed. Built inside net_position_frame, so this
+            # cannot be the Plotly-only half of a chart twin.
             net_position_frame([(major, scenario)], col_index,
-                                get_metro_wage_index(city), roi_window_years),
+                                get_metro_wage_index(city), roi_window_years,
+                                include_debt_free=net_position_reference_on()),
             roi_window_years,
             net_position_axis_title([(major, scenario)]),
             # Same value the on-screen chart passes -- with foregone earnings
@@ -13379,7 +13632,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             net_position_frame(
                 [(f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}", scenario_a),
                  (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
-                col_index, get_metro_wage_index(city), roi_window_years),
+                col_index, get_metro_wage_index(city), roi_window_years,
+                include_debt_free=net_position_reference_on()),
             roi_window_years,
             net_position_axis_title([("A", scenario_a), ("B", scenario_b)]),
             # max of the two, matching the on-screen compare chart.
@@ -15209,6 +15463,10 @@ if _credential_key_a and _cip_family_a and not enable_prestige_mode:
 
 _program_key_a = None if enable_prestige_mode else professional_program_for(major)
 professional_debt_a = None
+# Where that figure came from, stamped onto the scenario so the caption can
+# name the right source. None off a professional path, where there is no
+# figure and nothing to explain.
+_prof_basis_a = None
 if _program_key_a:
     _prof_options_a = [PROFESSIONAL_SCHOOL_NATIONAL] + professional_schools_for(_program_key_a)
     # Re-pin when the program changes, or a medical school rides along into a
@@ -15253,7 +15511,47 @@ if _program_key_a:
                  "depending on where you go. Leave on the national average if you "
                  "don't know yet. See Methodology.",
         )
-    professional_debt_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
+    # The resolution is the field's DEFAULT, not the value. See
+    # professional_debt_autofill: an edited figure survives until the
+    # resolution moves under it (a different school, a different programme, a
+    # carried price cleared), which is the same rule Cost of Attendance and the
+    # community-college cost already follow.
+    _prof_default_a = resolve_professional_debt(major, st.session_state["prof_school_a"])
+    # ?pdebt= seeds ONCE PER SESSION, not once per rerun. The key is popped
+    # whenever the path stops being a professional one, so a plain setdefault
+    # re-read the link every time the visitor came back to one -- switch to
+    # Software Developers and back to Dentists and the link's figure returned,
+    # overwriting whatever had been typed since. Found in a browser, not by a
+    # guard; it is the seed_repayment_from_share lesson in a second place.
+    # -1 as the absent sentinel, because 0 is a real shared value here.
+    if not st.session_state.get("_prof_debt_seeded_a"):
+        st.session_state["_prof_debt_seeded_a"] = True
+        _shared_prof_debt_a = get_shared_int("pdebt", -1)
+        if _shared_prof_debt_a >= 0:
+            st.session_state["prof_debt_a"] = _shared_prof_debt_a
+    st.session_state.setdefault("prof_debt_a", int(round(_prof_default_a)))
+    st.session_state.setdefault("_prof_debt_seen_a", _prof_default_a)
+    _prof_value_a, _prof_seen_a = professional_debt_autofill(
+        st.session_state.get("prof_debt_a"), st.session_state.get("_prof_debt_seen_a"),
+        _prof_default_a)
+    # Written before the widget is instantiated, which is the only order
+    # Streamlit allows -- assigning a widget's key after it has rendered raises.
+    st.session_state["prof_debt_a"] = int(round(_prof_value_a))
+    st.session_state["_prof_debt_seen_a"] = _prof_seen_a
+    professional_debt_a = _sb_study.number_input(
+        f"{PROFESSIONAL_SCHOOL_LABEL[_program_key_a]} debt ($)",
+        min_value=0, max_value=1_000_000,
+        step=1000, key="prof_debt_a",
+        on_change=lambda: mark_interaction("prof_debt_a"),
+        help="What the professional degree itself is borrowed for, on top of "
+             "the undergraduate loan above. It fills in from the figure below "
+             "and you can change it. Set it to 0 if it is covered by a "
+             "scholarship, an employer, the military or family money: this is "
+             "the only way to model a path with no professional-school debt, "
+             "and it is what the total loan is built from.",
+    )
+    _prof_basis_a = professional_debt_basis(professional_debt_a, _prof_default_a,
+                                            st.session_state["prof_school_a"])
     # A carried PRICE standing in for a debt has to say so, and say it instead
     # of the usual caption rather than beside it: that one describes what
     # graduates borrowed, which is the opposite end of the aid question from a
@@ -15261,7 +15559,25 @@ if _program_key_a:
     # one.
     _carried_price_a = applied_program_price(_program_key_a)
     _carried_school_a = applied_program_price_school(_program_key_a)
-    if _carried_price_a and st.session_state["prof_school_a"] == PROFESSIONAL_SCHOOL_NATIONAL:
+    if _prof_basis_a == PROF_DEBT_BASIS_ENTERED:
+        # Neither caption below is true of a figure the visitor typed, and a
+        # sentence naming the wrong source is worse than none: it sends the
+        # reader to check a number that did not build anything on screen.
+        _sb_study.caption(
+            f"Using your own figure of {fmt_money_md(professional_debt_a)}. "
+            f"The figure this path would otherwise carry is "
+            f"{fmt_money_md(_prof_default_a)}."
+        )
+        # The escape hatch. The field can express every value including the
+        # default, but getting BACK to a default it has been edited away from
+        # otherwise means picking another school and picking this one again --
+        # the same dead end the carried-price button exists to open, arrived at
+        # from the other direction.
+        _sb_study.button(
+            f"Reset to {fmt_money(_prof_default_a)}", key="reset_prof_debt_a",
+            on_click=lambda: st.session_state.update(prof_debt_a=int(round(_prof_default_a))),
+            help="Go back to the figure this path resolves to on its own.")
+    elif _carried_price_a and st.session_state["prof_school_a"] == PROFESSIONAL_SCHOOL_NATIONAL:
         _sb_study.caption(
             f"Using {fmt_money_md(_carried_price_a)}, the published tuition and "
             f"fees for **{_carried_school_a}** across the programme, which you "
@@ -15292,6 +15608,16 @@ if _program_key_a:
     _optional_residency_a = optional_residency_disclosure(major)
     if _optional_residency_a:
         _sb_study.caption(_optional_residency_a)
+else:
+    # Off a professional path there is nothing for the field to hold, and a
+    # value Streamlit is still storing for a widget that no longer renders is
+    # the shape of several bugs already recorded in CLAUDE.md. Dropping it here
+    # rather than relying on the autofill's sentinel makes "switch to Computer
+    # Science and back" incapable of resurrecting a $279,900 dental figure --
+    # professional_debt_autofill returns (None, None) for the same case, and
+    # the two agree on purpose.
+    st.session_state.pop("prof_debt_a", None)
+    st.session_state.pop("_prof_debt_seen_a", None)
 
 # NOT inside the `if _program_key_a:` block above: that covers professional
 # PROGRAMMES (medicine, dentistry, law), and a research doctorate has no
@@ -15594,6 +15920,7 @@ if compare_mode:
         # get_prestige_adjusted_major_name rewrites major_b further down.
         _program_key_b = None if enable_prestige_mode else professional_program_for(major_b)
         professional_debt_b = None
+        _prof_basis_b = None
         if _program_key_b:
             _prof_options_b = [PROFESSIONAL_SCHOOL_NATIONAL] + professional_schools_for(_program_key_b)
             st.session_state.setdefault(
@@ -15611,10 +15938,57 @@ if compare_mode:
                      "Scorecard). Comparing two schools for the same career is "
                      "what this control is for.",
             )
-            professional_debt_b = resolve_professional_debt(
+            # Editable on the same terms as Scenario A's. Both arms or
+            # neither: Compare Mode exists to weigh two paths against each
+            # other, and a scholarship a visitor can express on one side and
+            # not the other makes the comparison the arm was built for
+            # unavailable. See professional_debt_autofill.
+            _prof_default_b = resolve_professional_debt(
                 major_b, st.session_state["prof_school_b"])
-            render_professional_debt_caption(
-                major_b, st.session_state["prof_school_b"], professional_debt_b)
+            # Once per session, for the reason Scenario A's does.
+            if not st.session_state.get("_prof_debt_seeded_b"):
+                st.session_state["_prof_debt_seeded_b"] = True
+                _shared_prof_debt_b = get_shared_int("pdebt_b", -1)
+                if _shared_prof_debt_b >= 0:
+                    st.session_state["prof_debt_b"] = _shared_prof_debt_b
+            st.session_state.setdefault("prof_debt_b", int(round(_prof_default_b)))
+            st.session_state.setdefault("_prof_debt_seen_b", _prof_default_b)
+            _prof_value_b, _prof_seen_b = professional_debt_autofill(
+                st.session_state.get("prof_debt_b"),
+                st.session_state.get("_prof_debt_seen_b"), _prof_default_b)
+            st.session_state["prof_debt_b"] = int(round(_prof_value_b))
+            st.session_state["_prof_debt_seen_b"] = _prof_seen_b
+            professional_debt_b = st.number_input(
+                f"{PROFESSIONAL_SCHOOL_LABEL[_program_key_b]} debt ($)",
+                min_value=0, max_value=1_000_000, step=1000, key="prof_debt_b",
+                on_change=lambda: mark_interaction("prof_debt_b"),
+                help="What the professional degree itself is borrowed for, on "
+                     "top of the undergraduate loan. Set it to 0 if it is "
+                     "covered by a scholarship, an employer, the military or "
+                     "family money.",
+            )
+            _prof_basis_b = professional_debt_basis(
+                professional_debt_b, _prof_default_b,
+                st.session_state["prof_school_b"])
+            if _prof_basis_b == PROF_DEBT_BASIS_ENTERED:
+                st.caption(
+                    f"Using your own figure of {fmt_money_md(professional_debt_b)}. "
+                    f"The figure this path would otherwise carry is "
+                    f"{fmt_money_md(_prof_default_b)}."
+                )
+                st.button(
+                    f"Reset to {fmt_money(_prof_default_b)}", key="reset_prof_debt_b",
+                    on_click=lambda: st.session_state.update(
+                        prof_debt_b=int(round(_prof_default_b))),
+                    help="Go back to the figure this path resolves to on its own.")
+            else:
+                render_professional_debt_caption(
+                    major_b, st.session_state["prof_school_b"], professional_debt_b)
+        else:
+            # Same neutralisation as Scenario A's: a stored figure for a widget
+            # that no longer renders must not survive a path change.
+            st.session_state.pop("prof_debt_b", None)
+            st.session_state.pop("_prof_debt_seen_b", None)
 
         typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
         if typical_education_b in MISMODELLED_EDUCATION_LEVELS:
@@ -20068,8 +20442,21 @@ def get_loan_principal_caption(scenario: dict) -> str:
     # calls every one of them "the school you picked" while the picker plainly
     # says National average.
     national = national_professional_debt(scenario["major"])
-    basis = ("est. average professional-school debt" if additional_debt == national
-             else "professional-school debt for the school you picked")
+    # Three sources now, not two. The figure is an editable field, so a total
+    # can be built from a number the visitor typed -- and calling that "the
+    # school you picked" points them at a median that had nothing to do with
+    # it. The stamp travels with the debt (compute_scenario_results); the
+    # school/national test below is the fallback for a caller that predates it.
+    basis_key = scenario.get("professional_debt_basis")
+    if basis_key == PROF_DEBT_BASIS_ENTERED:
+        basis = "professional-school debt, the figure you entered"
+    elif basis_key == PROF_DEBT_BASIS_SCHOOL:
+        basis = "professional-school debt for the school you picked"
+    elif basis_key == PROF_DEBT_BASIS_NATIONAL:
+        basis = "est. average professional-school debt"
+    else:
+        basis = ("est. average professional-school debt" if additional_debt == national
+                 else "professional-school debt for the school you picked")
     # The metric above now carries the TOTAL, so restating it here would say
     # the same number twice and still leave the split unexplained. This gives
     # the other half: which part is the school and which is the degree.
@@ -20757,6 +21144,7 @@ if compare_mode:
                                            working_years=working_years_a,
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                            federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
+                                           professional_debt_basis_key=_prof_basis_a,
                                            **returning_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
@@ -20766,6 +21154,7 @@ if compare_mode:
                                            working_years=working_years_b,
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
+                                           professional_debt_basis_key=_prof_basis_b,
                                            **returning_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
@@ -20883,18 +21272,12 @@ if compare_mode:
             st.plotly_chart(_pay_fig, use_container_width=True,
                             config=PLOTLY_CHART_CONFIG)
             st.caption(PAYMENT_CHART_CAPTION)
-    st.plotly_chart(
-        build_net_position_chart(
-            net_position_frame(
-                [(f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}", scenario_a),
-                 (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
-                city_info["col_index"], get_metro_wage_index(city), roi_horizon_years),
-            roi_horizon_years,
-            net_position_axis_title([("A", scenario_a), ("B", scenario_b)]),
-            baseline_head_start_years=max(scenario_a["enrollment_years"],
-                                           scenario_b["enrollment_years"]),
-        ),
-        use_container_width=True, config=PLOTLY_CHART_CONFIG,
+    render_net_position_chart(
+        [(f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}", scenario_a),
+         (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
+        city_info["col_index"], get_metro_wage_index(city), roi_horizon_years,
+        baseline_head_start_years=max(scenario_a["enrollment_years"],
+                                       scenario_b["enrollment_years"]),
     )
 
     ai_context = {}
@@ -20936,7 +21319,8 @@ if compare_mode:
         roi_horizon_years=roi_horizon_years,
         cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
         cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
-    ), selected_salary_flow_period(), loan_amount, loan_amount_b)
+    ), selected_salary_flow_period(), loan_amount, loan_amount_b,
+       net_position_reference_on())
     compare_pdf_bytes = memoized_pdf("compare", _pdf_sig, lambda: generate_pdf_report_compare(
         city, major, school_name_a, in_state_a, coa_per_year_a, personal_contribution_per_year_a,
         grants_per_year_a, interest_rate, repayment_strategy, scenario_a,
@@ -21021,6 +21405,7 @@ else:
                                          working_years=working_years_a,
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                          federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
+                                           professional_debt_basis_key=_prof_basis_a,
                                            **returning_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
@@ -21188,15 +21573,10 @@ else:
              "comparison no matter where you live.",
     )
 
-    st.plotly_chart(
-        build_net_position_chart(
-            net_position_frame([(major, scenario)], city_info["col_index"],
-                                get_metro_wage_index(city), roi_horizon_years),
-            roi_horizon_years,
-            net_position_axis_title([(major, scenario)]),
-            baseline_head_start_years=scenario["enrollment_years"],
-        ),
-        use_container_width=True, config=PLOTLY_CHART_CONFIG,
+    render_net_position_chart(
+        [(major, scenario)], city_info["col_index"],
+        get_metro_wage_index(city), roi_horizon_years,
+        baseline_head_start_years=scenario["enrollment_years"],
     )
 
     # The break-even: how much debt this path can carry before it stops
@@ -21288,13 +21668,17 @@ else:
     #     school's default), so it is absent from the params by design -- and
     #     it moves every figure in the report. Found live: changing $13,000 to
     #     $77,000 re-rendered the page and served the $13,000 PDF.
+    #   - the debt-free reference line, the other main-page chart control. It
+    #     adds a whole series to the report's net-position chart, so without it
+    #     here the button serves the chart the visitor switched away from.
     _pdf_sig = pdf_memo_signature(build_share_params(
         career_data_source, major, city, school_name_a, in_state_a,
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
         interest_rate, repayment_strategy, False, start_year_a=start_year_a,
         roi_horizon_years=roi_horizon_years,
         cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
-    ), selected_salary_flow_period(), loan_amount)
+    ), selected_salary_flow_period(), loan_amount,
+       net_position_reference_on())
     single_pdf_bytes = memoized_pdf("single", _pdf_sig, lambda: generate_pdf_report_single(
         major, city, school_name_a, in_state_a, takehome_stages,
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
@@ -21578,6 +21962,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                        working_years=working_years_a,
                                                        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                                        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
+                                               professional_debt_basis_key=_prof_basis_a,
                                                **returning_kwargs())
                 # major_b/loan_amount_b/etc. only exist as script variables when
                 # compare_mode is on (they're assigned inside that sidebar
@@ -21594,6 +21979,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                            working_years=working_years_b,
                                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
+                                               professional_debt_basis_key=_prof_basis_b,
                                                **returning_kwargs())
                     compare_mode_kwargs = dict(
                         compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
@@ -22424,6 +22810,14 @@ school in the sidebar and these change**, often a lot: across the schools that
 publish a figure, 43% of medical and 78% of dental schools sit above the
 $200,000 ceiling, so for many the private share is larger than the national
 average implies. For some it is nothing at all.
+
+The figure is a **field, not a fixed number**. It fills in from your school, or
+from the national average when you have not named one, and you can type over
+it. Set it to 0 if the degree is paid for by a scholarship, an employer, the
+military or your family: that is the only way to model a professional path with
+no professional-school debt, and until this was a field, entering $0 in Total
+Loan Amount still left a dentist owing $279,900. The Total Loan Amount above it
+covers the undergraduate years only, so the two add up.
 
 #### Graduate degrees (master's and doctoral)
 
