@@ -484,6 +484,26 @@ def check_twins_and_memo() -> list:
             "  render_net_position_chart does not pass include_debt_free, so "
             "the on-screen toggle draws nothing.")
 
+    # And both twins must DRAW it the same way. The reference line is dashed
+    # because it is a counterfactual rather than a second career, and "which
+    # lines are dashed" is exactly what drifts when one renderer is edited
+    # alone -- a solid line on screen against a dashed one in print makes the
+    # two disagree about which path is hypothetical. One predicate, asked
+    # twice, so the check is that both ask it.
+    for fn in ("build_net_position_chart", "build_pdf_net_position_chart"):
+        node = next((n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == fn), None)
+        if node is None:
+            problems.append(f"  {fn} is gone.")
+            continue
+        if not any(isinstance(sub, ast.Name) and sub.id == "is_no_loan_series"
+                   for sub in ast.walk(node)):
+            problems.append(
+                f"  {fn} never asks is_no_loan_series, so it styles the "
+                f"debt-free reference line like an ordinary path. Both chart "
+                f"twins must read the same predicate, or screen and print "
+                f"disagree about which line is the hypothetical one.")
+
     calculator_sigs = [m for m, where in memo_sig_calls if where == "(module)"]
     if len(calculator_sigs) < 2:
         problems.append(
