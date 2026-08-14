@@ -216,14 +216,31 @@ PHYSICIAN_TITLES = [
 for _title in PHYSICIAN_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_PHYSICIAN_TRAINING)
 
-# Dentists: 4 years of dental school. Debt is the ADA/ADEA 2024 Survey of
-# Dental School Seniors' average education debt among indebted graduates
-# ($293,900) -- reported as a mean, unlike AAMC's median, and bimodal
-# (public ~$260k vs private ~$321k), so it represents the middle of a wide
-# spread rather than a typical individual.
+# Dentists: 4 years of dental school. DENTAL SCHOOL debt only, $279,900.
+#
+# This was $293,900, ADEA's "average education debt", and that figure is the
+# wrong shape for this field. ADEA defines education debt as dental school
+# borrowing PLUS predental debt: "the outstanding education debt the senior
+# students had when they entered dental school". `additional_training_debt` is
+# added ON TOP of the undergraduate loan this app already charges, so an
+# undergraduate-inclusive figure counted the bachelor's twice. The Scorecard
+# per-school figures never had this problem, being scoped by academic level
+# (see build_professional_debt.py), so it was only ever the national fallback.
+#
+# DERIVED, because ADEA publishes the split but not the dollar. Dentists of
+# Tomorrow 2025 reports a mean of $297,800 among indebted graduates and says
+# dental school loans were 94% of it against 6% predental, so 0.94 x $297,800
+# = $279,932, to the hundred. Both halves come from the same report and the
+# same class, so the derivation mixes no vintages; the 94% is published
+# rounded, which puts the result within roughly $1,500.
+#
+# Still a MEAN among INDEBTED graduates, unlike AAMC's median: 18% of the 2025
+# class reported no debt at all, and the distribution is bimodal (public
+# against private), so it describes the middle of a wide spread of borrowers
+# rather than a typical individual.
 # adea.org/home/publications/research-and-data/graduating-oral-health-students
 _DENTIST_TRAINING = {
-    "unpaid_training_years": 4, "additional_training_debt": 293900,
+    "unpaid_training_years": 4, "additional_training_debt": 279900,
 }
 # "Dentists, General" is the largest of these by far and was missing, so the
 # most common dentist in the dataset was charged nine years of school, given no
@@ -21580,7 +21597,7 @@ split at its own cap, at the published graduate/professional Direct rate
 (8.07%), with the remainder private:
 
 Against the national averages that gives $5,000 private for Medicine
-($205,000 vs a $200,000 ceiling), $93,900 for Dentistry ($293,900), and
+($205,000 vs a $200,000 ceiling), $79,900 for Dentistry ($279,900), and
 nothing for Law ($130,000 against 3 × $50,000 = $150,000). **Name your actual
 school in the sidebar and these change**, often a lot: across the schools that
 publish a figure, 43% of medical and 78% of dental schools sit above the
