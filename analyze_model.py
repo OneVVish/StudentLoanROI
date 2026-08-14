@@ -15,6 +15,7 @@ this model's terms no matter how it's financed.
 Usage:
     python3 analyze_model.py                 # national BLS wages
     python3 analyze_model.py --state CA      # California BLS wages
+    python3 analyze_model.py --flat-baseline # flat all-ages HS counterfactual
     python3 analyze_model.py -o breakeven.csv
 
 Outputs a per-major CSV plus a printed summary. Needs no Supabase
@@ -110,7 +111,26 @@ def load_model_layer(state: str = None) -> dict:
     return ns
 
 
-def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str) -> dict:
+def resolve_baseline_start_age(ns: dict, major: str, program_years: int,
+                               enrollment_years: int, flat_baseline: bool):
+    """The baseline_start_age to hand calculate_roi, or None for the flat one.
+
+    One function so the break-even table and the horizon panel below cannot
+    end up on different counterfactuals. calculate_roi treats None as the
+    original flat all-ages median (see hs_wage_for_timeline_year), which is
+    the ONLY thing --flat-baseline changes: every other argument, enrollment
+    years above all, is computed identically either way. A sensitivity check
+    that moved two variables would measure neither.
+    """
+    if flat_baseline:
+        return None
+    # The title is required: for the 74 occupations with a training overlay
+    # the earnings curve starts at the bachelor's and the baseline must too.
+    return ns["baseline_start_age_for"](program_years, enrollment_years, major)
+
+
+def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str,
+                        flat_baseline: bool = False) -> dict:
     """The undergrad loan at which `major` stops beating a debt-free high
     school graduate.
 
@@ -142,10 +162,8 @@ def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str) -> dic
     program_years = ns["program_years_for_education"](
         ns["MAJOR_DATA"].get(major, {}).get("typical_education"), major)
     enrollment_years = ns["pre_earnings_years"](major, program_years)
-    # The title is required: for the 74 occupations with a training overlay
-    # the earnings curve starts at the bachelor's and the baseline must too.
-    baseline_start_age = ns["baseline_start_age_for"](program_years,
-                                                      enrollment_years, major)
+    baseline_start_age = resolve_baseline_start_age(ns, major, program_years,
+                                                    enrollment_years, flat_baseline)
     result = ns["find_breakeven_loan"](major, rate, strategy,
                                         enrollment_years=enrollment_years,
                                         baseline_start_age=baseline_start_age)
@@ -168,7 +186,8 @@ def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str) -> dic
                 in ns["MISMODELLED_EDUCATION_LEVELS"] or program_years == 0)}
 
 
-def build_breakeven_table(ns: dict, rate: float) -> pd.DataFrame:
+def build_breakeven_table(ns: dict, rate: float,
+                          flat_baseline: bool = False) -> pd.DataFrame:
     rows = []
     majors = sorted(ns["MAJOR_DATA"].keys())
     for i, major in enumerate(majors, 1):
@@ -194,7 +213,7 @@ def build_breakeven_table(ns: dict, rate: float) -> pd.DataFrame:
         row["typical_education"] = info.get("typical_education") or "(unknown)"
         row["education_group"] = classify_education(info, ns["SUB_BACHELORS_EDUCATION_LEVELS"])
         for strategy in STRATEGIES:
-            result = find_breakeven_loan(ns, major, rate, strategy)
+            result = find_breakeven_loan(ns, major, rate, strategy, flat_baseline)
             key = "standard" if strategy == STRATEGIES[0] else "idr"
             row[f"breakeven_loan_{key}"] = result["breakeven_loan"]
             row[f"status_{key}"] = result["status"]
@@ -210,7 +229,7 @@ def ns_window_note() -> str:
     return "WHAT THE 10-YEAR WINDOW DECIDES"
 
 
-def print_window_sensitivity(ns: dict, rate: float):
+def print_window_sensitivity(ns: dict, rate: float, flat_baseline: bool = False):
     """How much of the verdict is the model's 10-year horizon rather than the
     occupation?
 
@@ -249,7 +268,8 @@ def print_window_sensitivity(ns: dict, rate: float):
             _enroll = ns["pre_earnings_years"](m, _py)
             roi = ns["calculate_roi"](m, repay["total_paid_in_roi_window"], principal or 1,
                                        years=h, enrollment_years=_enroll,
-                                       baseline_start_age=ns["baseline_start_age_for"](_py, _enroll, m))
+                                       baseline_start_age=resolve_baseline_start_age(
+                                           ns, m, _py, _enroll, flat_baseline))
             cells += f"{roi['earnings_premium']:>16,.0f}"
         print(f"{m[:22]:22s}{cells}")
     print("\n  Medicine is negative at 10 years and strongly positive later: at year 10 it\n"
@@ -310,13 +330,18 @@ def print_education_partition(df: pd.DataFrame):
               "  nothing on screen tells a student which one to believe.")
 
 
-def print_summary(df: pd.DataFrame, ns: dict, rate: float):
+def print_summary(df: pd.DataFrame, ns: dict, rate: float, flat_baseline: bool = False):
     line = "=" * 78
     print(f"\n{line}\nBREAK-EVEN DEBT BY MAJOR\n"
           f"At what undergrad loan does each major stop beating a debt-free HS grad?\n{line}")
     print(f"Model: {ns['ROI_WINDOW_YEARS']}-year window, HS baseline "
           f"${ns['HS_GRAD_SALARY']:,}/yr growing {ns['HS_GRAD_GROWTH_RATE']*100:.0f}%/yr, "
           f"loan rate {rate}%.")
+    # Named in the output because two runs of this script now answer different
+    # questions and their tables look identical otherwise.
+    print("HS counterfactual: " + ("FLAT all-ages median (--flat-baseline; the app never "
+                                   "does this)" if flat_baseline else
+                                   "age-adjusted (the app's own baseline)"))
 
     # Restricted to occupations the 4-year-degree assumption is actually true
     # for -- see print_education_partition. Reporting these aggregates over
@@ -408,19 +433,28 @@ def main():
                         help="Use the California BLS wage dataset instead of national.")
     parser.add_argument("--rate", type=float, default=6.5,
                         help="Loan interest rate %% to model (default: 6.5).")
+    parser.add_argument("--flat-baseline", action="store_true",
+                        help="Compare against a FLAT all-ages high-school median instead "
+                             "of the age-adjusted baseline the app uses. Off by default, so "
+                             "a plain run stays the app's own number. This is the paper's "
+                             "sensitivity check on that correction: the age curve lowers the "
+                             "counterfactual in the early years and so raises every "
+                             "occupation's premium, which is the direction that flatters the "
+                             "tool, and the contrast has to be reproducible to be disclosed.")
     parser.add_argument("-o", "--output", type=Path, default=DEFAULT_OUTPUT,
                         help=f"CSV output path (default: {DEFAULT_OUTPUT}).")
     args = parser.parse_args()
 
     print(f"Loading model layer from {APP_PATH.name} "
-          f"({'California' if args.state == 'CA' else 'national'} wages)...", file=sys.stderr)
+          f"({'California' if args.state == 'CA' else 'national'} wages"
+          f"{', FLAT baseline' if args.flat_baseline else ''})...", file=sys.stderr)
     ns = load_model_layer(args.state)
     print(f"  {len(ns['MAJOR_DATA'])} occupations loaded.", file=sys.stderr)
 
-    df = build_breakeven_table(ns, args.rate)
+    df = build_breakeven_table(ns, args.rate, args.flat_baseline)
     print_education_partition(df)
-    print_summary(df, ns, args.rate)
-    print_window_sensitivity(ns, args.rate)
+    print_summary(df, ns, args.rate, args.flat_baseline)
+    print_window_sensitivity(ns, args.rate, args.flat_baseline)
 
     args.output.parent.mkdir(exist_ok=True)
     df.to_csv(args.output, index=False)
