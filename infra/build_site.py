@@ -179,6 +179,56 @@ SITE_CSS = """  :root {
      title, summary and date with nothing separating them. The display:block on
      b/time is what does the separating, so a card without this CSS is not
      merely unstyled, it is unreadable. */
+  /* ===== The guides index =====
+     Structure follows a conventional blog index: a titled band, then a card
+     grid with a date and a reading time on each card. The one deliberate
+     departure is that the cards carry no photograph. Two of the four guides
+     have a generated hero and two do not, and a grid where half the cards
+     show a picture and half show a placeholder looks unfinished in a way that
+     no amount of styling fixes. The slot is ready (see card_image_for and the
+     .post-card figure rule): fill the missing heroes with
+     brand/build_ai_hero.py and this turns into the picture-led version.
+     Type-led is also the honest look for a site whose guides are arguments
+     about numbers rather than lifestyle pieces. */
+  .guides-band { background: var(--deep); color: #fff; border-radius: 16px;
+    padding: 44px 40px 40px; margin: 26px 0 34px; }
+  .guides-band h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.1;
+    font-weight: 800; letter-spacing: -0.01em; }
+  .guides-band .accent { width: 96px; height: 4px; background: var(--orange);
+    border-radius: 2px; margin: 18px 0; }
+  .guides-band p { color: rgba(255, 255, 255, 0.86); max-width: 60ch;
+    font-size: 17px; }
+  .post-head { display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; margin-bottom: 16px; }
+  .post-head h2 { font-size: 24px; color: var(--deep); }
+  .post-head span { color: var(--muted); font-size: 15px; }
+  .post-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .post-card { display: flex; flex-direction: column; background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 14px; overflow: hidden;
+    text-decoration: none; color: inherit;
+    transition: border-color .15s ease, transform .15s ease; }
+  .post-card:hover { border-color: var(--blue); transform: translateY(-2px); }
+  .post-card:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  .post-card figure { margin: 0; aspect-ratio: 16 / 9; background: var(--tile); }
+  .post-card figure img { width: 100%; height: 100%; object-fit: cover;
+    display: block; }
+  .post-card .meta { padding: 16px 18px 0; color: var(--muted); font-size: 13px;
+    letter-spacing: 0.02em; }
+  .post-card b { display: block; padding: 8px 18px 0; color: var(--deep);
+    font-size: 19px; line-height: 1.28; }
+  .post-card span.sum { display: block; padding: 10px 18px 0; color: var(--muted);
+    font-size: 15px; }
+  /* margin-top:auto pins the rule to the bottom whatever the title wraps to,
+     so a row of cards lines up along it rather than along the text. */
+  .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
+    font-weight: 700; font-size: 15px; }
+  @media (max-width: 980px) { .post-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
+    .guides-band { padding: 32px 24px 28px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .post-card { transition: none; }
+    .post-card:hover { transform: none; }
+  }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
   .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
     display: block; text-decoration: none; color: inherit; }
@@ -953,11 +1003,64 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
 '''
 
 
+def read_minutes(post: dict) -> int:
+    """Reading time in whole minutes, from the post's own word count.
+
+    200 words a minute is the usual convention for adult non-fiction and it is
+    close enough for a label whose job is "is this a two-minute thing or a
+    ten-minute thing". Derived rather than declared, so it cannot go stale
+    against the text the way a front-matter field would. Tables are counted as
+    the words they contain, which slightly over-reads a figure-heavy guide;
+    that errs toward telling someone it is longer than it is, which is the
+    forgiving direction.
+    """
+    return max(1, round(len(post.get("body", "").split()) / 200))
+
+
+def card_date(iso: str) -> str:
+    """2026-08-13 -> Aug 13, 2026. The ISO string stays in the datetime
+    attribute for machines; this is the half a person reads."""
+    try:
+        return datetime.date.fromisoformat(iso).strftime("%b %-d, %Y")
+    except ValueError:
+        return iso
+
+
+def card_image_for(post: dict):
+    """The card's picture, or None when the post has no hero of its own.
+
+    Deliberately NOT falling back to DEFAULT_OG_IMAGE the way og_image_for
+    does. That default is right for a social card, where every link needs some
+    picture, and wrong in a grid, where it would put the identical image on
+    every guide that lacks a hero and make the page look broken rather than
+    plain. None means the card renders type-only, which is a design that works.
+    """
+    return post.get("card") or post.get("hero") or None
+
+
 def build_guides_index_html(posts, logo_svg, favicon) -> str:
-    cards = "\n".join(
-        f'''  <a class="guide-card" href="/guides/{p["slug"]}">
-    <b>{p["title"]}</b><span>{p["summary"]}</span>
-    <time datetime="{p["date"]}">{p["date"]}</time></a>''' for p in posts)
+    # ALL OR NOTHING. A grid where some cards carry a photograph and others do
+    # not is not a grid with a few pictures missing, it is a broken-looking
+    # page: the picture cards stand taller and the plain ones read as failed
+    # images. Rendered once with two of four heroes present, and it looked
+    # exactly like that. So the pictures appear only when every guide has one,
+    # which also means this becomes the picture-led version by itself the
+    # moment the last hero is generated, with no code change.
+    use_images = all(card_image_for(p) for p in posts)
+    cards = []
+    for p in posts:
+        image = card_image_for(p)
+        figure = (f'    <figure><img src="/app/static/{image}" alt="" '
+                  f'loading="lazy" width="1600" height="900"></figure>\n'
+                  if use_images and image else "")
+        cards.append(
+            f'''  <a class="post-card" href="/guides/{p["slug"]}">
+{figure}    <p class="meta"><time datetime="{p["date"]}">{card_date(p["date"])}</time>
+      · {read_minutes(p)} min read</p>
+    <b>{p["title"]}</b>
+    <span class="sum">{p["summary"]}</span>
+    <p class="more">Read the guide</p></a>''')
+    cards = "\n".join(cards)
     return f'''<!doctype html>
 <html lang="en">
 <head>
@@ -973,12 +1076,19 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   <a class="logo" href="/" aria-label="worthmydegree.com">{logo_svg}</a>
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
+<section class="guides-band">
+  <h1>Guides</h1>
+  <div class="accent"></div>
+  <p>The rules that decide what a degree costs, written out in plain English.
+  Every figure comes from the same federal data the calculator runs on, and
+  every one of them is checked against it before a guide goes up.</p>
+</section>
 <section>
-  <h2 style="font-size:32px">Guides</h2>
-  <p class="deck">The rules that decide what a degree costs, written out in
-  plain English. Every figure comes from the same federal data the calculator
-  runs on.</p>
-  <div class="guides">
+  <div class="post-head">
+    <h2>Latest guides</h2>
+    <span>{len(posts)} guide{"" if len(posts) == 1 else "s"}</span>
+  </div>
+  <div class="post-grid">
 {cards}
   </div>
 </section>
