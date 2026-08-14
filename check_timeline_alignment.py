@@ -268,6 +268,115 @@ def check_end_to_end(ns):
     return problems
 
 
+def crossover_scenario(ns, title, loan=120_000, enroll=False):
+    py = ns["program_years_for_major"](title)
+    enrollment = ns["pre_earnings_years"](title, py) if enroll else 0
+    return ns["compute_scenario_results"](
+        title, loan, 6.5, "Standard 10-Year", col_index=100.0, hs_wage_index=1.0,
+        enrollment_years=enrollment, working_years=0,
+        baseline_start_age=ns["baseline_start_age_for"](py, enrollment, title))
+
+
+def check_crossover(ns):
+    """The crossover age must be the age from which the graduate STAYS ahead.
+
+    Two properties, checked against a brute-force recomputation of the series
+    rather than against the helper's own return:
+
+      * the reported year is ahead, and every year after it is ahead too;
+      * the year before it is NOT ahead (else the answer is not the earliest).
+
+    And the age identity, which is this file's whole subject: the age must be
+    the graduate's age at timeline year 0 plus the year.
+    """
+    problems = []
+    sample = ["Dentists, General", "Computer Science", "Lawyers", "Pharmacists",
+              "Commercial Divers", "Music Directors and Composers",
+              "Architectural and Civil Drafters", "Registered Nurses"]
+    for title in sample:
+        if title not in ns["MAJOR_DATA"]:
+            continue
+        for enroll in (False, True):
+            sc = crossover_scenario(ns, title, enroll=enroll)
+            got = ns["net_position_crossover"](sc, 100.0, 1.0)
+            points = ns["build_net_position_series"](
+                sc, 100.0, 1.0, ns["NET_POSITION_CROSSOVER_MAX_YEARS"])
+            ahead = [p["major"] >= p["hs"] for p in points]
+            tag = f"{title} (foregone {'on' if enroll else 'off'})"
+            if got["year"] is None:
+                if ahead and ahead[-1]:
+                    problems.append(f"  {tag}: reported as never getting ahead, "
+                                    "but it is ahead in the final year")
+                continue
+            index = got["year"] - 1
+            if not all(ahead[index:]):
+                problems.append(f"  {tag}: reported year {got['year']} but the "
+                                "path falls behind again after it")
+            if index > 0 and ahead[index - 1]:
+                problems.append(f"  {tag}: reported year {got['year']} but it "
+                                "was already ahead the year before")
+            want_age = (sc["baseline_start_age"] + sc["enrollment_years"]
+                        + got["year"])
+            if got["age"] != want_age:
+                problems.append(f"  {tag}: age {got['age']} does not equal the "
+                                f"year-0 age plus {got['year']} ({want_age})")
+    return problems
+
+
+def check_crossover_agrees_with_verdict(ns):
+    """The sentence must not contradict the verdict printed above it.
+
+    "Is this debt worth it?" is a statement about the ROI window; the crossover
+    is a statement about a longer horizon. They answer different questions, but
+    they cannot disagree about the window itself: if the path gets ahead on or
+    before the window's last year, the premium at the window must be >= 0.
+    """
+    problems = []
+    window = WINDOW
+    for title in ("Dentists, General", "Computer Science", "Lawyers",
+                  "Registered Nurses", "History Teachers, Postsecondary"):
+        if title not in ns["MAJOR_DATA"]:
+            continue
+        for enroll in (False, True):
+            sc = crossover_scenario(ns, title, enroll=enroll)
+            got = ns["net_position_crossover"](sc, 100.0, 1.0)
+            premium = sc["roi_result"]["earnings_premium"]
+            tag = f"{title} (foregone {'on' if enroll else 'off'})"
+            inside = got["year"] is not None and got["year"] <= window
+            if inside and premium < 0:
+                problems.append(f"  {tag}: crosses in year {got['year']} but the "
+                                f"{window}-year premium is ${premium:,.0f}")
+            if not inside and premium >= 0:
+                problems.append(f"  {tag}: {window}-year premium is "
+                                f"${premium:,.0f} but it is reported as not "
+                                "ahead within the window")
+    return problems
+
+
+def check_crossover_sentence(ns):
+    """Every branch produces a sentence, and the beyond-the-window case says so
+    -- that is the case where the verdict says no and this says a year, and
+    without naming the gap the two read as contradicting each other."""
+    problems = []
+    say = ns["crossover_sentence"]
+    cases = [
+        ({"year": None, "age": None}, 10, "never", "no crossover"),
+        ({"year": 4, "age": 26}, 10, "age 26", "inside the window"),
+        ({"year": 15, "age": 37}, 10, "beyond the 10-year window", "past the window"),
+        ({"year": 15, "age": None}, 10, "year 15", "no age available"),
+    ]
+    for crossover, window, needle, what in cases:
+        got = say(crossover, window)
+        if needle not in got:
+            problems.append(f"  {what}: sentence is {got!r}, expected it to "
+                            f"contain {needle!r}")
+    if "$" in "".join(say(c, 10) for c, _, _, _ in cases):
+        problems.append("  the sentence carries a dollar sign; it is appended to "
+                        "details that already carry one, and two in a markdown "
+                        "string render as LaTeX (see fmt_money_md)")
+    return problems
+
+
 def negative_controls(ns):
     """Break it deliberately. A guard that passes for the wrong reason is worse
     than none, and all three of these failed to fail in an earlier draft."""
@@ -314,6 +423,27 @@ def negative_controls(ns):
                         "not fail the axis check")
     ns["net_position_axis_title"] = real_title
 
+    # (e) The tempting definition -- the FIRST year ahead rather than the year
+    # it stays ahead from. Several paths lead in year 1 on salary alone, fall
+    # behind once loan payments start, and recover later; reporting year 1 there
+    # names an age the reader does not stay ahead at.
+    real_crossover = ns["net_position_crossover"]
+    def first_crossing(scenario, col_index, hs_wage_index, max_years=None):
+        points = ns["build_net_position_series"](
+            scenario, col_index, hs_wage_index,
+            max_years or ns["NET_POSITION_CROSSOVER_MAX_YEARS"])
+        for point in points:
+            if point["major"] >= point["hs"]:
+                age = (scenario["baseline_start_age"]
+                       + (scenario.get("enrollment_years") or 0) + point["year"])
+                return {"year": point["year"], "age": age}
+        return {"year": None, "age": None}
+    ns["net_position_crossover"] = first_crossing
+    if not check_crossover(ns):
+        problems.append("  taking the FIRST year ahead rather than the year it "
+                        "stays ahead from did not fail the crossover check")
+    ns["net_position_crossover"] = real_crossover
+
     caught = check_alignment(ns, unfunded)
     funded_titles = [t for t in ns["MAJOR_DATA"] if raw_overlay(ns, t)[2]]
     if not funded_titles:
@@ -339,6 +469,12 @@ def main():
          check_axis_title(ns)),
         ("a real scenario carries what the axis title reads",
          check_end_to_end(ns)),
+        ("the crossover is the age the graduate STAYS ahead from",
+         check_crossover(ns)),
+        ("the crossover cannot contradict the verdict above it",
+         check_crossover_agrees_with_verdict(ns)),
+        ("every crossover branch produces a usable sentence",
+         check_crossover_sentence(ns)),
         ("negative controls", negative_controls(ns)),
     ]
     failed = False
