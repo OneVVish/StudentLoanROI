@@ -1934,3 +1934,38 @@ alter table scenario_events
 -- switch rather than becoming unconditional (the treatment hs_baseline_age_aware
 -- got) because both answers are defensible: "what do I gain from here" is a real
 -- question for somebody already enrolled, and that is what OFF now means.
+
+
+-- ===========================================================================
+-- 2026-08-14  professional_debt_a / _b BECOME AN INPUT.  NO DDL.
+-- ===========================================================================
+-- The professional-school debt was a RESOLVED value (a school's median, a
+-- price carried from the graduate search, or a national average) and is now an
+-- editable sidebar field seeded from that resolution. build_scenario_context
+-- therefore logs the FIELD rather than re-resolving, so the column continues to
+-- name the figure every other number in the row was built from.
+--
+-- Two consequences for anyone reading these columns across this date:
+--
+--   1. A 0 IS NOW POSSIBLE AND IS NOT A MISSING VALUE. It means the visitor
+--      said this degree carries no debt (a scholarship, an employer, the
+--      military, family money). NULL still means what it always meant: this
+--      path attends no professional school at all. Do not coalesce them.
+--      Before this date the app could not produce a 0 here -- resolve_
+--      professional_debt is documented never to return one -- so every 0 is
+--      after the seam by construction.
+--   2. The value is no longer implied by prof_school_a. Before, (major,
+--      prof_school) determined the figure and it could be recomputed from a
+--      later dataset release. It cannot now, which is the reason the figure has
+--      always been stored alongside the name and is the reason to keep doing so.
+--
+-- Why this changed: entering $0 in Total Loan Amount did not model zero debt on
+-- the 33 occupations that attend a professional school. get_effective_principal
+-- added the professional figure on top of the slider regardless, so a visitor
+-- who typed 0 was shown a $279,900 loan (Dentists), $205,000 (physicians) or
+-- $130,000 (Lawyers) with nothing on screen explaining the disagreement. The
+-- rows written before this date are correct about what the model did; they are
+-- simply drawn from a population that could not express a zero.
+--
+-- The share link carries the field as ?pdebt= / ?pdebt_b=, so a row's figure is
+-- reproducible from a shared scenario the same way the rest of the inputs are.
