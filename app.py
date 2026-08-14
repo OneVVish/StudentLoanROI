@@ -198,6 +198,20 @@ PHYSICIAN_TITLES = [
     "Family Medicine Physicians", "Neurologists", "Obstetricians and Gynecologists",
     "Ophthalmologists, Except Pediatric", "Orthopedic Surgeons, Except Pediatric",
     "Pediatric Surgeons", "Physicians, Pathologists", "Psychiatrists", "Radiologists",
+    # Added 2026-08-14. The SAME omission as Dentists, General and Lawyers,
+    # a third time, and these five include the two largest physician
+    # occupations in OEWS. Every one of them was charged nine years of school,
+    # given NO medical school debt, and paid a full specialist salary from the
+    # year after a bachelor's, while the twelve titles above carried $205,000
+    # of debt, four unpaid years and a three-year residency. On a $182,476
+    # undergraduate loan a Dermatologist read a $182,476 principal and
+    # $139,990 in year zero against a Radiologist's $387,476 and $0.
+    #
+    # Invisible for the usual reason: each modelled specialist looks correct on
+    # its own, and nothing asserted the list was COMPLETE against the dataset.
+    # check_school_search_filters.py now does, via UNMODELLED_DOCTORAL_TITLES.
+    "Dermatologists", "General Internal Medicine Physicians",
+    "Pediatricians, General", "Physicians, All Other", "Surgeons, All Other",
 ]
 for _title in PHYSICIAN_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_PHYSICIAN_TRAINING)
@@ -217,7 +231,12 @@ _DENTIST_TRAINING = {
 # specialist titles beside it carried the structure. The gap was invisible
 # because each specialist entry looked correct on its own.
 DENTIST_TITLES = ["Dentists, General", "Oral and Maxillofacial Surgeons",
-                  "Prosthodontists", "Dentists, All Other Specialists"]
+                  "Prosthodontists", "Dentists, All Other Specialists",
+                  # Orthodontists went the same way as the five physicians
+                  # above: a dental specialty sitting beside three modelled
+                  # ones, charged for nine years of school and given no dental
+                  # school debt at all.
+                  "Orthodontists"]
 for _title in DENTIST_TITLES:
     ADVANCED_TRAINING_OVERLAY[_title] = dict(_DENTIST_TRAINING)
 
@@ -315,6 +334,74 @@ for _title in ("Pharmacists", "Veterinarians", "Optometrists", "Chiropractors"):
 # school publishes no figure -- not "the figure the app uses". Where a school
 # is named, its own median replaces them and the spread is large: medical
 # school debt runs from $47,503 to $330,479 across schools.
+# Every OEWS occupation BLS files as "Doctoral or professional degree" that this
+# app does NOT model as a professional path, listed rather than inferred.
+#
+# WHY A LIST AND NOT A RULE. Three times now a professional occupation has
+# shipped with no training structure -- Dentists, General; Lawyers; and on
+# 2026-08-14 five physicians plus Orthodontists -- and every time it was
+# invisible because the modelled titles beside it looked correct and nothing
+# asserted the set was COMPLETE. A guard can only check completeness against
+# something, so this is that something: the doctoral occupations are exactly
+# the mapped ones plus these, and check_school_search_filters.py fails if a
+# title appears in the dataset belonging to neither. A new OEWS release adding
+# a physician title now breaks the build instead of quietly costing nothing.
+#
+# These are NOT modelled correctly either, and the distinction is only that
+# their error runs the other way. They are research doctorates (the 35
+# postsecondary teaching titles, Astronomers, Physicists, Biochemists, Medical
+# Scientists) and clinical doctorates (Audiologists, Clinical and Counseling
+# Psychologists, Physical Therapists). All are charged nine years of tuition
+# with no stipend, which for a FUNDED PhD is simply wrong: those programmes
+# typically waive tuition and pay a stipend, so the app overstates their cost
+# by five years of a school's published price. Fixing that needs a sourced
+# funding share and stipend, and must not treat the clinical doctorates as
+# funded, since they generally are not. Tracked, not done.
+UNMODELLED_DOCTORAL_TITLES = frozenset({
+    "Agricultural Sciences Teachers, Postsecondary",
+    "Anthropology and Archeology Teachers, Postsecondary",
+    "Architecture Teachers, Postsecondary",
+    "Area, Ethnic, and Cultural Studies Teachers, Postsecondary",
+    "Astronomers",
+    "Atmospheric, Earth, Marine, and Space Sciences Teachers, Postsecondary",
+    "Audiologists",
+    "Biochemists and Biophysicists",
+    "Biological Science Teachers, Postsecondary",
+    "Business Teachers, Postsecondary",
+    "Chemistry Teachers, Postsecondary",
+    "Clinical and Counseling Psychologists",
+    "Communications Teachers, Postsecondary",
+    "Computer Science Teachers, Postsecondary",
+    "Criminal Justice and Law Enforcement Teachers, Postsecondary",
+    "Economics Teachers, Postsecondary",
+    "Education Teachers, Postsecondary",
+    "Engineering Teachers, Postsecondary",
+    "English Language and Literature Teachers, Postsecondary",
+    "Environmental Science Teachers, Postsecondary",
+    "Family and Consumer Sciences Teachers, Postsecondary",
+    "Foreign Language and Literature Teachers, Postsecondary",
+    "Forestry and Conservation Science Teachers, Postsecondary",
+    "Geography Teachers, Postsecondary",
+    "Health Specialties Teachers, Postsecondary",
+    "History Teachers, Postsecondary",
+    "Law Teachers, Postsecondary",
+    "Library Science Teachers, Postsecondary",
+    "Mathematical Science Teachers, Postsecondary",
+    "Medical Scientists, Except Epidemiologists",
+    "Nursing Instructors and Teachers, Postsecondary",
+    "Philosophy and Religion Teachers, Postsecondary",
+    "Physical Therapists",
+    "Physicists",
+    "Physics Teachers, Postsecondary",
+    "Political Science Teachers, Postsecondary",
+    "Postsecondary Teachers, All Other",
+    "Psychology Teachers, Postsecondary",
+    "Recreation and Fitness Studies Teachers, Postsecondary",
+    "Social Sciences Teachers, Postsecondary, All Other",
+    "Social Work Teachers, Postsecondary",
+    "Sociology Teachers, Postsecondary",
+})
+
 PROFESSIONAL_PROGRAM_BY_OCCUPATION = {
     **{title: "medicine" for title in PHYSICIAN_TITLES},
     **{title: "dentistry" for title in DENTIST_TITLES},

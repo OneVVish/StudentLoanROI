@@ -615,6 +615,59 @@ def check_professional_paths(ns) -> list:
     return problems
 
 
+def check_doctoral_coverage(ns) -> list:
+    """Every doctoral occupation is either modelled or knowingly listed.
+
+    The other professional checks in this file all start from
+    PROFESSIONAL_PROGRAM_BY_OCCUPATION and verify that what is IN it is
+    coherent. None of them can see an occupation that should be in it and is
+    not, because an absent title is absent from the map too, so there is
+    nothing to iterate over. That blind spot has now shipped three times:
+    Dentists, General; Lawyers; and on 2026-08-14 five physicians plus
+    Orthodontists, including the two largest physician occupations in OEWS.
+    Each was charged nine years of school, given no professional debt, and
+    paid a full specialist salary from the year after a bachelor's, while the
+    modelled titles beside it looked perfectly correct.
+
+    So this checks the set rather than its members: the doctoral occupations
+    in MAJOR_DATA must be exactly the mapped ones plus UNMODELLED_DOCTORAL_TITLES.
+    An unrecognised title fails LOUDLY, which is the point, because the
+    alternative is a path that silently costs nothing. A retired title fails
+    too, since a stale entry in the list is how the list stops describing the
+    dataset.
+    """
+    problems = []
+    major_data = ns["MAJOR_DATA"]
+    doctoral = {t for t, info in major_data.items()
+                if info.get("typical_education") == "Doctoral or professional degree"}
+    mapped = set(ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"]) | set(ns["ADVANCED_TRAINING_OVERLAY"])
+    known = set(ns["UNMODELLED_DOCTORAL_TITLES"])
+
+    for title in sorted(doctoral - mapped - known):
+        problems.append(
+            f"  {title!r} is a doctoral occupation in neither\n"
+            f"    PROFESSIONAL_PROGRAM_BY_OCCUPATION nor UNMODELLED_DOCTORAL_TITLES.\n"
+            f"    If it needs a professional degree, add it to PHYSICIAN_TITLES /\n"
+            f"    DENTIST_TITLES / LAW_TITLES or the programme map, or it is\n"
+            f"    charged nine years of school, borrows nothing for the degree\n"
+            f"    and earns a full salary from year one. If it is a research or\n"
+            f"    clinical doctorate, add it to UNMODELLED_DOCTORAL_TITLES.")
+
+    for title in sorted(known - doctoral):
+        problems.append(
+            f"  UNMODELLED_DOCTORAL_TITLES lists {title!r}, which is not a\n"
+            f"    doctoral occupation in MAJOR_DATA. A title that does not exist\n"
+            f"    is inert: it silently stops excusing anything and the list\n"
+            f"    stops describing the dataset.")
+
+    overlap = sorted(known & mapped)
+    if overlap:
+        problems.append(
+            f"  {overlap[0]!r} is BOTH modelled and listed as unmodelled -- the\n"
+            f"    two registries disagree about whether it has a degree to pay for")
+    return problems
+
+
 def check_residency_modelling(ns) -> list:
     """Charged residencies and disclosed ones must be different sets.
 
@@ -1176,6 +1229,7 @@ def main() -> int:
         ("apply target", lambda: check_apply_target(ns)),
         ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
         ("professional paths", lambda: check_professional_paths(ns)),
+        ("doctoral coverage", lambda: check_doctoral_coverage(ns)),
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
         ("field debt column", lambda: check_field_debt_column(ns, base)),
