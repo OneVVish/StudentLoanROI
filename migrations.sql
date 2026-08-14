@@ -2008,3 +2008,45 @@ alter table scenario_events
 -- (prestige tiers, and a returning student's entered salary), so the ceiling
 -- travels with them. Those rows are unaffected at any horizon where the
 -- ceiling did not bind before.
+
+
+-- ===========================================================================
+-- 2026-08-14  RAP IS RENAMED "2026 RAP (Repayment Assistance Plan)".  NO DDL.
+-- ===========================================================================
+-- The label only. Not one number moves: the plan, the simulator, the payment
+-- table and the forgiveness clock are untouched, and a scenario re-run either
+-- side of this date produces identical figures.
+--
+-- What changes is a STRING WRITTEN INTO FIVE TABLES. repayment_strategy (and
+-- repayment_strategy_b) on survey_responses, pdf_downloads, scenario_shares and
+-- scenario_events carries the label by value, so from this date the same plan
+-- appears under two spellings:
+--
+--     'Repayment Assistance Plan (RAP)'         <- before 2026-08-14
+--     '2026 RAP (Repayment Assistance Plan)'    <- from 2026-08-14
+--
+-- ANY analysis grouping by that column must fold them together, or the default
+-- plan splits into two arms at an arbitrary date and each looks half as popular
+-- as it is. There is no in-database repair: the anon key cannot UPDATE any more
+-- than it can DELETE, and rewriting history would destroy the only record of
+-- which label a visitor was actually shown. Normalise on read:
+--
+--     CASE WHEN repayment_strategy IN ('Repayment Assistance Plan (RAP)',
+--                                      '2026 RAP (Repayment Assistance Plan)')
+--          THEN 'RAP' ELSE repayment_strategy END
+--
+-- The same fold applies to the repayment tool's own comparison rows, which now
+-- take the label from the calculator's constant rather than a second literal.
+--
+-- Old share links keep working and do NOT write the old string. ?strategy=
+-- carries the label by value, and a keyed Streamlit widget RAISES when its
+-- stored value is not among its options -- so an unmapped old link would have
+-- been a hard error on the recipient's screen, not a quiet fallback.
+-- resolve_shared_strategy maps LEGACY_RAP_STRATEGY_LABEL onto the new one, and
+-- what gets logged afterwards is the new spelling. A row written after this date
+-- therefore says nothing about which link produced it.
+--
+-- Why rename at all: the two plans a 2026 borrower can actually choose are RAP
+-- and the "2026 Tiered Standard Plan". One carried the year and the other did
+-- not, so the pair read as one new plan beside one long-standing one, when both
+-- begin July 1, 2026. The name now says which regime it belongs to.

@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
-"""Guard: the repayment time axis says the same thing on screen and in print.
+"""Guard: the money and time axes say the same thing on screen and in print.
 
     python3 check_chart_axes.py     (exit 1 on a violation)
+
+THE MONEY HALF. The same drift, one axis over. Every money axis in the app is
+labelled by ONE formatter (fmt_money_k) reached two ways -- Plotly through
+money_k_ticks, matplotlib through _PDF_MONEY_K_FORMATTER -- because Plotly picks
+its own SI prefix per axis and put two charts on one page in two different
+units. A renderer that formats its own ticks would look right in isolation and
+disagree with its twin, which nobody holds side by side.
+
+It also pins the unit ladder itself. Thousands-forever printed "$5,000k" on the
+35-year net-position chart and "$3,690k" on a 30-year premium: five digits and a
+suffix where the reader wants a magnitude. Past a million the unit is millions,
+and the k and M ranges may not overlap -- "$1,000k" beside "$1.0M" on one axis
+is the same two-units failure in miniature.
 
 WHY THIS EXISTS. The balance and payment charts carried an axis labelled
 "Years" whose ticks were bare floats. A capped federal tranche clearing at 2.4
@@ -130,6 +143,147 @@ def check_axis_end(ns, fail):
              f"blank years to gain one label")
 
 
+# What each magnitude must READ AS, written out rather than derived from
+# fmt_money_k's own threshold constant -- reading the boundary out of the code
+# under test only asserts that it equals itself, the flaw check_ladder records
+# above and CLAUDE.md records against the residency guard. These are the
+# boundaries by hand: the last value in dollars, the first in thousands, the
+# last in thousands, the first in millions, and the sign on each side.
+MONEY_LABELS = (
+    (0, "$0"), (500, "$500"), (999, "$999"), (-750, "-$750"),
+    # 12,600 rather than 12,500: a half-thousand is a rounding tie, and
+    # Python rounds those to even, so the expectation would be asserting the
+    # formatting library rather than this app's ladder.
+    (1000, "$1k"), (12600, "$13k"), (-49000, "-$49k"), (250000, "$250k"),
+    (999000, "$999k"), (999499, "$999k"),
+    # The switch is where thousands would need four digits, not at 1,000,000.
+    (999500, "$1.0M"), (1000000, "$1.0M"), (1200000, "$1.2M"),
+    (3690000, "$3.7M"), (-3690000, "-$3.7M"), (5000000, "$5.0M"),
+    (12300000, "$12.3M"),
+)
+
+
+def check_money_format(ns, fail):
+    """fmt_money_k at every unit boundary, and the two things a money tick
+    must never be: four digits wearing a k, or a bare Plotly SI prefix."""
+    fmt = ns["fmt_money_k"]
+    for value, expected in MONEY_LABELS:
+        got = fmt(value)
+        if got != expected:
+            fail(f"fmt_money_k({value}) is {got!r}, expected {expected!r}")
+    # None is reachable -- a chart series with a gap -- and must cost a label,
+    # not a page.
+    if fmt(None) != "":
+        fail(f"fmt_money_k(None) is {fmt(None)!r}, expected an empty label")
+
+
+def check_money_ladder(ns, fail):
+    """Across every span a chart in this app can carry, no tick may be written
+    in four digits of thousands, and one axis may not mix the two units."""
+    ticks = ns["money_k_ticks"]
+    spans = (5_000, 60_000, 190_000, 469_900, 900_000, 1_000_000, 1_200_000,
+             2_500_000, 3_690_000, 5_030_000, 12_000_000)
+    for high in spans:
+        vals, txt = ticks([0, high])
+        if not txt:
+            fail(f"a $0-${high:,} span produced no money ticks")
+            continue
+        for label in txt:
+            digits = label.lstrip("-$").rstrip("kM").replace(",", "").split(".")[0]
+            if label.endswith("k") and len(digits) > 3:
+                fail(f"a $0-${high:,} span labels a tick {label!r}. Four digits "
+                     f"and a suffix is not a magnitude anyone reads -- past a "
+                     f"million the unit is millions.")
+        if any(t.endswith("k") for t in txt) and any(t.endswith("M") for t in txt):
+            # Legal only in the direction k-then-M: the ladder is monotonic, so
+            # the units may change once and must not change back.
+            units = [t[-1] if t[-1] in "kM" else "$" for t in txt]
+            ordered = [u for i, u in enumerate(units) if i == 0 or u != units[i - 1]]
+            if [u for u in ordered if u in "kM"] != ["k", "M"]:
+                fail(f"a $0-${high:,} span changes unit more than once: {txt}")
+    # Degenerate input costs ticks, not a page -- the same rule the time axis
+    # carries.
+    for values in ([], [None], [float("nan")]):
+        if ticks(values) != ([], []):
+            fail(f"money_k_ticks({values!r}) should be empty, got {ticks(values)}")
+
+
+def check_money_twins(ns, fail):
+    """THE MONEY HALF OF THE ONE THIS FILE IS FOR: both renderers label a money
+    axis through the SAME formatter.
+
+    Tick POSITIONS are deliberately not compared. Plotly is handed explicit
+    ticks (money_k_ticks) while matplotlib keeps its own locator, so equal
+    positions were never the invariant -- equal LABELLING is. So each side is
+    asked what it wrote at the positions it chose, and every label must be
+    fmt_money_k of its own position.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    fmt = ns["fmt_money_k"]
+
+    # The formatter object the PDF charts install, asked directly. A twin that
+    # grew its own lambda would pass every other check in this file.
+    for value, expected in MONEY_LABELS:
+        got = ns["_PDF_MONEY_K_FORMATTER"](value, 0)
+        if got != expected:
+            fail(f"_PDF_MONEY_K_FORMATTER({value}) is {got!r}, expected "
+                 f"{expected!r} -- the print twin is not going through "
+                 f"fmt_money_k")
+
+    # A real chart pair, at a scale that crosses the million: a 35-year net
+    # position is where "$5,000k" was actually rendered.
+    frame = pd.DataFrame([
+        {"year": y, "Series": s,
+         "Net Position": base * y * 1.0}
+        for s, base in (("Medicine", 150_000), ("High School Graduate", 60_000))
+        for y in range(1, 36)
+    ])
+    fig = ns["build_net_position_chart"](frame, 10, "Years after graduation")
+    screen = list(fig.layout.yaxis.ticktext or [])
+    screen_vals = list(fig.layout.yaxis.tickvals or [])
+    if not screen:
+        fail("the net-position chart has no explicit money ticks -- "
+             "money_k_ticks was not called")
+    if screen != [fmt(v) for v in screen_vals]:
+        fail(f"the on-screen money axis is not labelled by fmt_money_k: "
+             f"{screen} at {screen_vals}")
+
+    captured = {}
+    original = ns["_pdf_image_from_figure"]
+
+    def spy(pdf_fig, max_width=None, **kw):
+        ax = pdf_fig.axes[0]
+        pdf_fig.canvas.draw()
+        captured["labels"] = [t.get_text() for t in ax.get_yticklabels()]
+        captured["positions"] = list(ax.get_yticks())
+        return original(pdf_fig, max_width=max_width) if max_width else original(pdf_fig)
+
+    ns["_pdf_image_from_figure"] = spy
+    try:
+        ns["build_pdf_net_position_chart"](frame, 10, "Years after graduation")
+    finally:
+        ns["_pdf_image_from_figure"] = original
+        plt.close("all")
+
+    labels = [t for t in captured.get("labels", []) if t]
+    if not labels:
+        fail("the printed net-position chart produced no money labels")
+    for label, position in zip(captured.get("labels", []),
+                               captured.get("positions", [])):
+        if label and label != fmt(position):
+            fail(f"the printed money axis wrote {label!r} at {position} where "
+                 f"fmt_money_k says {fmt(position)!r} -- the twins disagree "
+                 f"about the unit")
+    if any(t.endswith("k") and len(t.lstrip("-$").rstrip("k").replace(",", "")) > 3
+           for t in labels):
+        fail(f"the printed net-position chart still labels in four-digit "
+             f"thousands: {labels}")
+
+
 def check_twins(ns, fail):
     """THE ONE THIS FILE IS FOR. Every chart pair, same ticks, same title.
 
@@ -235,6 +389,9 @@ def main() -> int:
     check_ladder(ns, fail)
     check_axis_end(ns, fail)
     check_twins(ns, fail)
+    check_money_format(ns, fail)
+    check_money_ladder(ns, fail)
+    check_money_twins(ns, fail)
 
     if problems:
         print(f"chart axes: {len(problems)} problem(s)\n")
@@ -246,7 +403,9 @@ def main() -> int:
         return 1
     print("chart axes OK -- 6 chart pairs agree on ticks and title, the "
           "years-and-months\n  ladder holds from three months to thirty years, "
-          "and every last tick is\n  inside its own plot area.")
+          "every last tick is inside\n  its own plot area, and both renderers "
+          "label money through one formatter\n  that switches to millions "
+          "before any tick can print four digits of\n  thousands.")
     return 0
 
 
