@@ -34,6 +34,8 @@ filling it, and $50,713 a year went straight back onto a dental student earning
 nothing -- while the balance chart beside it correctly showed the climb, and
 every one of the other nine guards passed.
 """
+import ast
+import inspect
 import sys
 
 TOLERANCE = 1.0          # dollars
@@ -181,6 +183,60 @@ def check_totals_absorb_the_deferment(ns):
     return problems
 
 
+def check_disclosure_cannot_drift(ns):
+    """The deferment warning quotes a lifetime interest figure, and the metric
+    directly above it reads `combined_repayment or repayment_result` -- which
+    differ the moment a visitor carries an existing balance. Quoting the new
+    loan's figure under a metric showing the combined one is the contradiction
+    this codebase keeps having to fix, so the figure is a REQUIRED keyword-only
+    argument. This asserts it stays one: give it a default and the two silently
+    become different numbers again.
+
+    Checked on the signature rather than by rendering, because the renderer is
+    Streamlit and this file has no runtime -- but a default is exactly the change
+    that would reintroduce the bug, and it is visible from here.
+    """
+    problems = []
+    fn = ns.get("render_forgiveness_note")
+    if fn is None:
+        return ["  render_forgiveness_note is missing"]
+    params = inspect.signature(fn).parameters
+    arg = params.get("total_interest")
+    if arg is None:
+        problems.append("  render_forgiveness_note takes no total_interest; the "
+                        "warning would quote the new loan's figure under a "
+                        "metric showing the combined one")
+        return problems
+    if arg.kind is not inspect.Parameter.KEYWORD_ONLY:
+        problems.append("  total_interest is not keyword-only, so a positional "
+                        "call can pass the wrong result silently")
+    if arg.default is not inspect.Parameter.empty:
+        problems.append(f"  total_interest has a default ({arg.default!r}); a "
+                        "missed call site must be a TypeError, not a quietly "
+                        "different number")
+    # Both call sites must pass it from the SAME expression the metric uses.
+    src = open("app.py").read()
+    calls = [n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == "render_forgiveness_note"]
+    if len(calls) != 2:
+        problems.append(f"  expected 2 render_forgiveness_note call sites, "
+                        f"found {len(calls)} -- a new one may omit the figure")
+    for call in calls:
+        names = [k.arg for k in call.keywords]
+        if "total_interest" not in names:
+            problems.append("  a render_forgiveness_note call site does not pass "
+                            "total_interest")
+        else:
+            value = next(k.value for k in call.keywords if k.arg == "total_interest")
+            text = ast.unparse(value)
+            if "shown" not in text:
+                problems.append(f"  a call site passes total_interest={text}, "
+                                "which is not the result the metric shows "
+                                "(`combined_repayment or repayment_result`)")
+    return problems
+
+
 def negative_controls(ns):
     """Break it deliberately."""
     problems = []
@@ -231,6 +287,8 @@ def main():
         ("the subsidized share accrues nothing", check_subsidized_is_exempt(ns)),
         ("payoff and interest absorb the deferment",
          check_totals_absorb_the_deferment(ns)),
+        ("the disclosure cannot quote a different figure than the metric",
+         check_disclosure_cannot_drift(ns)),
         ("negative controls", negative_controls(ns)),
     ]
     failed = False
