@@ -9818,6 +9818,44 @@ def render_payment_chart(result: dict, label: str, container=None) -> bool:
     return True
 
 
+def net_position_axis_title(scenarios: list) -> str:
+    """What the net-position chart's x-axis is counting FROM.
+
+    "Years after graduation" is ambiguous for the 74 occupations whose earnings
+    timeline starts at the bachelor's and then spends the graduate years in
+    training: a dentist's year 0 is the year they START dental school, four
+    years before the graduation a reader pictures. It was reported as a question
+    -- "I am assuming graduation from undergraduate school, is this right?" --
+    which is the point at which a label has stopped doing its job.
+
+    THE AGE AT YEAR 0 IS `baseline_start_age + enrollment_years`, in both toggle
+    states: with foregone earnings off the start age carries the whole offset,
+    with it on the start age is 18 and the head start carries it. That is why
+    this reads the scenario rather than the occupation title. Reading a title
+    would also break in prestige mode, where `major` has been rewritten to a
+    synthetic name (`"Family Medicine Physicians (Tier 1)"`) that no overlay is
+    keyed on -- so the label would silently revert on exactly the paths it
+    exists for.
+
+    Compare Mode can put two paths with different lengths on one axis (a dentist
+    at 22 beside a nurse practitioner at 24). That gets a neutral title rather
+    than one true of only one of them.
+    """
+    ages = {s["baseline_start_age"] + (s.get("enrollment_years") or 0)
+            for _, s in scenarios if s.get("baseline_start_age") is not None}
+    if len(ages) != 1:
+        return "Years into the comparison"
+    age = ages.pop()
+    if age <= HS_GRAD_START_AGE:
+        return "Years after high school"
+    if age == HS_GRAD_START_AGE + UNDERGRAD_YEARS:
+        # True of a plain four-year major AND of every training path, whose
+        # timeline starts the day the bachelor's ends. Naming the bachelor's is
+        # strictly more specific than "graduation" for both.
+        return "Years after your bachelor's degree"
+    return "Years after graduation"
+
+
 def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
                         roi_window_years: int) -> pd.DataFrame:
     """Tidy {year, Series, Net Position} frame for the net-position chart, from
@@ -9856,6 +9894,7 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
 
 
 def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
+                              axis_title: str,
                               baseline_head_start_years: int = 0):
     """Net position year by year, for every path on the page plus the
     high-school baseline.
@@ -9879,12 +9918,14 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         # twin and net_position_frame both read -- and only the displayed
         # name changes here.
         title="Cumulative Gross Pay minus loan payments (Tax not considered)",
-        # "after graduation" rather than "after starting": with foregone
-        # earnings counted, year 1 is the graduate's first working year while
-        # the baseline already carries the enrolled years' wages, so the two
-        # series do NOT begin level. Saying "starting" would misread that head
-        # start as the degree simply being behind.
-        labels={"year": "Years after graduation",
+        # The title counts from the END of school, never from starting it: with
+        # foregone earnings counted, year 1 is the graduate's first year out
+        # while the baseline already carries the enrolled years' wages, so the
+        # two series do NOT begin level. Saying "after starting" would misread
+        # that head start as the degree simply being behind. Which ending it
+        # names is net_position_axis_title's job, and it is a REQUIRED argument
+        # rather than a constant because it differs per path.
+        labels={"year": axis_title,
                  "Net Position": "Cumulative gross pay minus loan payments ($)"},
     )
     fig.update_traces(line=dict(width=3))
@@ -11669,6 +11710,7 @@ def build_pdf_comparison_payment_chart(result_a: dict, label_a: str,
 
 
 def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
+                                  axis_title: str,
                                   baseline_head_start_years: int = 0) -> Image:
     """PDF counterpart to build_net_position_chart. Takes the same prebuilt
     frame, so the two can't disagree about the trajectory -- what is hand-kept
@@ -11693,7 +11735,7 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     else:
         ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
                      fontsize=11)
-    ax.set_xlabel("Years after graduation")
+    ax.set_xlabel(axis_title)
     ax.set_ylabel("Cumulative gross pay minus loan payments ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
@@ -12272,6 +12314,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             net_position_frame([(major, scenario)], col_index,
                                 get_metro_wage_index(city), roi_window_years),
             roi_window_years,
+            net_position_axis_title([(major, scenario)]),
             # Same value the on-screen chart passes -- with foregone earnings
             # off, enrollment_years is 0 and the annotation stays away.
             baseline_head_start_years=scenario["enrollment_years"]),
@@ -12929,6 +12972,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                  (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
                 col_index, get_metro_wage_index(city), roi_window_years),
             roi_window_years,
+            net_position_axis_title([("A", scenario_a), ("B", scenario_b)]),
             # max of the two, matching the on-screen compare chart.
             baseline_head_start_years=max(scenario_a["enrollment_years"],
                                           scenario_b["enrollment_years"]),
@@ -20402,6 +20446,7 @@ if compare_mode:
                  (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
                 city_info["col_index"], get_metro_wage_index(city), roi_horizon_years),
             roi_horizon_years,
+            net_position_axis_title([("A", scenario_a), ("B", scenario_b)]),
             baseline_head_start_years=max(scenario_a["enrollment_years"],
                                            scenario_b["enrollment_years"]),
         ),
@@ -20703,6 +20748,7 @@ else:
             net_position_frame([(major, scenario)], city_info["col_index"],
                                 get_metro_wage_index(city), roi_horizon_years),
             roi_horizon_years,
+            net_position_axis_title([(major, scenario)]),
             baseline_head_start_years=scenario["enrollment_years"],
         ),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,

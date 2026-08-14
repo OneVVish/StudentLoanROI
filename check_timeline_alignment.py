@@ -203,6 +203,71 @@ def check_baseline_sum(ns):
     return []
 
 
+def check_axis_title(ns):
+    """The net-position chart's x-axis must name the moment year 0 actually is.
+
+    "Years after graduation" was ambiguous for exactly the paths this file
+    exists for -- a dentist's year 0 is the year they START dental school -- and
+    a label asserting a moment the data does not have is the same defect class
+    as the timeline itself, so it is checked here rather than left to reading.
+
+    The scenarios are hand-built dicts: net_position_axis_title reads only
+    baseline_start_age and enrollment_years, so constructing them literally
+    states the ages this file expects instead of asking the app to supply them.
+    check_end_to_end below then proves a REAL scenario carries the same keys.
+    """
+    title = ns["net_position_axis_title"]
+    def sc(start_age, enroll=0):
+        return ("x", {"baseline_start_age": start_age, "enrollment_years": enroll})
+    cases = [
+        # (scenarios, must contain, description)
+        ([sc(22)], "bachelor", "a path whose year 0 is age 22"),
+        ([sc(18, 4)], "bachelor", "the same path with foregone earnings on"),
+        ([sc(24)], "graduation", "a master's path, year 0 at 24"),
+        ([sc(20)], "graduation", "an associate's path, year 0 at 20"),
+        ([sc(18)], "high school", "a path needing no degree"),
+        ([sc(22), sc(24)], "comparison", "two paths starting at different ages"),
+        ([sc(22), sc(22)], "bachelor", "two paths starting at the same age"),
+    ]
+    problems = []
+    for scenarios, needle, what in cases:
+        got = title(scenarios)
+        if needle not in got.lower():
+            problems.append(f"  {what}: axis reads {got!r}, expected it to name "
+                            f"{needle!r}")
+    # The specific regression: a dentist must NOT get the bare old string.
+    if title([sc(22)]) == "Years after graduation":
+        problems.append("  a bachelor's-anchored path still reads the ambiguous "
+                        "'Years after graduation'")
+    return problems
+
+
+def check_end_to_end(ns):
+    """A real scenario dict must carry the two keys the axis title reads, and
+    must produce the bachelor's wording for a dentist. The hand-built dicts
+    above cannot catch a rename of either key."""
+    title = "Dentists, General"
+    if title not in ns["MAJOR_DATA"]:
+        return [f"  {title!r} is missing from MAJOR_DATA"]
+    py = ns["program_years_for_major"](title)
+    scenario = ns["compute_scenario_results"](
+        title, 100_000, 6.5, "Standard 10-Year", col_index=100.0,
+        hs_wage_index=1.0, enrollment_years=0, working_years=0,
+        baseline_start_age=ns["baseline_start_age_for"](py, 0, title))
+    problems = []
+    for key in ("baseline_start_age", "enrollment_years"):
+        if key not in scenario:
+            problems.append(f"  a real scenario has no {key!r}; the axis title "
+                            "reads it")
+    if problems:
+        return problems
+    got = ns["net_position_axis_title"]([("A", scenario)])
+    if "bachelor" not in got.lower():
+        problems.append(f"  a real dentist scenario gives axis title {got!r}, "
+                        "which does not name the bachelor's")
+    return problems
+
+
 def negative_controls(ns):
     """Break it deliberately. A guard that passes for the wrong reason is worse
     than none, and all three of these failed to fail in an earlier draft."""
@@ -241,6 +306,14 @@ def negative_controls(ns):
     # must be caught on its own, not incidentally by (a).
     unfunded = lambda py, enroll, title: HS_START + max(
         py - ns["curated_school_years"](title), 0)
+    # (d) A constant axis title -- the thing it was before -- must fail.
+    real_title = ns["net_position_axis_title"]
+    ns["net_position_axis_title"] = lambda scenarios: "Years after graduation"
+    if not check_axis_title(ns):
+        problems.append("  a constant 'Years after graduation' axis title did "
+                        "not fail the axis check")
+    ns["net_position_axis_title"] = real_title
+
     caught = check_alignment(ns, unfunded)
     funded_titles = [t for t in ns["MAJOR_DATA"] if raw_overlay(ns, t)[2]]
     if not funded_titles:
@@ -262,6 +335,10 @@ def main():
          check_head_start(ns)),
         ("the dentist's baseline sums the right ten ages",
          check_baseline_sum(ns)),
+        ("the x-axis names the moment year 0 actually is",
+         check_axis_title(ns)),
+        ("a real scenario carries what the axis title reads",
+         check_end_to_end(ns)),
         ("negative controls", negative_controls(ns)),
     ]
     failed = False
