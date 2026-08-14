@@ -2314,6 +2314,44 @@ CAREER_STAGE_OPTIONS = {
     "Mid-Career (Year 10)": 9,
 }
 
+# Two more stages, shown ONLY on the paths that spend their first years in
+# training. On those two stages describe almost nothing: a dentist's "Starting
+# (Year 1)" is a year of dental school at $0, and "Mid-Career (Year 10)" is six
+# years into practice, which is not mid-career by any reading. The take-home
+# table therefore never showed what practising actually looks like on exactly
+# the paths that carry the largest debt to get there.
+#
+# They are NOT shown on a path with no training delay. There "Year 30" would be
+# a third row of the same story, and every stage added costs the four already
+# on screen a share of their width.
+LATE_CAREER_STAGE_OPTIONS = {
+    "Established (Year 20)": 19,
+    "Late Career (Year 30)": 29,
+}
+
+# Canonical order for anything that has to merge two scenarios' stage lists.
+# Compare Mode can hold a dentist beside a software developer, so the two lists
+# differ in LENGTH -- see pair_takehome_stages, and the zip() this replaced.
+ALL_CAREER_STAGE_OPTIONS = {**CAREER_STAGE_OPTIONS, **LATE_CAREER_STAGE_OPTIONS}
+
+# The curated pseudo-occupations carry no OEWS percentiles of their own -- they
+# are synthetic entries, not occupations BLS surveys -- so the two that model a
+# real professional path inherit the earnings ceiling of the occupation they
+# were built from. Both are pairs this codebase already requires to AGREE:
+# "Medicine" resolves to the same nine years and the same debt as Family
+# Medicine Physicians, and an uncapped "Medicine" sitting beside a capped twin
+# would put two options in one dropdown back into disagreement about the same
+# life -- the contradiction ADVANCED_TRAINING_OVERLAY exists to have ended.
+#
+# The other nine curated entries (Business, Arts, ...) are synthetic aggregates
+# with no occupation behind them, so there is no published ceiling to inherit
+# and inventing one would be worse than leaving them uncapped. career_earnings_
+# ceiling returns None for those and the disclosure says so.
+CURATED_CEILING_SOURCE = {
+    "Medicine": "Family Medicine Physicians",
+    "Law": "Lawyers",
+}
+
 # ---- Pre/post impact measurement -------------------------------------------
 # The exit survey asks whether the tool changed the visitor's view -- one
 # retrospective self-report, asked after everything, requiring them to
@@ -3913,6 +3951,178 @@ def income_for_year(major_name: str, year_index: int,
     return get_annual_salary_for_year(major_name, year_index)
 
 
+def scale_wage_percentiles(percentiles, factor: float):
+    """A wage distribution moved to a new level, keeping its shape.
+
+    Used by the two places that shift an occupation's salary without changing
+    which occupation it is -- the prestige multiplier and the returning
+    student's own entered salary. Both already scale starting_salary and
+    median_salary; the percentiles have to travel with them or the entry
+    describes a distribution it no longer sits inside.
+    """
+    if not percentiles:
+        return percentiles
+    return {key: (value * factor if isinstance(value, (int, float)) else value)
+            for key, value in percentiles.items()}
+
+
+def career_earnings_ceiling(major_name: str) -> float:
+    """The top of this occupation's own published wage range (OEWS p90), or
+    None where nothing publishes one.
+
+    THE GROWTH RATE IS FITTED TO TEN YEARS AND IS FICTION BEYOND ABOUT FIFTEEN.
+    get_major_growth_rate solves for the rate that climbs from the 25th
+    percentile to the MEDIAN over ten years -- a career-progression rate
+    measured across exactly that span. Compounding it for a whole career says a
+    representative worker keeps out-earning their own occupation indefinitely,
+    and the occupation's own wage distribution says otherwise. Measured against
+    the committed OEWS file:
+
+        by year 10    0 of 825 occupations exceed their own p90
+        by year 15    2
+        by year 20   15
+        by year 30  302        worst 4.14x
+        by year 35  564        worst 6.95x
+
+    Uncapped, a Surgeon's year-30 gross came out at $1,590,753 against a
+    published p90 of $655,320, and a Cardiologist's at $1,009,825 against
+    $712,130. Those are not conservative estimates with wide error bars; they
+    are false, and false in the direction that flatters the most expensive
+    degrees on the page. Nothing on screen exposed them while the take-home
+    table stopped at year 10 and the chart at the visitor's horizon, which is
+    why this ceiling arrives with the two changes that show those years.
+
+    IT IS BIT-IDENTICAL AT TEN YEARS AND UNDER, for every occupation in the
+    file, which is why the default page and every 10-year figure this app has
+    ever logged are untouched. check_career_stages.py asserts that rather than
+    trusting it.
+
+    Two things it deliberately is NOT:
+
+      - It is not a claim that nobody earns more. p90 means a tenth of the
+        occupation earns at least this, and BLS top-codes some series at
+        $239,200, so the ceiling understates as often as it binds. It errs
+        conservatively, which is the direction this app must err in.
+      - It is not inflation-aware. The one growth term does duty for both
+        career progression and calendar drift, so flattening it stops both.
+        Over a 30-year window that is pessimistic about the degree while the
+        high-school baseline keeps drifting -- and the baseline's own
+        progression already plateaus (hs_age_factor is flat from age 40), so
+        this narrows an asymmetry that ran the other way rather than opening a
+        new one. Splitting the two terms is the real fix and is a bigger change
+        than this one.
+    """
+    entry = MAJOR_DATA.get(major_name, {})
+    ceiling = (entry.get("wage_percentiles") or {}).get("p90")
+    if not ceiling:
+        source = CURATED_CEILING_SOURCE.get(major_name)
+        ceiling = ((MAJOR_DATA.get(source, {}).get("wage_percentiles") or {}).get("p90")
+                   if source else None)
+    try:
+        ceiling = float(ceiling)
+    except (TypeError, ValueError):
+        return None
+    return ceiling if ceiling > 0 else None
+
+
+def career_stages_for(major_name: str) -> list:
+    """The take-home table's stages for this path, as [(label, year_index)].
+
+    A path that spends its first years in training gets two more, because on
+    those paths the standard two describe almost nothing -- see
+    LATE_CAREER_STAGE_OPTIONS. Keyed on the training structure rather than on a
+    list of titles, so a new entry in ADVANCED_TRAINING_OVERLAY is covered the
+    day it lands and a title typo cannot make the rule silently inert.
+    """
+    entry = MAJOR_DATA.get(major_name, {})
+    in_training = (entry.get("unpaid_training_years", 0)
+                   + entry.get("stipend_training_years", 0))
+    stages = list(CAREER_STAGE_OPTIONS.items())
+    if in_training > 0:
+        stages += list(LATE_CAREER_STAGE_OPTIONS.items())
+    return stages
+
+
+def late_career_disclosure(major_name: str, stages: list, for_pdf: bool = False) -> str:
+    """What the Year 20 and Year 30 columns are, in words, or "" when a path
+    has none.
+
+    They are an extrapolation and must be labelled as one. The growth rate
+    behind them is fitted over the first ten years (25th percentile to median),
+    so year 30 is that rate applied three times as far as it was measured. The
+    sentence names the ceiling too, because a reader who checks the figure
+    against BLS should find the same number rather than wondering why the curve
+    flattened.
+
+    Shared by the screen and both PDF builders, so the three cannot describe the
+    same two columns differently. `for_pdf` picks the money formatter, the same
+    switch underemployment_disclosure carries: reportlab prints a Streamlit
+    markdown escape as a literal backslash.
+    """
+    if not any(label in LATE_CAREER_STAGE_OPTIONS for label, _ in stages):
+        return ""
+    money = fmt_money if for_pdf else fmt_money_md
+    ceiling = career_earnings_ceiling(major_name)
+    text = ("Year 20 and Year 30 assume pay keeps rising at the same rate as "
+            "the first ten years, which is further than that rate was measured "
+            "over. Treat them as a direction, not a forecast.")
+    if ceiling:
+        text += (f" Pay stops climbing at {money(ceiling)}, what the "
+                 f"best-paid 10% in this job earn today, because a typical "
+                 f"person does not out-earn the top of their own field.")
+    else:
+        text += (" This path has no published wage range to hold it down, so "
+                 "the later figures are the least certain on the page.")
+    return text
+
+
+def pair_takehome_stages(stages_a: list, stages_b: list) -> list:
+    """Compare Mode's stage rows: [(label, figures_a|None, figures_b|None)].
+
+    Compare Mode can hold a dentist (four stages) beside a software developer
+    (two), and the two lists are then different LENGTHS. This replaced a
+    `zip(stages_a, stages_b)`, which truncates to the shorter one: A's Year 20
+    and Year 30 rows would have been computed, returned, and silently dropped
+    from both the screen and the PDF, with the section still rendering and
+    still looking complete.
+
+    Pairs on the LABEL against a canonical order rather than on position, so a
+    future stage inserted anywhere cannot pair Year 20 against Year 10 -- a
+    positional pairing is correct only for as long as both lists happen to be
+    prefixes of one another.
+    """
+    by_label_a = dict(stages_a)
+    by_label_b = dict(stages_b)
+    return [(label, by_label_a.get(label), by_label_b.get(label))
+            for label in ALL_CAREER_STAGE_OPTIONS
+            if label in by_label_a or label in by_label_b]
+
+
+def takehome_flow_rows(stages_a: list, stages_b: list,
+                        label_a: str, label_b: str) -> list:
+    """Compare Mode's salary-flow rows, for the screen AND the compare PDF.
+
+    One builder rather than the same comprehension written twice, because the
+    two were already the same comprehension written twice and both carried the
+    zip() truncation pair_takehome_stages exists to fix -- so fixing it in one
+    place would have left the report quietly dropping the rows the screen had
+    just gained.
+
+    A row draws when EITHER scenario earns at that stage: a physician in unpaid
+    training beside a path already earning is the contrast the arm exists to
+    show, and requiring both deletes the row that shows it. A stage only one
+    path HAS (Year 20 against a four-year degree) is that same case one step
+    further on, and draws the one bar it has.
+    """
+    rows = []
+    for label, figs_a, figs_b in pair_takehome_stages(stages_a, stages_b):
+        present = [(name, figs) for name, figs in ((label_a, figs_a), (label_b, figs_b))
+                   if figs is not None]
+        if any(figs["gross"] > 0 for _name, figs in present):
+            rows.append((label, present))
+    return rows
+
+
 def get_annual_salary_for_year(major_name: str, year_index: int) -> float:
     """Gross salary in a given year post-bachelor's (0-based: 0 = first year
     out). Majors with no training delay (unpaid_training_years/
@@ -3933,7 +4143,13 @@ def get_annual_salary_for_year(major_name: str, year_index: int) -> float:
     if year_index < years_to_practice:
         return data.get("stipend_salary", 0)
     practicing_year = year_index - years_to_practice
-    return data["starting_salary"] * (1 + get_major_growth_rate(major_name)) ** practicing_year
+    salary = data["starting_salary"] * (1 + get_major_growth_rate(major_name)) ** practicing_year
+    # And it stops at the top of the occupation's own published wage range.
+    # See career_earnings_ceiling: the growth rate is estimated to reach the
+    # MEDIAN at year 10, and compounding it for a whole career walks straight
+    # out of the data it was fitted to.
+    ceiling = career_earnings_ceiling(major_name)
+    return min(salary, ceiling) if ceiling else salary
 
 
 def get_effective_principal(major_name: str, loan_amount: float,
@@ -3976,6 +4192,15 @@ def get_prestige_adjusted_major_name(major_name: str, tier_label: str) -> str:
         **base,
         "starting_salary": base["starting_salary"] * multiplier,
         "median_salary": base["median_salary"] * multiplier,
+        # The percentiles move with the level, like everything else here. A
+        # tier multiplier is a claim about where these graduates sit in the
+        # SAME occupation, so shifting the entry's start and median while
+        # leaving its distribution behind describes nobody -- and now it would
+        # also cap a Tier 1 salary against a Tier 3 ceiling (see
+        # career_earnings_ceiling), quietly flattening the curve the
+        # multiplier had just raised.
+        "wage_percentiles": scale_wage_percentiles(
+            base.get("wage_percentiles"), multiplier),
     }
     return synthetic_name
 
@@ -4011,6 +4236,14 @@ def apply_starting_salary_override(major_name: str, entered: float) -> None:
         **base,
         "starting_salary": entered,
         "median_salary": base["median_salary"] * ratio,
+        # Scaled for the same reason the two figures above are, and it is
+        # load-bearing since career_earnings_ceiling arrived: a career-changer
+        # who enters a salary well above the occupation's own start would
+        # otherwise have their curve flattened against an UNSCALED p90 -- the
+        # app silently overruling the figure the visitor just typed, which is
+        # the one number on the page it has no business second-guessing.
+        "wage_percentiles": scale_wage_percentiles(
+            base.get("wage_percentiles"), ratio),
         "salary_overridden": True,
     }
 
@@ -10453,6 +10686,34 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
     return pd.DataFrame(rows)
 
 
+# How far the net-position chart runs, whatever window the metrics above it
+# use. A degree's whole point is that it pays back over a career, and on the
+# training paths the crossover lands well outside a ten-year view: the app
+# already TELLS a dentist they come out ahead at 40 (net_position_crossover
+# searches 40 years to say so) while the chart stopped at 10 and could not show
+# it. Thirty-five years after a bachelor's is age 57 on a four-year path, which
+# is as far as "when am I ahead" stays a real question.
+#
+# The metric above the chart still describes the visitor's own horizon, so that
+# year is MARKED rather than being where the line stops -- see
+# build_net_position_chart. The invariant is unchanged in substance: the point
+# at year = horizon still equals the metric by construction, it is simply no
+# longer the last point.
+NET_POSITION_CHART_YEARS = 35
+
+
+def net_position_chart_years(roi_window_years: int) -> int:
+    """How many years the chart draws: 35, or the visitor's horizon when that
+    is longer.
+
+    A max() rather than the constant, because the horizon must never fall
+    outside the chart -- the metric above it would then name a year the reader
+    cannot find. ROI_HORIZON_OPTIONS tops out at 30 today, so this is 35 in
+    every reachable case and stays correct if a longer option is ever added.
+    """
+    return max(int(roi_window_years or 0), NET_POSITION_CHART_YEARS)
+
+
 def is_no_loan_series(name) -> bool:
     """Whether a frame series is a debt-free reference line, and so is drawn
     dashed.
@@ -10537,7 +10798,26 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
             text=(f"Baseline starts {baseline_head_start_years} years ahead: "
                   f"{counterfactual_vocab()['head_start']}."),
         )
-    fig.update_xaxes(dtick=1 if roi_window_years <= 15 else 5)
+    # Ticks follow the DRAWN span, not the visitor's window. Reading the window
+    # here put a label on all 35 years at a 10-year horizon, which is not an
+    # axis, it is a wall of numbers.
+    _drawn_years = float(frame["year"].max()) if not frame.empty else roi_window_years
+    fig.update_xaxes(dtick=1 if _drawn_years <= 15 else 5)
+    # The window the metrics above describe, marked rather than implied. The
+    # chart now runs past it, so without this the reader has three figures
+    # above a chart whose end does not match any of them. Short label: Plotly
+    # clips annotation text at the plot-area edge, the rule the wage chart's
+    # p10/p90 money labels and the tranche payoff events both ran into.
+    if roi_window_years and _drawn_years > roi_window_years:
+        fig.add_vline(x=roi_window_years,
+                      line=dict(color="#999999", width=1, dash="dot"))
+        fig.add_annotation(
+            # INSIDE the plot area, not above it. Above it the label sits in
+            # the same band as the head-start annotation and the two overlap --
+            # visible only in a rendered chart, which is where it was found.
+            x=roi_window_years, y=0.99, yref="paper", showarrow=False,
+            xanchor="left", yanchor="top", font=dict(size=10, color="#666666"),
+            text=f" {roi_window_years}-year mark")
     return fig
 
 
@@ -10598,8 +10878,11 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
              "on this chart compares you against a different life; this compares "
              "you against yourself.",
     )
+    # Drawn to 35 years whatever window the metrics use -- see
+    # net_position_chart_years. `roi_window_years` still goes to the CHART, not
+    # to the frame: that is the year it marks, not the year it stops at.
     frame = net_position_frame(scenario_pairs, col_index, hs_wage_index,
-                                roi_window_years,
+                                net_position_chart_years(roi_window_years),
                                 include_debt_free=show_reference)
     target.plotly_chart(
         build_net_position_chart(
@@ -12400,6 +12683,17 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
                 linewidth=2, label=label,
                 linestyle="--" if is_no_loan_series(label) else "-")
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
+    # The visitor's window, marked, exactly as the Plotly twin marks it: the
+    # chart runs past the horizon its metrics describe, and in a printed report
+    # there is no page around the chart to explain that.
+    _drawn_years = float(frame["year"].max()) if not frame.empty else roi_window_years
+    if roi_window_years and _drawn_years > roi_window_years:
+        ax.axvline(roi_window_years, color="#999999", linewidth=1, linestyle=":")
+        # Top of the plot, where the Plotly twin puts it. At the bottom it
+        # landed on the zero rule, which a training path's curve starts at.
+        ax.annotate(f" {roi_window_years}-year mark",
+                    xy=(roi_window_years, 0.98), xycoords=("data", "axes fraction"),
+                    ha="left", va="top", fontsize=7, color="#666666")
     if baseline_head_start_years:
         ax.annotate(
             f"Baseline starts {baseline_head_start_years} years ahead: "
@@ -12926,6 +13220,12 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                fmt_money(f["disposable_nominal"]), fmt_money(f["disposable_col_adjusted"])]
               for label, f in takehome_stages],
         ]),
+        # The same sentence the screen prints under the same columns, from the
+        # same function. A report is read detached from the app, so a table
+        # whose last two rows are extrapolated needs to say so more, not less.
+        *([Paragraph(late_career_disclosure(major, takehome_stages, for_pdf=True),
+                     styles["caption"])]
+          if late_career_disclosure(major, takehome_stages) else []),
     ]
     # One row of charts per career stage, mirroring the on-screen columns. The
     # two implementations share no code (see CLAUDE.md on the chart twins), so
@@ -12995,7 +13295,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             # button was pressed. Built inside net_position_frame, so this
             # cannot be the Plotly-only half of a chart twin.
             net_position_frame([(major, scenario)], col_index,
-                                get_metro_wage_index(city), roi_window_years,
+                                get_metro_wage_index(city),
+                                net_position_chart_years(roi_window_years),
                                 include_debt_free=net_position_reference_on()),
             roi_window_years,
             net_position_axis_title([(major, scenario)]),
@@ -13475,17 +13776,20 @@ def _pdf_compare_takehome_flowables(city, scenario_a, scenario_b,
                   for label, f in stages],
             ]),
         ]
+        # Per scenario, because only one side of a comparison may be a
+        # training path -- and an extrapolation note printed over both tables
+        # would claim the four-year degree's figures are extrapolated too.
+        _late = late_career_disclosure(scenario["major"], stages, for_pdf=True)
+        if _late:
+            flowables.append(Paragraph(_late, styles["caption"]))
 
     # The bars, grouped by stage so A sits directly above B. ONE axis across
     # all four, computed here for the same reason the screen computes it
     # across all four: two scenarios drawn to their own widths cannot be
     # compared, and comparing them is what this report is.
-    _flow_rows = [
-        (stage_label, [("A", figs_a), ("B", figs_b)])
-        for (stage_label, figs_a), (_label_b, figs_b)
-        in zip(takehome_stages_a, takehome_stages_b)
-        if figs_a["gross"] > 0 or figs_b["gross"] > 0
-    ]
+    # The same builder the screen uses, so the report cannot keep the zip()
+    # truncation the screen no longer has -- see takehome_flow_rows.
+    _flow_rows = takehome_flow_rows(takehome_stages_a, takehome_stages_b, "A", "B")
     if _flow_rows:
         _divisor = salary_flow_divisor(selected_salary_flow_period())
         _entries = [figs for _h, cols in _flow_rows for _l, figs in cols]
@@ -13665,7 +13969,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             net_position_frame(
                 [(f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}", scenario_a),
                  (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
-                col_index, get_metro_wage_index(city), roi_window_years,
+                col_index, get_metro_wage_index(city),
+                net_position_chart_years(roi_window_years),
                 include_debt_free=net_position_reference_on()),
             roi_window_years,
             net_position_axis_title([("A", scenario_a), ("B", scenario_b)]),
@@ -20277,6 +20582,12 @@ def render_share_card_button(scenario_pairs: list, verdict: dict,
     numbers are already on screen above this button.
     """
     def _build():
+        # The visitor's WINDOW, not the page chart's 35 years, and deliberately
+        # so. This card is not a twin of build_net_position_chart -- it is its
+        # own composition, built around the headline verdict and labelling each
+        # line at its endpoint. Drawn to 35 years those endpoint labels would be
+        # 35-year figures under a 10-year headline, which is the one thing a
+        # card handed to someone else must not do.
         frame = net_position_frame(scenario_pairs, col_index, hs_wage_index,
                                     roi_window_years)
         return build_share_card(
@@ -20662,7 +20973,10 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
     if heading:
         st.subheader(f"🏙️ Real-World Take-Home: {major_name} in {city_name}")
 
-    stages = list(CAREER_STAGE_OPTIONS.items())
+    # Per-path, not a fixed pair: a training path gets Year 20 and Year 30 as
+    # well, because on those two the standard stages describe a year of school
+    # and a year six years into practice. See career_stages_for.
+    stages = career_stages_for(major_name)
     results = [(label, takehome_figures(scenario, major_name, key, city))
                for label, key in stages]
 
@@ -20689,6 +21003,14 @@ def render_takehome_block(scenario: dict, major_name: str, city_name: str, city:
     # stage_layout="stacked" AND show_charts=False today, but the guard is on
     # the layout rather than on show_charts so the two cannot drift into a
     # render-time crash.
+    # The later stages are extrapolated well past where the growth rate was
+    # fitted, so they say so. Rendered here rather than beside one metric: it
+    # describes the last two columns, and a caption under a single figure would
+    # read as being about that figure alone.
+    late = late_career_disclosure(major_name, stages)
+    if late:
+        st.caption(late)
+
     drawable = [(label, figs) for label, figs in results if figs["gross"] > 0]
     if show_charts and drawable:
         render_salary_flow_charts([(None, drawable)], key_prefix=major_name,
@@ -21269,16 +21591,13 @@ if compare_mode:
     # Grouped by stage rather than by scenario for the same reason the
     # balance and payment charts overlay A and B instead of drawing two: the
     # comparison should be adjacent, not held in the reader's head.
-    _flow_rows = [
-        (_stage_label,
-         [(f"A: {scenario_a['major']}", _figs_a), (f"B: {scenario_b['major']}", _figs_b)])
-        for (_stage_label, _figs_a), (_label_b, _figs_b)
-        in zip(_th_a["stages"], _th_b["stages"])
-        # EITHER, not both: a physician in unpaid training at year 1 beside a
-        # scenario that is already earning is exactly the contrast this arm
-        # exists to show, and requiring both would delete the row that shows it.
-        if _figs_a["gross"] > 0 or _figs_b["gross"] > 0
-    ]
+    # Merged by stage LABEL, never zipped: a dentist has four stages and a
+    # software developer two, and zip() silently truncates to the shorter --
+    # A's Year 20 and Year 30 computed, returned, and dropped, with the section
+    # still rendering and still looking complete. See pair_takehome_stages.
+    _flow_rows = takehome_flow_rows(
+        _th_a["stages"], _th_b["stages"],
+        f"A: {scenario_a['major']}", f"B: {scenario_b['major']}")
     if _flow_rows:
         render_salary_flow_charts(_flow_rows, key_prefix="compare")
 
@@ -22092,6 +22411,20 @@ below). The 25th percentile is a more realistic floor for "typical new
 grad" pay. This growth rate is our own estimate built from real BLS wage
 data, not something BLS itself publishes. BLS doesn't track how any one
 person's paycheck actually changes over 10 years.
+
+**Pay stops climbing at the top of the published range.** The growth rate
+above is fitted over ten years, so applying it for a whole career says a
+typical worker keeps out-earning their own occupation indefinitely. It does not
+hold: run uncapped, 302 of the 825 occupations here pass what the best-paid 10%
+of their own field make by year 30, and a surgeon reaches $1.6 million against
+a published top-10% figure of $655,320. So the salary curve flattens at that
+top-10% wage (BLS OEWS 90th percentile, for your city where the city publishes
+one). Two things that follows from: a tenth of any occupation does earn more
+than this, so it is a modelling floor rather than a limit on anybody; and
+because the curve is nominal, the flattening also stops it drifting with
+inflation, which makes long-horizon figures cautious rather than generous.
+Nothing at ten years or under is affected: no occupation in the file reaches
+its own ceiling that early.
 
 | Major | BLS Occupation (SOC) | 25th Pctile | Median |
 |---|---|---|---|

@@ -1969,3 +1969,42 @@ alter table scenario_events
 --
 -- The share link carries the field as ?pdebt= / ?pdebt_b=, so a row's figure is
 -- reproducible from a shared scenario the same way the rest of the inputs are.
+
+
+-- ===========================================================================
+-- 2026-08-14  THE SALARY CURVE STOPS AT THE OCCUPATION'S p90.  NO DDL.
+-- ===========================================================================
+-- get_annual_salary_for_year now flattens at career_earnings_ceiling -- the
+-- occupation's own OEWS 90th percentile, for whichever geography the scenario
+-- resolved (metro, state or national). Everything downstream of a salary moves
+-- with it: earnings_premium, roi_pct, the break-even, the net-position series.
+--
+-- THE SEAM IS AT roi_horizon_years, NOT AT THE DATE, and it is narrow:
+--
+--   * horizon 10  -- BIT-IDENTICAL. Zero of the 825 occupations reach their own
+--                    p90 by year 10, verified across the whole file by
+--                    check_career_stages.py. Rows at the default horizon are
+--                    unaffected and need no conditioning.
+--   * horizon 15  -- 2 occupations affected.
+--   * horizon 20  -- 15.
+--   * horizon 30  -- 302, the worst 4.14x over its own p90 before the change.
+--
+-- So pooling across this date is safe for the 10-year rows that dominate the
+-- table, and unsafe for 20- and 30-year rows. Condition on roi_horizon_years,
+-- which every row already carries.
+--
+-- The direction of the correction is one-way: the ceiling can only LOWER a
+-- salary, so any long-horizon earnings_premium or roi_pct written before this
+-- date is at least as flattering as the same scenario is now.
+--
+-- Why: the growth rate is solved to climb from the 25th percentile to the
+-- MEDIAN over ten years, and compounding it for a career walks out of the data
+-- it was fitted to. It was invisible while nothing on the page reached those
+-- years; the Year 20/Year 30 take-home stages and the 35-year net-position
+-- chart, shipped the same day, are what put it on screen -- as a headline
+-- "Gross Salary" of $1,590,753 for a surgeon.
+--
+-- Two level shifts now scale wage_percentiles with the salary they move
+-- (prestige tiers, and a returning student's entered salary), so the ceiling
+-- travels with them. Those rows are unaffected at any horizon where the
+-- ceiling did not bind before.
