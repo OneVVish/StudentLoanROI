@@ -92,6 +92,18 @@ COLLEGE_SCORECARD_URL = "https://api.data.gov/ed/collegescorecard/v1/schools.jso
 # refresh should move the citation and this number in the same commit.
 RESIDENT_STIPEND = 65000
 
+# A funded research doctorate pays no tuition and pays the student a stipend.
+# NIH's FY2025 Kirschstein-NRSA PREDOCTORAL level, the federal government's own
+# published figure for what a doctoral trainee is paid, and the closest thing to
+# a national standard: many universities peg their own stipends to it.
+# grants.nih.gov/grants/guide/notice-files/NOT-OD-25-105.html
+#
+# Deliberately NOT BLS 25-1191 (Graduate Teaching Assistants), which looks like
+# the obvious source and is worse twice over: it is absent from the committed
+# OEWS extract, and OEWS annualises an hourly wage as though the job were
+# full-time, which a teaching assistantship is not.
+PHD_STIPEND = 28788
+
 CURATED_MAJOR_DATA = {
     # Software Developers, SOC 15-1252: 25th pct $105,210 / median $135,980
     "Computer Science": {"starting_salary": 105210, "median_salary": 135980, "soc_major_group": "15"},
@@ -375,48 +387,9 @@ for _title in ("Pharmacists", "Veterinarians", "Optometrists", "Chiropractors"):
 # funding share and stipend, and must not treat the clinical doctorates as
 # funded, since they generally are not. Tracked, not done.
 UNMODELLED_DOCTORAL_TITLES = frozenset({
-    "Agricultural Sciences Teachers, Postsecondary",
-    "Anthropology and Archeology Teachers, Postsecondary",
-    "Architecture Teachers, Postsecondary",
-    "Area, Ethnic, and Cultural Studies Teachers, Postsecondary",
-    "Astronomers",
-    "Atmospheric, Earth, Marine, and Space Sciences Teachers, Postsecondary",
     "Audiologists",
-    "Biochemists and Biophysicists",
-    "Biological Science Teachers, Postsecondary",
-    "Business Teachers, Postsecondary",
-    "Chemistry Teachers, Postsecondary",
     "Clinical and Counseling Psychologists",
-    "Communications Teachers, Postsecondary",
-    "Computer Science Teachers, Postsecondary",
-    "Criminal Justice and Law Enforcement Teachers, Postsecondary",
-    "Economics Teachers, Postsecondary",
-    "Education Teachers, Postsecondary",
-    "Engineering Teachers, Postsecondary",
-    "English Language and Literature Teachers, Postsecondary",
-    "Environmental Science Teachers, Postsecondary",
-    "Family and Consumer Sciences Teachers, Postsecondary",
-    "Foreign Language and Literature Teachers, Postsecondary",
-    "Forestry and Conservation Science Teachers, Postsecondary",
-    "Geography Teachers, Postsecondary",
-    "Health Specialties Teachers, Postsecondary",
-    "History Teachers, Postsecondary",
-    "Law Teachers, Postsecondary",
-    "Library Science Teachers, Postsecondary",
-    "Mathematical Science Teachers, Postsecondary",
-    "Medical Scientists, Except Epidemiologists",
-    "Nursing Instructors and Teachers, Postsecondary",
-    "Philosophy and Religion Teachers, Postsecondary",
     "Physical Therapists",
-    "Physicists",
-    "Physics Teachers, Postsecondary",
-    "Political Science Teachers, Postsecondary",
-    "Postsecondary Teachers, All Other",
-    "Psychology Teachers, Postsecondary",
-    "Recreation and Fitness Studies Teachers, Postsecondary",
-    "Social Sciences Teachers, Postsecondary, All Other",
-    "Social Work Teachers, Postsecondary",
-    "Sociology Teachers, Postsecondary",
 })
 
 PROFESSIONAL_PROGRAM_BY_OCCUPATION = {
@@ -1565,6 +1538,79 @@ PROGRAM_YEARS_BY_EDUCATION = {
        for level, extra in GRADUATE_ADDITIONAL_YEARS.items()},
 }
 
+# Research doctorates: FUNDED. Tuition is waived and the student is paid a
+# stipend, so these years cost nothing at the school's price and earn
+# PHD_STIPEND rather than zero. Until 2026-08-14 they were charged nine years of
+# an undergraduate school's cost of attendance with no income at all, which at a
+# $45,619 school overstated the cost of a history PhD by $228,095.
+#
+# WHY THE MAJORITY PATH IS THE ONE MODELLED. NSF's Survey of Earned Doctorates
+# puts ~33% of doctorate recipients on research assistantships or traineeships,
+# 24% on fellowships and 22% on teaching assistantships, against 15% primarily
+# on their own resources. Roughly four in five are funded, so the app models the
+# majority path and discloses the rest -- the same call it already makes for
+# underemployment and for optional residencies.
+#
+# IT IS NOT UNIFORM, AND THE DISCLOSURE SAYS SO. SED finds 72%+ of doctorate
+# recipients in the physical, earth, mathematical, computer, engineering and
+# life sciences hold NO graduate debt, against about half in psychology, the
+# social sciences, humanities and arts. The humanities teaching titles below are
+# exactly where debt is most common.
+# ncses.nsf.gov/pubs/nsf22300/figure/13
+#
+# CLINICAL DOCTORATES ARE EXCLUDED and keep paying tuition: Audiologists (AuD),
+# Clinical and Counseling Psychologists (PsyD) and Physical Therapists (DPT) are
+# professional practice degrees students generally pay for. Sweeping them in
+# would swap the old error for its mirror image.
+_RESEARCH_DOCTORATE_TRAINING = {
+    "stipend_training_years": GRADUATE_ADDITIONAL_YEARS["Doctoral or professional degree"],
+    "stipend_salary": PHD_STIPEND,
+    "graduate_years_funded": True,
+}
+RESEARCH_DOCTORATE_TITLES = [
+    "Agricultural Sciences Teachers, Postsecondary",
+    "Anthropology and Archeology Teachers, Postsecondary",
+    "Architecture Teachers, Postsecondary",
+    "Area, Ethnic, and Cultural Studies Teachers, Postsecondary",
+    "Astronomers",
+    "Atmospheric, Earth, Marine, and Space Sciences Teachers, Postsecondary",
+    "Biochemists and Biophysicists",
+    "Biological Science Teachers, Postsecondary",
+    "Business Teachers, Postsecondary",
+    "Chemistry Teachers, Postsecondary",
+    "Communications Teachers, Postsecondary",
+    "Computer Science Teachers, Postsecondary",
+    "Criminal Justice and Law Enforcement Teachers, Postsecondary",
+    "Economics Teachers, Postsecondary",
+    "Education Teachers, Postsecondary",
+    "Engineering Teachers, Postsecondary",
+    "English Language and Literature Teachers, Postsecondary",
+    "Environmental Science Teachers, Postsecondary",
+    "Family and Consumer Sciences Teachers, Postsecondary",
+    "Foreign Language and Literature Teachers, Postsecondary",
+    "Forestry and Conservation Science Teachers, Postsecondary",
+    "Geography Teachers, Postsecondary",
+    "Health Specialties Teachers, Postsecondary",
+    "History Teachers, Postsecondary",
+    "Law Teachers, Postsecondary",
+    "Library Science Teachers, Postsecondary",
+    "Mathematical Science Teachers, Postsecondary",
+    "Medical Scientists, Except Epidemiologists",
+    "Nursing Instructors and Teachers, Postsecondary",
+    "Philosophy and Religion Teachers, Postsecondary",
+    "Physicists",
+    "Physics Teachers, Postsecondary",
+    "Political Science Teachers, Postsecondary",
+    "Postsecondary Teachers, All Other",
+    "Psychology Teachers, Postsecondary",
+    "Recreation and Fitness Studies Teachers, Postsecondary",
+    "Social Sciences Teachers, Postsecondary, All Other",
+    "Social Work Teachers, Postsecondary",
+    "Sociology Teachers, Postsecondary",
+]
+for _title in RESEARCH_DOCTORATE_TITLES:
+    ADVANCED_TRAINING_OVERLAY[_title] = dict(_RESEARCH_DOCTORATE_TRAINING)
+
 # The levels this app still models with the wrong program length -- i.e.
 # everything it hasn't been taught a real length for. This gates the "we're
 # charging you four years you don't need" disclosure and the break-even
@@ -1672,14 +1718,30 @@ def curated_professional_debt(title: str) -> float:
     return 0.0
 
 
+def graduate_years_funded(title: str) -> bool:
+    """True when a path's graduate years are paid FOR the student rather than
+    by them: a funded research doctorate, tuition waived and a stipend paid.
+
+    Section-1 constants only, like curated_school_years and
+    curated_professional_debt, because this resolves before MAJOR_DATA exists.
+    """
+    for source in (ADVANCED_TRAINING_OVERLAY, CURATED_MAJOR_DATA):
+        if source.get(title or "", {}).get("graduate_years_funded"):
+            return True
+    return False
+
+
 def school_cost_years(program_years: int, graduate_years: int,
                       title: str = None) -> int:
     """Years the SCHOOL'S cost of attendance should be charged for.
 
-    The whole programme, EXCEPT on a path whose graduate years are already
-    priced by additional_training_debt. There the debt figure IS the cost of
-    those years, so charging the undergraduate school's COA for them as well
-    counts the degree twice.
+    The whole programme, EXCEPT where something other than the school's price
+    already accounts for the graduate years. Two cases, opposite in kind:
+
+      * additional_training_debt IS the cost of those years, so charging COA on
+        top counts the degree twice (medicine, dentistry, law and the rest);
+      * a funded research doctorate does not pay for them at all -- tuition is
+        waived and a stipend is paid -- so charging COA invents a cost.
 
     It was counted twice until 2026-08-14. A dermatologist at a $45,619 school
     was charged eight years of that COA ($364,952) and then had $205,000 of
@@ -1700,7 +1762,7 @@ def school_cost_years(program_years: int, graduate_years: int,
     additional_training_debt, so COA over its graduate years is the only cost
     model available, and trimming those years would price the degree at zero.
     """
-    if curated_professional_debt(title):
+    if curated_professional_debt(title) or graduate_years_funded(title):
         return max(int(program_years) - int(graduate_years), 0)
     return int(program_years)
 
@@ -6006,6 +6068,39 @@ OPTIONAL_RESIDENCY = {
         "graduates, at an average stipend of {money:47274} (ASCO), so under a "
         "third, and concentrated in hospital and specialty practice"),
 }
+
+
+def funded_doctorate_disclosure(major_name: str) -> str:
+    """One paragraph naming what "funded" assumes, for a research doctorate.
+
+    Returns "" for every other path, so a caller can print it unconditionally.
+
+    It says the majority-path assumption OUT LOUD rather than leaving a reader
+    to infer it from a stipend appearing in the numbers, because the minority
+    is large and identifiable: NSF puts 15% of doctorate recipients primarily
+    on their own resources, and the fields where graduate debt is most common
+    are the humanities and social sciences, which is most of the occupations
+    this applies to. A reader in one of them should not have to guess whether
+    they are in the average.
+    """
+    entry = ADVANCED_TRAINING_OVERLAY.get(major_name or "", {})
+    if not entry.get("graduate_years_funded"):
+        return ""
+    years = entry.get("stipend_training_years", 0)
+    stipend = entry.get("stipend_salary", 0)
+    return (
+        f"**On the {years} doctoral years:** they are modeled as FUNDED. No "
+        f"tuition, and {fmt_money_md(stipend)} a year of stipend income rather "
+        f"than a full salary. That is the majority path: NSF's Survey of Earned "
+        f"Doctorates puts about four in five doctorate recipients on an "
+        f"assistantship, traineeship or fellowship, and 15% primarily on their "
+        f"own resources. It is not uniform. Over 72% of doctorate recipients in "
+        f"the sciences and engineering finish with no graduate debt, against "
+        f"about half in psychology, the social sciences and the humanities, so "
+        f"if your field is in that second group this understates what you may "
+        f"borrow. Ask the programs you are applying to what they fund, for "
+        f"how many years, and what happens if you take longer."
+    )
 
 
 def optional_residency_disclosure(major_name: str) -> str:
@@ -14635,6 +14730,15 @@ if _program_key_a:
     _optional_residency_a = optional_residency_disclosure(major)
     if _optional_residency_a:
         _sb_study.caption(_optional_residency_a)
+
+# NOT inside the `if _program_key_a:` block above: that covers professional
+# PROGRAMMES (medicine, dentistry, law), and a research doctorate has no
+# programme key, so a disclosure placed there never rendered for the 39 paths
+# it exists to describe. Still the sidebar, so it runs once whichever result
+# branch does and cannot become an arm asymmetry.
+_funded_doctorate_a = funded_doctorate_disclosure(major)
+if _funded_doctorate_a:
+    _sb_study.caption(_funded_doctorate_a)
 
 # Returning students only. Placed here because it needs the chosen major to
 # pre-fill from, and it must run BEFORE anything reads MAJOR_DATA's salary --

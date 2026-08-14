@@ -712,11 +712,15 @@ def check_professional_cost_years(ns) -> list:
                 f"  {title!r} calls ${value:,.0f} a Total when the total is "
                 f"${scenario['effective_principal']:,.0f}")
 
-    # The other direction: a path with no debt figure must keep every year, or
-    # its graduate study becomes free.
+    # The other direction: a path whose graduate years nothing else pays for
+    # must keep every year, or that degree becomes free. "Nothing else" is now
+    # two things -- a debt figure, or a funded doctorate where tuition is
+    # waived and a stipend is paid -- and the check has to know about both or
+    # it fires on the funded paths, which is exactly what it did when they
+    # landed.
     for title in sorted(major_data):
         info = major_data[title]
-        if info.get("additional_training_debt"):
+        if info.get("additional_training_debt") or info.get("graduate_years_funded"):
             continue
         py = ns["program_years_for_major"](title)
         gy = ns["graduate_years_for_major"](title)
@@ -729,6 +733,67 @@ def check_professional_cost_years(ns) -> list:
                 f"pays for its\n    {gy} graduate years, but the cost model "
                 f"charges only {cy} of {py} years: that degree is free")
             break
+    return problems
+
+
+def check_funded_doctorates(ns) -> list:
+    """A funded doctorate pays no tuition, is paid a stipend, and borrows
+    nothing extra for the degree.
+
+    All three or none. A path marked funded that still charges tuition has
+    changed nothing; one that charges no tuition and pays no stipend has
+    replaced an overstated cost with an overstated income gap; and one that
+    carries professional debt as well is claiming the degree is both free and
+    borrowed for.
+
+    The clinical doctorates are asserted from the other side, because the
+    tempting mistake is to sweep them in: an AuD, PsyD or DPT is a professional
+    practice degree students generally pay for, and marking those funded would
+    swap the old error for its mirror image.
+    """
+    problems = []
+    major_data = ns["MAJOR_DATA"]
+    funded = [t for t in ns["RESEARCH_DOCTORATE_TITLES"] if t in major_data]
+
+    if len(funded) < 30:
+        problems.append(
+            f"  only {len(funded)} of the research-doctorate titles exist in "
+            f"MAJOR_DATA -- a title that does not match an OEWS string is inert, "
+            f"and the path silently keeps paying nine years of tuition")
+
+    for title in funded:
+        info = major_data[title]
+        py = ns["program_years_for_major"](title)
+        gy = ns["graduate_years_for_major"](title)
+        if ns["school_cost_years"](py, gy, title) != max(py - gy, 0):
+            problems.append(
+                f"  {title!r} is funded but still charged the school's COA for "
+                f"its {gy} graduate years")
+        if not info.get("stipend_salary"):
+            problems.append(
+                f"  {title!r} pays no tuition and no stipend either: the years "
+                f"are free AND earn nothing, which is not what funded means")
+        if info.get("additional_training_debt"):
+            problems.append(
+                f"  {title!r} is marked funded and ALSO carries "
+                f"${info['additional_training_debt']:,.0f} of degree debt")
+        # Year 0 is the first year after the bachelor's, i.e. the first year of
+        # the doctorate. It must pay the stipend, not the professor's salary.
+        first = ns["get_annual_salary_for_year"](title, 0)
+        if first != info.get("stipend_salary"):
+            problems.append(
+                f"  {title!r} earns ${first:,.0f} in its first doctoral year, "
+                f"not the ${info.get('stipend_salary', 0):,.0f} stipend")
+
+    for title in ("Audiologists", "Clinical and Counseling Psychologists",
+                  "Physical Therapists"):
+        if title not in major_data:
+            continue
+        if major_data[title].get("graduate_years_funded"):
+            problems.append(
+                f"  {title!r} is marked funded. It is a clinical practice "
+                f"doctorate students generally pay for, and treating it like a\n"
+                f"    research PhD understates its cost by the whole degree.")
     return problems
 
 
@@ -1347,6 +1412,7 @@ def main() -> int:
         ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
         ("professional paths", lambda: check_professional_paths(ns)),
         ("professional cost years", lambda: check_professional_cost_years(ns)),
+        ("funded doctorates", lambda: check_funded_doctorates(ns)),
         ("doctoral coverage", lambda: check_doctoral_coverage(ns)),
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
