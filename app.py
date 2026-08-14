@@ -686,15 +686,25 @@ def hs_wage_for_timeline_year(year_index: int, hs_wage_index: float,
     return wage * hs_age_factor(baseline_start_age + year_index)
 
 
-def baseline_start_age_for(program_years: int, enrollment_years: int) -> int:
+def baseline_start_age_for(program_years: int, enrollment_years: int,
+                           major_name: str) -> int:
     """The age the high-school baseline's timeline starts at.
 
     The offset is the subtle part, so it lives in one place. With foregone
     earnings counted the timeline starts the year the graduate would have
     started working, so year 0 is age 18. Without it the comparison starts at
-    graduation, so year 0 is age 18 + however long the program ran -- the high
-    school graduate is the same age as the graduate at that moment, just with
-    more years of earnings behind them.
+    graduation, so year 0 is age 18 + however long the graduate was in school
+    BEFORE the earnings curve picks them up -- the high school graduate is the
+    same age as the graduate at that moment, just with more years of earnings
+    behind them.
+
+    That last clause is why major_name is required rather than defaulted. For
+    most paths the answer is the whole programme, but for the 74 occupations
+    carrying a training overlay the earnings curve starts at the bachelor's and
+    prices the graduate years itself, so the baseline must start there too. See
+    pre_earnings_years, which is where that is decided and where the story of
+    getting it wrong for twelve days is recorded. A default here would have made
+    the wrong answer the quiet one; a missing argument is a TypeError.
 
     There is no longer an off switch: the app always compares against the age
     curve, because a flat age-25+ median is simply the wrong figure for an
@@ -705,7 +715,7 @@ def baseline_start_age_for(program_years: int, enrollment_years: int) -> int:
     """
     if enrollment_years:
         return HS_GRAD_START_AGE
-    return HS_GRAD_START_AGE + program_years
+    return HS_GRAD_START_AGE + pre_earnings_years(major_name, program_years)
 
 
 def hs_young_wage_disclosure() -> str:
@@ -1729,6 +1739,73 @@ def graduate_years_funded(title: str) -> bool:
         if source.get(title or "", {}).get("graduate_years_funded"):
             return True
     return False
+
+
+def curated_stipend_years(title: str) -> int:
+    """Post-bachelor's years this occupation spends on a stipend, or 0.
+
+    The counterpart to curated_school_years, and it deliberately does NOT say
+    whether those years are school. A medical residency and a funded PhD both
+    pay a stipend; only the second is a programme you are enrolled in. That
+    distinction is graduate_years_funded's job, and overlay_school_years is
+    where the two are combined.
+    """
+    for source in (ADVANCED_TRAINING_OVERLAY, CURATED_MAJOR_DATA):
+        years = source.get(title or "", {}).get("stipend_training_years")
+        if years:
+            return int(years)
+    return 0
+
+
+def overlay_school_years(title: str) -> int:
+    """Post-bachelor's years ADVANCED_TRAINING_OVERLAY already models as SCHOOL
+    rather than as work, so that program_years and the earnings curve cannot
+    both charge for them.
+
+    Two shapes, and the difference is the whole reason this is not just
+    curated_school_years:
+
+      * unpaid school -- medical, dental, law, pharmacy and the rest. Those
+        years earn $0 because the student is enrolled.
+      * a FUNDED doctorate -- tuition waived, stipend paid. Those years earn a
+        stipend and are still school, which is exactly the identity
+        curated_school_years' docstring says it cannot represent.
+
+    A residency is neither. It is a stipend paid for WORK, after the degree, so
+    stipend years count here only when graduate_years_funded says the programme
+    itself is funded. A physician has 4 school years and 3 residency years; only
+    the 4 belong to this figure.
+    """
+    return curated_school_years(title) + (
+        curated_stipend_years(title) if graduate_years_funded(title) else 0)
+
+
+def pre_earnings_years(title: str, program_years: int) -> int:
+    """Years between age 18 and year 0 of this occupation's earnings timeline.
+
+    THE ONE PLACE that answers "what does year 0 mean", for both halves of the
+    comparison. get_annual_salary_for_year's year 0 is the first year after the
+    bachelor's for any path carrying a training overlay, because the overlay
+    picks the timeline up there -- so the baseline it is compared against has to
+    start at the same moment, and the foregone-earnings head start has to stop
+    at the same moment.
+
+    It was two different moments from 2026-08-02 to 2026-08-14. baseline_start_
+    age_for shipped on 2026-07-30 returning 18 + program_years, which was right
+    while every path was 4 undergraduate years long. "Model graduate program
+    length" then gave doctoral and professional paths 9 and 6, and the baseline
+    moved with them while the earnings curve stayed at the bachelor's. Nothing
+    errored: a dentist's baseline was aged 26 in the same year the dentist was
+    22, so the dental-school years were charged twice -- once by aging the
+    baseline past them, once by zeroing the salary inside the window -- and only
+    6 of the 10 window years were practicing years. Both halves read correctly
+    alone. It understated all 74 affected occupations, and on four of the ones
+    checked it flipped the sign of the earnings premium.
+
+    Paths with no overlay are unchanged by construction: overlay_school_years is
+    0, so this returns program_years exactly as before.
+    """
+    return max(int(program_years) - overlay_school_years(title), 0)
 
 
 def school_cost_years(program_years: int, graduate_years: int,
@@ -13948,8 +14025,18 @@ plus_cap_a = (parent_plus_cap(_schedule_a, loan_dependency, start_year_a,
 # the HS baseline; working_years credits the part-time CC years back to the
 # major side. Both gate on the option; enrollment_years == UNDERGRAD_YEARS in
 # every mode when it's on (cc_years + university_years), so no-CC is unchanged.
+#
+# The head start has to END where the earnings curve BEGINS, which is what
+# pre_earnings_years decides -- the same call baseline_start_age_for makes, so
+# the two cannot answer that question differently. For a path carrying a
+# training overlay the graduate years are inside the window earning $0 or a
+# stipend, so crediting the baseline for them as well charges them twice. A
+# community-college path is untouched: it never has graduate years, so
+# pre_earnings_years returns the sum below unchanged.
 _foregone_on = st.session_state.get("count_foregone_earnings", False)
-enrollment_years_a = (cc_years_a + university_years_a) if _foregone_on else 0
+enrollment_years_a = (pre_earnings_years(_selected_title_a,
+                                         cc_years_a + university_years_a)
+                      if _foregone_on else 0)
 working_years_a = cc_years_a if (is_parttime_a and _foregone_on) else 0
 
 # Returning students answer the same question the community-college path asks,
@@ -14034,7 +14121,7 @@ elif loan_source_a == "personal":
         f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
         f"{fmt_money(personal_contribution_per_year_a)} personal "
         f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
-        f"→ over {program_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
+        f"→ over {cost_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
     )
 elif cc_mode_a == "ccb":
     # Simplified at a CCB-granting community college is the one place the
@@ -14836,7 +14923,8 @@ elif typical_education_a in PROGRAM_YEARS_BY_EDUCATION:
     _sb_study.caption((
         f"ℹ️ The typical entry-level education for {major} (BLS: "
         f"\"{typical_education_a}\") is below a bachelor's degree, so costs "
-        f"below are modelled over {program_years_for_education(typical_education_a)} "
+        f"below are modelled over "
+        f"{program_years_for_education(typical_education_a, _selected_title_a)} "
         f"years rather than {UNDERGRAD_YEARS} -- and the community-college path "
         "covers the whole program."
     ).replace("$", r"\$"))
@@ -15342,7 +15430,11 @@ if compare_mode:
                                       graduate_years=graduate_years_b)
                       if loan_source_b == "personal" else None)
         _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
-        enrollment_years_b = (cc_years_b + university_years_b) if _foregone_on_b else 0
+        # Same treatment as Scenario A: the head start ends where the earnings
+        # curve begins. Both arms, or Compare Mode contrasts two timelines.
+        enrollment_years_b = (pre_earnings_years(_selected_title_b,
+                                                 cc_years_b + university_years_b)
+                              if _foregone_on_b else 0)
         working_years_b = cc_years_b if (is_parttime_b and _foregone_on_b) else 0
         financed_years_b = university_years_b + (cc_years_b if cc_financed_b else 0)
         personal_contribution_b = (personal_contribution_per_year_b * financed_years_b
@@ -15392,7 +15484,7 @@ if compare_mode:
                 f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
                 f"{fmt_money(personal_contribution_per_year_b)} personal "
                 f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
-                f"→ over {program_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
+                f"→ over {cost_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
             )
         elif cc_mode_b == "ccb":
             # See Scenario A: at a community college the reported median debt is
@@ -20175,7 +20267,7 @@ if compare_mode:
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
-                                           baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
+                                           baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                            federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
                                            **returning_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
@@ -20184,7 +20276,7 @@ if compare_mode:
                                            hs_wage_index=get_metro_wage_index(city),
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
-                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
+                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
                                            **returning_kwargs())
 
@@ -20438,7 +20530,7 @@ else:
                                          hs_wage_index=get_metro_wage_index(city),
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
-                                         baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
+                                         baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                          federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
                                            **returning_kwargs())
     effective_principal = scenario["effective_principal"]
@@ -20988,7 +21080,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                        hs_wage_index=get_metro_wage_index(city),
                                                        enrollment_years=enrollment_years_a,
                                                        working_years=working_years_a,
-                                                       baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a),
+                                                       baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                                        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
                                                **returning_kwargs())
                 # major_b/loan_amount_b/etc. only exist as script variables when
@@ -21004,7 +21096,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                            hs_wage_index=get_metro_wage_index(city),
                                                            enrollment_years=enrollment_years_b,
                                                            working_years=working_years_b,
-                                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b),
+                                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
                                                **returning_kwargs())
                     compare_mode_kwargs = dict(
