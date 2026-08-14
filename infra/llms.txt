@@ -67,6 +67,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [What starting at community college is actually worth](https://worthmydegree.com/guides/community-college-first):
+  Two years at a community college before transferring cuts the
+  published cost of a bachelor's by 39%, and changes how much of it
+  you can borrow in your own name.
 - [For parents: how to run your student's numbers in one sitting](https://worthmydegree.com/guides/for-parents-run-the-numbers):
   A step-by-step walkthrough for parents. Turn a cost of attendance
   into a monthly payment, a break-even number, and a PDF you can both

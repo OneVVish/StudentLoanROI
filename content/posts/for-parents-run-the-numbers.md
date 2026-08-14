@@ -120,7 +120,7 @@ unpaid interest is waived, and whatever is left is written off after 30 years.
 
 One thing to carry with you. Since January 1, 2026, a balance written off at the
 end of an income-driven plan is taxed as ordinary income in the year it is
-discharged. A forgiveness figure is a bill deferred, not a bill cancelled, and
+discharged. A forgiveness figure is a bill deferred, not a bill canceled, and
 the tool says so rather than quietly counting it as a win.
 
 ### Read the verdict, not just the payment

@@ -1,13 +1,13 @@
 ---
 title: For counselors: the money conversation, in the time you actually have
 description: A free, no-login tool your students can use alone or in a meeting. What changed under the 2026 federal rules, and the three conversations it makes shorter.
-summary: You are asked to be a financial advisor without the licence, the training or the hour it would take. Here is what to hand a student instead.
+summary: You are asked to be a financial advisor without the license, the training or the hour it would take. Here is what to hand a student instead.
 date: 2026-08-12
 hero: guide-hero-for-counselors-the-money-conversation-klein4b.png
 ---
 
 You are asked, several times a week, to be a financial advisor. Without the
-licence, without the training, and without the hour per family it would honestly
+license, without the training, and without the hour per family it would honestly
 take.
 
 So the question is not whether you can do this arithmetic for every student on
@@ -42,7 +42,7 @@ Repayment Assistance Plan, which sizes the payment from income rather than from
 the balance and writes off the remainder after 30 years. And since January 1,
 2026 a balance written off at the end of an income-driven plan is **taxed as
 ordinary income in the year it is discharged**. Forgiveness is a bill deferred
-rather than a bill cancelled, which is worth saying out loud to any family
+rather than a bill canceled, which is worth saying out loud to any family
 treating it as a plan.
 
 ## The three conversations it makes shorter
