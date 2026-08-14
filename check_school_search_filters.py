@@ -615,6 +615,69 @@ def check_professional_paths(ns) -> list:
     return problems
 
 
+def check_professional_cost_years(ns) -> list:
+    """A degree priced by debt must not ALSO be charged the school's tuition.
+
+    additional_training_debt is added on top of the undergraduate loan, so the
+    cost model must stop at the undergraduate years on those paths. Until
+    2026-08-14 it did not: a dermatologist at a $45,619 school was charged
+    eight years of that COA and then had $205,000 of medical school debt added,
+    for a $569,952 principal where the twelve modelled physician titles read
+    $387,476. Both halves looked right on their own, which is why this asserts
+    the RELATIONSHIP rather than either number.
+
+    Both directions matter. Trimming the graduate years off a master's would
+    price the degree at zero, because nothing else is paying for it there.
+    """
+    problems = []
+    major_data = ns["MAJOR_DATA"]
+    COA = 40_000
+
+    def principal(title):
+        py = ns["program_years_for_major"](title)
+        gy = ns["graduate_years_for_major"](title)
+        cy = ns["school_cost_years"](py, gy, title)
+        rows = ns["compute_loan_schedule_by_year"](COA, 0.0, 0.0, 0.0, years=cy)
+        return py, gy, cy, sum(r["loan_amount"] for r in rows)
+
+    professional = sorted(set(ns["PROFESSIONAL_PROGRAM_BY_OCCUPATION"]) & set(major_data))
+    for title in professional:
+        debt = major_data[title].get("additional_training_debt", 0)
+        if not debt:
+            continue
+        py, gy, cy, charged = principal(title)
+        if cy != max(py - gy, 0):
+            problems.append(
+                f"  {title!r} is charged {cy} years of the school's COA but its "
+                f"{gy} graduate years\n"
+                f"    are already priced by ${debt:,.0f} of professional debt. "
+                f"Expected {max(py - gy, 0)}.")
+        if gy and charged >= COA * py:
+            problems.append(
+                f"  {title!r} is charged ${charged:,.0f} of COA over a {py}-year "
+                f"programme AND\n    ${debt:,.0f} of professional debt: the "
+                f"degree is being paid for twice")
+
+    # The other direction: a path with no debt figure must keep every year, or
+    # its graduate study becomes free.
+    for title in sorted(major_data):
+        info = major_data[title]
+        if info.get("additional_training_debt"):
+            continue
+        py = ns["program_years_for_major"](title)
+        gy = ns["graduate_years_for_major"](title)
+        if not gy:
+            continue
+        cy = ns["school_cost_years"](py, gy, title)
+        if cy != py:
+            problems.append(
+                f"  {title!r} has no professional debt figure, so nothing else "
+                f"pays for its\n    {gy} graduate years, but the cost model "
+                f"charges only {cy} of {py} years: that degree is free")
+            break
+    return problems
+
+
 def check_doctoral_coverage(ns) -> list:
     """Every doctoral occupation is either modelled or knowingly listed.
 
@@ -1229,6 +1292,7 @@ def main() -> int:
         ("apply target", lambda: check_apply_target(ns)),
         ("fixed-field levels", lambda: check_fixed_field_levels(ns)),
         ("professional paths", lambda: check_professional_paths(ns)),
+        ("professional cost years", lambda: check_professional_cost_years(ns)),
         ("doctoral coverage", lambda: check_doctoral_coverage(ns)),
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
