@@ -96,6 +96,56 @@
      title, summary and date with nothing separating them. The display:block on
      b/time is what does the separating, so a card without this CSS is not
      merely unstyled, it is unreadable. */
+  /* ===== The guides index =====
+     Structure follows a conventional blog index: a titled band, then a card
+     grid with a date and a reading time on each card. The one deliberate
+     departure is that the cards carry no photograph. Two of the four guides
+     have a generated hero and two do not, and a grid where half the cards
+     show a picture and half show a placeholder looks unfinished in a way that
+     no amount of styling fixes. The slot is ready (see card_image_for and the
+     .post-card figure rule): fill the missing heroes with
+     brand/build_ai_hero.py and this turns into the picture-led version.
+     Type-led is also the honest look for a site whose guides are arguments
+     about numbers rather than lifestyle pieces. */
+  .guides-band { background: var(--deep); color: #fff; border-radius: 16px;
+    padding: 44px 40px 40px; margin: 26px 0 34px; }
+  .guides-band h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.1;
+    font-weight: 800; letter-spacing: -0.01em; }
+  .guides-band .accent { width: 96px; height: 4px; background: var(--orange);
+    border-radius: 2px; margin: 18px 0; }
+  .guides-band p { color: rgba(255, 255, 255, 0.86); max-width: 60ch;
+    font-size: 17px; }
+  .post-head { display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; margin-bottom: 16px; }
+  .post-head h2 { font-size: 24px; color: var(--deep); }
+  .post-head span { color: var(--muted); font-size: 15px; }
+  .post-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .post-card { display: flex; flex-direction: column; background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 14px; overflow: hidden;
+    text-decoration: none; color: inherit;
+    transition: border-color .15s ease, transform .15s ease; }
+  .post-card:hover { border-color: var(--blue); transform: translateY(-2px); }
+  .post-card:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  .post-card figure { margin: 0; aspect-ratio: 16 / 9; background: var(--tile); }
+  .post-card figure img { width: 100%; height: 100%; object-fit: cover;
+    display: block; }
+  .post-card .meta { padding: 16px 18px 0; color: var(--muted); font-size: 13px;
+    letter-spacing: 0.02em; }
+  .post-card b { display: block; padding: 8px 18px 0; color: var(--deep);
+    font-size: 19px; line-height: 1.28; }
+  .post-card span.sum { display: block; padding: 10px 18px 0; color: var(--muted);
+    font-size: 15px; }
+  /* margin-top:auto pins the rule to the bottom whatever the title wraps to,
+     so a row of cards lines up along it rather than along the text. */
+  .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
+    font-weight: 700; font-size: 15px; }
+  @media (max-width: 980px) { .post-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
+    .guides-band { padding: 32px 24px 28px; } }
+  @media (prefers-reduced-motion: reduce) {
+    .post-card { transition: none; }
+    .post-card:hover { transform: none; }
+  }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
   .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
     display: block; text-decoration: none; color: inherit; }

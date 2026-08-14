@@ -103,6 +103,13 @@ PROMPTS = {
         "window light, quiet and still, documentary photography, muted natural "
         "colour. No text, no charts, no visible screens.",
         20260811, 4),
+    "community-college-first": (
+        "A community college walkway on an ordinary weekday morning, a student "
+        "with a backpack walking toward a low plain building, seen from behind "
+        "so no face is visible. Unglamorous and everyday, documentary "
+        "photography, muted natural colour, overcast light, unposed. No text, "
+        "no signage, no charts, no screens showing content.",
+        20260814, 4),
     "for-counselors-the-money-conversation": (
         "A small high school counselor's office in late afternoon light, two "
         "chairs turned toward each other across a corner of a desk, a student's "
