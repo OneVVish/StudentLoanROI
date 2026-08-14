@@ -10431,6 +10431,9 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
     # order the chart is explained: each path, then the same path unborrowed,
     # then what both are measured against.
     series.update(debt_free)
+    # Colour alone cannot say which line is the hypothetical one. Both chart
+    # twins dash these, and both ask is_no_loan_series rather than deciding for
+    # themselves -- see its docstring.
 
     # The legend names the baseline too, and it is the one place a returning
     # student sees it plotted rather than described -- so it comes from the
@@ -10448,6 +10451,23 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
         for year, value in enumerate(values, start=1):
             rows.append({"year": year, "Series": label, "Net Position": value})
     return pd.DataFrame(rows)
+
+
+def is_no_loan_series(name) -> bool:
+    """Whether a frame series is a debt-free reference line, and so is drawn
+    dashed.
+
+    One test, asked by BOTH chart twins rather than each deciding for itself.
+    "Which lines are dashed" is exactly the kind of styling that drifts when a
+    renderer is changed alone, and a solid line on screen against a dashed one
+    in the PDF would make the two reports disagree about which path is the
+    hypothetical one. Dashed because the line is a counterfactual: the same
+    person at the same salary who did not borrow, not a second career.
+
+    Keyed on the same vocabulary suffix net_position_frame labels them with, so
+    a returning student's "(No New Loan)" matches as readily as "(No Loan)".
+    """
+    return str(name).endswith(counterfactual_vocab()["no_loan_suffix"])
 
 
 def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
@@ -10486,8 +10506,16 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
                  "Net Position": "Cumulative gross pay minus loan payments ($)"},
     )
     fig.update_traces(line=dict(width=3))
+    # Dashed for the no-loan reference lines, matching the PDF twin. Iterated
+    # rather than passed as a `selector=` callable, which is not accepted by
+    # every Plotly version this has been pinned to and would fail by silently
+    # styling nothing.
+    for _trace in fig.data:
+        if is_no_loan_series(_trace.name):
+            _trace.update(line=dict(width=3, dash="dash"))
     # Zero line: the training-debt paths sit below it for years, and "below
-    # zero" is a different statement from "below the baseline".
+    # zero" is a different statement from "below the baseline". Dotted, not
+    # dashed: it is chrome, and a dashed rule here would read as another series.
     fig.add_hline(y=0, line=dict(color="#999999", width=1, dash="dot"))
     _tickvals, _ticktext = money_k_ticks(frame["Net Position"])
     fig.update_layout(
@@ -10581,10 +10609,10 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     )
     if show_reference:
         target.caption(
-            "Each path now carries a second line for the same career with no "
-            "loan. The gap between the pair is what the borrowing costs. A path "
-            "that borrows nothing has only one line, because the two would be "
-            "the same line."
+            "The dashed line is the same career with no loan at all. The gap "
+            "between a path and its dashed twin is what the borrowing costs. A "
+            "path that borrows nothing has only one line, because the two would "
+            "be the same line."
         )
 
 
@@ -12364,8 +12392,13 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     explain it and reads as a modelling error."""
     fig, ax = _pdf_subplots(figsize=(6, 3.5))
     for label, group in frame.groupby("Series", sort=False):
+        # Dashed for the no-loan reference lines, from the same predicate the
+        # Plotly twin asks. A printed report is where this matters most: it is
+        # read detached from the app, with no legend hover and often no colour
+        # at all once someone puts it through a black-and-white printer.
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
-                linewidth=2, label=label)
+                linewidth=2, label=label,
+                linestyle="--" if is_no_loan_series(label) else "-")
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
     if baseline_head_start_years:
         ax.annotate(
