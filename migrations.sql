@@ -1721,3 +1721,50 @@ alter table scenario_events
 --    they are per-guide counts rather than research data, and they cannot be
 --    told apart from real ones -- the same irreversibility as the untagged
 --    pageviews of 2026-07-30/31.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-14 -- SIX PROFESSIONAL OCCUPATIONS GAINED THEIR TRAINING STRUCTURE.
+-- No DDL. Every stored figure for these paths changes meaning.
+--
+-- Dermatologists, General Internal Medicine Physicians, Pediatricians General,
+-- Physicians All Other and Surgeons All Other were absent from PHYSICIAN_TITLES,
+-- and Orthodontists from DENTIST_TITLES. Because PROFESSIONAL_PROGRAM_BY_OCCUPATION
+-- is derived from those lists, all six were also absent from it, so until this
+-- date each was:
+--
+--   * charged nine years of school with NO medical or dental school debt,
+--   * paid a full specialist salary from the year after a bachelor's,
+--   * given a federal professional cap of 0, which split_loan_financing reads
+--     as a real cap rather than "unset".
+--
+-- The same omission as Dentists, General (2026-08) and Lawyers before it, and
+-- this time it included the two largest physician occupations in OEWS. On a
+-- $182,476 undergraduate loan a Dermatologist read a principal of $182,476,
+-- $139,990 of income in year zero and a 12.1 year payoff. It now reads
+-- $387,476, $0 and 27.6 years, which is what the twelve modelled specialists
+-- beside it always read.
+--
+-- ANY ROW NAMING ONE OF THESE SIX IS NOT COMPARABLE ACROSS THIS DATE.
+-- scenario_events, survey_responses, pdf_downloads and scenario_shares all
+-- store scenario_a_major / scenario_b_major, and roi_pct, earnings_premium,
+-- monthly_payment, payoff_years and dti_ratio all move for them. Rows before
+-- this date describe a path priced as if the degree were free. Condition on
+-- the date or exclude the six titles; do not pool.
+--
+-- Everything else is untouched: the twelve physicians, four dentists and the
+-- law, pharmacy, veterinary, optometry, podiatry and chiropractic paths already
+-- carried the structure and are bit-identical across this change.
+--
+-- UNMODELLED_DOCTORAL_TITLES now lists the 42 doctoral occupations the app
+-- deliberately does not model as professional, and
+-- check_school_search_filters.py fails if a doctoral occupation belongs to
+-- neither set. That is what makes a fourth recurrence impossible rather than
+-- unlikely: the previous checks all started from the map, so a title missing
+-- from it was invisible to every one of them.
+--
+-- STILL WRONG, IN THE OTHER DIRECTION, and tracked rather than fixed: those 42
+-- are charged nine years of tuition with no stipend. For a funded research PhD
+-- that overstates cost by five years of a school's published price, and the
+-- clinical doctorates in the list (Audiologists, Clinical and Counseling
+-- Psychologists, Physical Therapists) must not be lumped in with them, because
+-- those generally are self-funded.
