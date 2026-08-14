@@ -114,6 +114,17 @@ def load_app_namespace():
     # check would pass on code that had lost the curated ones entirely. Built
     # the way analyze_model.py builds it, from app.py's own builder.
     ns["MAJOR_DATA"] = ns["build_major_data"](ns["CAREERS_CSV_PATH_NATIONAL"])
+    # Plus the pure functions defined BELOW the section-3 banner. The display
+    # helpers live in section 5 beside what they render, so the exec prefix
+    # cannot see them -- and the metric they build is exactly where the last
+    # two reported bugs surfaced. Same extra pass check_internal_links.py runs.
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.FunctionDef) and node.name not in ns:
+            try:
+                exec(compile(ast.Module(body=[node], type_ignores=[]),
+                             "app.py", "exec"), ns)
+            except Exception:
+                pass          # a def whose decorators need the UI; not ours
     return ns
 
 
@@ -676,6 +687,30 @@ def check_professional_cost_years(ns) -> list:
             problems.append(
                 f"  the Total Loan Amount label for {title!r} does not name the "
                 f"{cy} years it covers ({label!r})")
+
+    # And the headline metric must be the principal the other three metrics
+    # beside it are computed from. It was the undergraduate part under the word
+    # "Total": "Total Loan Amount (school-reported) $13,000" next to "Total
+    # Interest Paid $417,825" on the same row. Reported from the dashboard,
+    # twice, because each number was individually correct.
+    for title in professional:
+        debt = major_data[title].get("additional_training_debt", 0)
+        if not debt:
+            continue
+        scenario = ns["compute_scenario_results"](
+            title, 13_000, 6.5, "Standard 10-Year", col_index=100.0,
+            hs_wage_index=1.0, enrollment_years=0, working_years=0,
+            baseline_start_age=ns["baseline_start_age_for"](8, 0))
+        label, value = ns["total_loan_metric"](scenario, 13_000, "reported", 8, 4)
+        if abs(value - scenario["effective_principal"]) > 1:
+            problems.append(
+                f"  the Total Loan Amount metric for {title!r} shows "
+                f"${value:,.0f} while the\n    principal every other metric is "
+                f"computed from is ${scenario['effective_principal']:,.0f}")
+        if "Total" in label and value < scenario["effective_principal"] - 1:
+            problems.append(
+                f"  {title!r} calls ${value:,.0f} a Total when the total is "
+                f"${scenario['effective_principal']:,.0f}")
 
     # The other direction: a path with no debt figure must keep every year, or
     # its graduate study becomes free.
