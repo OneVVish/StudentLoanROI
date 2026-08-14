@@ -1190,8 +1190,8 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   <h1>Guides: the money side of the college decision</h1>
   <div class="accent"></div>
   <p>What a degree costs, what you can borrow, and what you pay back. Including
-  the impact of the One Big Beautiful Bill Act (OBBBA), which changed federal
-  borrowing in 2026.</p>
+  the One Big Beautiful Bill Act (OBBBA), which changed federal borrowing in
+  2026.</p>
 </section>
 <section>
   <div class="post-head">
