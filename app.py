@@ -1427,6 +1427,21 @@ FEDERAL_DIRECT_ANNUAL_LIMITS = {
     "independent": {1: 9500, 2: 10500, 3: 12500, 4: 12500},
 }
 FEDERAL_DIRECT_AGGREGATE_CAP = {"dependent": 31000, "independent": 57500}
+# The SUBSIDIZED share of those same limits, which matters for exactly one
+# thing: a subsidized loan accrues no interest while the borrower is enrolled at
+# least half-time, and every other dollar does. See in_school_deferment.
+#
+# Deliberately NOT keyed on dependency. The subsidized limits are identical for
+# dependent and independent undergraduates -- dependency raises the UNsubsidized
+# half only -- so a dict per dependency would imply a distinction that does not
+# exist and invite someone to "fix" one side of it.
+#
+# Undergraduate only, and that is statute rather than simplification: Direct
+# Subsidized has not been available for graduate study since July 1, 2012, so a
+# graduate or professional year contributes nothing here. Source:
+# studentaid.gov, Subsidized and Unsubsidized Loans.
+FEDERAL_SUBSIDIZED_ANNUAL_LIMITS = {1: 3500, 2: 4500, 3: 5500, 4: 5500}
+FEDERAL_SUBSIDIZED_AGGREGATE_CAP = 23000
 # Direct PLUS for PARENTS, post-OBBBA. Before July 1, 2026 this was "cost of
 # attendance minus other aid received" -- i.e. no ceiling in practice, which is
 # how this app modelled the gap tranche. It is now a real limit, and BOTH halves
@@ -3655,6 +3670,24 @@ def render_forgiveness_note(repayment_result: dict, strategy_label: str = None,
     # payment covers the interest has none of it waived, and telling them the
     # plan waives interest would be misleading. This is what it was worth to
     # THEM.
+    # In-school deferment, where the path has one. This sits with the other loan
+    # captions rather than in the sidebar because it carries a figure from THIS
+    # scenario, and it is in a shared builder so both result branches get it --
+    # a disclosure in one arm and not the other is the H2 confound, not a
+    # cosmetic gap.
+    capitalized = repayment_result.get("capitalized_interest", 0) or 0
+    deferred_months = repayment_result.get("deferment_months", 0) or 0
+    if deferred_months > 0:
+        years = deferred_months // 12
+        st.caption(
+            f"Repayment starts after your {years} years of graduate school, not "
+            f"at your bachelor's: federal loans are in in-school deferment while "
+            f"you are enrolled at least half time, and private lenders defer too. "
+            f"That is not free. {fmt_money_md(capitalized)} of interest built up "
+            f"while you were enrolled and was added to the balance, which is why "
+            f"it climbs before it falls. Only subsidized federal loans escape "
+            f"that; everything else accrues."
+        )
     waived = repayment_result.get("waived_interest", 0) or 0
     if waived > 0:
         st.caption(
@@ -7503,6 +7536,115 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
     }
 
 
+def in_school_deferment(principal: float, subsidized_principal: float,
+                         annual_rate_pct: float, months: int) -> dict:
+    """What a balance does while the borrower is still enrolled: nothing is
+    paid, and everything except the subsidized share accrues interest that
+    capitalises at the end.
+
+    Returns {"principal", "capitalized", "rows"} -- the balance repayment
+    actually begins on, the interest added getting there, and the schedule rows
+    covering those months so the balance chart shows the climb rather than
+    starting the story after it.
+
+    WHY THIS EXISTS. The app models a professional path as unpaid school, and
+    then started the repayment clock at the BACHELOR'S -- so a dental student
+    with a $242,900 private tranche was charged $3,012 a month for four years
+    against $0 of income, $144,557 of payments nobody could make. The take-home
+    panel said so out loud, printing a monthly disposable income of -$3,022 at
+    the Starting stage, which is the model describing a person who cannot exist.
+    Federal loans are in in-school deferment while enrolled at least half-time,
+    and private lenders defer too.
+
+    IT IS NOT A DISCOUNT, and the arithmetic must not read like one. Deferring
+    that tranche grows it to $336,625 by the time dental school ends and raises
+    the payment from $3,012 to $4,174. Less cash leaves inside a ten-year
+    window; far more leaves over the life of the loan. Capitalising here is what
+    keeps both halves of that true.
+
+    Only the subsidized portion is exempt, because that is the one kind of
+    federal loan the government pays the interest on during deferment. Everything
+    else -- unsubsidized Direct, PLUS, private -- accrues. The split is a cap,
+    not a per-dollar tracing: `subsidized_principal` is clamped to the balance,
+    so a tranche smaller than the subsidized ceiling is simply all subsidized.
+    """
+    months = max(int(months or 0), 0)
+    principal = max(float(principal), 0.0)
+    if months == 0 or principal == 0:
+        return {"principal": principal, "capitalized": 0.0, "rows": []}
+    exempt = min(max(float(subsidized_principal or 0.0), 0.0), principal)
+    accruing = principal - exempt
+    monthly_rate = annual_rate_pct / 100 / 12
+    rows = []
+    for month in range(1, months + 1):
+        accruing *= (1 + monthly_rate)
+        rows.append({"month": month, "year": month / 12,
+                     "balance": accruing + exempt, "payment": 0.0})
+    grown = accruing + exempt
+    return {"principal": grown, "capitalized": grown - principal, "rows": rows}
+
+
+def apply_in_school_deferment(result: dict, deferment: dict,
+                               deferment_months: int,
+                               roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
+    """Slide a repayment result forward by the months spent enrolled and prepend
+    the deferment itself.
+
+    Composes over the simulators rather than teaching all three about
+    deferment, the same move combine_repayment_results makes: each simulator
+    still balances its own books on the balance it was handed, and this shifts
+    the finished schedule. `result` must therefore already have been computed on
+    `deferment["principal"]` -- the GROWN balance -- or the schedule and the
+    totals describe different loans.
+
+    Three things it has to fix up, each of which is a wrong number on screen if
+    missed:
+
+      * total_interest gains the capitalised interest, or the money-in/money-out
+        identity check_repayment_invariants asserts fails by exactly that
+        amount;
+      * payoff_years gains the deferment, because "how long until this is gone"
+        is asked from today, not from the day repayment starts;
+      * total_paid_in_roi_window is RECOMPUTED against the shifted months. The
+        simulator measured it from month 1 of repayment; after the shift those
+        payments fall later in the visitor's window, and some fall outside it.
+        That figure feeds calculate_roi, so leaving it is a wrong ROI rather
+        than a wrong chart.
+    """
+    if not deferment_months or not deferment.get("rows"):
+        return result
+    shifted = dict(result)
+    schedule = result.get("schedule")
+    if schedule is not None and not schedule.empty:
+        moved = schedule.copy()
+        moved["month"] = moved["month"] + deferment_months
+        moved["year"] = moved["month"] / 12
+        deferred_rows = pd.DataFrame(deferment["rows"])
+        # A DEFERRED SCHEDULE MUST CARRY AN EXPLICIT PAYMENT COLUMN, even when
+        # the simulator that produced it did not. Only the income-driven
+        # simulators emit one; a fixed plan is flat, so everything downstream
+        # reconstructs it as monthly_payment x months. That reconstruction is
+        # exactly wrong here -- it is flat from month 1 of the TIMELINE, and
+        # after a shift the first months are enrolled ones with no payment at
+        # all. Dropping the column instead of filling it put $50,713 a year back
+        # onto a dental student earning nothing, silently, with the balance
+        # chart alongside it correctly showing the climb.
+        if "payment" not in moved.columns:
+            moved["payment"] = float(result.get("monthly_payment", 0.0))
+        combined = pd.concat([deferred_rows, moved], ignore_index=True)
+        shifted["schedule"] = combined
+        window_months = roi_window_years * 12
+        inside = combined[combined["month"] <= window_months]
+        shifted["total_paid_in_roi_window"] = float(inside["payment"].sum())
+    shifted["total_interest"] = (result.get("total_interest", 0.0)
+                                 + deferment.get("capitalized", 0.0))
+    shifted["payoff_years"] = (result.get("payoff_years", 0.0)
+                               + deferment_months / 12)
+    shifted["deferment_months"] = deferment_months
+    shifted["capitalized_interest"] = deferment.get("capitalized", 0.0)
+    return shifted
+
+
 # ---- 2e. Financial Math: Income-Driven Repayment --------------------------
 
 def _close_schedule_at_forgiveness(schedule_rows: list, max_months: int) -> None:
@@ -7529,7 +7671,8 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              max_term_years: int = IDR_MAX_TERM_YEARS,
                              max_months: int = None,
                              roi_window_years: int = ROI_WINDOW_YEARS,
-                             extra_payments: tuple = ()) -> dict:
+                             extra_payments: tuple = (),
+                             income_offset_years: int = 0) -> dict:
     """
     Models a payment as 10% of discretionary income (salary above a flat
     living allowance). Salary each year comes from get_annual_salary_for_year,
@@ -7580,7 +7723,8 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
 
     for month in range(1, max_months + 1):
         year_index = (month - 1) // 12
-        current_salary = income_for_year(major_name, year_index, annual_income, income_growth)
+        current_salary = income_for_year(major_name, year_index + income_offset_years,
+                                         annual_income, income_growth)
         discretionary_monthly = max((current_salary / 12) - (living_adjustment / 12), 0.0)
         payment = discretionary_monthly * payment_rate
         payment += sum(amount for start, amount in extra_payments
@@ -7704,7 +7848,8 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
                            max_term_years: int = RAP_MAX_TERM_YEARS,
                            max_months: int = None,
                            roi_window_years: int = ROI_WINDOW_YEARS,
-                           extra_payments: tuple = ()) -> dict:
+                           extra_payments: tuple = (),
+                           income_offset_years: int = 0) -> dict:
     """Year-by-year RAP amortization: payment = calculate_rap_payment against
     that year's real salary (get_annual_salary_for_year), with RAP's real
     interest-waiver + up to $50/month government principal-match provisions
@@ -7757,7 +7902,8 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
     for month in range(1, max_months + 1):
         year_index = (month - 1) // 12
-        agi = income_for_year(major_name, year_index, annual_income, income_growth)
+        agi = income_for_year(major_name, year_index + income_offset_years,
+                              annual_income, income_growth)
         payment = calculate_rap_payment(agi, dependents)["monthly_payment"]
         payment += sum(amount for start, amount in extra_payments
                        if month >= start)
@@ -8265,6 +8411,37 @@ def federal_direct_cap(schedule: list, dependency: str) -> float:
     return min(total, FEDERAL_DIRECT_AGGREGATE_CAP.get(dependency, FEDERAL_DIRECT_AGGREGATE_CAP["dependent"]))
 
 
+def federal_subsidized_cap(schedule: list, graduate_years: int = 0) -> float:
+    """The SUBSIDIZED share of the federal Direct tranche, which is the only
+    money in this model that accrues no interest while the borrower is enrolled.
+
+    Mirrors federal_direct_cap's shape -- financed rows, class-standing limits,
+    bounded by the aggregate -- with two differences, both statutory:
+
+      * no dependency argument, because the subsidized limits do not vary by it;
+      * graduate years contribute nothing, because Direct Subsidized has not
+        existed for graduate study since July 1, 2012.
+
+    `graduate_years` counts the graduate years INSIDE this schedule, which is
+    not the same as the path's graduate length. A professional path prices its
+    graduate years from a debt figure instead of a cost of attendance, so its
+    schedule is undergraduate-only and this argument is 0 even though the path
+    runs eight years. That is what `_grad_cost_years_a` already tracks; passing
+    the path's graduate_years here would strike out the undergraduate years of
+    every professional path and hand back $0 of subsidized money.
+
+    Being wrong in that direction is expensive but not silent: it would exempt
+    nothing and capitalise everything, so the error shows up as too much
+    interest rather than as nothing at all.
+    """
+    financed = [row for row in schedule
+                if row.get("financed", row.get("phase") == "university")]
+    undergraduate = financed[:max(len(financed) - int(graduate_years or 0), 0)]
+    total = sum(FEDERAL_SUBSIDIZED_ANNUAL_LIMITS[min(row["year"], 4)]
+                for row in undergraduate)
+    return float(min(total, FEDERAL_SUBSIDIZED_AGGREGATE_CAP))
+
+
 def parent_plus_cap(schedule: list, dependency: str, start_year: int = None,
                      graduate_years: int = 0) -> float:
     """Total Direct PLUS a PARENT can borrow across the financed years of
@@ -8744,6 +8921,7 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               working_years: int = 0,
                               baseline_start_age: int = None,
                               federal_cap: float = None, gap_rate: float = None,
+                              subsidized_cap: float = None,
                               plus_cap: float = None,
                               dependents: int = 0,
                               professional_debt: float = None,
@@ -8806,9 +8984,48 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         financing = None
         principal_for_repayment = effective_principal
         rate_for_repayment = interest_rate
+
+    # ---- in-school deferment -------------------------------------------------
+    # Repayment starts when ENROLMENT ends, not when the bachelor's does. Derived
+    # from the major rather than threaded through every caller, exactly as the
+    # professional cap above is: overlay_school_years already knows how many
+    # post-bachelor's years this path spends in school, and a residency is not
+    # one of them -- a resident is employed, and really does start repaying.
+    _defer_years = overlay_school_years(major_name)
+    _defer_months = _defer_years * 12
+
+    def _deferred(simulate, principal, rate, subsidized=0.0):
+        """Run one tranche through its simulator with the enrolled years in
+        front of it. The simulator sees a clean loan starting the day repayment
+        does; the shift puts it back on the visitor's timeline.
+
+        That composition is what makes the forgiveness clock right for free: the
+        simulator counts its own 30 years from month 1 of REPAYMENT, and the
+        shift lands the discharge 30 years after enrolment ends rather than 30
+        years after the bachelor's. Deferment months do not count toward
+        discharge, and this never lets them.
+        """
+        deferment = in_school_deferment(principal, subsidized, rate, _defer_months)
+        return apply_in_school_deferment(
+            simulate(deferment["principal"]), deferment, _defer_months,
+            roi_window_years)
+
+    # The subsidized share rides with the FEDERAL tranche and nowhere else: it is
+    # the only money the government pays the interest on while enrolled. Clamped
+    # by in_school_deferment to the tranche it is handed, so a federal tranche
+    # smaller than the subsidized ceiling is simply all subsidized.
+    _subsidized = max(float(subsidized_cap or 0.0), 0.0)
+    # Income is read from the year repayment STARTS. Without this the RAP/IDR
+    # payment for a dentist's first real year would be sized on the $0 income of
+    # a first-year dental student, which is the very year deferment exists to
+    # take out of the schedule.
+    _income_offset = _defer_years
+
     if repayment_strategy == "Standard 10-Year":
-        repayment_result = calculate_standard_repayment(
-            principal_for_repayment, rate_for_repayment, roi_window_years=roi_window_years)
+        repayment_result = _deferred(
+            lambda p: calculate_standard_repayment(
+                p, rate_for_repayment, roi_window_years=roi_window_years),
+            principal_for_repayment, rate_for_repayment, _subsidized)
         strategy_label = "Standard 10-Year"
     elif repayment_strategy == TIERED_STANDARD_STRATEGY_LABEL:
         # OBBBA's replacement for Standard 10-Year: a fixed payment, but over a
@@ -8817,9 +9034,11 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # split -- both pools are repaid in full either way, which is also what
         # keeps the blended rate legitimate here.
         _tiered_term = calculate_tiered_standard_term(principal_for_repayment)
-        repayment_result = calculate_standard_repayment(
-            principal_for_repayment, rate_for_repayment, _tiered_term,
-            roi_window_years=roi_window_years)
+        repayment_result = _deferred(
+            lambda p: calculate_standard_repayment(
+                p, rate_for_repayment, _tiered_term,
+                roi_window_years=roi_window_years),
+            principal_for_repayment, rate_for_repayment, _subsidized)
         strategy_label = TIERED_STANDARD_STRATEGY_LABEL
     elif repayment_strategy == RAP_STRATEGY_LABEL:
         # RAP forgives at 30 years, so it takes the same forgivable-pool split
@@ -8828,12 +9047,18 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # a value read inside would not key the cache, so the break-even would
         # go stale the moment the visitor changed it.
         if financing and financing.get("nonforgivable_principal", 0) > 0:
-            federal_part = simulate_rap_schedule(
+            federal_part = _deferred(
+                lambda p: simulate_rap_schedule(
+                    p, financing["forgivable_rate"], major_name, dependents,
+                    roi_window_years=roi_window_years,
+                    income_offset_years=_income_offset),
                 financing["forgivable_principal"], financing["forgivable_rate"],
-                major_name, dependents, roi_window_years=roi_window_years)
-            nonfederal_part = calculate_standard_repayment(
-                financing["nonforgivable_principal"], financing["nonforgivable_rate"],
-                roi_window_years=roi_window_years)
+                _subsidized)
+            nonfederal_part = _deferred(
+                lambda p: calculate_standard_repayment(
+                    p, financing["nonforgivable_rate"],
+                    roi_window_years=roi_window_years),
+                financing["nonforgivable_principal"], financing["nonforgivable_rate"])
             repayment_result = combine_repayment_results(federal_part, nonfederal_part)
             # Survives the later combine with an existing balance, because
             # combine_repayment_results copies the primary dict wholesale.
@@ -8841,9 +9066,12 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                 federal_part, nonfederal_part)
             repayment_result["tranches"] = (federal_part, nonfederal_part)
         else:
-            repayment_result = simulate_rap_schedule(
-                principal_for_repayment, rate_for_repayment, major_name, dependents,
-                roi_window_years=roi_window_years)
+            repayment_result = _deferred(
+                lambda p: simulate_rap_schedule(
+                    p, rate_for_repayment, major_name, dependents,
+                    roi_window_years=roi_window_years,
+                    income_offset_years=_income_offset),
+                principal_for_repayment, rate_for_repayment, _subsidized)
         strategy_label = RAP_STRATEGY_LABEL
     elif financing and financing.get("nonforgivable_principal", 0) > 0:
         # Income-driven repayment writes off whatever is left at the end of the
@@ -8858,20 +9086,30 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # So the two pools are amortised on their own terms and added: the
         # federal part income-driven and forgivable, the rest on an ordinary
         # fixed schedule that runs to completion.
-        federal_part = calculate_idr_repayment(
+        federal_part = _deferred(
+            lambda p: calculate_idr_repayment(
+                p, financing["forgivable_rate"], major_name,
+                roi_window_years=roi_window_years,
+                income_offset_years=_income_offset),
             financing["forgivable_principal"], financing["forgivable_rate"],
-            major_name, roi_window_years=roi_window_years)
-        nonfederal_part = calculate_standard_repayment(
-            financing["nonforgivable_principal"], financing["nonforgivable_rate"],
-            roi_window_years=roi_window_years)
+            _subsidized)
+        nonfederal_part = _deferred(
+            lambda p: calculate_standard_repayment(
+                p, financing["nonforgivable_rate"],
+                roi_window_years=roi_window_years),
+            financing["nonforgivable_principal"], financing["nonforgivable_rate"])
         repayment_result = combine_repayment_results(federal_part, nonfederal_part)
         repayment_result["tranche_events"] = tranche_payoff_events(
             federal_part, nonfederal_part)
         repayment_result["tranches"] = (federal_part, nonfederal_part)
         strategy_label = "Income-Driven Repayment"
     else:
-        repayment_result = calculate_idr_repayment(
-            principal_for_repayment, rate_for_repayment, major_name, roi_window_years=roi_window_years)
+        repayment_result = _deferred(
+            lambda p: calculate_idr_repayment(
+                p, rate_for_repayment, major_name,
+                roi_window_years=roi_window_years,
+                income_offset_years=_income_offset),
+            principal_for_repayment, rate_for_repayment, _subsidized)
         strategy_label = "Income-Driven Repayment"
     # NEW borrowing only, deliberately. An existing balance is paid whether or
     # not this degree happens, so it sits on BOTH sides of the comparison and
@@ -9065,6 +9303,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          working_years: int = 0,
                          baseline_start_age: int = None,
                          federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
+                         subsidized_cap: float = None,
                          professional_debt: float = None,
                          include_fees: bool = False,
                          baseline_salary_now: float = None,
@@ -9128,7 +9367,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             enrollment_years=enrollment_years,
             working_years=working_years,
             baseline_start_age=baseline_start_age,
-            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees,
+            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees, subsidized_cap=subsidized_cap,
             # The same baseline the ROI used. Without this the break-even would
             # be solved against the high-school-graduate curve while the premium
             # beside it used the visitor's own salary -- two numbers on one
@@ -9189,6 +9428,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        working_years: int = 0,
                        baseline_start_age: int = None,
                        federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
+                       subsidized_cap: float = None,
                          professional_debt: float = None,
                        include_fees: bool = False,
                        baseline_salary_now: float = None,
@@ -9227,7 +9467,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   enrollment_years=enrollment_years,
                                   working_years=working_years,
                                   baseline_start_age=baseline_start_age,
-                                  federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt,
+                                  federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, subsidized_cap=subsidized_cap,
                                   include_fees=include_fees,
                                   baseline_salary_now=baseline_salary_now,
                                   baseline_salary_in_10y=baseline_salary_in_10y)
@@ -12188,6 +12428,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                                 roi_window_years: int = ROI_WINDOW_YEARS, cc_info_a=None,
                                 loan_source_a: str = "personal",
                                 federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
+                                subsidized_cap_a: float = None,
                                 professional_debt_a: float = None,
                                 professional_school_a: str = None,
                                 include_fees: bool = False) -> bytes:
@@ -12420,7 +12661,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
         professional_debt=professional_debt_a,
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_a,
         crossover=net_position_crossover(scenario, col_index,
                                          get_metro_wage_index(city)),
             **breakeven_kwargs())
@@ -12934,9 +13175,11 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                                  loan_source_a: str = "personal",
                                  loan_source_b: str = "personal",
                                  federal_cap_a: float = None, plus_cap_a: float = None, gap_rate_a: float = None, dependents: int = 0,
+                                 subsidized_cap_a: float = None,
                                 professional_debt_a: float = None,
                                 professional_school_a: str = None,
                                  federal_cap_b: float = None, plus_cap_b: float = None, gap_rate_b: float = None, professional_debt_b: float = None, professional_school_b: str = None,
+                                 subsidized_cap_b: float = None,
                                  include_fees: bool = False,
                                  takehome_stages_a: list = None,
                                  takehome_stages_b: list = None) -> bytes:
@@ -13004,7 +13247,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               working_years=scenario_a["working_years"],
                               baseline_start_age=scenario_a["baseline_start_age"],
                               professional_debt=professional_debt_a,
-                              federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees,
+                              federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_a,
                               crossover=net_position_crossover(
                                   scenario_a, col_index, get_metro_wage_index(city)),
             **breakeven_kwargs()),
@@ -13033,7 +13276,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               working_years=scenario_b["working_years"],
                               baseline_start_age=scenario_b["baseline_start_age"],
                               professional_debt=professional_debt_b,
-                              federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=dependents, include_fees=include_fees,
+                              federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_b,
                               crossover=net_position_crossover(
                                   scenario_b, col_index, get_metro_wage_index(city)),
             **breakeven_kwargs()),
@@ -14156,6 +14399,14 @@ federal_cap_a = (federal_direct_cap(
 plus_cap_a = (parent_plus_cap(_schedule_a, loan_dependency, start_year_a,
                               graduate_years=graduate_years_a)
               if loan_source_a == "personal" else None)
+# The subsidized share of federal_cap_a, and the ONLY thing it is used for is
+# in-school deferment: a subsidized loan is the one kind the government pays the
+# interest on while the borrower is enrolled. Takes _grad_cost_years_a for the
+# same reason federal_direct_cap does -- graduate years earn no subsidized
+# entitlement, and they are only IN this schedule on a path that prices them
+# from a cost of attendance rather than from a debt figure.
+subsidized_cap_a = (federal_subsidized_cap(_schedule_a, _grad_cost_years_a)
+                    if loan_source_a == "personal" else None)
 # Foregone-earnings option (widget rendered further down; read from state, per
 # this file's established before-the-widget pattern). enrollment_years extends
 # the HS baseline; working_years credits the part-time CC years back to the
@@ -15565,6 +15816,9 @@ if compare_mode:
         plus_cap_b = (parent_plus_cap(_schedule_b, loan_dependency, start_year_b,
                                       graduate_years=graduate_years_b)
                       if loan_source_b == "personal" else None)
+        # See Scenario A. Both arms or the deferment is asymmetric.
+        subsidized_cap_b = (federal_subsidized_cap(_schedule_b, _grad_cost_years_b)
+                            if loan_source_b == "personal" else None)
         _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
         # Same treatment as Scenario A: the head start ends where the earnings
         # curve begins. Both arms, or Compare Mode contrasts two timelines.
@@ -20164,6 +20418,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            col_index: float, career_data_source_name: str,
                            hs_wage_index: float = 1.0,
                            federal_cap: float = None, plus_cap: float = None, gap_rate: float = None, dependents: int = 0,
+                           subsidized_cap: float = None,
                          professional_debt: float = None,
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
@@ -20297,7 +20552,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             # only in Compare Mode, the randomly assigned contrast arm.
             working_years=scenario["working_years"],
             baseline_start_age=scenario["baseline_start_age"],
-            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees,
+            federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees, subsidized_cap=subsidized_cap,
             crossover=net_position_crossover(scenario, col_index, hs_wage_index),
             **breakeven_kwargs())
         if breakeven["headline"]:
@@ -20405,7 +20660,7 @@ if compare_mode:
                                            enrollment_years=enrollment_years_a,
                                            working_years=working_years_a,
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
-                                           federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
+                                           federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                            **returning_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
@@ -20414,7 +20669,7 @@ if compare_mode:
                                            enrollment_years=enrollment_years_b,
                                            working_years=working_years_b,
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
-                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
+                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
                                            **returning_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
@@ -20430,7 +20685,7 @@ if compare_mode:
         loan_amount, interest_rate, repayment_strategy,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_a, program_years=program_years_a, cost_years=cost_years_a,
         current_age=st.session_state.get("current_age") if is_returning else None,
@@ -20443,7 +20698,7 @@ if compare_mode:
         loan_amount_b, interest_rate_b, repayment_strategy_b,
         city_info["col_index"], career_data_source,
         hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
+        federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
         loan_basis=loan_basis_b, program_years=program_years_b, cost_years=cost_years_b,
         current_age=st.session_state.get("current_age") if is_returning else None,
@@ -20598,8 +20853,8 @@ if compare_mode:
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
         cc_info_b=_cc_info_for_pdf(cc_mode_b, cc_state_key_b, effective_cc_coa_per_year_b, cc_oop_b, cc_years_b),
         loan_source_a=loan_source_a, loan_source_b=loan_source_b,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'),
-        federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, professional_school_b=st.session_state.get('prof_school_b'), include_fees=True,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'), subsidized_cap_a=subsidized_cap_a,
+        federal_cap_b=federal_cap_b, plus_cap_b=plus_cap_b, gap_rate_b=gap_rate_b, professional_debt_b=professional_debt_b, professional_school_b=st.session_state.get('prof_school_b'), include_fees=True, subsidized_cap_b=subsidized_cap_b,
         takehome_stages_a=_th_a["stages"], takehome_stages_b=_th_b["stages"],
     ))
     with top_actions_container:
@@ -20669,7 +20924,7 @@ else:
                                          enrollment_years=enrollment_years_a,
                                          working_years=working_years_a,
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
-                                         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
+                                         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                            **returning_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
@@ -20862,7 +21117,7 @@ else:
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
         crossover=net_position_crossover(scenario, city_info["col_index"],
                                          get_metro_wage_index(city)),
             **breakeven_kwargs())
@@ -20949,7 +21204,7 @@ else:
         col_index=city_info["col_index"], roi_window_years=roi_horizon_years,
         loan_source_a=loan_source_a,
         loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
-        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'), include_fees=True,
+        federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'), include_fees=True, subsidized_cap_a=subsidized_cap_a,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
     ))
     with top_actions_container:
@@ -21222,7 +21477,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                        enrollment_years=enrollment_years_a,
                                                        working_years=working_years_a,
                                                        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
-                                                       federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
+                                                       federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                                **returning_kwargs())
                 # major_b/loan_amount_b/etc. only exist as script variables when
                 # compare_mode is on (they're assigned inside that sidebar
@@ -21238,7 +21493,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                            enrollment_years=enrollment_years_b,
                                                            working_years=working_years_b,
                                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
-                                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
+                                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
                                                **returning_kwargs())
                     compare_mode_kwargs = dict(
                         compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
