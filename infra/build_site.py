@@ -1187,11 +1187,12 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 <section class="guides-band">
-  <h1>Guides</h1>
+  <h1>Guides: the money side of the college decision</h1>
   <div class="accent"></div>
-  <p>The rules that decide what a degree costs, written out in plain English.
-  Every figure comes from the same federal data the calculator runs on, and
-  every one of them is checked against it before a guide goes up.</p>
+  <p>What a degree costs, what you can borrow, and what you pay back. Including
+  what changed in 2026. Every figure comes from the same federal data the
+  calculator runs on, and every one of them is checked against it before a
+  guide goes up.</p>
 </section>
 <section>
   <div class="post-head">
