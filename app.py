@@ -9410,7 +9410,7 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
 
 
 def breakeven_points(loan_amount: float, ceiling: str, crossover: dict,
-                      roi_window_years: int,
+                      roi_window_years: int, professional_debt: float = 0.0,
                       max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> list:
     """The verdict as three scannable facts: [(label, value), ...].
 
@@ -9431,7 +9431,24 @@ def breakeven_points(loan_amount: float, ceiling: str, crossover: dict,
     more, which is the opposite of this tool's job. "Worth it up to" states the
     line without inviting anyone to walk up to it.
     """
-    points = [("Your loan", fmt_money(loan_amount)), ("Worth it up to", ceiling)]
+    # THE BASIS HAS TO BE NAMED ON A PROFESSIONAL PATH. find_breakeven_loan
+    # bisects on the loan slider, and professional-school debt is added on top
+    # inside compute_scenario_results and held constant through every step -- so
+    # both figures are the SCHOOL loan, while the metric a few lines above reads
+    # "Total Loan Amount (school + professional degree)". Labelling $190,000 as
+    # "Your loan" on a page that also says $469,900 is a contradiction the
+    # earlier prose merely buried in a headline, and it misleads exactly the
+    # parent or counsellor this list was added for. So the debt gets its own row
+    # and the ceiling says which half it bounds. The three money rows reconcile
+    # to the metric, which is the point and which the guard asserts.
+    professional_debt = max(float(professional_debt or 0.0), 0.0)
+    if professional_debt > 0:
+        points = [("Your school loan", fmt_money(loan_amount)),
+                  ("Professional school debt", fmt_money(professional_debt)),
+                  ("Worth it up to (school loan)", ceiling)]
+    else:
+        points = [("Your loan", fmt_money(loan_amount)),
+                  ("Worth it up to", ceiling)]
     year = (crossover or {}).get("year")
     age = (crossover or {}).get("age")
     if year is None:
@@ -9472,7 +9489,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        include_fees: bool = False,
                        baseline_salary_now: float = None,
                        baseline_salary_in_10y: float = None,
-                       *, crossover: dict) -> dict:
+                       *, crossover: dict,
+                       resolved_professional_debt: float = 0.0) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
     borrowing, shared by the on-screen section and its PDF counterpart so
     the two can't drift.
@@ -9533,7 +9551,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
             "status": "never", "breakeven_loan": None, "headroom": None,
             "positive": False, "label": "Worth a rethink",
             "points": breakeven_points(loan_amount, "nothing, at this horizon",
-                                       crossover, years),
+                                       crossover, years, resolved_professional_debt),
         }
     if result["status"] == "beyond_search_max":
         return {
@@ -9548,7 +9566,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
             "positive": True, "label": "Good news",
             "points": breakeven_points(
                 loan_amount, f"more than {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)}",
-                crossover, years),
+                crossover, years, resolved_professional_debt),
         }
 
     breakeven = result["breakeven_loan"]
@@ -9620,7 +9638,7 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         )
     return {"headline": headline, "detail": detail, "status": "ok",
             "points": breakeven_points(loan_amount, fmt_money(breakeven),
-                                       crossover, years),
+                                       crossover, years, resolved_professional_debt),
             "breakeven_loan": breakeven, "headroom": headroom,
             # positive drives the render: green success box vs amber warning.
             # A celebratory banner on a "No" would cheerlead the optimism bias
@@ -12717,6 +12735,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_a,
         crossover=net_position_crossover(scenario, col_index,
                                          get_metro_wage_index(city)),
+        resolved_professional_debt=scenario.get("professional_debt") or 0.0,
             **breakeven_kwargs())
     story += _pdf_breakeven_block(breakeven, styles)
     story += _pdf_wage_distribution_block(major, styles)
@@ -13303,6 +13322,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_a,
                               crossover=net_position_crossover(
                                   scenario_a, col_index, get_metro_wage_index(city)),
+                              resolved_professional_debt=scenario_a.get("professional_debt") or 0.0,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario A"),
         PageBreak(),
@@ -13332,6 +13352,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
                               federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_b,
                               crossover=net_position_crossover(
                                   scenario_b, col_index, get_metro_wage_index(city)),
+                              resolved_professional_debt=scenario_b.get("professional_debt") or 0.0,
             **breakeven_kwargs()),
             styles, scenario_label="Scenario B"),
         PageBreak(),
@@ -20608,6 +20629,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             baseline_start_age=scenario["baseline_start_age"],
             federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, include_fees=include_fees, subsidized_cap=subsidized_cap,
             crossover=net_position_crossover(scenario, col_index, hs_wage_index),
+            resolved_professional_debt=scenario.get("professional_debt") or 0.0,
             **breakeven_kwargs())
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
@@ -21179,6 +21201,7 @@ else:
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
         crossover=net_position_crossover(scenario, city_info["col_index"],
                                          get_metro_wage_index(city)),
+        resolved_professional_debt=scenario.get("professional_debt") or 0.0,
             **breakeven_kwargs())
     if breakeven["headline"]:
         # Rendered into the container anchored high on the page rather than

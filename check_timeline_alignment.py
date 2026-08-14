@@ -377,8 +377,6 @@ def check_breakeven_points(ns):
         if needle not in ahead:
             problems.append(f"  {what}: 'Comes out ahead at' reads {ahead!r}, "
                             f"expected it to contain {needle!r}")
-    # The loan figure must be the loan, not the ceiling -- they are adjacent
-    # rows and swapping them is silent.
     rows = dict(build(190_000.0, "$74,417", {"year": 4, "age": 26}, 10))
     if rows["Your loan"] != ns["fmt_money"](190_000.0):
         problems.append(f"  'Your loan' reads {rows['Your loan']!r} for a "
@@ -386,6 +384,70 @@ def check_breakeven_points(ns):
     if rows["Worth it up to"] != "$74,417":
         problems.append(f"  'Worth it up to' reads {rows['Worth it up to']!r}, "
                         "not the ceiling it was handed")
+    return problems
+
+
+def check_points_reconcile_to_the_metric(ns):
+    """On a professional path the money rows must ADD UP to the Total Loan
+    Amount metric printed a few lines above them.
+
+    find_breakeven_loan bisects on the loan slider, and professional-school debt
+    is added on top inside compute_scenario_results and held constant through
+    every step -- so both the loan row and the ceiling are the SCHOOL loan,
+    while the metric reads "Total Loan Amount (school + professional degree)".
+    Calling $190,000 "Your loan" on a page that also says $469,900 is a
+    contradiction, and it misleads exactly the reader the list was added for.
+
+    The sum is checked against `effective_principal`, which is what the metric
+    is built from -- not against the two inputs re-added here, which would only
+    assert that addition works.
+    """
+    problems = []
+    for title, loan in (("Dentists, General", 190_000.0),
+                        ("Lawyers", 120_000.0),
+                        ("Dermatologists", 190_000.0)):
+        if title not in ns["MAJOR_DATA"]:
+            continue
+        py = ns["program_years_for_major"](title)
+        scenario = ns["compute_scenario_results"](
+            title, loan, 6.5, "Standard 10-Year", col_index=100.0,
+            hs_wage_index=1.0, enrollment_years=0, working_years=0,
+            baseline_start_age=ns["baseline_start_age_for"](py, 0, title))
+        debt = scenario.get("professional_debt") or 0.0
+        if debt <= 0:
+            problems.append(f"  {title!r} resolved no professional debt, so the "
+                            "reconciliation proves nothing")
+            continue
+        points = ns["breakeven_points"](loan, "$98,679", {"year": 4, "age": 26},
+                                        10, debt)
+        labels = [label for label, _ in points]
+        want = ["Your school loan", "Professional school debt",
+                "Worth it up to (school loan)", "Comes out ahead at"]
+        if labels != want:
+            problems.append(f"  {title!r}: rows are {labels}, expected {want}")
+            continue
+        rows = dict(points)
+        money = ns["fmt_money"]
+        if rows["Your school loan"] != money(loan):
+            problems.append(f"  {title!r}: school-loan row reads "
+                            f"{rows['Your school loan']!r}")
+        if rows["Professional school debt"] != money(debt):
+            problems.append(f"  {title!r}: professional-debt row reads "
+                            f"{rows['Professional school debt']!r}, not the "
+                            f"resolved {money(debt)}")
+        if abs(loan + debt - scenario["effective_principal"]) > 1:
+            problems.append(
+                f"  {title!r}: the two money rows sum to "
+                f"{money(loan + debt)} but the metric above them shows "
+                f"{money(scenario['effective_principal'])}")
+    # A path with no professional debt must keep the plain three rows, or every
+    # ordinary major grows a $0 row.
+    plain = ns["breakeven_points"](190_000.0, "$74,417", {"year": 4, "age": 26},
+                                   10, 0.0)
+    if [label for label, _ in plain] != ["Your loan", "Worth it up to",
+                                         "Comes out ahead at"]:
+        problems.append("  a path with no professional debt did not keep the "
+                        "plain three rows")
     return problems
 
 
@@ -456,6 +518,17 @@ def negative_controls(ns):
                         "stays ahead from did not fail the crossover check")
     ns["net_position_crossover"] = real_crossover
 
+    # (f) The bug this fixed: one basis for every path, so a professional loan
+    # row reads $190,000 under a metric showing $469,900.
+    real_points = ns["breakeven_points"]
+    ns["breakeven_points"] = lambda loan, ceiling, crossover, window, debt=0.0, **k: [
+        ("Your loan", ns["fmt_money"](loan)), ("Worth it up to", ceiling),
+        ("Comes out ahead at", "age 26")]
+    if not check_points_reconcile_to_the_metric(ns):
+        problems.append("  labelling the school loan as 'Your loan' on a "
+                        "professional path did not fail the reconciliation check")
+    ns["breakeven_points"] = real_points
+
     caught = check_alignment(ns, unfunded)
     funded_titles = [t for t in ns["MAJOR_DATA"] if raw_overlay(ns, t)[2]]
     if not funded_titles:
@@ -487,6 +560,8 @@ def main():
          check_crossover_agrees_with_verdict(ns)),
         ("the verdict's facts list covers every crossover case",
          check_breakeven_points(ns)),
+        ("the facts list reconciles to the Total Loan Amount metric",
+         check_points_reconcile_to_the_metric(ns)),
         ("negative controls", negative_controls(ns)),
     ]
     failed = False
