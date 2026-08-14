@@ -20391,8 +20391,10 @@ else:
              "Loan Amount This Year": fmt_money(row["loan_amount"])}
             for row in loan_schedule_a
         ]))
+    # `scenario`, not `scenario_a`: that name belongs to the compare branch.
+    # This is the single-scenario branch, and it defines its own at line ~20331.
     _loan_metric_label, _loan_metric_value = total_loan_metric(
-        scenario_a, loan_amount, loan_basis_a, program_years_a, cost_years_a)
+        scenario, loan_amount, loan_basis_a, program_years_a, cost_years_a)
     st.metric(_loan_metric_label, fmt_money(_loan_metric_value))
     # "Overridden" is measured against whichever default is active, so the note
     # only fires on a real manual change (not on the expected college-vs-personal
