@@ -5306,7 +5306,7 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # age curve carry NULL/false and the column is what tells the two eras
         # apart; dropping it would make them indistinguishable.
         "hs_baseline_age_aware": True,
-        "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", False)),
+        "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", True)),
         "loan_mode": st.session_state.get("loan_mode", "Simplified"),  # Simplified / Detailed
         "cc_mode_a": cc_mode_a,                                         # none / fulltime / parttime
         # The professional school, and the debt figure it produced. Both are
@@ -13843,7 +13843,21 @@ st.session_state.setdefault("enable_ai_mode", False)
 apply_shared_flag("ai", "enable_ai_mode")
 # Seeded here rather than at its checkbox, which renders far below several
 # blocks that already read this key before the widget exists.
-st.session_state.setdefault("count_foregone_earnings", False)
+#
+# ON by default since 2026-08-14. The wages given up while enrolled are the
+# largest real cost of a degree, larger than tuition, and leaving them out
+# quietly flattered every path -- most of all the long ones, where a dentist was
+# compared against a high school graduate who had somehow not worked for eight
+# years. It remains a switch rather than becoming unconditional (the treatment
+# hs_baseline_age_aware got) because BOTH answers are defensible here: "what do I
+# gain from here" is a real question for someone already enrolled, and it is what
+# the off position now means.
+#
+# THIS IS A SEAM IN THE RESEARCH DATA. count_foregone_earnings is logged with
+# every scenario row and defines what earnings_premium and roi_pct MEAN, so rows
+# either side of this date are not poolable without conditioning on it. Recorded
+# in migrations.sql.
+st.session_state.setdefault("count_foregone_earnings", True)
 apply_shared_flag("foregone", "count_foregone_earnings")
 enable_prestige_mode = st.session_state["enable_prestige_mode"]
 enable_ai_mode = st.session_state["enable_ai_mode"]
@@ -14494,7 +14508,7 @@ subsidized_cap_a = (federal_subsidized_cap(_schedule_a, _grad_cost_years_a)
 # stipend, so crediting the baseline for them as well charges them twice. A
 # community-college path is untouched: it never has graduate years, so
 # pre_earnings_years returns the sum below unchanged.
-_foregone_on = st.session_state.get("count_foregone_earnings", False)
+_foregone_on = st.session_state.get("count_foregone_earnings", True)
 enrollment_years_a = (pre_earnings_years(_selected_title_a,
                                          cc_years_a + university_years_a)
                       if _foregone_on else 0)
@@ -15490,7 +15504,9 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
                 "head-start years of income, so every path is compared from "
                 "age 18 rather than from graduation. ")
              + "This lowers each degree's earnings premium and "
-               "break-even. Off by default. See Methodology.",
+               "break-even. On by default, because those wages are the largest "
+               "real cost of a degree. Switch it off to ask what a student "
+               "gains from here rather than from age 18. See Methodology.",
     )
 
 # The in-enrollment opportunity cost is now applied PER SCENARIO (its
@@ -15893,7 +15909,7 @@ if compare_mode:
         # See Scenario A. Both arms or the deferment is asymmetric.
         subsidized_cap_b = (federal_subsidized_cap(_schedule_b, _grad_cost_years_b)
                             if loan_source_b == "personal" else None)
-        _foregone_on_b = st.session_state.get("count_foregone_earnings", False)
+        _foregone_on_b = st.session_state.get("count_foregone_earnings", True)
         # Same treatment as Scenario A: the head start ends where the earnings
         # curve begins. Both arms, or Compare Mode contrasts two timelines.
         enrollment_years_b = (pre_earnings_years(_selected_title_b,
@@ -22773,9 +22789,10 @@ other or to you.
 
 ### Advanced Analysis Settings
 
-These are optional and off by default. Four extra
-modules live in a sidebar expander. Each one is opt-in, and the calculator
-behaves exactly as described above when all four are left off.
+Four extra modules live in a sidebar expander. Three are off by default and
+opt-in. *Count foregone earnings during enrollment* is the exception: it is
+**on** by default, because the wages given up while enrolled are the largest
+real cost of a degree and leaving them out flatters every path.
 
 - **Compare against pre-2026 repayment plans.** Adds Standard 10-Year and
   IBR-style IDR back into the "How you'll repay" list, as a comparison
@@ -22826,16 +22843,20 @@ behaves exactly as described above when all four are left off.
   group. It's a representative approximation, clearly labeled as such, since a
   major spreads across many jobs. A few majors that span the whole labor market
   (Interdisciplinary Studies, Liberal Arts) are left unmapped and show no level.
-- **Count foregone earnings during enrollment.** By default this calculator
-  starts its earnings clock at *graduation*: it compares a graduate's first
-  N years of post-degree salary against a high-school graduate's same N
-  years, and captures only the *tuition/debt* cost of the degree. But the
-  largest real cost of a bachelor's degree is usually not tuition. It's the
-  roughly four years of wages given up while enrolled full-time, during which
-  the debt-free high-school graduate is already working, earning raises, and
-  banking that income. Turning this option on adds those foregone years to the
-  high-school baseline, so every path is compared on one consistent timeline
-  that starts at **age 18** rather than at graduation. The number of years is
+- **Count foregone earnings during enrollment.** On by default since
+  August 14, 2026. The largest real cost of a bachelor's degree is usually not
+  tuition. It is the roughly four years of wages given up while enrolled
+  full-time, during which the debt-free high-school graduate is already
+  working, earning raises, and banking that income. So the earnings clock
+  starts at **age 18** and those foregone years are added to the high-school
+  baseline, putting every path on one consistent timeline.
+
+  Switching it **off** starts the clock at *graduation* instead: it compares a
+  graduate's first N years of post-degree salary against a high-school
+  graduate's same N years, and captures only the *tuition and debt* cost of the
+  degree. That is a narrower question, and a real one for somebody already
+  enrolled who is asking what they gain from here. It is not the right default
+  for somebody choosing at 17, which is why it is no longer the default. The number of years is
   the program's real length, not a flat four: an occupation BLS says is
   entered with an associate's degree is charged two years of cost and two
   years of foregone wages, because that is how long it takes. Concretely: the high-school graduate is credited with ~4 extra

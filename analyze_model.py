@@ -133,19 +133,26 @@ def find_breakeven_loan(ns: dict, major: str, rate: float, strategy: str) -> dic
     # every break-even here by 15-26% against what a visitor actually sees --
     # Nuclear Power Reactor Operators read $431,289 against the app's $542,587.
     #
-    # enrollment_years stays 0: this table is the default no-foregone-earnings
-    # view, matching the app's default.
+    # enrollment_years MATCHES THE APP'S DEFAULT, which became "count foregone
+    # earnings" on 2026-08-14. This table's whole claim is that it is the app's
+    # number; the moment the two disagree about the counterfactual it is a
+    # different study wearing the app's name. It is the pre_earnings_years the
+    # app uses, not program_years -- the enrolled years only, so a path whose
+    # graduate years the earnings curve already prices is not charged twice.
     program_years = ns["program_years_for_education"](
         ns["MAJOR_DATA"].get(major, {}).get("typical_education"), major)
+    enrollment_years = ns["pre_earnings_years"](major, program_years)
     # The title is required: for the 74 occupations with a training overlay
     # the earnings curve starts at the bachelor's and the baseline must too.
-    baseline_start_age = ns["baseline_start_age_for"](program_years, 0, major)
+    baseline_start_age = ns["baseline_start_age_for"](program_years,
+                                                      enrollment_years, major)
     result = ns["find_breakeven_loan"](major, rate, strategy,
+                                        enrollment_years=enrollment_years,
                                         baseline_start_age=baseline_start_age)
     status = {"never": "never_breaks_even",
               "beyond_search_max": "breakeven_above_search_max"}.get(result["status"], "ok")
     premium_at_zero = ns["compute_scenario_results"](
-        major, 0.0, rate, strategy,
+        major, 0.0, rate, strategy, enrollment_years=enrollment_years,
         baseline_start_age=baseline_start_age)["roi_result"]["earnings_premium"]
     return {"status": status, "breakeven_loan": result["breakeven_loan"],
             "premium_at_zero_debt": premium_at_zero,
@@ -237,9 +244,12 @@ def print_window_sensitivity(ns: dict, rate: float):
             # horizon effect to the wrong thing.
             _py = ns["program_years_for_education"](
                 ns["MAJOR_DATA"].get(m, {}).get("typical_education"), m)
+            # Same baseline as the break-even table above, foregone earnings
+            # included -- this panel is the sensitivity check ON that number.
+            _enroll = ns["pre_earnings_years"](m, _py)
             roi = ns["calculate_roi"](m, repay["total_paid_in_roi_window"], principal or 1,
-                                       years=h,
-                                       baseline_start_age=ns["baseline_start_age_for"](_py, 0, m))
+                                       years=h, enrollment_years=_enroll,
+                                       baseline_start_age=ns["baseline_start_age_for"](_py, _enroll, m))
             cells += f"{roi['earnings_premium']:>16,.0f}"
         print(f"{m[:22]:22s}{cells}")
     print("\n  Medicine is negative at 10 years and strongly positive later: at year 10 it\n"
