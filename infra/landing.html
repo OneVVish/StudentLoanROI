@@ -112,15 +112,19 @@
      merely unstyled, it is unreadable. */
   /* ===== The guides index =====
      Structure follows a conventional blog index: a titled band, then a card
-     grid with a date and a reading time on each card. The one deliberate
-     departure is that the cards carry no photograph. Two of the four guides
-     have a generated hero and two do not, and a grid where half the cards
-     show a picture and half show a placeholder looks unfinished in a way that
-     no amount of styling fixes. The slot is ready (see card_image_for and the
-     .post-card figure rule): fill the missing heroes with
-     brand/build_ai_hero.py and this turns into the picture-led version.
-     Type-led is also the honest look for a site whose guides are arguments
-     about numbers rather than lifestyle pieces. */
+     grid, each card a photograph with a date and a reading time under it. It
+     is picture-led as of 2026-08-14, because every guide now has a hero --
+     see card_image_for and build_guides_index_html, where that is ALL OR
+     NOTHING and always has been.
+     TWO columns, not three. The pictures are the point once they are there,
+     and a third column bought density at the cost of drawing every photograph
+     at ~290px, where a wide scene reads as a texture rather than an image. At
+     two the card is ~457px, which is inside the 720px thumbnail's resolution
+     and close to the single-column list the reference site uses. Four guides
+     also fill a 2-up grid exactly, where 3-up leaves a lone card on row two.
+     NO TINT on these either -- see the article hero note in ARTICLE_CSS. The
+     text sits below the frame, so nothing needs to be legible on top of a
+     photograph and nothing is painted over one. */
   .guides-band { background: var(--deep); color: #fff; border-radius: 16px;
     padding: 44px 40px 40px; margin: 26px 0 34px; }
   .guides-band h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.1;
@@ -133,7 +137,7 @@
     gap: 16px; margin-bottom: 16px; }
   .post-head h2 { font-size: 24px; color: var(--deep); }
   .post-head span { color: var(--muted); font-size: 15px; }
-  .post-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .post-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
   .post-card { display: flex; flex-direction: column; background: var(--surface);
     border: 1px solid var(--rule); border-radius: 14px; overflow: hidden;
     text-decoration: none; color: inherit;
@@ -153,7 +157,6 @@
      so a row of cards lines up along it rather than along the text. */
   .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
     font-weight: 700; font-size: 15px; }
-  @media (max-width: 980px) { .post-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
     .guides-band { padding: 32px 24px 28px; } }
   @media (prefers-reduced-motion: reduce) {

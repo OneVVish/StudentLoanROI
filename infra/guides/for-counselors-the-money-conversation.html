@@ -98,15 +98,19 @@
      merely unstyled, it is unreadable. */
   /* ===== The guides index =====
      Structure follows a conventional blog index: a titled band, then a card
-     grid with a date and a reading time on each card. The one deliberate
-     departure is that the cards carry no photograph. Two of the four guides
-     have a generated hero and two do not, and a grid where half the cards
-     show a picture and half show a placeholder looks unfinished in a way that
-     no amount of styling fixes. The slot is ready (see card_image_for and the
-     .post-card figure rule): fill the missing heroes with
-     brand/build_ai_hero.py and this turns into the picture-led version.
-     Type-led is also the honest look for a site whose guides are arguments
-     about numbers rather than lifestyle pieces. */
+     grid, each card a photograph with a date and a reading time under it. It
+     is picture-led as of 2026-08-14, because every guide now has a hero --
+     see card_image_for and build_guides_index_html, where that is ALL OR
+     NOTHING and always has been.
+     TWO columns, not three. The pictures are the point once they are there,
+     and a third column bought density at the cost of drawing every photograph
+     at ~290px, where a wide scene reads as a texture rather than an image. At
+     two the card is ~457px, which is inside the 720px thumbnail's resolution
+     and close to the single-column list the reference site uses. Four guides
+     also fill a 2-up grid exactly, where 3-up leaves a lone card on row two.
+     NO TINT on these either -- see the article hero note in ARTICLE_CSS. The
+     text sits below the frame, so nothing needs to be legible on top of a
+     photograph and nothing is painted over one. */
   .guides-band { background: var(--deep); color: #fff; border-radius: 16px;
     padding: 44px 40px 40px; margin: 26px 0 34px; }
   .guides-band h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.1;
@@ -119,7 +123,7 @@
     gap: 16px; margin-bottom: 16px; }
   .post-head h2 { font-size: 24px; color: var(--deep); }
   .post-head span { color: var(--muted); font-size: 15px; }
-  .post-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .post-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
   .post-card { display: flex; flex-direction: column; background: var(--surface);
     border: 1px solid var(--rule); border-radius: 14px; overflow: hidden;
     text-decoration: none; color: inherit;
@@ -139,7 +143,6 @@
      so a row of cards lines up along it rather than along the text. */
   .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
     font-weight: 700; font-size: 15px; }
-  @media (max-width: 980px) { .post-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
     .guides-band { padding: 32px 24px 28px; } }
   @media (prefers-reduced-motion: reduce) {
@@ -172,44 +175,52 @@
   article ul { margin: 0 0 16px 22px; }
   article li { margin-bottom: 6px; }
   article img { width: 100%; border-radius: 12px; margin: 20px 0; }
-  /* ===== Hero: live text over a background image =====
-     The headline is a real heading element, so it follows the clamp below and
-     reflows on a phone. Baking it in was tried and measured on 2026-08-12: the
-     picture scales with the column, so the words came out at 13.6px on a phone
-     against a 30px heading. See build_guide_graphics.compose_hero. */
-  article > header.guide-hero {
-    position: relative; margin: 0 0 26px; border-radius: 14px; overflow: hidden;
-    background-size: cover; background-position: center 30%;
-    background-color: var(--deep);   /* holds the shape if the image 404s */
+  /* ===== Hero: the photograph, shown as itself =====
+     NO TINT. There is deliberately no scrim, no gradient, no filter and no
+     blend mode over this image, and none may be added back. The band that
+     preceded it painted rgba(0,0,0,0.55) across the whole photograph because
+     the headline sat ON the picture in white and had to clear AA against
+     whatever a diffusion model happened to return. That was a real constraint
+     while the type was on top of the image, and it cost 45% of every hero's
+     luminance: a warm kitchen interior and an overcast campus morning arrived
+     at the same flat grey.
+     Moving the type BELOW the image retires the constraint rather than tuning
+     it. Contrast is now a question about dark ink on the page background, so
+     the picture is free to be a picture. Anything that puts text back over
+     this image brings the scrim back with it.
+     background: var(--tile) holds the shape while the bytes arrive and if the
+     image 404s -- a neutral placeholder, not a brand colour, for the same
+     reason. */
+  article > figure.guide-hero {
+    margin: 12px 0 22px; border-radius: 14px; overflow: hidden;
+    background: var(--tile);
   }
-  /* A scrim over the whole band, not a gradient from one side. A generated
-     background can be bright anywhere, so contrast has to survive whatever came
-     back rather than the region we hoped would be dark.
-     NEUTRAL, not navy. This was rgba(18,51,92,0.72) and the brand tint was the
-     loudest thing about every hero: it pushed the whole photograph blue, so a
-     warm afternoon interior read as a cold one and two different scenes looked
-     like the same picture. A neutral scrim darkens without repainting, and the
-     brand is already carried by the mark, the type and the rules.
-     0.55 is not a taste value either. Worst case is this scrim over a PURE
-     WHITE patch of photo: 0.50 gives 3.98:1, which clears AA for the 44px
-     heading and FAILS it for the small date line; 0.55 gives 4.76:1. It is
-     also LIGHTER than what it replaces, keeping 45% of the photo's luminance
-     against the old 28%, because black does the darkening more efficiently
-     than a mid-tone navy does. Contrast is guaranteed HERE and nowhere else --
-     compose_hero deliberately bakes no tint, so this one number can be tuned
-     without regenerating an image. */
-  article > header.guide-hero::before {
-    content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55);
+  /* At full desktop width the picture breaks out of the 68ch reading measure
+     to the width of the page container. At reading width a 3.5:1 banner is a
+     456px strip; at container width it is an opening image, which is the whole
+     job of the format.
+     Fixed pixels behind a media query, NOT the usual 100vw breakout: 100vw
+     counts the scrollbar, so that trick puts a horizontal scrollbar on the
+     page it is meant to improve, and this page must never scroll sideways.
+     The arithmetic: .wrap is 980px with 24px of padding a side, so its content
+     box is 932px and its half-width is 466px. The article is centred inside
+     it, so shifting the figure left by (50% of the article - 466px) puts the
+     figure's centre on the article's centre whatever the reading measure
+     resolves to in the actual font. */
+  @media (min-width: 1000px) {
+    article > figure.guide-hero { width: 932px; margin-left: calc(50% - 466px); }
   }
-  article > header.guide-hero .guide-hero-in { position: relative; padding: 46px 34px 34px; }
-  article > header.guide-hero h1 { color: #fff; margin: 6px 0 10px;
-    font-size: clamp(30px, 5vw, 44px); text-transform: none;
-    font-weight: 600; line-height: 1.12; }
-  article > header.guide-hero .meta,
-  article > header.guide-hero .meta a { color: rgba(255, 255, 255, 0.92); }
-  @media (max-width: 620px) {
-    article > header.guide-hero .guide-hero-in { padding: 30px 20px 24px; }
+  /* Overrides the generic article img above: no second radius inside the
+     clipped figure, and no vertical margin, which would show as a strip of
+     placeholder at the top and bottom of the frame. */
+  article > figure.guide-hero img {
+    display: block; width: 100%; height: auto; margin: 0; border-radius: 0;
   }
+  /* The line between the picture and the headline: date, reading time, source.
+     Reading time is derived (read_minutes), so it matches the figure the
+     guides index puts on the same guide's card by construction. */
+  article .eyebrow { color: var(--muted); font-size: 14px;
+    letter-spacing: 0.02em; margin: 0 0 6px; }
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
@@ -276,13 +287,10 @@
 </header>
 
 <article>
-  <header class="guide-hero" style="background-image:url(/app/static/guide-hero-for-counselors-the-money-conversation-klein4b.png)">
-  <div class="guide-hero-in">
-    <p class="meta"><a href="/guides">← All guides</a></p>
-    <h1>For counselors: the money conversation, in the time you actually have</h1>
-    <p class="meta"><time datetime="2026-08-12">2026-08-12</time> · worthmydegree.com</p>
-  </div>
-</header>
+  <p class="meta"><a href="/guides" style="color:var(--blue);text-decoration:none">← All guides</a></p>
+  <figure class="guide-hero"><img src="/app/static/hero-guide-hero-for-counselors-the-money-conversation-klein4b.jpg" alt="" width="1360" height="390" fetchpriority="high"></figure>
+  <p class="eyebrow"><time datetime="2026-08-12">Aug 12, 2026</time> · 7 min read · worthmydegree.com</p>
+  <h1>For counselors: the money conversation, in the time you actually have</h1>
 <p>You are asked, several times a week, to be a financial advisor. Without the license, without the training, and without the hour per family it would honestly take.</p>
 <p>So the question is not whether you can do this arithmetic for every student on your caseload. You cannot, and nobody should ask you to. The question is what you can hand them that does it for them, that works when you are not in the room, and that you can trust enough to put your name near.</p>
 <h2>What changed underneath your students in 2026</h2>
