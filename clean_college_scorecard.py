@@ -27,6 +27,18 @@ and matched no other year from 2018 to 2023; the API's `latest` alias returns
 the same figure. (A wider sweep hits api.data.gov's rate limit at HTTP 429,
 which is why the sample is small rather than exhaustive.)
 
+That data year comes from the RELEASE OF JUNE 10, 2026, which is the current
+one as of 2026-08-14 (collegescorecard.ed.gov/data, "last updated June 10,
+2026"). Two independent traces agree: the API's `latest` alias returns the same
+cost figures as data year 2024, and the field-of-study download this repo pins
+elsewhere is Most-Recent-Cohorts-Field-of-Study_06102026.zip, the same release.
+So the committed dataset is CURRENT, not stale, and the 2024 data year is
+simply how far the cost fields reach in it.
+
+Do not confuse the two numbers. The release is June 2026; the cost data inside
+it describes 2024. The footer cites the data year, because that is what the
+figures describe.
+
 Re-run that check after any regeneration and update the year here, because the
 site footer cites it and "Most Recent" silently means something different every
 release.
