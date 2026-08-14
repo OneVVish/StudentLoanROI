@@ -17,6 +17,20 @@ Project rules this script implements:
   4. CONTROL (1 = Public, 2 = Private Non-Profit, 3 = Private For-Profit) is
      kept alongside a human-readable label.
 
+WHICH RELEASE THE COMMITTED DATASET IS. data/college_coa_clean.csv holds
+College Scorecard DATA YEAR 2024. Nothing recorded that until 2026-08-14 and
+the file name ("Most-Recent-Cohorts") deliberately carries no year, so it had
+to be recovered from the data: every committed in_state_coa was compared
+against the API's year-prefixed cost fields for the same UNITID. Seven schools
+across two samples matched 2024.cost.attendance.academic_year to the dollar
+and matched no other year from 2018 to 2023; the API's `latest` alias returns
+the same figure. (A wider sweep hits api.data.gov's rate limit at HTTP 429,
+which is why the sample is small rather than exhaustive.)
+
+Re-run that check after any regeneration and update the year here, because the
+site footer cites it and "Most Recent" silently means something different every
+release.
+
 Usage:
     python clean_college_scorecard.py path/to/Most-Recent-Cohorts-Institution.csv
     python clean_college_scorecard.py raw.csv -o college_coa_clean.csv
