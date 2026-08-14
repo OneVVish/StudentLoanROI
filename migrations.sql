@@ -1768,3 +1768,36 @@ alter table scenario_events
 -- clinical doctorates in the list (Audiologists, Clinical and Counseling
 -- Psychologists, Physical Therapists) must not be lumped in with them, because
 -- those generally are self-funded.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-14 -- DENTISTRY'S NATIONAL DEBT FIGURE WAS THE WRONG DEFINITION.
+-- $293,900 -> $279,900. No DDL. Same day as the six-physician fix above and
+-- independent of it.
+--
+-- additional_training_debt is added ON TOP of the undergraduate loan the app
+-- charges, so it must be graduate borrowing only. The Scorecard per-school
+-- figures are scoped exactly that way and were always correct. The national
+-- FALLBACK was not: ADEA's "average education debt" is defined as dental
+-- school borrowing PLUS predental debt, "the outstanding education debt the
+-- senior students had when they entered dental school", so the bachelor's was
+-- counted twice for anyone who did not name a school.
+--
+-- The replacement is derived, because ADEA publishes the split and not the
+-- dollar: Dentists of Tomorrow 2025 gives a mean of $297,800 among indebted
+-- graduates and puts dental school loans at 94% of it against 6% predental,
+-- so 0.94 x $297,800 = $279,932, to the hundred. Same report, same class, so
+-- no vintage is mixed; the published 94% is rounded, which puts the result
+-- within about $1,500.
+--
+-- WHO IS AFFECTED. Only scenarios on a dentistry path that did NOT name a
+-- dental school: the five DENTIST_TITLES occupations and the curated
+-- "Dentistry" entry. Naming a school has always used that school's Scorecard
+-- figure and is unchanged. Medicine and law are untouched, because AAMC's
+-- cited figure is medical-school-only (its premedical debt is reported
+-- separately, $28,000 median for the Class of 2025) and the ABA figure is law
+-- school debt.
+--
+-- The national private tranche for dentistry moves with it: $93,900 above the
+-- $200,000 federal professional ceiling becomes $79,900. Any stored
+-- roi_pct, earnings_premium, monthly_payment, payoff_years or dti_ratio for an
+-- unnamed-school dentistry scenario is not comparable across this date.
