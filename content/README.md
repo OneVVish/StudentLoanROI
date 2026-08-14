@@ -80,11 +80,91 @@ same silent way.
   fabricated attribution that keeps `src` out of the app's share links too.
 - **A share is the softest number on that page**, softer than a like. It is
   written when the share sheet resolves or the link reaches the clipboard, and
-  neither proves anyone received it; a cancelled sheet writes nothing; there is
+  neither proves anyone received it; a canceled sheet writes nothing; there is
   no dedupe, so one enthusiastic reader is several rows. Upper bound on intent,
   never a rate. `migrations.sql` carries the full list of caveats.
 - **The sitemap regenerates from the posts.** Deleting a post removes its URL,
   which is right — a sitemap listing a 301 is worse than one listing nothing.
+
+## How the prose reads
+
+House style, arrived at by writing four of these. None of it is enforced by a
+guard, so it is written down instead.
+
+- **American English.** math, modeling, license, canceled, toward. The audience
+  is American families; a British spelling reads as a page written by somebody
+  who is not from here, which is the last impression a money article wants.
+- **No dashes as punctuation.** Not the em dash, not the en dash, not a spaced
+  hyphen. Use a period, a comma or a colon. Hyphens inside words are fine and
+  necessary: four-year, in-state, ten-year. This is the visitor-facing half of
+  the same rule the app follows, and the reason is the audience: a sentence
+  holding two nested dash asides makes a seventeen-year-old parse an
+  interruption while keeping a clause open.
+- **Almost no contractions.** The published guides run about one per 1,400
+  words. It is not a ban, it is a register. Reaching for contractions to sound
+  friendlier makes a page sound like a different writer.
+- **Vary how paragraphs open.** Five paragraphs in a row each leading with a
+  bolded thesis is a template, not a voice, and it reads as machine-written
+  even when every sentence in it is true.
+- **Name the parties, not the pronouns.** The community college guide ended a
+  paragraph with "They can answer it and this cannot", meaning the colleges and
+  the calculator, and saying neither. A compressed closing line sounds decisive
+  and communicates nothing; if a sentence carries `this`, `they` or `it` across
+  a paragraph break, spell out what each one is.
+- **When you add a paragraph, reread its neighbours.** Adding the "community
+  college gets talked about as a fallback" paragraph left two consecutive
+  paragraphs both declining the same argument. Insertions are where redundancy
+  gets in, because the new text is the part you are reading closely.
+
+## What the guides will not claim
+
+The temptation is always to answer the question the reader is actually asking.
+Some of those questions this app cannot answer, and a guide that answers them
+anyway spends the credibility the rest of the page depends on.
+
+- **Nothing about outcomes by institution.** `SCOPE.md` names this a real gap:
+  modelled salary does not vary by school except through a thin prestige
+  multiplier. So a guide can compare schools on COST and must not imply the
+  degree is worth more or less for having come from one of them.
+- **No verdict on a perception, however obvious the verdict feels.** The
+  community college guide nearly opened by calling the "that is for people who
+  did not make it" idea wrong. That is a claim about outcomes, the repo cannot
+  support it, and the one piece of outcome evidence it does hold (NBER on
+  community college bachelor's graduates) points mildly the other way. The
+  version that shipped names the perception and what believing it costs, and
+  leaves the judgement to the reader.
+- **No advice.** `SCOPE.md` puts "should I do this" out of scope, and the
+  counselor guide ends "None of those three was told what to do." Price the
+  trade, then stop.
+- **Say what is missing rather than letting silence imply zero.** The community
+  college guide cannot price credits that fail to transfer or students who
+  never transfer at all, so it says so and sends the reader to the two
+  admissions offices that can answer it.
+
+## Numbers in the prose
+
+- **Every figure comes from a dataset in this repo, never from memory.** This
+  is the rule the whole content pipeline exists to protect. Compute it, do not
+  recall it, and re-derive it from the datasets before publishing rather than
+  trusting the draft.
+- **Round the money, and hedge every rounded figure**: *a bit under $18,000*,
+  *roughly $10,000*, *nearly $38,000 ahead*. An unhedged $17,725 claims a
+  precision the median of 1,797 colleges does not have, and it reads like a
+  machine that has not thought about what the number is for.
+- **In a table use `~` rather than the word**: `~$71,000`. It keeps a column
+  scannable, where "about" five times over is noise. The renderer passes `~`
+  through untouched, including inside `**bold**`.
+- **Statutory figures stay exact.** $5,500, $7,500, the $20,000 and $65,000
+  PLUS caps, the $27,000 aggregate. Those are legal ceilings rather than
+  estimates, and "about $65,000" is simply false: it is $65,000, or you are
+  over the limit. The contrast is useful in itself, because it lets a reader
+  feel which numbers are hard and which are typical.
+- **Rounded figures must still add up on the page.** Round each one
+  independently and the differences a reader can check stop working, which
+  looks like carelessness rather than approximation. In the community college
+  guide $71,000 minus $43,000 is the $28,000 the text claims, and $44,000 minus
+  $16,000 is the same $28,000 arriving from the other direction. Check the
+  arithmetic on the ROUNDED numbers before publishing, not just the exact ones.
 
 ## Where each piece ends up
 
