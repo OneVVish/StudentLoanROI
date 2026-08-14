@@ -9408,31 +9408,53 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
     return {"status": "ok", "breakeven_loan": round((lo + hi) / 2, 2)}
 
 
-def crossover_sentence(crossover: dict, roi_window_years: int,
-                        max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> str:
-    """The one sentence naming when this path gets ahead and stays there.
 
-    Built here rather than at either render site so the on-screen verdict and
-    the PDF's cannot word it differently -- and so Compare Mode inherits it,
-    which is the H2 parity rule: a sentence in one result branch and not the
-    other is a confound in the paper, not a cosmetic gap.
+def breakeven_points(loan_amount: float, ceiling: str, crossover: dict,
+                      roi_window_years: int,
+                      max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> list:
+    """The verdict as three scannable facts: [(label, value), ...].
 
-    It says "beyond the N-year window above" whenever the crossover falls past
-    the visitor's own horizon, because that is precisely the case where the
-    verdict says no and this sentence says a year: without naming the gap the
-    two read as contradicting each other rather than answering different
-    questions.
+    The prose version of this section is written for a seventeen-year-old
+    reading their own scenario. Parents and counsellors read it differently:
+    a counsellor works through many students in a sitting and a parent is
+    comparing schools, so both want to LOCATE the number rather than absorb a
+    paragraph. Four sentences carrying five figures, with the baseline named
+    twice, is the wrong shape for that even when every sentence is right.
+
+    So the figures move here and the prose keeps only what a list cannot say --
+    the levers that move the line. Same numbers, and they come from ONE place so
+    the on-screen box and the PDF cannot quote different ones.
+
+    `ceiling` arrives pre-worded because it is the one row whose MEANING changes
+    by branch, and CLAUDE.md records why the wording is not interchangeable: in
+    the positive case a figure framed as headroom reads as permission to borrow
+    more, which is the opposite of this tool's job. "Worth it up to" states the
+    line without inviting anyone to walk up to it.
     """
-    noun = counterfactual_vocab()["baseline_noun"]
-    if not crossover or crossover.get("year") is None:
-        return (f"Within the {max_years} years modelled here, this path never "
-                f"gets ahead of {noun} for good.")
-    year, age = crossover["year"], crossover.get("age")
-    when = f"at age {age}" if age is not None else f"in year {year}"
-    if year > roi_window_years:
-        return (f"It does get ahead of {noun} {when} and stay there, which is "
-                f"beyond the {roi_window_years}-year window above.")
-    return f"It gets ahead of {noun} {when} and stays there."
+    points = [("Your loan", fmt_money(loan_amount)), ("Worth it up to", ceiling)]
+    year = (crossover or {}).get("year")
+    age = (crossover or {}).get("age")
+    if year is None:
+        ahead = f"not within {max_years} years"
+    elif age is None:
+        ahead = f"year {year}"
+    else:
+        ahead = f"age {age}"
+        if year > roi_window_years:
+            ahead += f" (past the {roi_window_years}-year window)"
+    points.append(("Comes out ahead at", ahead))
+    return points
+
+
+def render_breakeven_points(points: list) -> str:
+    """One markdown block for the facts list, shared by both result branches.
+
+    Money is escaped here rather than by the caller's blanket .replace: these
+    lines carry two figures between them, and CLAUDE.md's LaTeX trap fires on
+    the pair, not on either one.
+    """
+    return "\n".join(f"- {label}: {value}" for label, value in points).replace(
+        "$", chr(92) + "$")
 
 
 def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
@@ -9474,7 +9496,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     # -- a career you can enter with a diploma doesn't have a debt ceiling.
     if (typical_education in MISMODELLED_EDUCATION_LEVELS
             or program_years_for_education(typical_education) == 0):
-        return {"headline": None, "detail": None, "status": "not_applicable"}
+        return {"headline": None, "detail": None, "status": "not_applicable",
+                "points": []}
 
     result = find_breakeven_loan(major_name, interest_rate, repayment_strategy,
                                   roi_window_years, col_index,
@@ -9503,26 +9526,29 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         return {
             "headline": "No, not at any loan amount",
             "detail": (
-                f"Over {years} years, this path earns less than {_cf['baseline_noun']} "
-                f"does, even with no loan at all. Borrowing less doesn't change "
-                f"that; only a longer horizon or a different path would. "
-                + crossover_sentence(crossover, years)
+                f"Over {years} years this path earns less than {_cf['baseline_noun']} "
+                f"does, even with no loan at all. Borrowing less does not change "
+                f"that; only a longer horizon or a different path would."
             ),
             "status": "never", "breakeven_loan": None, "headroom": None,
             "positive": False, "label": "Worth a rethink",
+            "points": breakeven_points(loan_amount, "nothing, at this horizon",
+                                       crossover, years),
         }
     if result["status"] == "beyond_search_max":
         return {
             "headline": "Yes, at any realistic loan amount",
             "detail": (
                 f"Over {years} years this path stays ahead of {_cf['baseline_noun']} "
-                f"even past {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)} of debt. Under Income-Driven "
-                f"Repayment that's usually because the payment is capped by your income rather "
-                f"than your balance. The debt outlives this window rather than disappearing. "
-                + crossover_sentence(crossover, years)
+                f"whatever you borrow. Under Income-Driven Repayment that is usually "
+                f"because the payment is capped by your income rather than your "
+                f"balance, so the debt outlives this window rather than disappearing."
             ),
             "status": "beyond_search_max", "breakeven_loan": None, "headroom": None,
             "positive": True, "label": "Good news",
+            "points": breakeven_points(
+                loan_amount, f"more than {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)}",
+                crossover, years),
         }
 
     breakeven = result["breakeven_loan"]
@@ -9559,24 +9585,24 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
             headline = f"Yes, comfortably worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out well ahead of {_cf['baseline_noun']} "
-                f"over {years} years, because it earns back more than the loan costs you. "
-                f"It would take {fmt_money(breakeven)} of loans, about {multiple:.0f}× what "
-                f"you're borrowing, before that stopped being true."
+                f"over {years} years, because it earns back more than the loan costs "
+                f"you. It would take about {multiple:.0f}× what you are borrowing "
+                f"before that stopped being true."
             )
         elif multiple is not None and multiple >= 1.5:
             headline = f"Yes, worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out ahead of {_cf['baseline_noun']} "
-                f"over {years} years, because it earns back more than the loan costs you. It would take "
-                f"{fmt_money(breakeven)} of loans, about half again what you're borrowing, before "
+                f"over {years} years, because it earns back more than the loan costs "
+                f"you. It would take about half again what you are borrowing before "
                 f"that stopped being true."
             )
         else:
             headline = f"Yes, but only just: worth your {fmt_money(loan_amount)} loan"
             detail = (
                 f"For {major_name}, this comes out ahead of {_cf['baseline_noun']} "
-                f"over {years} years, but the margin is thin: it stops being worth it at "
-                f"{fmt_money(breakeven)} of loans, and you're already at {fmt_money(loan_amount)}."
+                f"over {years} years, but the margin is thin: you are already close "
+                f"to the point where it stops being worth it."
             )
     else:
         # State the break-even as an actionable CEILING, not just a fact. In
@@ -9588,14 +9614,13 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
         headline = f"No, not at {fmt_money(loan_amount)}"
         detail = (
             f"For {major_name}, this falls behind {_cf['baseline_noun']} over "
-            f"{years} years. To come out ahead, total loans would need to stay under "
-            f"{fmt_money(breakeven)}, and you're {fmt_money(abs(headroom))} above that ceiling. "
-            f"A longer horizon, a cheaper school, or Income-Driven Repayment can each move the line."
+            f"{years} years, by {fmt_money(abs(headroom))} more debt than it can "
+            f"carry. A longer horizon, a cheaper school, or Income-Driven "
+            f"Repayment can each move the line."
         )
-    # One append for all four detail strings above, rather than four copies --
-    # the same reason the sentence lives in its own function at all.
-    detail = f"{detail} {crossover_sentence(crossover, years)}"
     return {"headline": headline, "detail": detail, "status": "ok",
+            "points": breakeven_points(loan_amount, fmt_money(breakeven),
+                                       crossover, years),
             "breakeven_loan": breakeven, "headroom": headroom,
             # positive drives the render: green success box vs amber warning.
             # A celebratory banner on a "No" would cheerlead the optimism bias
@@ -11200,6 +11225,17 @@ def _pdf_breakeven_block(breakeven: dict, styles: dict, scenario_label: str = No
     if breakeven.get("label"):
         parts.append(Paragraph(f"<b>{xml_escape(breakeven['label'])}.</b>", styles["body"]))
     parts.append(Paragraph(f"<b>{xml_escape(breakeven['headline'])}</b>", styles["body"]))
+    # The same facts list the screen shows, as a two-column table. A printed
+    # report is the version a counsellor actually hands across a desk, so it is
+    # the LAST place the scannable form should be dropped for a paragraph -- and
+    # the rows come from breakeven_points, so the two cannot quote different
+    # numbers.
+    points = breakeven.get("points") or []
+    if points:
+        parts.append(Spacer(1, 4))
+        parts.append(_pdf_table(rows=[[label, value] for label, value in points],
+                                header=False))
+        parts.append(Spacer(1, 4))
     parts.append(Paragraph(xml_escape(breakeven["detail"]), styles["body"]))
     return parts
 
@@ -20576,6 +20612,10 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         if breakeven["headline"]:
             st.markdown("**🎯 Is this debt worth it?**")
             st.markdown(breakeven["headline"].replace("$", r"\$"))
+            # The facts list, in both branches. A structured verdict in one arm
+            # and a paragraph in the other is an H2 confound, not a layout
+            # choice -- and the narrow column is where a list helps most.
+            st.markdown(render_breakeven_points(breakeven.get("points") or []))
             st.caption(breakeven["detail"].replace("$", r"\$"))
 
         # Major mode's underemployment rate is per-major, so A and B carry
@@ -21155,7 +21195,9 @@ else:
             box(
                 f"**🎯 Is this debt worth it?**\n\n"
                 f"**{breakeven['label']}.**\n\n"
-                f"**{breakeven['headline']}**  \n{breakeven['detail']}".replace("$", r"\$")
+                f"**{breakeven['headline']}**\n\n"
+                + render_breakeven_points(breakeven.get("points") or [])
+                + f"\n\n{breakeven['detail']}".replace("$", r"\$")
             )
 
     # Sits directly under the position/premium numbers on purpose: this is the

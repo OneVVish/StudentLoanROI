@@ -353,27 +353,39 @@ def check_crossover_agrees_with_verdict(ns):
     return problems
 
 
-def check_crossover_sentence(ns):
-    """Every branch produces a sentence, and the beyond-the-window case says so
-    -- that is the case where the verdict says no and this says a year, and
-    without naming the gap the two read as contradicting each other."""
+def check_breakeven_points(ns):
+    """The verdict's facts list must cover every crossover case, and must name
+    the window when the crossover falls outside it -- that is the case where the
+    verdict says no and this says an age, and without the marker the two read as
+    contradicting each other."""
     problems = []
-    say = ns["crossover_sentence"]
+    build = ns["breakeven_points"]
     cases = [
-        ({"year": None, "age": None}, 10, "never", "no crossover"),
+        ({"year": None, "age": None}, 10, "not within", "no crossover"),
         ({"year": 4, "age": 26}, 10, "age 26", "inside the window"),
-        ({"year": 15, "age": 37}, 10, "beyond the 10-year window", "past the window"),
+        ({"year": 15, "age": 37}, 10, "past the 10-year window", "past the window"),
         ({"year": 15, "age": None}, 10, "year 15", "no age available"),
     ]
     for crossover, window, needle, what in cases:
-        got = say(crossover, window)
-        if needle not in got:
-            problems.append(f"  {what}: sentence is {got!r}, expected it to "
-                            f"contain {needle!r}")
-    if "$" in "".join(say(c, 10) for c, _, _, _ in cases):
-        problems.append("  the sentence carries a dollar sign; it is appended to "
-                        "details that already carry one, and two in a markdown "
-                        "string render as LaTeX (see fmt_money_md)")
+        points = build(190_000.0, "$74,417", crossover, window)
+        labels = [label for label, _ in points]
+        if labels != ["Your loan", "Worth it up to", "Comes out ahead at"]:
+            problems.append(f"  {what}: rows are {labels}, expected the three "
+                            "scannable facts")
+            continue
+        ahead = dict(points)["Comes out ahead at"]
+        if needle not in ahead:
+            problems.append(f"  {what}: 'Comes out ahead at' reads {ahead!r}, "
+                            f"expected it to contain {needle!r}")
+    # The loan figure must be the loan, not the ceiling -- they are adjacent
+    # rows and swapping them is silent.
+    rows = dict(build(190_000.0, "$74,417", {"year": 4, "age": 26}, 10))
+    if rows["Your loan"] != ns["fmt_money"](190_000.0):
+        problems.append(f"  'Your loan' reads {rows['Your loan']!r} for a "
+                        "$190,000 loan")
+    if rows["Worth it up to"] != "$74,417":
+        problems.append(f"  'Worth it up to' reads {rows['Worth it up to']!r}, "
+                        "not the ceiling it was handed")
     return problems
 
 
@@ -473,8 +485,8 @@ def main():
          check_crossover(ns)),
         ("the crossover cannot contradict the verdict above it",
          check_crossover_agrees_with_verdict(ns)),
-        ("every crossover branch produces a usable sentence",
-         check_crossover_sentence(ns)),
+        ("the verdict's facts list covers every crossover case",
+         check_breakeven_points(ns)),
         ("negative controls", negative_controls(ns)),
     ]
     failed = False
