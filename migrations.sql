@@ -1894,3 +1894,43 @@ alter table scenario_events
 --
 -- Professional paths, master's paths and every bachelor's-level occupation are
 -- bit-identical across this change.
+
+
+-- ===========================================================================
+-- 2026-08-14  count_foregone_earnings DEFAULTS TO TRUE.  NO DDL.
+-- ===========================================================================
+-- The "Count foregone earnings during enrollment" option shipped OFF by
+-- default and is now ON. This is a SEAM IN THE RESEARCH DATA, not a UI tweak.
+--
+-- The column is written on every scenario row (build_scenario_context) and it
+-- defines what earnings_premium and roi_pct MEAN. With it off, the clock starts
+-- at graduation and only tuition and debt are charged against the degree. With
+-- it on, the clock starts at age 18 and the counterfactual is credited with the
+-- wages earned while the student was enrolled. The two are different questions
+-- and the numbers are not comparable:
+--
+--   Dentists, General, Berkeley COA, RAP, 10-year window
+--     foregone OFF   earnings premium  +$261,556
+--     foregone ON     earnings premium   +$85,541
+--
+-- The effect scales with programme length, so pooling across this date does not
+-- merely add noise -- it biases against long paths, which are exactly the ones
+-- the flag moves most.
+--
+-- ANALYSING ACROSS 2026-08-14 MUST CONDITION ON count_foregone_earnings.
+-- Do not treat it as a minor covariate: before this date a TRUE value means the
+-- visitor went into the Advanced expander and ticked it, which is a selected,
+-- unusually engaged population. After it, TRUE is simply the default and FALSE
+-- is the deliberate act. The column's distribution and its meaning as a signal
+-- both invert here.
+--
+-- Rows before the option existed at all carry NULL; treat NULL as false, which
+-- is what the pre-2026-07-31 note above already says.
+--
+-- Why the default changed: the wages given up while enrolled are the largest
+-- real cost of a degree, larger than tuition, and omitting them flattered every
+-- path -- most of all the long ones, where a dentist was compared against a
+-- high school graduate who had somehow not worked for eight years. It stays a
+-- switch rather than becoming unconditional (the treatment hs_baseline_age_aware
+-- got) because both answers are defensible: "what do I gain from here" is a real
+-- question for somebody already enrolled, and that is what OFF now means.
