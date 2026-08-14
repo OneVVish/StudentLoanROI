@@ -19352,6 +19352,28 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
 
 # ---- 5c. Calculator Results ----------------------------------------------
 
+def total_loan_metric(scenario: dict, loan_amount: float, loan_basis: str,
+                      program_years: int, cost_years: int = None) -> tuple:
+    """(label, value) for the Total Loan Amount metric.
+
+    On a professional path this is the WHOLE principal, not the undergraduate
+    part. It used to be the undergraduate part under the word "Total", and the
+    result was a headline reading "Total Loan Amount (school-reported)
+    $13,000" beside "Total Interest Paid $417,825" -- the three metrics next to
+    it are all computed from the full principal, so the one labelled Total was
+    the only one that was not. Reported from the dashboard.
+
+    The composition moves into the caption underneath (see
+    get_loan_principal_caption), which is the right place for it: a metric
+    answers "how much do I owe" and a caption answers "made up of what".
+    """
+    additional = scenario.get("professional_debt") or 0
+    if additional > 0 and scenario.get("effective_principal"):
+        return ("Total Loan Amount (school + professional degree)",
+                scenario["effective_principal"])
+    return (loan_amount_label(loan_basis, program_years, cost_years), loan_amount)
+
+
 def get_loan_principal_caption(scenario: dict) -> str:
     """Explains what actually feeds the loan repayment simulation, when it
     differs from the raw loan slider (professional-school debt on top of
@@ -19372,9 +19394,13 @@ def get_loan_principal_caption(scenario: dict) -> str:
     national = national_professional_debt(scenario["major"])
     basis = ("est. average professional-school debt" if additional_debt == national
              else "professional-school debt for the school you picked")
+    # The metric above now carries the TOTAL, so restating it here would say
+    # the same number twice and still leave the split unexplained. This gives
+    # the other half: which part is the school and which is the degree.
+    school_part = max(scenario["effective_principal"] - additional_debt, 0)
     return (
-        f"Effective loan principal including {fmt_money(additional_debt)} "
-        f"{basis}: **{fmt_money(scenario['effective_principal'])}**"
+        f"That is {fmt_money(school_part)} for the school above plus "
+        f"{fmt_money(additional_debt)} {basis}."
     ).replace("$", r"\$")
 
 
@@ -19860,8 +19886,9 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # label honest for a Simplified-mode figure ("school-reported", which
         # has no time dimension) and for the 430 occupations needing no degree.
         if loan_basis is not None:
-            st.metric(loan_amount_label(loan_basis, program_years, cost_years),
-                      fmt_money(loan_amount))
+            _panel_label, _panel_value = total_loan_metric(
+                scenario, loan_amount, loan_basis, program_years, cost_years)
+            st.metric(_panel_label, fmt_money(_panel_value))
             # The same what-this-figure-is prose the single branch shows.
             render_loan_basis_disclosure(loan_basis, loan_source, default_loan,
                                          reported_debt, school_name,
@@ -20364,8 +20391,9 @@ else:
              "Loan Amount This Year": fmt_money(row["loan_amount"])}
             for row in loan_schedule_a
         ]))
-    st.metric(loan_amount_label(loan_basis_a, program_years_a, cost_years_a),
-              fmt_money(loan_amount))
+    _loan_metric_label, _loan_metric_value = total_loan_metric(
+        scenario_a, loan_amount, loan_basis_a, program_years_a, cost_years_a)
+    st.metric(_loan_metric_label, fmt_money(_loan_metric_value))
     # "Overridden" is measured against whichever default is active, so the note
     # only fires on a real manual change (not on the expected college-vs-personal
     # gap that exists by design).
