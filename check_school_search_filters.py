@@ -658,6 +658,25 @@ def check_professional_cost_years(ns) -> list:
                 f"programme AND\n    ${debt:,.0f} of professional debt: the "
                 f"degree is being paid for twice")
 
+    # The LABEL has to name the years the figure actually covers. Trimming the
+    # cost model without following it here printed "Total Loan Amount (all 8
+    # years)" over four years of a dentist's tuition -- reported from the
+    # dashboard, not caught by anything, because both the number and the label
+    # were individually defensible.
+    for title in professional:
+        if not major_data[title].get("additional_training_debt"):
+            continue
+        py, gy, cy, _ = principal(title)
+        label = ns["loan_amount_label"]("detailed", py, cy)
+        if str(py) in label:
+            problems.append(
+                f"  the Total Loan Amount label for {title!r} names {py} years "
+                f"({label!r})\n    over a figure covering {cy}")
+        if str(cy) not in label:
+            problems.append(
+                f"  the Total Loan Amount label for {title!r} does not name the "
+                f"{cy} years it covers ({label!r})")
+
     # The other direction: a path with no debt figure must keep every year, or
     # its graduate study becomes free.
     for title in sorted(major_data):

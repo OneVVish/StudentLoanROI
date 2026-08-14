@@ -8250,7 +8250,8 @@ def ccb_school(coa_row, predominant_degree) -> bool:
     return len(bachl) / len(assoc) <= CCB_MAX_BACHELORS_TO_ASSOC_RATIO
 
 
-def loan_amount_label(loan_basis: str, program_years: int) -> str:
+def loan_amount_label(loan_basis: str, program_years: int,
+                      cost_years: int = None) -> str:
     """Label for the Total Loan Amount figure, matching how it was derived.
 
     The previous label was `f"Total Loan Amount (all {program_years} years)"`
@@ -8259,6 +8260,16 @@ def loan_amount_label(loan_basis: str, program_years: int) -> str:
     -- that median is cumulative debt at exit with no time dimension at all --
     and once associate's degrees started resolving to 2 it printed "all 2
     years" over an unscaled four-year institution-wide figure.
+
+    `cost_years` is the third way, and it arrived with the fix for it. Once a
+    professional path stopped being charged the school's COA for the years its
+    debt figure already pays for (see school_cost_years), this figure covered
+    the undergraduate years alone while the label went on naming the whole
+    programme: "Total Loan Amount (all 8 years)" over four years of a
+    dentist's tuition. Saying "all 4 years" instead would be true of the
+    arithmetic and still misread, because the programme IS eight years -- so
+    the label names which four they are, and the caption beneath it carries
+    the professional debt that covers the rest.
     """
     if loan_basis == "no_program":
         return "Total Loan Amount (no degree required)"
@@ -8271,6 +8282,8 @@ def loan_amount_label(loan_basis: str, program_years: int) -> str:
         # graduation for this field at this school, so naming a year count over
         # it would assert something Scorecard does not measure.
         return "Total Loan Amount (graduate, school-reported)"
+    if cost_years is not None and 0 < cost_years < program_years:
+        return f"Total Loan Amount ({cost_years} undergraduate years)"
     return f"Total Loan Amount (all {program_years} years)"
 
 
@@ -11964,7 +11977,9 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         # NOT recomputed here from program_years_for_major, which would be a
         # second independent derivation and exactly the twin-drift CLAUDE.md
         # warns about for the chart pairs.
-        Paragraph(f"{loan_amount_label(loan_basis_a, program_years_for_major(major))}: "
+        # cost_years from the same resolvers, so the printed label cannot say a
+        # different number of years than the screen it is a copy of.
+        Paragraph(f"{loan_amount_label(loan_basis_a, program_years_for_major(major), school_cost_years(program_years_for_major(major), graduate_years_for_major(major), major))}: "
                    f"{fmt_money(loan_amount)}", styles["body"]),
         *financing_line,
         Spacer(1, 6),
@@ -19795,6 +19810,7 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            include_fees: bool = False, cc_mode: str = "none",
                            wage_row_slots: int = None,
                            loan_basis: str = None, program_years: int = None,
+                           cost_years: int = None,
                            current_age: int = None,
                            loan_source: str = None, default_loan=None,
                            reported_debt=None, school_name: str = None,
@@ -19844,7 +19860,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # label honest for a Simplified-mode figure ("school-reported", which
         # has no time dimension) and for the 430 occupations needing no degree.
         if loan_basis is not None:
-            st.metric(loan_amount_label(loan_basis, program_years), fmt_money(loan_amount))
+            st.metric(loan_amount_label(loan_basis, program_years, cost_years),
+                      fmt_money(loan_amount))
             # The same what-this-figure-is prose the single branch shows.
             render_loan_basis_disclosure(loan_basis, loan_source, default_loan,
                                          reported_debt, school_name,
@@ -20055,7 +20072,7 @@ if compare_mode:
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True,
         cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
-        loan_basis=loan_basis_a, program_years=program_years_a,
+        loan_basis=loan_basis_a, program_years=program_years_a, cost_years=cost_years_a,
         current_age=st.session_state.get("current_age") if is_returning else None,
         loan_source=loan_source_a, default_loan=default_loan_a,
         reported_debt=reported_debt_a, school_name=school_name_a,
@@ -20068,7 +20085,7 @@ if compare_mode:
         hs_wage_index=get_metro_wage_index(city),
         federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True,
         cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
-        loan_basis=loan_basis_b, program_years=program_years_b,
+        loan_basis=loan_basis_b, program_years=program_years_b, cost_years=cost_years_b,
         current_age=st.session_state.get("current_age") if is_returning else None,
         loan_source=loan_source_b, default_loan=default_loan_b,
         reported_debt=reported_debt_b, school_name=school_name_b,
@@ -20347,7 +20364,8 @@ else:
              "Loan Amount This Year": fmt_money(row["loan_amount"])}
             for row in loan_schedule_a
         ]))
-    st.metric(loan_amount_label(loan_basis_a, program_years_a), fmt_money(loan_amount))
+    st.metric(loan_amount_label(loan_basis_a, program_years_a, cost_years_a),
+              fmt_money(loan_amount))
     # "Overridden" is measured against whichever default is active, so the note
     # only fires on a real manual change (not on the expected college-vs-personal
     # gap that exists by design).
