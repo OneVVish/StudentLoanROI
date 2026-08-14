@@ -31,8 +31,32 @@ description: One sentence for search results and the preview card (<200 chars)
 summary: One line for the guide cards on the landing page and the index
 date: 2026-08-11
 image: borrowing-1080x1350.png     # optional; must exist in static/
+hero: guide-hero-<slug>-klein4b.png   # optional; the article's opening photo
+card: some-other.png               # optional; overrides hero for card + og
 ---
 ```
+
+### The `hero:` picture
+
+`hero:` is the photograph at the top of the article and the picture on the
+guide's card in the index. Generate one with `python3 brand/build_ai_hero.py
+--slug <slug>`; the build resizes it into the two sizes a browser actually
+draws (a 1360px article JPEG and a 720px card JPEG) and commits them beside
+the original, so nothing serves the ~1 MB PNG.
+
+Three things to know before writing one:
+
+- **The index is all or nothing.** The cards show pictures only when *every*
+  published guide has a hero. A grid where some cards carry a photograph and
+  some do not does not read as a few missing pictures, it reads as a broken
+  page. So a new guide without a hero silently turns the pictures off for all
+  of them.
+- **No words in the picture.** The headline is live text below it. Baked-in
+  text scales with the column instead of reflowing, and diffusion models
+  render letterforms badly.
+- **No tint, ever.** The photograph is shown as itself: no scrim, no gradient,
+  no filter. Contrast is a question about the type below the picture, not
+  about the picture. See the note in `infra/build_site.py`'s `ARTICLE_CSS`.
 
 ## The Markdown subset
 

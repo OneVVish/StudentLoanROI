@@ -335,9 +335,9 @@ def compose_hero(name="guide-hero-1600x460.png", w=1600, h=460,
     image, so text in the pixels shrinks with the container instead of
     reflowing. Measured on 2026-08-12 -- 13.6px on a 390pt phone against a live
     `h1` of 30px, and already smaller than the heading on desktop at 26px
-    against 44px. The template puts the real `<h1>` over this instead, which is
-    what the reference format does and what makes the words selectable,
-    translatable and reachable by a screen reader.
+    against 44px. The template renders the real `<h1>` BELOW this instead
+    (since 2026-08-14; it was over the band before), which makes the words
+    selectable, translatable and reachable by a screen reader.
 
     It is also the only arrangement that suits a generated background: a
     diffusion model renders text unreliably, so the words must not be its job.
@@ -359,24 +359,23 @@ def compose_hero(name="guide-hero-1600x460.png", w=1600, h=460,
         _curve_motif(ax, w * 0.665, h * 0.24, h * 0.98, alpha=0.16)
     else:
         ax.imshow(background, extent=(0, w, 0, h), aspect="auto", zorder=1)
-        # NO TINT BY DEFAULT, on purpose. The template already lays a
-        # rgba(18,51,92,0.72) scrim under the headline, sized so that white text
-        # clears 4.5:1 even over a pure white patch of photo. Baking a second
-        # one here stacked the two: at 0.62 plus 0.72 only 11% of the image
-        # survived, so the photograph we paid to generate was invisible.
-        # Contrast is guaranteed in ONE place, and it is the CSS, because that
-        # can be retuned without regenerating anything.
+        # NO TINT. Not "no tint by default" -- `overlay` has no caller and
+        # should not acquire one. This once stacked with a scrim in the CSS
+        # (0.62 here plus 0.72 there left 11% of the image, so the photograph
+        # we paid to generate was invisible). The CSS scrim is gone as of
+        # 2026-08-14: the headline moved below the picture, so nothing has to
+        # be legible on top of it and there is no contrast argument for
+        # darkening a photograph anywhere in this pipeline.
         if overlay:
             ax.add_patch(plt.Rectangle((0, 0), w, h, color=DEEP, alpha=overlay,
                                        zorder=2, linewidth=0))
 
-    # NO CUT-AWAY ARC. The first version drew a white curve across the foot,
-    # which is the detail that makes the reference format read as a hero. It
-    # cannot live in the IMAGE once the template lays a scrim over the whole
-    # header: the white arc sits under the overlay and renders as a grey band,
-    # which looks like a rendering fault rather than a shape. A curve would have
-    # to be drawn in CSS, above the scrim, to work. Rounded corners on the
-    # header carry the same job for far less machinery.
+    # NO CUT-AWAY ARC. The first version drew a white curve across the foot of
+    # the band. It was dropped because the template's scrim turned it grey, and
+    # it stays dropped now the scrim is gone for a better reason: a shape baked
+    # into the picture is a shape that cannot follow the page background, and
+    # the rounded corners the CSS puts on the figure carry the same job for far
+    # less machinery.
 
     path = OUT / name
     fig.savefig(path, dpi=DPI, facecolor=SURFACE)

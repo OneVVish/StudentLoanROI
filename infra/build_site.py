@@ -181,15 +181,19 @@ SITE_CSS = """  :root {
      merely unstyled, it is unreadable. */
   /* ===== The guides index =====
      Structure follows a conventional blog index: a titled band, then a card
-     grid with a date and a reading time on each card. The one deliberate
-     departure is that the cards carry no photograph. Two of the four guides
-     have a generated hero and two do not, and a grid where half the cards
-     show a picture and half show a placeholder looks unfinished in a way that
-     no amount of styling fixes. The slot is ready (see card_image_for and the
-     .post-card figure rule): fill the missing heroes with
-     brand/build_ai_hero.py and this turns into the picture-led version.
-     Type-led is also the honest look for a site whose guides are arguments
-     about numbers rather than lifestyle pieces. */
+     grid, each card a photograph with a date and a reading time under it. It
+     is picture-led as of 2026-08-14, because every guide now has a hero --
+     see card_image_for and build_guides_index_html, where that is ALL OR
+     NOTHING and always has been.
+     TWO columns, not three. The pictures are the point once they are there,
+     and a third column bought density at the cost of drawing every photograph
+     at ~290px, where a wide scene reads as a texture rather than an image. At
+     two the card is ~457px, which is inside the 720px thumbnail's resolution
+     and close to the single-column list the reference site uses. Four guides
+     also fill a 2-up grid exactly, where 3-up leaves a lone card on row two.
+     NO TINT on these either -- see the article hero note in ARTICLE_CSS. The
+     text sits below the frame, so nothing needs to be legible on top of a
+     photograph and nothing is painted over one. */
   .guides-band { background: var(--deep); color: #fff; border-radius: 16px;
     padding: 44px 40px 40px; margin: 26px 0 34px; }
   .guides-band h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.1;
@@ -202,7 +206,7 @@ SITE_CSS = """  :root {
     gap: 16px; margin-bottom: 16px; }
   .post-head h2 { font-size: 24px; color: var(--deep); }
   .post-head span { color: var(--muted); font-size: 15px; }
-  .post-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .post-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
   .post-card { display: flex; flex-direction: column; background: var(--surface);
     border: 1px solid var(--rule); border-radius: 14px; overflow: hidden;
     text-decoration: none; color: inherit;
@@ -222,7 +226,6 @@ SITE_CSS = """  :root {
      so a row of cards lines up along it rather than along the text. */
   .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
     font-weight: 700; font-size: 15px; }
-  @media (max-width: 980px) { .post-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
     .guides-band { padding: 32px 24px 28px; } }
   @media (prefers-reduced-motion: reduce) {
@@ -610,44 +613,52 @@ ARTICLE_CSS = """
   article ul { margin: 0 0 16px 22px; }
   article li { margin-bottom: 6px; }
   article img { width: 100%; border-radius: 12px; margin: 20px 0; }
-  /* ===== Hero: live text over a background image =====
-     The headline is a real heading element, so it follows the clamp below and
-     reflows on a phone. Baking it in was tried and measured on 2026-08-12: the
-     picture scales with the column, so the words came out at 13.6px on a phone
-     against a 30px heading. See build_guide_graphics.compose_hero. */
-  article > header.guide-hero {
-    position: relative; margin: 0 0 26px; border-radius: 14px; overflow: hidden;
-    background-size: cover; background-position: center 30%;
-    background-color: var(--deep);   /* holds the shape if the image 404s */
+  /* ===== Hero: the photograph, shown as itself =====
+     NO TINT. There is deliberately no scrim, no gradient, no filter and no
+     blend mode over this image, and none may be added back. The band that
+     preceded it painted rgba(0,0,0,0.55) across the whole photograph because
+     the headline sat ON the picture in white and had to clear AA against
+     whatever a diffusion model happened to return. That was a real constraint
+     while the type was on top of the image, and it cost 45% of every hero's
+     luminance: a warm kitchen interior and an overcast campus morning arrived
+     at the same flat grey.
+     Moving the type BELOW the image retires the constraint rather than tuning
+     it. Contrast is now a question about dark ink on the page background, so
+     the picture is free to be a picture. Anything that puts text back over
+     this image brings the scrim back with it.
+     background: var(--tile) holds the shape while the bytes arrive and if the
+     image 404s -- a neutral placeholder, not a brand colour, for the same
+     reason. */
+  article > figure.guide-hero {
+    margin: 12px 0 22px; border-radius: 14px; overflow: hidden;
+    background: var(--tile);
   }
-  /* A scrim over the whole band, not a gradient from one side. A generated
-     background can be bright anywhere, so contrast has to survive whatever came
-     back rather than the region we hoped would be dark.
-     NEUTRAL, not navy. This was rgba(18,51,92,0.72) and the brand tint was the
-     loudest thing about every hero: it pushed the whole photograph blue, so a
-     warm afternoon interior read as a cold one and two different scenes looked
-     like the same picture. A neutral scrim darkens without repainting, and the
-     brand is already carried by the mark, the type and the rules.
-     0.55 is not a taste value either. Worst case is this scrim over a PURE
-     WHITE patch of photo: 0.50 gives 3.98:1, which clears AA for the 44px
-     heading and FAILS it for the small date line; 0.55 gives 4.76:1. It is
-     also LIGHTER than what it replaces, keeping 45% of the photo's luminance
-     against the old 28%, because black does the darkening more efficiently
-     than a mid-tone navy does. Contrast is guaranteed HERE and nowhere else --
-     compose_hero deliberately bakes no tint, so this one number can be tuned
-     without regenerating an image. */
-  article > header.guide-hero::before {
-    content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55);
+  /* At full desktop width the picture breaks out of the 68ch reading measure
+     to the width of the page container. At reading width a 3.5:1 banner is a
+     456px strip; at container width it is an opening image, which is the whole
+     job of the format.
+     Fixed pixels behind a media query, NOT the usual 100vw breakout: 100vw
+     counts the scrollbar, so that trick puts a horizontal scrollbar on the
+     page it is meant to improve, and this page must never scroll sideways.
+     The arithmetic: .wrap is 980px with 24px of padding a side, so its content
+     box is 932px and its half-width is 466px. The article is centred inside
+     it, so shifting the figure left by (50% of the article - 466px) puts the
+     figure's centre on the article's centre whatever the reading measure
+     resolves to in the actual font. */
+  @media (min-width: 1000px) {
+    article > figure.guide-hero { width: 932px; margin-left: calc(50% - 466px); }
   }
-  article > header.guide-hero .guide-hero-in { position: relative; padding: 46px 34px 34px; }
-  article > header.guide-hero h1 { color: #fff; margin: 6px 0 10px;
-    font-size: clamp(30px, 5vw, 44px); text-transform: none;
-    font-weight: 600; line-height: 1.12; }
-  article > header.guide-hero .meta,
-  article > header.guide-hero .meta a { color: rgba(255, 255, 255, 0.92); }
-  @media (max-width: 620px) {
-    article > header.guide-hero .guide-hero-in { padding: 30px 20px 24px; }
+  /* Overrides the generic article img above: no second radius inside the
+     clipped figure, and no vertical margin, which would show as a strip of
+     placeholder at the top and bottom of the frame. */
+  article > figure.guide-hero img {
+    display: block; width: 100%; height: auto; margin: 0; border-radius: 0;
   }
+  /* The line between the picture and the headline: date, reading time, source.
+     Reading time is derived (read_minutes), so it matches the figure the
+     guides index puts on the same guide's card by construction. */
+  article .eyebrow { color: var(--muted); font-size: 14px;
+    letter-spacing: 0.02em; margin: 0 0 6px; }
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
@@ -787,32 +798,51 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
     body = render_markdown(post["body"])
     canonical = f"https://worthmydegree.com/guides/{post['slug']}"
 
-    # A hero is a BACKGROUND with the real <h1> on top, never an <img> with the
-    # headline baked into it. Measured 2026-08-12: `article img { width: 100% }`
-    # scales the image, so pixel text shrinks with the container instead of
-    # reflowing -- 13.6px on a 390pt phone against a live h1 of 30px, and
-    # already smaller than the heading on desktop. Live text also stays
-    # selectable, translatable and reachable by a screen reader, and it means a
-    # generated background never has to render a word, which diffusion models
-    # do badly. `hero:` in the front matter opts a post in; without it the
-    # header is exactly what it was.
+    # ===== The hero is a PHOTOGRAPH, above the headline =====
+    #
+    # It used to be a background image with the live <h1> painted on top, which
+    # forced a scrim over the whole band -- rgba(0,0,0,0.55), the only thing
+    # guaranteeing the white heading stayed legible over a picture nobody had
+    # seen yet. That scrim threw away 45% of every photograph's luminance and
+    # was the loudest thing on the page: a warm afternoon kitchen and a grey
+    # campus morning came out looking like the same washed-out image.
+    #
+    # Putting the picture ABOVE the type removes the reason for it. Dark text
+    # on white needs no scrim, so the photograph renders as itself, and the
+    # headline is an ordinary <h1> in the article's own type scale rather than
+    # white text sized to survive a background. It is also what a blog index
+    # like collegewise.com/blog does: picture, then date and reading time, then
+    # the title.
+    #
+    # The rule the old approach was protecting still holds and still applies:
+    # a hero is a picture with NO WORDS IN IT. Baking the headline into the
+    # image was measured on 2026-08-12 at 13.6px on a 390pt phone, because the
+    # picture scales with the column while a live heading reflows. Live text
+    # also stays selectable, translatable and reachable by a screen reader, and
+    # a generated image never has to render a word, which diffusion models do
+    # badly.
+    #
+    # `hero:` in the front matter opts a post in; without it the header is
+    # exactly what it was. alt="" because these are decorative openers -- the
+    # <h1> immediately below says what the page is, and a screen reader should
+    # not have to hear a description of a stock photograph first.
     hero = post.get("hero")
+    meta_line = (f'<time datetime="{post["date"]}">{card_date(post["date"])}'
+                 f'</time> · {read_minutes(post)} min read · worthmydegree.com')
+    back = ('<p class="meta"><a href="/guides" '
+            'style="color:var(--blue);text-decoration:none">← All guides</a></p>')
     if hero:
-        head = (f'<header class="guide-hero" '
-                f'style="background-image:url(/app/static/{hero})">\n'
-                f'  <div class="guide-hero-in">\n'
-                f'    <p class="meta"><a href="/guides">← All guides</a></p>\n'
-                f'    <h1>{_inline(post["title"])}</h1>\n'
-                f'    <p class="meta"><time datetime="{post["date"]}">'
-                f'{post["date"]}</time> · worthmydegree.com</p>\n'
-                f'  </div>\n</header>')
+        rendered = article_hero(hero)
+        w, h = image_ratio(rendered)
+        head = (f'{back}\n'
+                f'  <figure class="guide-hero"><img src="/app/static/{rendered}"'
+                f' alt="" width="{w}" height="{h}" fetchpriority="high"></figure>\n'
+                f'  <p class="eyebrow">{meta_line}</p>\n'
+                f'  <h1>{_inline(post["title"])}</h1>')
     else:
-        head = (f'<p class="meta"><a href="/guides" '
-                f'style="color:var(--blue);text-decoration:none">\n'
-                f'    ← All guides</a></p>\n'
-                f'  <h1>{_inline(post["title"])}</h1>\n'
-                f'  <p class="meta"><time datetime="{post["date"]}">'
-                f'{post["date"]}</time>\n    · worthmydegree.com</p>')
+        head = (f'{back}\n'
+                f'  <p class="eyebrow">{meta_line}</p>\n'
+                f'  <h1>{_inline(post["title"])}</h1>')
     return f'''<!doctype html>
 <html lang="en">
 <head>
@@ -1028,17 +1058,20 @@ def card_date(iso: str) -> str:
 
 
 CARD_THUMB_WIDTH = 720          # 2x the ~360px a card is ever drawn at
-CARD_THUMB_QUALITY = 82
+ARTICLE_HERO_WIDTH = 1360       # 2x the ~680px an article column is ever drawn at
+JPEG_QUALITY = 82
 
 
-def card_thumb(source: str) -> str:
-    """A small JPEG of a hero, generated once and committed beside it.
+def _resized_jpeg(source: str, width: int, prefix: str) -> str:
+    """A width-limited JPEG of a source image, generated once and committed
+    beside it. Returns the new filename, or the source unchanged when the
+    source is not in static/ (the caller's page still renders).
 
     The heroes are 1600x459 PNGs of about a megabyte each, which is right for
-    a full-bleed banner and absurd for a card drawn at 260x146. Serving the
-    originals put 4.3 MB of images on the guides index, roughly thirty times
-    the bytes the page can use, and the visitor most likely to open a shared
-    guide link is on a phone.
+    an archival original and absurd for anything a browser draws. Serving them
+    directly put 4.3 MB of images on the guides index, roughly thirty times the
+    bytes the page can use, and a 1.27 MB background on a single article page.
+    The visitor most likely to open a shared guide link is on a phone.
 
     JPEG rather than PNG because these are photographs, where PNG's lossless
     encoding buys nothing and costs an order of magnitude. Pillow is already
@@ -1046,26 +1079,60 @@ def card_thumb(source: str) -> str:
     this adds no dependency, in keeping with this file's rule about using only
     what production already ships.
 
+    Two sizes exist rather than one because a card is drawn at ~360px and an
+    article hero at ~680px, and a single file cannot serve both without being
+    wrong for one of them: the card size is blurry as a hero, and the hero size
+    is four cards' worth of bytes on an index that shows every guide at once.
+
     Regenerated only when the source is newer, so a normal build does no image
     work at all.
     """
     from PIL import Image
 
-    thumb = f"card-{Path(source).stem}.jpg"
-    src, dst = ROOT / "static" / source, ROOT / "static" / thumb
+    out = f"{prefix}-{Path(source).stem}.jpg"
+    src, dst = ROOT / "static" / source, ROOT / "static" / out
     if not src.exists():
         return source
     if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
-        return thumb
+        return out
     with Image.open(src) as im:
         im = im.convert("RGB")
-        height = round(im.height * CARD_THUMB_WIDTH / im.width)
-        im = im.resize((CARD_THUMB_WIDTH, height), Image.LANCZOS)
-        im.save(dst, "JPEG", quality=CARD_THUMB_QUALITY, optimize=True,
+        height = round(im.height * width / im.width)
+        im = im.resize((width, height), Image.LANCZOS)
+        im.save(dst, "JPEG", quality=JPEG_QUALITY, optimize=True,
                 progressive=True)
-    print(f"  card thumb {thumb}  ({dst.stat().st_size:,} bytes"
+    print(f"  {prefix} image {out}  ({dst.stat().st_size:,} bytes"
           f" from {src.stat().st_size:,})")
-    return thumb
+    return out
+
+
+def card_thumb(source: str) -> str:
+    """The guides-index card picture for a hero. See _resized_jpeg."""
+    return _resized_jpeg(source, CARD_THUMB_WIDTH, "card")
+
+
+def article_hero(source: str) -> str:
+    """The in-article photograph for a hero. See _resized_jpeg."""
+    return _resized_jpeg(source, ARTICLE_HERO_WIDTH, "hero")
+
+
+def image_ratio(name: str, fallback=(1600, 459)) -> tuple:
+    """(width, height) of a static image, for the img attributes.
+
+    Present so the browser can reserve the right box before the bytes arrive.
+    Guessing here is not harmless: a wrong ratio on a full-width photograph
+    reserves the wrong height and the article text jumps when the image lands,
+    which is the one layout fault a reader always notices.
+    """
+    path = ROOT / "static" / name
+    if not path.exists():
+        return fallback
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return fallback
 
 
 def card_image_for(post: dict):
