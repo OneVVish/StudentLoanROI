@@ -1847,3 +1847,50 @@ alter table scenario_events
 -- dti_ratio from a DETAILED-mode scenario on one of those occupations is not
 -- comparable across this date. loan_mode is stored, so the affected rows can
 -- be isolated exactly rather than by excluding the occupations wholesale.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-14 -- RESEARCH DOCTORATES ARE NOW MODELLED AS FUNDED. No DDL.
+-- The largest modelling change of the day: it moves BOTH sides of the ROI for
+-- 39 occupations, so their rows change meaning more than any fix above.
+--
+-- Until now every occupation BLS files as "Doctoral or professional degree"
+-- that was not a professional path was charged nine years of an undergraduate
+-- school's cost of attendance AND paid a full salary from the year after a
+-- bachelor's. Both halves were wrong, in opposite directions. A funded PhD pays
+-- no tuition and earns a stipend.
+--
+--   COST:     the 5 doctoral years are no longer charged. At a $45,619 school
+--             that is $228,095 removed from the modelled cost.
+--   EARNINGS: those years now earn PHD_STIPEND ($28,788, NIH's FY2025
+--             Kirschstein-NRSA predoctoral level) instead of the full
+--             occupational salary.
+--
+-- THE SECOND EFFECT IS LARGER THAN THE FIRST AND RUNS THE OTHER WAY, which is
+-- why no row is safe to pool. History Teachers, Postsecondary at a $45,619
+-- school went from a 10-year premium of +$149,215 to -$68,497: the cost fell
+-- by $228,095 and five years of professor's salary were replaced by five years
+-- of stipend. A path that looked comfortably worth it now does not, inside a
+-- 10-year window. Any comparison across this date on these occupations is
+-- measuring the fix, not the world.
+--
+-- WHICH OCCUPATIONS. RESEARCH_DOCTORATE_TITLES, 39 of them: the 35
+-- postsecondary teaching titles plus Astronomers, Physicists, Biochemists and
+-- Biophysicists, and Medical Scientists.
+--
+-- WHICH ARE DELIBERATELY EXCLUDED, and still charged nine years:
+-- Audiologists (AuD), Clinical and Counseling Psychologists (PsyD) and
+-- Physical Therapists (DPT). Those are clinical practice doctorates students
+-- generally pay for, and marking them funded would swap the old error for its
+-- mirror image. They are the whole of UNMODELLED_DOCTORAL_TITLES now.
+--
+-- THE MAJORITY PATH IS MODELLED AND THE MINORITY IS DISCLOSED, the same call
+-- the app already makes for underemployment and optional residencies. NSF's
+-- Survey of Earned Doctorates: ~33% research assistantship or traineeship, 24%
+-- fellowship, 22% teaching assistantship, against 15% primarily own resources.
+-- Debt is field-dependent -- 72%+ finish with none in the sciences and
+-- engineering, about half in psychology, the social sciences and humanities --
+-- and funded_doctorate_disclosure() says so on screen, because the humanities
+-- teaching titles are most of this list.
+--
+-- Professional paths, master's paths and every bachelor's-level occupation are
+-- bit-identical across this change.
