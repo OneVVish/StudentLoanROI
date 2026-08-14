@@ -584,10 +584,9 @@ def build_html(f: dict, posts: list = ()) -> str:
 </div>
 
 <footer>
-  Source: Bureau of Labor Statistics, New York Fed, College Scorecard,
-  IPEDS and CPS ASEC data, every figure traceable to its source in the app's
-  Methodology section. A student research project. Educational estimate, not
-  financial advice.<br>
+  Data Source: Bureau of Labor Statistics (May 2025), New York Fed
+  (February 2026), College Scorecard, IPEDS (2023) and CPS ASEC (2025).
+  Educational estimate, not financial advice.<br>
   <a href="/llms.txt" style="color:inherit">Plain-text summary</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a>
 </footer>
@@ -845,9 +844,9 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
 </article>
 
 <footer>
-  Source: Bureau of Labor Statistics, New York Fed, College Scorecard,
-  IPEDS and CPS ASEC data. A student research project. Educational estimate,
-  not financial advice.<br>
+  Data Source: Bureau of Labor Statistics (May 2025), New York Fed
+  (February 2026), College Scorecard, IPEDS (2023) and CPS ASEC (2025).
+  Educational estimate, not financial advice.<br>
   <a href="/guides" style="color:inherit">All guides</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a>
 </footer>
@@ -1135,8 +1134,8 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   </div>
 </section>
 <footer>
-  <a href="/" style="color:inherit">worthmydegree.com</a> · A student research
-  project. Educational estimate, not financial advice.
+  <a href="/" style="color:inherit">worthmydegree.com</a> · Educational
+  estimate, not financial advice.
 </footer>
 </div>
 {CARRY_QS_JS}
