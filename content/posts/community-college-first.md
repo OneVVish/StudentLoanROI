@@ -3,6 +3,7 @@ title: What starting at community college is actually worth
 description: Two years at a community college before transferring cuts the published cost of a bachelor's by 39%, and changes how much of it you can borrow in your own name.
 summary: The 2+2 path costs about $28,000 less at a typical public university. Here is what that does to the loan, the payment, and the part nobody can borrow.
 date: 2026-08-13
+hero: guide-hero-community-college-first-klein4b.png
 ---
 
 Until this year a family that could not cover a college's price had a standard answer: borrow the difference. Parent PLUS had no real ceiling, only the cost of attendance minus whatever aid arrived. For loans first disbursed from July 1, 2026 it is capped at **$20,000 a year and $65,000 in total** per student, so [the gap can now simply run out](/guides/parent-plus-senior-year).

@@ -1026,6 +1026,47 @@ def card_date(iso: str) -> str:
         return iso
 
 
+CARD_THUMB_WIDTH = 720          # 2x the ~360px a card is ever drawn at
+CARD_THUMB_QUALITY = 82
+
+
+def card_thumb(source: str) -> str:
+    """A small JPEG of a hero, generated once and committed beside it.
+
+    The heroes are 1600x459 PNGs of about a megabyte each, which is right for
+    a full-bleed banner and absurd for a card drawn at 260x146. Serving the
+    originals put 4.3 MB of images on the guides index, roughly thirty times
+    the bytes the page can use, and the visitor most likely to open a shared
+    guide link is on a phone.
+
+    JPEG rather than PNG because these are photographs, where PNG's lossless
+    encoding buys nothing and costs an order of magnitude. Pillow is already
+    installed (matplotlib depends on it and app.py imports PIL directly), so
+    this adds no dependency, in keeping with this file's rule about using only
+    what production already ships.
+
+    Regenerated only when the source is newer, so a normal build does no image
+    work at all.
+    """
+    from PIL import Image
+
+    thumb = f"card-{Path(source).stem}.jpg"
+    src, dst = ROOT / "static" / source, ROOT / "static" / thumb
+    if not src.exists():
+        return source
+    if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return thumb
+    with Image.open(src) as im:
+        im = im.convert("RGB")
+        height = round(im.height * CARD_THUMB_WIDTH / im.width)
+        im = im.resize((CARD_THUMB_WIDTH, height), Image.LANCZOS)
+        im.save(dst, "JPEG", quality=CARD_THUMB_QUALITY, optimize=True,
+                progressive=True)
+    print(f"  card thumb {thumb}  ({dst.stat().st_size:,} bytes"
+          f" from {src.stat().st_size:,})")
+    return thumb
+
+
 def card_image_for(post: dict):
     """The card's picture, or None when the post has no hero of its own.
 
@@ -1035,7 +1076,8 @@ def card_image_for(post: dict):
     every guide that lacks a hero and make the page look broken rather than
     plain. None means the card renders type-only, which is a design that works.
     """
-    return post.get("card") or post.get("hero") or None
+    source = post.get("card") or post.get("hero")
+    return card_thumb(source) if source else None
 
 
 def build_guides_index_html(posts, logo_svg, favicon) -> str:
