@@ -110,6 +110,14 @@ PROMPTS = {
         "photography, muted natural colour, overcast light, unposed. No text, "
         "no signage, no charts, no screens showing content.",
         20260814, 4),
+    "switching-repayment-plans-2026": (
+        "A young adult sitting at a small desk by a window in a modest "
+        "apartment in the early evening, a lamp switched on beside a stack of "
+        "opened mail and a closed laptop, seen from behind and slightly to one "
+        "side so no face is visible. Shallow depth of field, documentary "
+        "photography, muted natural colour, unposed. No text, no charts, no "
+        "screens showing content.",
+        20260815, 4),
     "for-counselors-the-money-conversation": (
         "A small high school counselor's office in late afternoon light, two "
         "chairs turned toward each other across a corner of a desk, a student's "
