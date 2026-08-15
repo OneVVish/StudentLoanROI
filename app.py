@@ -2092,6 +2092,34 @@ US_STATES = {
     "WI": "Wisconsin", "WY": "Wyoming",
 }
 
+# Census regions, used by the school search's region buttons.
+#
+# THESE POPULATE THE STATE FILTER; THEY ARE NOT A FILTER OF THEIR OWN, and the
+# distinction is load-bearing rather than stylistic. 129 schools in
+# college_coa_clean.csv sit outside these 50 states -- Puerto Rico alone has 108
+# (58 of them bachelor-granting), plus DC's 12 and 9 across Guam, the Virgin
+# Islands, American Samoa and the Pacific freely associated states. A region
+# FILTER built from four Census regions would therefore make "all four
+# selected" return FEWER schools than selecting none, which is the silent
+# narrowing this file's search guards exist to prevent.
+#
+# As buttons that write into the states multiselect, the multiselect stays the
+# only thing the backend filters on, every territory stays reachable by typing
+# its code, and no new filter path exists to get wrong.
+#
+# DC is grouped with the South, following the Census Bureau's own South
+# Atlantic division, so it is reachable from a chip rather than orphaned. The
+# territories are in no region and are deliberately not invented into one.
+SEARCH_REGIONS = {
+    "Northeast": ("CT", "ME", "MA", "NH", "NJ", "NY", "PA", "RI", "VT"),
+    "Midwest": ("IL", "IN", "IA", "KS", "MI", "MN", "MO", "NE", "ND", "OH",
+                "SD", "WI"),
+    "South": ("AL", "AR", "DC", "DE", "FL", "GA", "KY", "LA", "MD", "MS",
+              "NC", "OK", "SC", "TN", "TX", "VA", "WV"),
+    "West": ("AK", "AZ", "CA", "CO", "HI", "ID", "MT", "NV", "NM", "OR",
+             "UT", "WA", "WY"),
+}
+
 # Helper: default annual CC cost for a state abbrev (None/unknown -> national).
 def community_college_cost_for_state(state_key) -> int:
     if not state_key:
@@ -2591,6 +2619,51 @@ ADM_RATE_CREDENTIALS = ("Bachelor's degree",)
 # 6, so the associate's and certificate levels this search also offers have no
 # rows at all. See field_debt_applies.
 FIELD_DEBT_CREDENTIALS = ("Bachelor's degree",)
+
+# The ONLY orderings this search will offer: label -> (column, ascending).
+#
+# The exclusions are the point, and each has a reason already written down
+# elsewhere in this file:
+#
+#   net_price               an average over AIDED students only, so ordering on
+#                           it ranks schools by who got aid rather than by what
+#                           they charge. The sticker stays the affordability
+#                           test; net price stays the correction beside it.
+#   PLUS_DEBT_INST_COMP_MD  other families' past borrowing.
+#   field_debt_median       the same, for the student's own side.
+#
+# Ranking a school list on either debt column would read as a recommendation
+# built out of what other people were willing to owe, which is not a fact about
+# the school. They are display-only and must stay that way.
+#
+# Cost is first because it is the default, and because a cost-ordered list is
+# the one ordering that cannot be mistaken for a quality judgement.
+SEARCH_SORT_MODES = {
+    "Cost": ("coa_per_year", True),
+    "Finish rate": ("completion_rate", False),
+    "Admit rate": ("ADM_RATE", False),
+}
+SEARCH_SORT_DEFAULT = "Cost"
+# The caption clause per mode. One string each, because "cheapest first" is
+# false the moment the list is ordered on anything else and a stale ordering
+# claim is the kind of thing nobody re-reads.
+SEARCH_SORT_PHRASES = {
+    "Cost": "cheapest first",
+    "Finish rate": "highest completion rate first",
+    "Admit rate": "highest admit rate first",
+}
+# Sorting on a column a level barely reports is not an ordering, it is a
+# reshuffle of whichever schools happened to file. ADM_RATE is reported by 74%
+# of bachelor's institutions and collapses below that level, which is the same
+# coverage cliff ADM_RATE_CREDENTIALS already exists for -- so the sort reuses
+# that rule rather than restating it.
+SEARCH_SORT_THIN_COLUMNS = ("ADM_RATE",)
+
+# Below this many borrowing families, a published median is a handful of
+# households rather than a pattern. Scorecard reports the count beside the
+# median precisely so it can be read this way; 91 of the 2,127 schools with a
+# Parent PLUS median (4%) fall under it.
+PLUS_DEBT_THIN_N = 30
 
 CREDENTIAL_LEVELS = {
     "Bachelor's degree": ("bachl", 4),
@@ -6760,7 +6833,9 @@ def search_schools_by_budget(cip_family: str, credential: str,
                               states: tuple = None, control_types: tuple = None,
                               limit: int = 50,
                               min_coa_per_year: float = 0.0,
-                              adm_rate_range: tuple = None) -> pd.DataFrame:
+                              adm_rate_range: tuple = None,
+                              sort_mode: str = SEARCH_SORT_DEFAULT,
+                              name_query: str = None) -> pd.DataFrame:
     """Schools that teach `cip_family` at `credential` for at most
     `max_coa_per_year`, cheapest first. The inverse of the app's normal
     question: not "what does the school I named cost" but "what could I attend
@@ -6779,12 +6854,19 @@ def search_schools_by_budget(cip_family: str, credential: str,
     overstate cost, and an overstated cost drops a school the visitor could
     afford, where an understated one recommends a school they cannot.
 
-    Sorted by COST and nothing else, deliberately. Every salary figure in this
-    app comes from the occupation or major dataset -- no school attribute
-    touches the earnings side -- so a "best value" or ROI ordering here would
-    be the cost ordering wearing an outcome's name. For the same reason the ROI
-    model is NOT run per row: 181 model runs per search would be slow AND
-    misleading.
+    Ordered by `sort_mode`, which may only ever be a key of SEARCH_SORT_MODES:
+    cost, completion rate or admit rate. Never by anything that would amount to
+    a "best value" or ROI ordering -- every salary figure in this app comes from
+    the occupation or major dataset, no school attribute touches the earnings
+    side, so such an ordering would be the cost ordering wearing an outcome's
+    name. For the same reason the ROI model is NOT run per row: 181 model runs
+    per search would be slow AND misleading. See SEARCH_SORT_MODES for why the
+    two borrowing columns and net price are excluded from even this short list.
+
+    THE SORT RUNS BEFORE THE CAP, like every filter here, so the result is the
+    best `limit` MATCHES rather than the best of the cheapest `limit`. Missing
+    values sort LAST in every mode, and cost is the tiebreak, so the order is
+    total and does not depend on the input row order.
 
     Excludes schools flagged as no longer operating. Surfacing a closed
     institution as somewhere a 17-year-old could enrol is this feature's worst
@@ -6875,8 +6957,33 @@ def search_schools_by_budget(cip_family: str, credential: str,
         matches = matches[matches["ADM_RATE"].notna()
                           & (matches["ADM_RATE"] >= low)
                           & (matches["ADM_RATE"] <= high)]
+    if name_query and str(name_query).strip():
+        # A filter like any other, so it runs BEFORE the cap: typing "state"
+        # must search every match for the name, not just the cheapest 25.
+        # regex=False because a school name is not a pattern -- "St. John's
+        # (N.Y.)" would otherwise be an unbalanced-parenthesis error rather
+        # than a search.
+        matches = matches[matches["INSTNM"].fillna("").str.contains(
+            str(name_query).strip(), case=False, regex=False)]
 
-    matches = matches.sort_values("coa_per_year").head(limit).copy()
+    # The counts the visitor needs and the cap is about to destroy. The unrated
+    # one matters only when the list is ordered on admit rate: a school that
+    # reports no rate cannot be placed in that order, so it sinks to the tail
+    # and the cap may then cut it -- the same asymmetry the admit-rate BAND
+    # already warns about, arriving through the sort instead of the filter.
+    total_matches = len(matches)
+    unrated_matches = int(matches["ADM_RATE"].isna().sum())
+
+    sort_column, ascending = SEARCH_SORT_MODES[
+        resolve_search_sort(sort_mode, credential)]
+    # coa_per_year second so ties break on price and the order is total; a
+    # partial order would let two runs of the same search return different
+    # rows once the cap binds. na_position="last" in BOTH directions -- a
+    # school that reports no completion rate has not earned the top of a list
+    # ordered by completion.
+    matches = matches.sort_values([sort_column, "coa_per_year"],
+                                  ascending=[ascending, True],
+                                  na_position="last").head(limit).copy()
     matches["total_program_cost"] = matches["coa_per_year"] * nominal_years
 
     # What students of THIS field borrowed at each school, attached last and
@@ -6893,7 +7000,20 @@ def search_schools_by_budget(cip_family: str, credential: str,
     if field_debt_applies(credential):
         matches = matches.merge(bachelor_field_debt(cip_family),
                                 on="UNITID", how="left")
-    return matches.reset_index(drop=True)
+
+    out = matches.reset_index(drop=True)
+    # LAST STATEMENT BEFORE THE RETURN, AND THAT IS NOT STYLISTIC. pandas drops
+    # DataFrame.attrs across .merge -- measured on the pinned 3.0.3, where
+    # .head, .copy, .rename and .reset_index all preserve it and merge alone
+    # returns {}. Set before the field-debt merge above, the count would
+    # survive on graduate searches and vanish on bachelor's ones, which is the
+    # default path: the caption would silently fall back to the very claim this
+    # exists to correct, on the search most people run. Anything added below
+    # this line must be checked against that. check_school_search_filters
+    # asserts the attribute survives the call.
+    out.attrs["total_matches"] = total_matches
+    out.attrs["unrated_matches"] = unrated_matches
+    return out
 
 
 @st.cache_data(show_spinner=False)
@@ -6961,6 +7081,72 @@ def adm_filter_applies(credential: str) -> bool:
     return credential in ADM_RATE_CREDENTIALS
 
 
+def search_sort_modes(credential: str) -> list:
+    """Which orderings the school search may offer at this credential level.
+
+    In section 2 beside the search, for the reason adm_filter_applies gives:
+    a guard can then test the rule instead of a copy of it.
+
+    Cost is always available and always first. A mode is withheld rather than
+    offered and quietly useless in two cases:
+
+    - The column is thinly reported at this level. Ordering on a column three
+      quarters of the list leaves blank does not rank those schools, it just
+      decides which fall off the end of the cap. ADM_RATE is the only such
+      column and it reuses adm_filter_applies, because that rule already
+      describes this exact coverage cliff.
+    - The GRADUATE searches do not carry the column at all. Their frames come
+      from the tuition and debt files, which have no completion rate and no
+      admit rate, so cost is the only thing there is to order on. A control
+      offering more would be a control that lies -- the same objection that
+      put a button under the carried professional price.
+    """
+    if is_graduate_credential(credential) or credential in PROFESSIONAL_SEARCH_LEVELS:
+        return [SEARCH_SORT_DEFAULT]
+    modes = []
+    for label, (column, _asc) in SEARCH_SORT_MODES.items():
+        if column in SEARCH_SORT_THIN_COLUMNS and not adm_filter_applies(credential):
+            continue
+        modes.append(label)
+    return modes
+
+
+def resolve_search_sort(mode: str, credential: str) -> str:
+    """The sort mode actually applied, given what this level offers.
+
+    A stored mode can outlive the level that offered it -- pick "Admit rate" on
+    a bachelor's search, switch to Associate's, and the widget's session value
+    still says "Admit rate" while the option is gone. Streamlit raises on a
+    selectbox whose stored value is absent from its options, so this runs before
+    the widget (the reconcile_cc_mode / reconcile_search_pick pattern), and the
+    backend calls it too so a hand-built call cannot order on a column the level
+    does not support.
+    """
+    return mode if mode in search_sort_modes(credential) else SEARCH_SORT_DEFAULT
+
+
+def search_result_caption(shown: int, total: int, mode: str) -> str:
+    """The sentence above the results table.
+
+    `total` is REQUIRED and is the count BEFORE the cap. The caption this
+    replaced read "{len(results)} schools, cheapest first" over a frame that
+    had already been through .head(limit), so it said "25 schools" whether 25
+    matched or 312 -- a visitor could not tell "these are all of them" from
+    "these are the cheapest 25 of many", which are different findings in the
+    same way "no school teaches this" and "none is this cheap" are.
+
+    A required argument rather than a defaulted one on purpose: the failure
+    mode of getting this wrong is a confident sentence with no error anywhere,
+    so a forgetful caller should be a TypeError. Same reasoning as
+    render_forgiveness_note's total_interest and breakeven_summary's crossover.
+    """
+    phrase = SEARCH_SORT_PHRASES.get(mode, SEARCH_SORT_PHRASES[SEARCH_SORT_DEFAULT])
+    if total > shown:
+        return f"Showing {shown:,} of {total:,} matching schools, {phrase}."
+    return (f"{shown:,} school{'s' if shown != 1 else ''}, {phrase}."
+            if shown else "No matching schools.")
+
+
 GRADUATE_TUITION_PATH = "data/graduate_tuition_clean.csv"
 PROFESSIONAL_TUITION_PATH = "data/professional_tuition_clean.csv"
 
@@ -6990,7 +7176,8 @@ def search_graduate_schools_by_budget(cip_family: str, credential: str,
                                        states: tuple = None,
                                        control_types: tuple = None,
                                        limit: int = 25,
-                                       min_price_per_year: float = 0.0) -> pd.DataFrame:
+                                       min_price_per_year: float = 0.0,
+                                       name_query: str = None) -> pd.DataFrame:
     """Graduate schools teaching `cip_family` at `credential`, cheapest first.
 
     The graduate twin of search_schools_by_budget, and a separate function
@@ -7070,9 +7257,21 @@ def search_graduate_schools_by_budget(cip_family: str, credential: str,
     if control_types:
         matches = matches[matches["control_type"].isin(control_types)]
 
+    if name_query and str(name_query).strip():
+        # Same filter, same place: before the cap. See
+        # search_schools_by_budget for why regex is off.
+        matches = matches[matches["INSTNM"].fillna("").str.contains(
+            str(name_query).strip(), case=False, regex=False)]
+
+    total_matches = len(matches)
     matches = matches.sort_values("price_per_year").head(limit).copy()
     matches["total_program_cost"] = matches["price_per_year"] * years
-    return matches.reset_index(drop=True)
+    out = matches.reset_index(drop=True)
+    # Same count the undergraduate search reports, for the same reason: this
+    # list is capped too, and a master's field can easily exceed it. See
+    # search_schools_by_budget for why this is the last statement.
+    out.attrs["total_matches"] = total_matches
+    return out
 
 
 @st.cache_data(show_spinner=False)
@@ -7100,7 +7299,8 @@ def search_professional_schools_by_budget(program_key: str,
                                            states: tuple = None,
                                            control_types: tuple = None,
                                            limit: int = 25,
-                                           min_price_per_year: float = 0.0
+                                           min_price_per_year: float = 0.0,
+                                           name_query: str = None
                                            ) -> pd.DataFrame:
     """Medical, dental or law schools by price, cheapest first.
 
@@ -7158,6 +7358,13 @@ def search_professional_schools_by_budget(program_key: str,
     if control_types:
         matches = matches[matches["control_type"].isin(control_types)]
 
+    if name_query and str(name_query).strip():
+        # Same filter, same place: before the cap. See
+        # search_schools_by_budget for why regex is off.
+        matches = matches[matches["INSTNM"].fillna("").str.contains(
+            str(name_query).strip(), case=False, regex=False)]
+
+    total_matches = len(matches)
     matches = matches.sort_values("price_per_year").head(limit).copy()
     # Every column the shared results table reads, named as it expects them.
     # The table is deliberately one renderer for both searches, so anything it
@@ -7169,7 +7376,10 @@ def search_professional_schools_by_budget(program_key: str,
     matches["total_program_cost"] = matches["price_per_year"] * years
     matches["grad_tuition_fees_in"] = matches["prof_tuition_fees_in"]
     matches["grad_tuition_fees_out"] = matches["prof_tuition_fees_out"]
-    return matches.reset_index(drop=True)
+    out = matches.reset_index(drop=True)
+    # See search_schools_by_budget: last statement, and the reason is measured.
+    out.attrs["total_matches"] = total_matches
+    return out
 
 
 def applied_program_price(program_key: str):
@@ -19277,7 +19487,15 @@ SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
                         # stops counting that search as adjusted.
                         "grad_search_credential", "grad_search_coa_range",
                         "grad_search_cip_family", "grad_search_home_state",
-                        "grad_search_states", "grad_search_control_types")
+                        "grad_search_states", "grad_search_control_types",
+                        # Sort and name change WHICH schools come back (the
+                        # sort because it runs before the cap), so touching
+                        # either is a real adjustment. The region buttons are
+                        # deliberately absent: they only write into
+                        # search_states, which is already here, and listing a
+                        # button would claim the chip is itself a filter.
+                        "search_sort", "search_name",
+                        "grad_search_sort", "grad_search_name")
 
 
 def search_was_adjusted() -> bool:
@@ -19369,6 +19587,25 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # Seeded, not synced: two-way syncing would need a canonical third value
     # and a write-back on every rerun, and the cross-page case this exists for
     # is a fresh session on the other page, where a seed is exactly right.
+    def tool_button_key(base: str) -> str:
+        """Per-tool key for a BUTTON: the prefix, and none of the seeding.
+
+        tool_key seeds the graduate copy by ASSIGNING to it, and Streamlit
+        forbids assigning to a button's key -- StreamlitValueAssignmentNotAllowed
+        the moment "More tools" renders the undergraduate search (which leaves
+        `search_region_northeast` in session_state) and then the graduate one.
+        The page half-drew and then died, which is exactly the failure mode the
+        duplicate-key comment above describes.
+
+        Seeding is meaningless for a button in any case: its stored value is
+        "was I clicked on the last run", which is not context worth carrying
+        between two tools. So this is the prefix alone, which is all the
+        uniqueness rule actually asks for.
+
+        Found in a browser, not by a type error and not by any guard.
+        """
+        return f"grad_{base}" if is_graduate else base
+
     def tool_key(base: str) -> str:
         if not is_graduate:
             return base
@@ -19387,6 +19624,8 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     home_key = tool_key("search_home_state")
     states_key = tool_key("search_states")
     control_types_key = tool_key("search_control_types")
+    sort_key = tool_key("search_sort")
+    name_key = tool_key("search_name")
 
     # Read BEFORE the Level widget renders, which is the sidebar's own
     # before-the-widget pattern, because it decides whether there is a field of
@@ -19469,6 +19708,32 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     )
     budget = max_coa
     all_states = sorted({s for s in coa_df["STABBR"].dropna().unique()})
+
+    # Region buttons, ABOVE the states multiselect and writing into it.
+    #
+    # ORDER IS LOAD-BEARING TWICE OVER. These must execute before the
+    # multiselect instantiates `states_key`, because Streamlit refuses an
+    # assignment to a key whose widget has already rendered -- the same rule
+    # the "Choose by" radio and _apply_pending_school are placed around. And
+    # they must never st.rerun(): the write lands before the widget reads its
+    # own key on this very pass, so the control already shows the new value.
+    #
+    # Intersected with all_states because SEARCH_REGIONS is the 50 states plus
+    # DC while the multiselect's options come from the DATA, which also holds
+    # PR, GU, VI and the rest. Handing a multiselect a value outside its
+    # options raises, and this is the only place the two lists meet.
+    region_cols = st.columns(len(SEARCH_REGIONS))
+    for _col, (_region, _codes) in zip(region_cols, SEARCH_REGIONS.items()):
+        if _col.button(_region, key=tool_button_key(f"search_region_{_region.lower()}"),
+                       use_container_width=True,
+                       help=f"Select every {_region} state in the filter below. "
+                            "Adds to the list rather than replacing it, so you "
+                            "can combine regions."):
+            _current = set(st.session_state.get(states_key) or [])
+            st.session_state[states_key] = sorted(
+                _current | {c for c in _codes if c in all_states})
+            mark_interaction(states_key)
+
     home_col, states_col, type_col = st.columns([2, 3, 3])
 
     # Asked once, here, rather than inherited from the sidebar's in-state
@@ -19531,6 +19796,40 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
               "to include all three. For-profit schools are the largest group "
               "in this dataset and their prices sort near the top, so this is "
               "how you look past them.")
+
+    # Reconciled BEFORE the widget exists. A stored "Admit rate" outlives the
+    # bachelor's search that offered it, and Streamlit raises when a keyed
+    # selectbox's stored value is absent from its options -- reconcile_cc_mode
+    # and reconcile_search_pick are here for the same reason.
+    _sort_options = search_sort_modes(credential)
+    if st.session_state.get(sort_key) not in _sort_options:
+        st.session_state[sort_key] = SEARCH_SORT_DEFAULT
+    # A one-option "Sort by" is a control that cannot be used, and on the
+    # graduate tools cost is genuinely the only orderable column -- their
+    # frames come from the tuition and debt files and carry neither a
+    # completion rate nor an admit rate. Rendering it anyway would promise a
+    # choice the data cannot deliver. Keyed on the option list rather than on
+    # is_graduate, so it is a general rule and not a fourth branch.
+    if len(_sort_options) > 1:
+        sort_col, name_col = st.columns([3, 5])
+        sort_mode = sort_col.selectbox(
+            "Sort by", _sort_options, key=sort_key,
+            on_change=lambda: mark_interaction(sort_key),
+            help="Cost is the default because it is the one ordering that "
+                 "cannot be mistaken for a judgement about quality. Finish "
+                 "rate is the share who graduate within 150% of the normal "
+                 "time. Sorting never changes which schools match, only which "
+                 "of them the list shows first.")
+    else:
+        sort_mode = SEARCH_SORT_DEFAULT
+        (name_col,) = st.columns(1)
+    name_query = name_col.text_input(
+        "School name contains (optional)", key=name_key,
+        on_change=lambda: mark_interaction(name_key),
+        placeholder="e.g. State, Tech, Community",
+        help="Narrows the matches by name before the list is cut to 25, so "
+             "this searches every school that fits your filters rather than "
+             "only the ones already on screen.")
 
     # UNDERGRADUATE ONLY, and absent rather than disabled here.
     # adm_filter_applies() already refuses every non-bachelor's
@@ -19641,6 +19940,8 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         "adm_filtered": adm_filtered,
         "adm_low": adm_low,
         "adm_high": adm_high,
+        "sort_mode": sort_mode,
+        "name_query": name_query,
     }
 
 
@@ -19678,7 +19979,11 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     # the debt file, so the coverage question does not even mean the same thing.
     known, priced = coverage or (0, 0)
     st.caption(
-        f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
+        search_result_caption(
+            len(results),
+            results.attrs.get("total_matches", len(results)),
+            SEARCH_SORT_DEFAULT)
+        + " "
         f"**Per year** is tuition and required fees, *not* a full cost of "
         f"attendance. No federal source publishes graduate living costs, so "
         f"housing, food and books are on top of every figure here, and this is "
@@ -19964,7 +20269,8 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                 grad_key, controls["max_budget"], controls["home_state"],
                 states=tuple(controls["states"]) or None, limit=25,
                 min_price_per_year=controls["min_budget"],
-                control_types=tuple(controls["control_types"]) or None)
+                control_types=tuple(controls["control_types"]) or None,
+                name_query=controls.get("name_query"))
         else:
             # The MBA runs the GRADUATE search -- its universe is the debt file
             # and its price is the school's institution-wide graduate average,
@@ -19981,7 +20287,8 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                 search_key, grad_key, controls["max_budget"], controls["home_state"],
                 states=tuple(controls["states"]) or None, limit=25,
                 min_price_per_year=controls["min_budget"],
-                control_types=tuple(controls["control_types"]) or None)
+                control_types=tuple(controls["control_types"]) or None,
+                name_query=controls.get("name_query"))
         # One name for "the yearly price" downstream, so the table, the picker
         # and the apply button do not each have to know which search ran.
         if not results.empty:
@@ -20136,8 +20443,15 @@ def _search_actions(results, table, captions, is_graduate: bool,
                 results, table, captions,
                 title=("Graduate schools that fit this budget" if is_graduate
                        else "Schools that fit this budget"),
-                subtitle=(f"{len(results)} schools, cheapest first, "
-                          f"{CIP_FAMILY_TITLES.get(family, level or 'all fields')}"),
+                # The same builder the screen uses, so a printed shortlist
+                # cannot claim a different count or a different ordering from
+                # the page it was printed off.
+                subtitle=(search_result_caption(
+                              len(results),
+                              results.attrs.get("total_matches", len(results)),
+                              (controls or {}).get("sort_mode", SEARCH_SORT_DEFAULT)
+                          ).rstrip(".")
+                          + f", {CIP_FAMILY_TITLES.get(family, level or 'all fields')}"),
                 is_graduate=is_graduate,
                 filters=(_search_filter_summary(controls, is_graduate)
                          if controls else None))),
@@ -20190,7 +20504,8 @@ def render_school_search(always_open: bool = False) -> None:
                 f"[open this as its own page]({internal_tool_url('schools')})."
             )
         st.caption(
-            "Sorted by cost, and by nothing else. Every salary in this app comes "
+            "Ordered by cost, completion rate or admit rate, and by nothing "
+            "else. Every salary in this app comes "
             "from the occupation or major you picked, never from the school, so "
             "this can't tell you which of these leads to higher pay. What it can "
             "tell you is which ones teach your field at a price you could cover."
@@ -20206,6 +20521,7 @@ def render_school_search(always_open: bool = False) -> None:
         states, control_types = controls["states"], controls["control_types"]
         adm_filtered = controls["adm_filtered"]
         adm_low, adm_high = controls["adm_low"], controls["adm_high"]
+        sort_mode, name_query = controls["sort_mode"], controls["name_query"]
 
         # From the controls' own return value rather than by re-reading a key:
         # the key is per-tool now, and re-deriving it here is how the two get
@@ -20228,7 +20544,13 @@ def render_school_search(always_open: bool = False) -> None:
             states=tuple(states) or None, limit=25, min_coa_per_year=min_coa,
             control_types=tuple(control_types) or None,
             # Percent on screen, fraction in the data.
-            adm_rate_range=(adm_low / 100, adm_high / 100) if adm_filtered else None)
+            adm_rate_range=(adm_low / 100, adm_high / 100) if adm_filtered else None,
+            sort_mode=sort_mode, name_query=name_query)
+        # Read once, here. The backend attaches it as the last thing it does,
+        # and any later .merge on this frame would drop it silently.
+        total_matches = results.attrs.get("total_matches", len(results))
+        _matched = total_matches
+        _unrated = results.attrs.get("unrated_matches", 0)
 
         # Only once the visitor has actually adjusted something -- see
         # search_was_adjusted. The results above still render either way; this
@@ -20242,7 +20564,10 @@ def render_school_search(always_open: bool = False) -> None:
             _log_school_search(family, budget, states, len(results), home_state,
                                 level=CREDENTIAL_LEVELS.get(credential, (None,))[0],
                                 adm_band=(adm_low, adm_high) if adm_filtered else None,
-                                control_types=control_types)
+                                control_types=control_types,
+                                sort_mode=sort_mode,
+                                name_filtered=bool(name_query and name_query.strip()),
+                                total_matches=total_matches)
 
         if results.empty:
             # A real answer, not an error state. "Your budget admits nothing in
@@ -20279,8 +20604,8 @@ def render_school_search(always_open: bool = False) -> None:
             return
 
         st.caption(
-            f"{len(results)} school{'s' if len(results) != 1 else ''}, cheapest first. "
-            "These are **sticker prices before aid**, so a pricier school can end up "
+            search_result_caption(len(results), total_matches, sort_mode)
+            + " These are **sticker prices before aid**, so a pricier school can end up "
             "cheaper once grants are applied, so treat this as a starting list and "
             "run the **Net price** calculator on any school you're serious about."
         )
@@ -20351,9 +20676,23 @@ def render_school_search(always_open: bool = False) -> None:
             # It is NOT filterable and NOT sortable-on: it describes families
             # who already borrowed, so ranking by it would rank schools by
             # other people's decisions and read as a recommendation.
-            "Parents borrowed": results["PLUS_DEBT_INST_COMP_MD"].map(
-                lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0
-                else "—"),
+            # The count rides IN the cell rather than in a twelfth column.
+            # Eleven already share the width seven used to and Streamlit clips
+            # a cell rather than wrapping it, so another column would cost
+            # every other one legibility to carry a parenthetical. "(12)" is
+            # four characters inside a header sixteen wide.
+            #
+            # It is here at all because a median over 5 families and one over
+            # 500 render identically without it, and Scorecard publishes the
+            # count next to the median precisely so they need not.
+            "Parents borrowed": [
+                (f"{fmt_money(debt)} ({int(n)})"
+                 if pd.notna(n) and n > 0 else fmt_money(debt))
+                if pd.notna(debt) and debt > 0 else "—"
+                for debt, n in zip(results["PLUS_DEBT_INST_COMP_MD"],
+                                    results.get("PLUS_DEBT_INST_COMP_N",
+                                                pd.Series(index=results.index,
+                                                          dtype=float)))],
             # And the STUDENT's own, for their own field. The column beside it
             # has always shown what PARENTS borrowed with no student equivalent
             # anywhere in this table, which is a strange pair of facts to give
@@ -20422,7 +20761,19 @@ def render_school_search(always_open: bool = False) -> None:
             + (f" You've limited this to {adm_low}% to {adm_high}%, so every row "
                "reports a rate and any school that reports none is excluded. "
                if adm_filtered else " ")
-            + "It is never what the list is sorted by: the order is cost, always."
+            + (f"This list is ordered by **{sort_mode.lower()}**."
+               if sort_mode != SEARCH_SORT_DEFAULT else
+               "This list is ordered by cost.")
+            + " Ordering never changes which schools match, only which of the "
+              "matches you see first."
+            # An admit-rate ordering has a hole a cost ordering does not, and
+            # it is the same asymmetry the band's own warning describes: a
+            # school reporting no rate cannot be placed in the order at all, so
+            # it sinks to the bottom and the cap can then cut it. Said only
+            # when it is actually true of the list on screen.
+            + (f" {_unrated:,} of the {_matched:,} matching schools report no "
+               "admit rate, so they sort last and may fall outside the 25 shown."
+               if sort_mode == "Admit rate" and _unrated else "")
         )
         # The three things render_parent_plus_note's docstring forbids doing
         # with this figure, said once below the table rather than 25 times
@@ -20451,6 +20802,19 @@ def render_school_search(always_open: bool = False) -> None:
             "against the school they left, and part-time students are not in "
             "it at all. **—** means unreported."
         )
+        # Counted over the rows ON SCREEN, not the whole dataset, so the
+        # sentence describes what the visitor is actually looking at -- and so
+        # it stays silent on the majority of searches where every listed median
+        # is well backed. Dataset-wide it is 91 of 2,127 (4%).
+        _plus_n = pd.to_numeric(
+            results.get("PLUS_DEBT_INST_COMP_N",
+                        pd.Series(index=results.index, dtype=float)),
+            errors="coerce")
+        _plus_md = pd.to_numeric(results["PLUS_DEBT_INST_COMP_MD"], errors="coerce")
+        _shown_plus = _plus_md.notna() & (_plus_md > 0)
+        _with_plus = int(_shown_plus.sum())
+        _thin_plus = int((_shown_plus & _plus_n.notna()
+                          & (_plus_n < PLUS_DEBT_THIN_N)).sum())
         _cap(
             "**Parents borrowed** is what families of *completers* at that school "
             "who took Parent PLUS borrowed in total, at the median. It is the parent's "
@@ -20458,7 +20822,13 @@ def render_school_search(always_open: bool = False) -> None:
             "app models for the student. It is not what a typical family borrows: "
             "families who borrowed nothing are not in it. Congress capped Parent "
             "PLUS on July 1, 2026, so these are amounts borrowed under the older, "
-            "uncapped rules. **—** means the school reports none."
+            "uncapped rules. **—** means the school reports none. "
+            "The number in brackets is how many families the median is drawn "
+            "from, which is the difference between a pattern and a handful."
+            + (f" **{_thin_plus} of the {_with_plus} schools listed here** report "
+               f"a median based on fewer than {PLUS_DEBT_THIN_N} families, so "
+               "treat those as a rough indication."
+               if _thin_plus else "")
         )
 
         # Said separately from the Parent PLUS caption above, not folded into
@@ -20580,7 +20950,10 @@ def render_school_search(always_open: bool = False) -> None:
 def _log_school_search(family: str, budget: int, states: list, hit_count: int,
                         home_state: str = None, level: str = None,
                         adm_band: tuple = None,
-                        control_types: list = None) -> None:
+                        control_types: list = None,
+                        sort_mode: str = None,
+                        name_filtered: bool = False,
+                        total_matches: int = None) -> None:
     """Record a search, once per distinct query rather than once per rerun.
 
     This runs on every pass of the script, so without the dedupe a slider drag
@@ -20598,8 +20971,11 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
     # the ACTION a zero-result row cannot be read -- "budget admits nothing in
     # this field" is the finding this log exists to capture, and it is a
     # different finding from "nothing in that admit band does".
+    # sort_mode and name_filtered join the signature because both change which
+    # schools come back -- the sort because it runs BEFORE the cap, so
+    # reordering a 633-match search swaps out the whole visible 25.
     signature = (family, budget, tuple(states), hit_count, home_state, level,
-                 adm_band, tuple(control_types or ()))
+                 adm_band, tuple(control_types or ()), sort_mode, name_filtered)
     if st.session_state.get("_last_school_search") == signature:
         return
     st.session_state["_last_school_search"] = signature
@@ -20616,6 +20992,15 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
         # Abbreviated to first letters (Public / Non-profit / For-profit) so
         # the action string stays short, the same treatment `level` gets.
         f":types={'+'.join(t.split()[-1][0] for t in control_types) if control_types else 'any'}"
+        f":sort={(sort_mode or SEARCH_SORT_DEFAULT).split()[0].lower()}"
+        # WHETHER they typed a name, never WHAT they typed. A school name is
+        # free text a visitor entered, and usage_logs is the research dataset.
+        f":named={'y' if name_filtered else 'n'}"
+        # n= is the CAPPED count and always has been, so it cannot answer "did
+        # the budget admit anything" once the cap binds -- 25 means "at least
+        # 25". matched= is the real total. Rows written before this carry no
+        # matched= at all; see migrations.sql.
+        f":matched={hit_count if total_matches is None else total_matches}"
         f":n={hit_count}")
 
 
