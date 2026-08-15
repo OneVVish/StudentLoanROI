@@ -279,6 +279,11 @@
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
+  /* The renderer wraps quote paragraphs in <p> so a multi-paragraph footnote
+     is possible. Zeroing the outer margins keeps every EXISTING single
+     paragraph quote pixel-identical to before that change. */
+  article blockquote p { margin: 0 0 12px; }
+  article blockquote p:last-child { margin-bottom: 0; }
   article hr { border: 0; border-top: 1px solid var(--rule); margin: 30px 0; }
   article table { width: 100%; border-collapse: collapse; margin: 18px 0; }
   article thead th { background: var(--deep); color: #fff; padding: 9px 10px;

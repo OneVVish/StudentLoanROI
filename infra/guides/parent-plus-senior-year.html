@@ -279,6 +279,11 @@
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
+  /* The renderer wraps quote paragraphs in <p> so a multi-paragraph footnote
+     is possible. Zeroing the outer margins keeps every EXISTING single
+     paragraph quote pixel-identical to before that change. */
+  article blockquote p { margin: 0 0 12px; }
+  article blockquote p:last-child { margin-bottom: 0; }
   article hr { border: 0; border-top: 1px solid var(--rule); margin: 30px 0; }
   article table { width: 100%; border-collapse: collapse; margin: 18px 0; }
   article thead th { background: var(--deep); color: #fff; padding: 9px 10px;
@@ -358,7 +363,7 @@
 <p>That is the real cost of the senior-year cliff. It is not only that the money is harder to find. It is that the money you find is worse money.</p>
 <h2>The number to actually plan with</h2>
 <p>If Parent PLUS is part of how you are paying for a four-year degree, the figure to write down is not $20,000. It is:</p>
-<blockquote><strong>$16,250 a year</strong>, which is $65,000 spread evenly across four years.</blockquote>
+<blockquote><p><strong>$16,250 a year</strong>, which is $65,000 spread evenly across four years.</p></blockquote>
 <p>Plan at that level and the fourth year is like the other three. Plan at $20,000 and you have quietly borrowed your senior year's funding in advance.</p>
 <h2>The whole federal picture</h2>
 <p>Student Direct loans and Parent PLUS together, for a dependent undergraduate under the 2026 rules:</p>
