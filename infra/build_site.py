@@ -167,6 +167,12 @@ SITE_CSS = """  :root {
   }
   .tools .tile a { color: var(--blue); font-weight: 600;
     text-decoration: none; }
+  /* TWO columns for the tool cards, not the three the feature grid uses.
+     There are four tools, and four cards in a 3-up grid leave a lone card
+     stranded on row two -- the same reason the guides index is 2-up. This
+     needs the extra specificity of `.tools .grid`, so the 720px breakpoint
+     below has to restate it or the cards stay 2-up on a phone. */
+  .tools .grid { grid-template-columns: repeat(2, 1fr); }
   .cta { text-align: center; padding: 56px 0; }
   footer {
     border-top: 1px solid var(--rule); margin-top: 40px; padding: 26px 0 40px;
@@ -243,6 +249,7 @@ SITE_CSS = """  :root {
   @media (max-width: 720px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
+    .tools .grid { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
@@ -564,7 +571,7 @@ def build_html(f: dict, posts: list = ()) -> str:
 {guides_section}
 
 <section class="tools">
-  <h2>Three tools, one dataset</h2>
+  <h2>Four tools, one dataset</h2>
   <div class="grid">
     <div class="tile"><b>🎓 The calculator</b>
       <p>School + major + loan → the 10-year verdict.
@@ -572,6 +579,11 @@ def build_html(f: dict, posts: list = ()) -> str:
     <div class="tile"><b>🔎 Schools that fit a budget</b>
       <p>Every school teaching your field, cheapest first, priced for your
       state. <a href="/?tool=schools&amp;from=welcome">Search&nbsp;→</a></p></div>
+    <div class="tile"><b>🏛️ Graduate schools that fit a budget</b>
+      <p>Master's, doctoral, medicine, dentistry, law and the MBA, at each
+      school's published tuition and fees beside what its graduates in that
+      field borrowed.
+      <a href="/?tool=gradschools&amp;from=welcome">Find&nbsp;→</a></p></div>
     <div class="tile"><b>💸 Already have loans?</b>
       <p>Compare the 2026 repayment plans on the balance you already owe.
       <a href="/?tool=repayment&amp;from=welcome">Compare&nbsp;→</a></p></div>
