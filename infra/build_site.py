@@ -173,6 +173,24 @@ SITE_CSS = """  :root {
      needs the extra specificity of `.tools .grid`, so the 720px breakpoint
      below has to restate it or the cards stay 2-up on a phone. */
   .tools .grid { grid-template-columns: repeat(2, 1fr); }
+  /* ===== The tools band =====
+     The tools are the product, so they sit above the guides and carry a
+     background of their own: edge to edge, the section reads as its own zone
+     instead of as one more stretch of the same white page.
+     The colour is --tile, the neutral grey the stat tiles and feature cards
+     already use. NOT the brand orange: that is this page's single accent, and
+     four cards painted in it would be a far louder change than a zone marker
+     needs to be. No new token and no new hue, so nothing here has to be
+     re-decided if the palette moves.
+     The full bleed comes from the MARKUP -- the section is a sibling of the
+     page's .wrap containers with its own .wrap inside -- and deliberately not
+     from `margin-left: calc(50% - 50vw)`. 100vw counts the scrollbar, so the
+     vw trick adds a horizontal scrollbar of its own at exactly the widths
+     where the page is otherwise fine.
+     The cards flip to white with a rule because `.tile`'s own background IS
+     --tile: left alone they would dissolve into the band they sit on. */
+  .tools { background: var(--tile); margin-top: 40px; padding: 48px 0; }
+  .tools .tile { background: var(--surface); border: 1px solid var(--rule); }
   .cta { text-align: center; padding: 56px 0; }
   footer {
     border-top: 1px solid var(--rule); margin-top: 40px; padding: 26px 0 40px;
@@ -542,9 +560,13 @@ def build_html(f: dict, posts: list = ()) -> str:
   </div>
 </section>
 
-{guides_section}
+</div>
 
+<!-- The tools band breaks out of .wrap so its background can run edge to
+     edge; it carries its own .wrap so the content stays on the same grid as
+     every section above and below it. See the tools-band note in SITE_CSS. -->
 <section class="tools">
+  <div class="wrap">
   <h2>Four tools, one dataset</h2>
   <div class="grid">
     <div class="tile"><b>🎓 The calculator</b>
@@ -562,7 +584,12 @@ def build_html(f: dict, posts: list = ()) -> str:
       <p>Compare the 2026 repayment plans on the balance you already owe.
       <a href="/?tool=repayment&amp;from=welcome">Compare&nbsp;→</a></p></div>
   </div>
+  </div>
 </section>
+
+<div class="wrap">
+
+{guides_section}
 
 <div class="cta">
   <h2>Two minutes. Zero forms.</h2>
