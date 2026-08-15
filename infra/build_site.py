@@ -542,32 +542,6 @@ def build_html(f: dict, posts: list = ()) -> str:
   </div>
 </section>
 
-<section>
-  <h2>Know before you borrow</h2>
-  <p class="deck">Starting college in {f['effective_year']} or later, federal
-  borrowing for a dependent undergraduate has hard ceilings. This is the whole
-  table:</p>
-  <div class="table-scroll">
-  <table>
-    <thead><tr><th>College year</th><th>Student Direct loan</th>
-      <th>Parent PLUS max</th><th>Maximum combined</th></tr></thead>
-    <tbody>
-{cap_body}
-    </tbody>
-    <tfoot><tr><td>4-year total</td><td>{money(d_tot)}</td>
-      <td>{money(p_tot)}</td><td>{money(c_tot)}</td></tr></tfoot>
-  </table>
-  </div>
-  <p class="note">*Parent PLUS is capped at {money(f['plus_aggregate'])} in
-  total per dependent student: borrow {money(f['plus_annual'])} in each of the
-  first three years and only {money(leftover)} remains for senior year. These
-  are ceilings, not offers; anything a school costs beyond them is private
-  borrowing.</p>
-  <div class="callout">Planning around PLUS? The steady number is
-  {money(f['plus_aggregate'] / 4)} a year, not {money(f['plus_annual'])}.
-  The calculator applies these caps automatically to any school you pick.</div>
-</section>
-
 {guides_section}
 
 <section class="tools">
