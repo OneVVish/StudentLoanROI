@@ -67,6 +67,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [The repayment switch that only goes one way](https://worthmydegree.com/guides/switching-repayment-plans-2026):
+  Payments you have already made count toward RAP. RAP payments mostly
+  do not count back. On a graduate balance the door stays shut until
+  you earn about $108,000.
 - [What starting at community college is actually worth](https://worthmydegree.com/guides/community-college-first):
   Two years at a community college before transferring cuts the
   published cost of a bachelor's by 39%, and changes how much of it

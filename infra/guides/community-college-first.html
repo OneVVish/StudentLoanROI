@@ -279,6 +279,11 @@
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
+  /* The renderer wraps quote paragraphs in <p> so a multi-paragraph footnote
+     is possible. Zeroing the outer margins keeps every EXISTING single
+     paragraph quote pixel-identical to before that change. */
+  article blockquote p { margin: 0 0 12px; }
+  article blockquote p:last-child { margin-bottom: 0; }
   article hr { border: 0; border-top: 1px solid var(--rule); margin: 30px 0; }
   article table { width: 100%; border-collapse: collapse; margin: 18px 0; }
   article thead th { background: var(--deep); color: #fff; padding: 9px 10px;
@@ -371,7 +376,7 @@
 <h2>What it does not change, and why that matters</h2>
 <p>That last phrase is carrying a lot of weight, so here is what sits behind it.</p>
 <p>This calculator does not vary salary by school. It prices a path on what people in that occupation earn, from federal wage data, and on what the school charges. So a 2+2 and a four-year start come out with the same earnings and differ only on cost. It is a modeling choice, and you lean on it every time you read one of these figures.</p>
-<blockquote>If you believe the four-year school changes what you will earn, this comparison is not measuring the thing you care about, and no calculator here can settle it. What it can tell you exactly is the price of finding out.</blockquote>
+<blockquote><p>If you believe the four-year school changes what you will earn, this comparison is not measuring the thing you care about, and no calculator here can settle it. What it can tell you exactly is the price of finding out.</p></blockquote>
 <h2>When the transfer is not the question</h2>
 <p>Not every path needs the four-year school at all. Of the 836 occupations in the wage data, <strong>48 list an associate's degree as the typical entry credential</strong>, and <strong>430 need no degree at all</strong>. For those the community college is not two cheap years before the real thing. It is the whole credential, and the calculator prices it that way: two years of cost, no transfer, no four-year tuition.</p>
 <p>Some community colleges now award their own bachelor's degrees too. The first national study of those graduates found they earn about <strong>5.5% less</strong> a year than people with the same degree in the same field from a four-year school, and clearly more than people who stopped at an associate's. That figure describes who chose each path rather than what the choice did to them, so this calculator does not apply it to your salary. Treat it as a reason to ask the college what its own graduates in your field earn.</p>

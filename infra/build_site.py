@@ -386,11 +386,27 @@ def render_markdown(body: str) -> str:
             html.append(f"<h2>{_inline(line[3:])}</h2>"); i += 1
         elif line.startswith("# "):
             html.append(f"<h1>{_inline(line[2:])}</h1>"); i += 1
-        elif line.startswith("> "):
+        elif line.startswith(">"):
+            # ">" WITHOUT A SPACE IS THE PARAGRAPH SEPARATOR inside a quote, and
+            # matching only "> " hung the build outright: a bare ">" matched no
+            # branch, fell to the paragraph `else`, and that loop rejects a line
+            # starting with ">" before it ever increments i. No output, no error,
+            # no exit -- just a build that never returns. Found 2026-08-15 by
+            # adding an ordinary two-paragraph footnote to the repayment guide.
             quote, i = [], i
-            while i < len(lines) and lines[i].startswith("> "):
-                quote.append(lines[i][2:]); i += 1
-            html.append(f"<blockquote>{_inline(' '.join(quote))}</blockquote>")
+            while i < len(lines) and lines[i].startswith(">"):
+                quote.append(lines[i][1:].strip()); i += 1
+            paras, cur = [], []
+            for q in quote:
+                if q:
+                    cur.append(q)
+                elif cur:
+                    paras.append(" ".join(cur)); cur = []
+            if cur:
+                paras.append(" ".join(cur))
+            html.append("<blockquote>"
+                        + "".join(f"<p>{_inline(p)}</p>" for p in paras)
+                        + "</blockquote>")
         elif line.startswith("- "):
             items, i = [], i
             while i < len(lines) and lines[i].startswith("- "):
@@ -416,6 +432,13 @@ def render_markdown(body: str) -> str:
             para, i = [], i
             while i < len(lines) and lines[i].strip() and not lines[i][0] in "#>-|":
                 para.append(lines[i].strip()); i += 1
+            if not para:
+                # PROGRESS GUARANTEE. This branch is the fallthrough, so a line
+                # matching no branch above AND rejected by the loop condition
+                # consumes nothing and spins forever -- which is what the bare
+                # ">" did. Emit it and advance. A slightly wrong render is
+                # recoverable and visible; a hung build is neither.
+                para.append(line); i += 1
             html.append(f"<p>{_inline(' '.join(para))}</p>")
     return "\n".join(html)
 
@@ -705,6 +728,11 @@ ARTICLE_CSS = """
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
+  /* The renderer wraps quote paragraphs in <p> so a multi-paragraph footnote
+     is possible. Zeroing the outer margins keeps every EXISTING single
+     paragraph quote pixel-identical to before that change. */
+  article blockquote p { margin: 0 0 12px; }
+  article blockquote p:last-child { margin-bottom: 0; }
   article hr { border: 0; border-top: 1px solid var(--rule); margin: 30px 0; }
   article table { width: 100%; border-collapse: collapse; margin: 18px 0; }
   article thead th { background: var(--deep); color: #fff; padding: 9px 10px;

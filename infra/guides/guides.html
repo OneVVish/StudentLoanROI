@@ -279,6 +279,11 @@
   article blockquote { border-left: 4px solid var(--orange);
     background: var(--tint); border-radius: 0 10px 10px 0;
     padding: 14px 18px; margin: 20px 0; font-size: 18px; }
+  /* The renderer wraps quote paragraphs in <p> so a multi-paragraph footnote
+     is possible. Zeroing the outer margins keeps every EXISTING single
+     paragraph quote pixel-identical to before that change. */
+  article blockquote p { margin: 0 0 12px; }
+  article blockquote p:last-child { margin-bottom: 0; }
   article hr { border: 0; border-top: 1px solid var(--rule); margin: 30px 0; }
   article table { width: 100%; border-collapse: collapse; margin: 18px 0; }
   article thead th { background: var(--deep); color: #fff; padding: 9px 10px;
@@ -350,9 +355,16 @@
 <section>
   <div class="post-head">
     <h2>Latest guides</h2>
-    <span>4 guides</span>
+    <span>5 guides</span>
   </div>
   <div class="post-grid">
+  <a class="post-card" href="/guides/switching-repayment-plans-2026">
+    <figure><img src="/app/static/card-guide-hero-switching-repayment-plans-2026-klein4b.jpg" alt="" loading="lazy" width="1600" height="900"></figure>
+    <p class="meta"><time datetime="2026-08-15">Aug 15, 2026</time>
+      · 11 min read</p>
+    <b>The repayment switch that only goes one way</b>
+    <span class="sum">Under the 2026 rules the plans do not swap freely. What you already paid carries into RAP, and what you pay under RAP mostly does not carry back out.</span>
+    <p class="more">Read the guide</p></a>
   <a class="post-card" href="/guides/community-college-first">
     <figure><img src="/app/static/card-guide-hero-community-college-first-klein4b.jpg" alt="" loading="lazy" width="1600" height="900"></figure>
     <p class="meta"><time datetime="2026-08-13">Aug 13, 2026</time>
