@@ -12,6 +12,8 @@ What almost nobody mentions is that the plans do not swap freely. One of the cho
 
 This article is about that asymmetry, and about what these plans cost once you look past the monthly payment. Every figure in it comes from the same model that runs the calculator, at the 6.5 percent federal rate the tool uses.
 
+Dollar amounts throughout have been rounded for readability, so the tables will not always add up to the cent. Figures set by statute, such as the $50 dependent reduction and the $10 minimum payment, are exact.
+
 ## The menu, on one balance
 
 Take somebody who finished a doctoral program owing about **$79,000**. That is the median debt at graduation across the 591 doctoral programs in the federal field-of-study data. Put them on an income of about **$47,000**, the twenty-fifth percentile of the 825 occupational medians in the wage data. A balance about seventy percent larger than the salary, which is an ordinary shape for anyone who borrowed for graduate school.
@@ -20,11 +22,11 @@ Five plans, same balance, same person:
 
 | Plan | First payment | Years | Handed over |
 |---|---|---|---|
-| Standard, 10-year | ~$900 | 10 | ~$108,000 |
-| 2026 Tiered Standard, 20-year | ~$590 | 20 | ~$142,000 |
-| Extended Standard, 25-year | ~$535 | 25 | ~$160,000 |
-| IBR-style income-driven | ~$210 | 20 | ~$83,000, plus ~$23,000 tax |
-| 2026 RAP | ~$160 | ~30 | ~$164,000 |
+| Standard, 10-year | $900 | 10 | $108,000 |
+| 2026 Tiered Standard, 20-year | $590 | 20 | $142,000 |
+| Extended Standard, 25-year | $535 | 25 | $160,000 |
+| IBR-style income-driven | $210 | 20 | $83,000, plus $23,000 tax |
+| 2026 RAP | $160 | 30 | $164,000 |
 
 Read the payment column and the total column together, because they run in opposite directions. RAP has the smallest payment on the page and the largest total on the page. The balance clears a couple of months before the thirty-year mark, so the forgiveness that makes RAP sound generous never arrives for this borrower. They simply pay, for thirty years. That is about **$56,000 more than the ten-year plan** and about **$58,000 more than the IBR row**, tax included.
 
@@ -44,16 +46,37 @@ Here is where the bar sits, using the median debt at four credential levels from
 
 | What you owe | Ten-year Standard payment | Income before a RAP payment reaches it |
 |---|---|---|
-| ~$23,000, a bachelor's field | ~$265 | ~$60,000 |
-| ~$38,000, a master's | ~$425 | ~$73,000 |
-| ~$79,000, a doctoral program | ~$900 | ~$108,000 |
-| ~$156,000, a professional program | ~$1,770 | ~$212,000 |
+| $23,000, a bachelor's field | $265 | $60,000 |
+| $38,000, a master's | $425 | $73,000 |
+| $79,000, a doctoral program | $900 | $108,000 |
+| $156,000, a professional program | $1,770 | $212,000 |
 
 The right-hand column is the income at which a RAP payment finally equals what the ten-year plan would have charged. Below it, the months are not counting. Of the 825 occupations in the federal wage data, 396 have a median wage under the figure in the top row, so on a typical undergraduate balance the door is already shut for people in about half of them.
 
 Payments do grow, because incomes grow, so a borrower who stays long enough will eventually clear the bar. That is less comfort than it sounds. The doctoral borrower on $47,000 has 9 of 358 RAP months counting toward a return, and the first of them arrives in year 29. On a $23,000 balance at the same income, 40 of 149 months count and the first lands in year 10. The months that count are always the last ones. In the years when somebody would actually want to change their mind, none of them do.
 
 So the honest summary is that switching into RAP is close to a one-way door, and the lower your income relative to your balance, the more firmly it closes. Which is the opposite of how an exception clause reads.
+
+## What the children do to the arithmetic
+
+RAP subtracts $50 a month from the payment for each dependent you claim on your federal tax return, and no payment can fall below $10. Those two figures are statutory, so they are exact rather than estimated.
+
+For a household paying for childcare, that reduction is not a rounding detail. On the same $79,000 balance at $47,000 of income:
+
+| Dependents claimed | First payment | Written off at year 30 | Handed over, tax included |
+|---|---|---|---|
+| None | $157 | nothing | $164,000 |
+| One | $107 | $10,000 | $150,000 |
+| Two | $57 | $21,000 | $135,000 |
+| Three | $10 | $31,000 | $119,000 |
+
+Each dependent is worth roughly $15,000 over the life of the loan, and the smaller payment is only part of the reason. Recall that without children this borrower clears the balance about two months before the thirty-year mark and is forgiven nothing. The reduction pushes the payoff past that line, so the write-off finally arrives, and on this balance the forgiveness moves the total more than the monthly saving does.
+
+Then the same reduction works against you. The exit test compares your RAP payment against the ten-year Standard payment, and the reduction makes your payment smaller while leaving the bar exactly where it was. Every dependent therefore raises the income you need before a RAP month counts toward IBR, by $6,000 each. Without children this borrower needs about $108,000. With two, about $120,000. With three, about $126,000, and at $47,000 they are paying the $10 statutory minimum, which is as far from the $900 bar as this plan can put them.
+
+That is the whole asymmetry in miniature. The provision that makes the plan survivable in the month you are living through is the provision that keeps you in it, and it applies hardest to the households with the least room to absorb either outcome. Childcare is competing for the same money as the payment, on a schedule that does not care which plan you picked, and the plan leaving the most in your account each month is the one costing the most by the end.
+
+That can still be the right trade. Thirty years of a payment you can actually make beats ten years of one you cannot. It is worth making on purpose rather than discovering later.
 
 ## Paying extra only pays on a plan that does not forgive
 
@@ -86,3 +109,7 @@ The second is when your first federal loan was disbursed. A first loan before Ju
 [The repayment comparison](/?tool=repayment&from=guide) is free, needs no login, and asks for nothing that identifies you. Put in what you owe, what you earn and how many payments you have already made, and it will lay every plan out side by side with the count-back rule applied to your numbers instead of to the example above.
 
 Then look at the last column before you look at the first one.
+
+> **This is not financial advice.** Everything here is an educational estimate produced by a model, using national data and a single set of assumptions about rates, income growth and taxes. Your own balance, interest rates, family size and state will move these numbers, sometimes by a lot. Nothing on this page is a recommendation to choose any particular plan.
+>
+> Before you commit to a repayment plan, talk to somebody who can see your actual account. Free help exists and is worth using: a nonprofit student loan counselor can go through your options with you at no cost, and a financial advisor can weigh a thirty-year payment against everything else you are saving for. Neither of them is this page, and both of them can see things this page cannot.

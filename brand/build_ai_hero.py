@@ -111,12 +111,15 @@ PROMPTS = {
         "no signage, no charts, no screens showing content.",
         20260814, 4),
     "switching-repayment-plans-2026": (
-        "A young adult sitting at a small desk by a window in a modest "
-        "apartment in the early evening, a lamp switched on beside a stack of "
-        "opened mail and a closed laptop, seen from behind and slightly to one "
-        "side so no face is visible. Shallow depth of field, documentary "
-        "photography, muted natural colour, unposed. No text, no charts, no "
-        "screens showing content.",
+        "A grown adult woman in her early thirties, full adult height and "
+        "build, sitting alone at a kitchen table late in the evening after "
+        "her child has gone to bed, photographed from directly behind her so "
+        "that the back of her head and shoulders fill the foreground and no "
+        "part of her face is visible. A high chair pushed against the wall "
+        "and a few toys left on the floor behind her, a stack of opened mail "
+        "and a laptop on the table. Shallow depth of field, documentary "
+        "photography, muted natural colour, unposed. No children in the "
+        "frame, no text, no charts, no screens showing content.",
         20260815, 4),
     "for-counselors-the-money-conversation": (
         "A small high school counselor's office in late afternoon light, two "
