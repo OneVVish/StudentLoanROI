@@ -173,6 +173,25 @@ SITE_CSS = """  :root {
      needs the extra specificity of `.tools .grid`, so the 720px breakpoint
      below has to restate it or the cards stay 2-up on a phone. */
   .tools .grid { grid-template-columns: repeat(2, 1fr); }
+  /* ===== The tools band =====
+     The tools are the product, so they sit above the guides and carry a
+     background of their own: edge to edge, the section reads as its own zone
+     instead of as one more stretch of the same white page.
+     The colour is --tile, the neutral grey the stat tiles and feature cards
+     already use. NOT the brand orange: that is this page's single accent, and
+     four cards painted in it would be a far louder change than a zone marker
+     needs to be. No new token and no new hue, so nothing here has to be
+     re-decided if the palette moves.
+     The full bleed comes from the MARKUP -- the section is a sibling of the
+     page's .wrap containers with its own .wrap inside -- and deliberately not
+     from `margin-left: calc(50% - 50vw)`. 100vw counts the scrollbar, so the
+     vw trick adds a horizontal scrollbar of its own at exactly the widths
+     where the page is otherwise fine.
+     The cards flip to white with a rule because `.tile`'s own background IS
+     --tile: left alone they would dissolve into the band they sit on. Their
+     fill and their accent are set with the guide cards, in the one-card-two-
+     colours rule below, so the two kinds cannot drift apart in shape. */
+  .tools { background: var(--tile); margin-top: 40px; padding: 48px 0; }
   .cta { text-align: center; padding: 56px 0; }
   footer {
     border-top: 1px solid var(--rule); margin-top: 40px; padding: 26px 0 40px;
@@ -239,7 +258,36 @@ SITE_CSS = """  :root {
     .post-card:hover { transform: none; }
   }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-  .guide-card { background: var(--tile); border-radius: 12px; padding: 20px;
+  /* ===== ONE CARD, TWO COLOURS =====
+     The landing page holds two kinds of card: a tool is something you use, a
+     guide is something you read. Before this they were two neutral greys
+     pointed at each other -- white cards on the --tile band above, --tile
+     cards on white here -- which reads as one list interrupted by a band
+     rather than as two categories.
+     They are now ONE shape written once, and colour is the only difference:
+     tools cool (blue rule on white), guides warm (orange rule on --tint, the
+     cream the callout and the table footer already use). Both accents are
+     existing tokens; no new hue enters the palette. Writing the shape twice is
+     how the two would drift into looking like unrelated components, which is
+     the opposite of what a reader is meant to take from them: same kind of
+     object, different category.
+     Blue against orange is also the pairing that survives the common forms of
+     colour blindness, which matters because the accent is the part carrying
+     the distinction at a glance.
+     COLOUR IS NOT THE ONLY SIGNAL, deliberately. The fills are nearly
+     identical in greyscale (--tint against --surface is 1.1:1), so position
+     and the section heading do the real work, and the accent rule is
+     reinforcement rather than the sole carrier: --blue on the white tool card
+     is 4.42:1, --orange between the cream fill (2.91:1) and the white page
+     (3.20:1). Text is untouched and clears AA on both fills -- --deep 11.54:1
+     and --muted 5.52:1 on --tint, --ink 18.11:1 and --muted 6.07:1 on white.
+     `.guide-card` is the LANDING page's card. The guides index draws
+     `.post-card` -- different rule, different page; editing the wrong one
+     restyles a page nobody asked about. */
+  .tools .tile, .guide-card { border-radius: 12px; padding: 20px;
+    border: 1px solid var(--rule); border-left-width: 3px; }
+  .tools .tile { background: var(--surface); border-left-color: var(--blue); }
+  .guide-card { background: var(--tint); border-left-color: var(--orange);
     display: block; text-decoration: none; color: inherit; }
   .guide-card b { display: block; color: var(--deep); font-size: 18px;
     margin-bottom: 6px; }
@@ -542,9 +590,13 @@ def build_html(f: dict, posts: list = ()) -> str:
   </div>
 </section>
 
-{guides_section}
+</div>
 
+<!-- The tools band breaks out of .wrap so its background can run edge to
+     edge; it carries its own .wrap so the content stays on the same grid as
+     every section above and below it. See the tools-band note in SITE_CSS. -->
 <section class="tools">
+  <div class="wrap">
   <h2>Four tools, one dataset</h2>
   <div class="grid">
     <div class="tile"><b>🎓 The calculator</b>
@@ -562,7 +614,12 @@ def build_html(f: dict, posts: list = ()) -> str:
       <p>Compare the 2026 repayment plans on the balance you already owe.
       <a href="/?tool=repayment&amp;from=welcome">Compare&nbsp;→</a></p></div>
   </div>
+  </div>
 </section>
+
+<div class="wrap">
+
+{guides_section}
 
 <div class="cta">
   <h2>Two minutes. Zero forms.</h2>
