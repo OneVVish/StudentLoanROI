@@ -114,4 +114,4 @@ Then look at the last column before you look at the first one.
 
 > **This is not financial advice.** Everything here is an educational estimate produced by a model, using national data and a single set of assumptions about rates, income growth and taxes. Your own balance, interest rates, family size and state will move these numbers, sometimes by a lot. Nothing on this page is a recommendation to choose any particular plan.
 >
-> Before you commit to a repayment plan, talk to somebody who can see your actual account. Free help exists and is worth using: a nonprofit student loan counselor can go through your options with you at no cost, and a financial advisor can weigh a thirty-year payment against everything else you are saving.
+> Before you commit to a repayment plan, talk to somebody who can see your actual account. Free help exists and is worth using: a nonprofit student loan counselor can go through your options with you at no cost, and a financial advisor can weigh a thirty-year payment against everything else you are saving for.
