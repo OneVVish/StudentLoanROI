@@ -277,6 +277,233 @@ def check_filter_before_cap(ns, base) -> list:
     return problems
 
 
+def check_match_count_reported(ns, base) -> list:
+    """Property: the frame carries the PRE-cap match count.
+
+    The caption above the results used to read "{len(results)} schools" over a
+    frame already through .head(limit), so it said "25 schools" whether 25
+    matched or 633. A visitor could not tell "these are all of them" from
+    "these are the cheapest 25 of many", which are different findings in the
+    same way "no school teaches this" and "none is this cheap" are.
+
+    The expectation is an INDEPENDENT unbounded search, never the capped
+    frame's own length -- deriving it from the thing under test would assert
+    only that the code equals itself.
+    """
+    problems = []
+    limit = 25
+    capped = ns["search_schools_by_budget"](
+        CIP, CREDENTIAL, BUDGET, HOME_STATE, limit=limit)
+    expected = len(search(ns))
+    if expected <= limit:
+        problems.append("  fixture has too few matches for the cap to bind; "
+                        "this check discriminates nothing")
+        return problems
+    got = capped.attrs.get("total_matches")
+    if got is None:
+        problems.append(
+            "  the capped frame carries no total_matches attribute\n"
+            "    pandas DROPS DataFrame.attrs across .merge -- if this was set "
+            "before the field-debt merge it survives graduate searches and "
+            "vanishes on bachelor's ones, which is the default path")
+    elif got != expected:
+        problems.append(f"  total_matches is {got}, expected {expected}")
+    caption = ns["search_result_caption"](limit, expected, "Cost")
+    if str(expected) not in caption.replace(",", ""):
+        problems.append(f"  the caption does not name the total: {caption!r}")
+    if str(limit) not in caption:
+        problems.append(f"  the caption does not name the shown count: {caption!r}")
+    # And it must read differently when nothing was cut, or the fix is cosmetic.
+    if ns["search_result_caption"](7, 7, "Cost") == ns["search_result_caption"](7, 70, "Cost"):
+        problems.append("  a capped and an uncapped result caption identically")
+    return problems
+
+
+def check_sort_before_cap(ns) -> list:
+    """Property: the sort runs BEFORE the cap, in every offered mode.
+
+    Sorting after .head() would return the best of the cheapest 25 rather than
+    the best 25 matches -- the same defect check_filter_before_cap measures for
+    filters, and equally invisible: the list still renders and still sorts.
+
+    Also pins missing values to the TAIL. ADM_RATE is blank for a quarter of
+    bachelor's institutions, so NaN-first would fill the whole window with
+    schools that report nothing.
+    """
+    problems = []
+    limit = 25
+    modes = ns["search_sort_modes"](CREDENTIAL)
+    if len(modes) < 2:
+        problems.append("  the fixture level offers no sort choice; "
+                        "this check discriminates nothing")
+        return problems
+    for mode in modes:
+        column, ascending = ns["SEARCH_SORT_MODES"][mode]
+        full = search(ns, sort_mode=mode)
+        capped = ns["search_schools_by_budget"](
+            CIP, CREDENTIAL, BUDGET, HOME_STATE, limit=limit, sort_mode=mode)
+        if ids(capped) != ids(full)[:limit]:
+            problems.append(
+                f"  [{mode}] the capped result is not the first {limit} of the "
+                f"sorted matches\n"
+                f"    sorting AFTER .head(limit) reorders a cost-selected "
+                f"remnant while looking entirely plausible")
+        values = full[column].tolist()
+        reported = [v for v in values if v == v]
+        blanks = [i for i, v in enumerate(values) if v != v]
+        if blanks and reported and min(blanks) < len(reported):
+            problems.append(
+                f"  [{mode}] rows with no {column} are not last "
+                f"(first blank at {min(blanks)} of {len(reported)} reported)")
+        ordered = sorted(reported, reverse=not ascending)
+        if reported != ordered:
+            problems.append(f"  [{mode}] the reported values are not monotonic")
+    return problems
+
+
+def check_sort_excludes_judgement_columns(ns) -> list:
+    """Property: no sort mode orders on net price or on either debt column.
+
+    Net price is an average over AIDED students only, so ordering on it ranks
+    schools by who received aid. The two borrowing columns would rank schools
+    by what other families were willing to owe, which is not a fact about the
+    school. All three are display-only and the app says so in three places.
+    """
+    problems = []
+    forbidden = {"net_price", "NPT4_PUB", "NPT4_PRIV",
+                 "PLUS_DEBT_INST_COMP_MD", "field_debt_median"}
+    used = {column for column, _asc in ns["SEARCH_SORT_MODES"].values()}
+    overlap = used & forbidden
+    if overlap:
+        problems.append(
+            f"  a sort mode orders on {sorted(overlap)}, which the table shows "
+            f"but must never rank on")
+    if ns["SEARCH_SORT_DEFAULT"] not in ns["SEARCH_SORT_MODES"]:
+        problems.append("  the default sort mode is not one of the modes")
+    # A level that cannot support a mode must not offer it, and a stored mode
+    # from a level that could must not survive onto one that cannot -- the
+    # widget raises on a value absent from its options.
+    if "Admit rate" in ns["search_sort_modes"]("Associate's degree"):
+        problems.append("  admit-rate sorting is offered below bachelor's, "
+                        "where three quarters of schools report no rate")
+    if ns["resolve_search_sort"]("Admit rate", "Associate's degree") != ns["SEARCH_SORT_DEFAULT"]:
+        problems.append("  a stale sort mode is not reconciled to the default")
+    # A mode the FRAME cannot support is a control that lies. The graduate and
+    # professional searches build their frames from the tuition and debt files,
+    # which carry neither completion_rate nor ADM_RATE, so cost is the only
+    # orderable column -- offering more renders a selectbox whose choice the
+    # results silently ignore. Found in a browser, not by a type error.
+    import inspect
+    for credential in list(ns["GRADUATE_CREDENTIAL_LEVELS"]) + list(ns["PROFESSIONAL_SEARCH_LEVELS"]):
+        offered = ns["search_sort_modes"](credential)
+        if offered != [ns["SEARCH_SORT_DEFAULT"]]:
+            problems.append(
+                f"  {credential!r} offers {offered}, but the graduate frames "
+                f"carry no column to order on but price")
+    # And the name filter must actually reach those searches, for the same
+    # reason: the shared control renders on both tools.
+    for fn in ("search_graduate_schools_by_budget",
+               "search_professional_schools_by_budget"):
+        if "name_query" not in inspect.signature(ns[fn]).parameters:
+            problems.append(
+                f"  {fn} takes no name_query, but render_search_controls "
+                f"shows the name filter on the graduate tool")
+    return problems
+
+
+def check_name_filter(ns, base) -> list:
+    """Property: the name filter is a filter -- before the cap, case-blind."""
+    problems = []
+    limit = 25
+    query = "University"
+    filtered = search(ns, name_query=query)
+    if filtered.empty:
+        problems.append("  the fixture matches no school by name; "
+                        "this check discriminates nothing")
+        return problems
+    if not set(ids(filtered)) <= set(ids(base)):
+        problems.append("  the name filter returned schools the base search did not")
+    names = filtered["INSTNM"].fillna("")
+    if not names.str.contains(query, case=False, regex=False).all():
+        problems.append("  a returned school's name does not contain the query")
+    if len(filtered) != len(search(ns, name_query=query.upper())):
+        problems.append("  the name filter is case-SENSITIVE")
+    capped = ns["search_schools_by_budget"](
+        CIP, CREDENTIAL, BUDGET, HOME_STATE, limit=limit, name_query=query)
+    if ids(capped) != ids(filtered)[:limit]:
+        problems.append(
+            "  the capped name search is not the cheapest matches\n"
+            "    filtering by name AFTER .head(limit) searches only the 25 "
+            "already on screen, which is a different question")
+    if capped.attrs.get("total_matches") != len(filtered):
+        problems.append("  the reported total ignores the name filter")
+    return problems
+
+
+def check_regions_partition(ns) -> list:
+    """Property: the region buttons cover every state exactly once.
+
+    They POPULATE the state filter rather than filtering, so a gap here cannot
+    silently narrow a search -- but a state in no region is unreachable by
+    button, and a state in two is a chip that appears to do nothing when the
+    other is already selected.
+    """
+    problems = []
+    regions = ns["SEARCH_REGIONS"]
+    seen, dupes = set(), set()
+    for name, codes in regions.items():
+        codes = set(codes)
+        dupes |= seen & codes
+        seen |= codes
+    if dupes:
+        problems.append(f"  states in more than one region: {sorted(dupes)}")
+    missing = set(ns["US_STATES"]) - seen
+    if missing:
+        problems.append(f"  states in no region: {sorted(missing)}")
+    # DC is deliberately included and is not in US_STATES; anything ELSE extra
+    # is a typo, and a code that matches no school is a chip that does nothing.
+    extra = seen - set(ns["US_STATES"]) - {"DC"}
+    if extra:
+        problems.append(f"  region codes that are not states: {sorted(extra)}")
+    known = set(ns["load_coa_dataset"]()["STABBR"].dropna().unique())
+    unknown = seen - known
+    if unknown:
+        problems.append(f"  region codes matching no school in the data: "
+                        f"{sorted(unknown)}")
+    return problems
+
+
+def check_plus_debt_sample_size(ns) -> list:
+    """Property: the count behind the Parent PLUS median is available to show.
+
+    The pipeline keeps PLUS_DEBT_INST_COMP_N explicitly so the median is not
+    misread, and a median over 5 families renders identically to one over 500
+    without it.
+    """
+    problems = []
+    frame = ns["load_coa_dataset"]()
+    if "PLUS_DEBT_INST_COMP_N" not in frame.columns:
+        problems.append("  PLUS_DEBT_INST_COMP_N is absent from the dataset")
+        return problems
+    import pandas as _pd
+    n = _pd.to_numeric(frame["PLUS_DEBT_INST_COMP_N"], errors="coerce")
+    md = _pd.to_numeric(frame["PLUS_DEBT_INST_COMP_MD"], errors="coerce")
+    shown = md.notna() & (md > 0)
+    if not shown.any():
+        problems.append("  no school publishes a Parent PLUS median")
+        return problems
+    if (n[shown].dropna() < 0).any():
+        problems.append("  a negative borrowing-family count")
+    thin = float((n[shown] < ns["PLUS_DEBT_THIN_N"]).mean())
+    # A threshold marking nothing, or marking everything, is not a threshold.
+    # Measured at 4% of publishing schools.
+    if not 0.001 < thin < 0.40:
+        problems.append(
+            f"  PLUS_DEBT_THIN_N={ns['PLUS_DEBT_THIN_N']} marks {thin:.1%} of "
+            f"publishing schools, which is not a useful cut")
+    return problems
+
+
 def check_credential_gate(ns) -> list:
     """The admit-rate filter is offered only where the field has the coverage
     to mean something, and the fact that gate rests on is still true."""
@@ -1029,6 +1256,37 @@ def check_shared_controls_have_per_tool_keys(_ns) -> list:
             f"    this function renders twice per run on the calculator page, "
             f"so the second one raises StreamlitDuplicateElementKey and the "
             f"page dies mid-render")
+
+    # A BUTTON's key must not go through tool_key. That helper seeds the
+    # graduate copy by ASSIGNING to it, and Streamlit forbids assigning to a
+    # button's key -- StreamlitValueAssignmentNotAllowedError the moment "More
+    # tools" renders the undergraduate search (leaving search_region_* in
+    # session_state) and then the graduate one. The page half-drew and died.
+    # tool_button_key applies the same prefix and does no seeding.
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "button"):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "key":
+                continue
+            called = (kw.value.func.id
+                      if isinstance(kw.value, ast.Call)
+                      and isinstance(kw.value.func, ast.Name) else None)
+            if called == "tool_key":
+                problems.append(
+                    f"  app.py:{getattr(node, 'lineno', '?')} keys a button "
+                    f"with tool_key()\n"
+                    f"    tool_key SEEDS by assignment and Streamlit forbids "
+                    f"that on a button key; use tool_button_key")
+            elif called != "tool_button_key":
+                problems.append(
+                    f"  app.py:{getattr(node, 'lineno', '?')} keys a button "
+                    f"with {called or 'something unrecognised'}\n"
+                    f"    both searches render in one run, so a button key "
+                    f"must be per-tool via tool_button_key")
     return problems
 
 
@@ -1405,6 +1663,13 @@ def main() -> int:
         ("sectors partition", lambda: check_sectors_partition(ns, base)),
         ("order and subset", lambda: check_order_and_subset(ns, base)),
         ("filter before cap", lambda: check_filter_before_cap(ns, base)),
+        ("match count reported", lambda: check_match_count_reported(ns, base)),
+        ("sort before cap", lambda: check_sort_before_cap(ns)),
+        ("sort excludes judgement columns",
+            lambda: check_sort_excludes_judgement_columns(ns)),
+        ("name filter", lambda: check_name_filter(ns, base)),
+        ("regions partition", lambda: check_regions_partition(ns)),
+        ("plus debt sample size", lambda: check_plus_debt_sample_size(ns)),
         ("credential gate", lambda: check_credential_gate(ns)),
         ("graduate search", lambda: check_graduate_search(ns)),
         ("picker identity", lambda: check_picker_identity(ns, base)),

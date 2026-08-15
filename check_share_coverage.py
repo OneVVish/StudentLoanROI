@@ -80,6 +80,11 @@ SHARE_EXEMPT = {
     "search_adm_rate_range": "transient school-search filter; narrows the list "
                              "on admit rate and no school attribute it touches "
                              "survives into the scenario ?school= carries",
+    "search_sort": "transient school-search ordering; changes which of the "
+                    "matches the cap shows, not which schools exist, and "
+                    "?school= carries the one that was picked",
+    "search_name": "transient school-search filter; free text the visitor "
+                    "typed, and ?school= carries the resolved name",
     "search_pick": "transient school-search result picker",
     "grad_search_pick": "transient graduate school-search result picker; "
                         "?grad_school= carries the resolved name",
