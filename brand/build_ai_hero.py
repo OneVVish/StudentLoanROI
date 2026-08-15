@@ -121,6 +121,21 @@ PROMPTS = {
         "photography, muted natural colour, unposed. No children in the "
         "frame, no text, no charts, no screens showing content.",
         20260815, 4),
+    # Shot from directly above, unlike the four behind-the-shoulder heroes, so
+    # the guides index does not read as five photographs of the same room.
+    # NOTE: klein4b puts illegible squiggle "text" on paper regardless of the
+    # "No text" instruction. Checked at 4x on this one: no readable words, no
+    # digits, no charts. That clears the rule at the top of this file, which
+    # bans fake EVIDENCE rather than the texture of a printed page. Re-check
+    # at magnification if this prompt is ever reseeded.
+    "consolidating-student-loans-2026": (
+        "Overhead flat lay of a dining table in flat morning light, six or "
+        "seven opened letters and statements spread across the wood and being "
+        "gathered into one neat stack by a pair of adult hands, a pen and a "
+        "cold cup of coffee to one side, photographed from directly above so "
+        "no face is in the frame. Documentary photography, muted natural "
+        "colour, unposed. No text, no charts, no screens showing content.",
+        20260815, 4),
     "for-counselors-the-money-conversation": (
         "A small high school counselor's office in late afternoon light, two "
         "chairs turned toward each other across a corner of a desk, a student's "
