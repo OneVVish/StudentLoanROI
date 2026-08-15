@@ -6,7 +6,7 @@ date: 2026-08-15
 hero: guide-hero-switching-repayment-plans-2026-klein4b.png
 ---
 
-If your loans are on SAVE, a clock may already be running. Your servicer's notice to leave starts a 90-day window to pick a plan, and the window runs from that notice rather than from a date in the news. Miss it and you are enrolled automatically into Standard or the new Tiered Standard. Neither one is income-driven and neither one forgives anything, so the automatic outcome is the one that ignores what you earn. That description comes from TICAS, and the deadline is yours rather than the country's, so check the letter rather than this page.
+If your loans are on SAVE, a clock may already be running. Your servicer's notice to leave starts a 90-day window to pick a plan, and the window runs from that notice rather than from a date in the news. Miss it and you are enrolled automatically into Standard or the new Tiered Standard. Neither one is income-driven and neither one forgives anything, so the automatic outcome is the one that ignores what you earn. 
 
 What almost nobody mentions is that the plans do not swap freely. One of the choices in front of you is much easier to walk into than to walk out of, and the borrowers it was designed for are the ones least able to leave.
 
@@ -90,11 +90,11 @@ That fork is the thing a comparison table cannot show you, because every row in 
 
 ## What no plan touches
 
-Private loans sit outside all of this. No federal plan forgives them, none of them lowers the payment when your income falls, and nothing about them changes when you switch. In the comparison they add the same amount to every row, which is the clearest possible statement of the fact. The choice you are weighing has no effect at all on that part of the bill.
+Private loans sit outside all of this. No federal plan forgives them, none of them lowers the payment when your income falls, and nothing about them changes when you switch. 
 
 Federal loans work the other way, and that arithmetic surprises people. Several federal loans do not mean several income-driven payments. The plan sizes one payment from your income and that payment covers all of them. Split the $79,000 above across two federal loans at different rates and the RAP payment is still about $160 a month rather than double that. If you have been adding up per-loan estimates from a servicer's website, the total you are dreading may not exist.
 
-What the tool will not do is tell you which row to pick. It prices them. Whether a smaller payment for thirty years is worth more to you than a bigger one for ten is a question about your life and about how much certainty you want, and no model has an opinion about that.
+What the tool will not do is tell you which row to pick. It prices them. Whether a smaller payment for thirty years is worth more to you than a bigger one for ten is a question about your life and about how much certainty you want.
 
 ## Two things to find out before you choose
 
@@ -103,6 +103,8 @@ Both of them live with your servicer rather than in any calculator, and both are
 The first is how many qualifying payments you have already made. That count carries into RAP in full, and for somebody who has been paying for years it is worth tens of thousands of dollars. Ask for the number of payments rather than the number of years, because discharge is counted in months.
 
 The second is when your first federal loan was disbursed. A first loan before July 1, 2014 puts you on the older version of IBR, at 15 percent of discretionary income with forgiveness at 25 years, instead of 10 percent and 20 years. And loans originated on or after July 1, 2026 cannot use IBR at all. If your loans came before that date you have an option new borrowers do not, which is exactly why the choice deserves an evening rather than whichever plan your servicer suggests first.
+
+It is also why consolidation deserves its own evening. A Direct Consolidation Loan is first disbursed on the day it is made, so consolidating after that date closes the older plans for every federal loan you hold, the pre-2026 ones included. [What that costs, and why it lands hardest on parent borrowers](/guides/consolidating-student-loans-2026), is a separate piece.
 
 ## Run it on your own balance
 
