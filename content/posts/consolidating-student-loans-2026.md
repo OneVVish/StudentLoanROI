@@ -78,4 +78,4 @@ The other half is a phone call.
 
 > **This is not financial advice.** Everything here is an educational estimate produced by a model, using national data and a single set of assumptions about rates, income growth and taxes. Your own balance, interest rates, family size and state will move these numbers, sometimes by a lot. Nothing on this page is a recommendation to consolidate or to avoid consolidating.
 >
-> Before you commit to a repayment plan or a consolidation, talk to somebody who can see your actual account. Free help exists and is worth using: a nonprofit student loan counselor can go through your options with you at no cost, and a financial advisor can weigh a long fixed payment against everything else you are saving for. Neither of them is this page, and both of them can see things this page cannot.
+> Before you commit to a repayment plan or a consolidation, talk to somebody who can see your actual account. Free help exists and is worth using: a nonprofit student loan counselor can go through your options with you at no cost, and a financial advisor can weigh a long fixed payment against everything else you are saving for.
