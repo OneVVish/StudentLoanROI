@@ -990,6 +990,8 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
   (February 2026), College Scorecard (2024 data,
   released June 2026), IPEDS (2023) and CPS ASEC (2025).
   Educational estimate, not financial advice.<br>
+  Hero illustration generated with Cloudflare Workers AI. Every figure,
+  chart and table on this page comes from the cited sources above.<br>
   <a href="/guides" style="color:inherit">All guides</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a>
 </footer>
@@ -1563,6 +1565,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   </div>
 </section>
 <footer>
+  Card illustrations generated with Cloudflare Workers AI.<br>
   <a href="/" style="color:inherit">worthmydegree.com</a> · Educational
   estimate, not financial advice.
 </footer>
