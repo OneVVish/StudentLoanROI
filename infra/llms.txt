@@ -28,6 +28,9 @@
   priced from IPEDS published tuition, each shown beside what graduates
   in that field actually borrowed. Tuition and fees only — no federal
   source publishes graduate living costs.
+- [Infographics](https://worthmydegree.com/charts): single-picture
+  charts built from the same federal data as the calculator, free to
+  reuse anywhere. One page, each chart addressable by #slug fragment.
 
 ## Data sources (all public, all cited in-app)
 
@@ -91,3 +94,50 @@ ends at the calculator.
   The 2026 rules cap Parent PLUS at $20,000 a year — and $65,000 in
   total. Those two numbers don't fit together, and the gap lands in
   your final year.
+## Infographics
+
+Free single-picture charts built from the same federal data as the
+calculator, indexed at https://worthmydegree.com/charts. Reusable
+anywhere with attribution. One page, so each is addressed by fragment.
+
+- [Borrow the federal maximum for a bachelor's and the plan barely matters](https://worthmydegree.com/charts#borrow-the-federal-maximum):
+  $31,000 is the most a dependent undergraduate can borrow federally.
+  On a $61,000 salary, income-driven, Standard and 2026 RAP all clear
+  it inside a decade, and the whole spread between them is $984.
+- [Everyone says the rent eats the raise](https://worthmydegree.com/charts#rent-versus-the-raise):
+  San Francisco wages against the national median for the same job,
+  discounted by what it costs to live there. It is still ahead in all
+  nine occupations.
+- [Same degree, seven times the debt](https://worthmydegree.com/charts#same-degree-different-debt):
+  Median debt at graduation for the same professional degree runs from
+  $37,167 to $439,325 depending only on which school you attend.
+- [The family maximum is $92,000 and $65,000 of it is your parents'](https://worthmydegree.com/charts#the-family-maximum):
+  Everything the government will lend for four years of a dependent
+  undergraduate is $27,000 in the student's name and $65,000 in a
+  parent's. Parent PLUS sits outside every income-driven plan, so 71%
+  of the debt never moves with the repayment choice.
+- [The 20 careers that earn most in 30 years, and 18 are health care](https://worthmydegree.com/charts#top-earning-careers):
+  Everything earned in the 30 years after a bachelor's degree, capped
+  at each occupation's own published 90th percentile. Fourteen of the
+  twenty are physicians, and only two are reachable on a bachelor's
+  degree alone.
+- [You asked for $20,000. You pay back $31,070](https://worthmydegree.com/charts#what-the-loan-really-costs):
+  Every federal loan is billed for more than it hands over, because
+  the origination fee comes off at disbursement. On Parent PLUS you
+  sign for $20,883 to receive $20,000.
+- [What the data says is the best major](https://worthmydegree.com/charts#best-major-by-the-data):
+  The ten majors with the highest early-career pay, shown beside their
+  unemployment and underemployment rates.
+- [Business majors, ranked by what they actually pay](https://worthmydegree.com/charts#business-majors-tier-list):
+  Every business degree tiered by early-career pay and by the share of
+  graduates working in jobs that do not require the degree.
+- [College majors, ranked by the job market](https://worthmydegree.com/charts#majors-tier-list):
+  A tier list of college majors built from early-career pay,
+  unemployment and underemployment rather than reputation.
+- [The federal cap is doing the flattening](https://worthmydegree.com/charts#student-vs-parent-debt):
+  Median federal debt at graduation by field, students against
+  parents, showing how the Parent PLUS cap compresses what a family
+  can borrow.
+- [What a top university charges around the world](https://worthmydegree.com/charts#world-tuition):
+  Annual tuition for domestic undergraduates at each country's
+  highest-ranked university, converted to U.S. dollars.

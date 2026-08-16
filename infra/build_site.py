@@ -554,7 +554,7 @@ def build_html(f: dict, posts: list = ()) -> str:
     guides&nbsp;→</a>
     &nbsp;·&nbsp;
     <a href="/charts"
-    style="color:var(--blue);font-weight:600;text-decoration:none">Charts&nbsp;→</a></p>
+    style="color:var(--blue);font-weight:600;text-decoration:none">Infographics&nbsp;→</a></p>
 </section>'''
 
     cap_body = "\n".join(
@@ -1368,7 +1368,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
             continue
         cards.append(f'''  <div class="chart-card" id="{c["slug"]}">
     <a class="shot" href="/app/static/{c["full"]}" target="_blank" rel="noopener"
-       aria-label="Open the full-size chart: {c["title"]}">
+       aria-label="Open the full-size infographic: {c["title"]}">
       <img src="/app/static/{c["card"]}" alt="{c["description"]}"
            loading="lazy" width="720" height="405"></a>
     <b>{c["title"]}</b>
@@ -1385,7 +1385,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     return f'''<!doctype html>
 <html lang="en">
 <head>
-{_page_head("Charts — worthmydegree.com",
+{_page_head("Infographics — worthmydegree.com",
             "Free infographics on what college costs, what majors pay, and "
             "what the 2026 student loan rules changed. Built from federal data.",
             CHART_SHARE_BASE, "feature-og-calculator-1200x630.png", favicon)}
@@ -1397,16 +1397,16 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">
-  <h1>Charts: the college money picture, one page at a time</h1>
+  <h1>Infographics: the college money picture, one page at a time</h1>
   <div class="accent"></div>
-  <p>Every chart is built from federal data: Bureau of Labor Statistics wages,
-  College Scorecard costs and borrowing, New York Fed outcomes. Free to use
-  anywhere, no permission needed. Click any chart for the full-size version.</p>
+  <p>Every infographic is built from federal data: Bureau of Labor Statistics
+  wages, College Scorecard costs and borrowing, New York Fed outcomes. Free to
+  use anywhere, no permission needed. Click any one for the full-size version.</p>
 </section>
 
 <div class="post-head">
-  <h2>All charts</h2>
-  <span>{len(charts)} chart{"" if len(charts) == 1 else "s"}</span>
+  <h2>All infographics</h2>
+  <span>{len(charts)} infographic{"" if len(charts) == 1 else "s"}</span>
 </div>
 <div class="post-grid">
 {cards}
@@ -1651,9 +1651,37 @@ def llms_guides_section(posts: list) -> str:
 
 
 LLMS_GUIDES_HEADING = "## Guides"
+LLMS_CHARTS_HEADING = "## Infographics"
 
 
-def render_llms(posts: list) -> str:
+def llms_charts_section(charts: list) -> str:
+    """The `## Infographics` section, one entry per chart.
+
+    Enumerated rather than pointed at, for the reason llms_guides_section
+    records: an index URL plus a list of card titles makes an agent fetch the
+    page to find out what is on it, which is the hop this file exists to save.
+
+    The URL carries the #slug fragment because the gallery is ONE page. That
+    fragment is the only way to address a single infographic, and it is the
+    same id build_charts_index_html puts on the card, so a link here scrolls to
+    the picture it names.
+    """
+    lines = [LLMS_CHARTS_HEADING, "",
+             "Free single-picture charts built from the same federal data as the",
+             "calculator, indexed at https://worthmydegree.com/charts. Reusable",
+             "anywhere with attribution. One page, so each is addressed by fragment.",
+             ""]
+    for c in charts:
+        url = f"https://worthmydegree.com/charts#{c['slug']}"
+        # One line however long, the same rule the guide links follow: a URL
+        # wrapped across a newline is broken for anything reading this as text.
+        lines.append(f"- [{c['title']}]({url}):")
+        lines += textwrap.wrap(c["description"], width=70,
+                               initial_indent="  ", subsequent_indent="  ")
+    return "\n".join(lines) + "\n"
+
+
+def render_llms(posts: list, charts: list) -> str:
     """infra/llms.txt with its guide list regenerated. The file is the source;
     the Worker's LLMS constant is built from this by inject_llms().
 
@@ -1665,13 +1693,15 @@ def render_llms(posts: list) -> str:
     silently leaving a stale list is the failure this whole change is fixing.
     """
     text = LLMS_PATH.read_text()
-    new, n = re.subn(r"^" + re.escape(LLMS_GUIDES_HEADING) + r"\n.*?(?=\n## |\Z)",
-                     lambda _m: llms_guides_section(posts).rstrip("\n"),
-                     text, count=1, flags=re.S | re.M)
-    if n != 1:
-        sys.exit(f"infra/llms.txt: no {LLMS_GUIDES_HEADING!r} section to "
-                 f"regenerate -- restore the heading or update this builder")
-    return new.rstrip("\n") + "\n"
+    for heading, body in ((LLMS_GUIDES_HEADING, llms_guides_section(posts)),
+                          (LLMS_CHARTS_HEADING, llms_charts_section(charts))):
+        text, n = re.subn(r"^" + re.escape(heading) + r"\n.*?(?=\n## |\Z)",
+                          lambda _m, b=body: b.rstrip("\n"),
+                          text, count=1, flags=re.S | re.M)
+        if n != 1:
+            sys.exit(f"infra/llms.txt: no {heading!r} section to regenerate "
+                     f"-- restore the heading or update this builder")
+    return text.rstrip("\n") + "\n"
 
 
 def inject_llms(worker_src: str, text: str) -> str:
@@ -1895,19 +1925,23 @@ def main():
         (guide_dir / name).write_text(page)
         print(f"  wrote infra/guides/{name}  ({len(page):,} bytes)")
 
-    llms = render_llms(posts)
+    # Read ONCE and reused. render_all() builds its own list and does not
+    # return it, and this ran load_charts() twice more below -- three reads of
+    # the same directory, any of which a future edit could let drift apart.
+    charts = load_charts()
+
+    llms = render_llms(posts, charts)
     LLMS_PATH.write_text(llms)
 
     worker = inject(WORKER.read_text(), html)
-    worker = inject_guides(
-        worker, pages, [c["slug"] for c in load_charts()])
-    _charts = load_charts()
-    worker = inject_sitemap(worker, posts, lastmod, _charts)
+    worker = inject_guides(worker, pages, [c["slug"] for c in charts])
+    worker = inject_sitemap(worker, posts, lastmod, charts)
     worker = inject_llms(worker, llms)
     check_worker_syntax(worker)
     WORKER.write_text(worker)
     print("  injected LANDING, GUIDES and LLMS into infra/worker.js")
-    print(f"  llms.txt: {len(posts)} guide URL(s), {len(llms):,} bytes")
+    print(f"  llms.txt: {len(posts)} guide and {len(charts)} infographic "
+          f"URL(s), {len(llms):,} bytes")
 
     # Written HERE and not in render_all(), so --preview stays a read. A
     # preview that recorded a hash would mark the post as seen without ever
@@ -1919,7 +1953,7 @@ def main():
     # the two halves used to be a "change both in one PR" comment, and a
     # generated section is one less thing asking a human to remember.
     ref = ROOT / "infra" / "sitemap.xml"
-    ref.write_text(inject_sitemap(ref.read_text(), posts, lastmod, _charts))
+    ref.write_text(inject_sitemap(ref.read_text(), posts, lastmod, charts))
     print(f"  sitemap: {len(posts) + 1} guide URL(s) in both halves")
 
 
