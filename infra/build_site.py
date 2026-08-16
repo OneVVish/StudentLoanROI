@@ -554,7 +554,7 @@ def build_html(f: dict, posts: list = ()) -> str:
     guides&nbsp;→</a>
     &nbsp;·&nbsp;
     <a href="/charts"
-    style="color:var(--blue);font-weight:600;text-decoration:none">Charts&nbsp;→</a></p>
+    style="color:var(--blue);font-weight:600;text-decoration:none">Infographics&nbsp;→</a></p>
 </section>'''
 
     cap_body = "\n".join(
@@ -1368,7 +1368,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
             continue
         cards.append(f'''  <div class="chart-card" id="{c["slug"]}">
     <a class="shot" href="/app/static/{c["full"]}" target="_blank" rel="noopener"
-       aria-label="Open the full-size chart: {c["title"]}">
+       aria-label="Open the full-size infographic: {c["title"]}">
       <img src="/app/static/{c["card"]}" alt="{c["description"]}"
            loading="lazy" width="720" height="405"></a>
     <b>{c["title"]}</b>
@@ -1385,7 +1385,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     return f'''<!doctype html>
 <html lang="en">
 <head>
-{_page_head("Charts — worthmydegree.com",
+{_page_head("Infographics — worthmydegree.com",
             "Free infographics on what college costs, what majors pay, and "
             "what the 2026 student loan rules changed. Built from federal data.",
             CHART_SHARE_BASE, "feature-og-calculator-1200x630.png", favicon)}
@@ -1397,16 +1397,16 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">
-  <h1>Charts: the college money picture, one page at a time</h1>
+  <h1>Infographics: the college money picture, one page at a time</h1>
   <div class="accent"></div>
-  <p>Every chart is built from federal data: Bureau of Labor Statistics wages,
-  College Scorecard costs and borrowing, New York Fed outcomes. Free to use
-  anywhere, no permission needed. Click any chart for the full-size version.</p>
+  <p>Every infographic is built from federal data: Bureau of Labor Statistics
+  wages, College Scorecard costs and borrowing, New York Fed outcomes. Free to
+  use anywhere, no permission needed. Click any one for the full-size version.</p>
 </section>
 
 <div class="post-head">
-  <h2>All charts</h2>
-  <span>{len(charts)} chart{"" if len(charts) == 1 else "s"}</span>
+  <h2>All infographics</h2>
+  <span>{len(charts)} infographic{"" if len(charts) == 1 else "s"}</span>
 </div>
 <div class="post-grid">
 {cards}
