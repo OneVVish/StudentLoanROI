@@ -85,6 +85,11 @@ pppub*.csv
 # rule does not untrack a tracked file, and quietly deleting published assets
 # is not what "stop carrying duplicates" asked for.
 brand/guide-*.png
+# Same rule, same reason, for the calculator link-preview card. Its INPUT is
+# the exception and IS committed: brand/sources/ holds a browser screenshot of
+# the running app, which no script can regenerate, so it is source rather than
+# output.
+brand/feature-og-*.png
 
 # Two generated files in static/ that nothing serves, kept on disk but out of
 # git so they do not read as published assets:
