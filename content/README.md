@@ -175,9 +175,29 @@ anyway spends the credibility the rest of the page depends on.
   *roughly $10,000*, *nearly $38,000 ahead*. An unhedged $17,725 claims a
   precision the median of 1,797 colleges does not have, and it reads like a
   machine that has not thought about what the number is for.
-- **In a table use `~` rather than the word**: `~$71,000`. It keeps a column
-  scannable, where "about" five times over is noise. The renderer passes `~`
-  through untouched, including inside `**bold**`.
+- **In a table, mark the rounding per cell or once for the guide, and do not
+  mix the two.** Both are in use, and the split is by VOLUME rather than by
+  anything about the tables themselves:
+
+  - **Per cell, `~$71,000`.** The community college guide carries eleven money
+    figures across its three tables and marks every one. At that count the
+    tilde still reads as a mark. The renderer passes it through untouched,
+    including inside `**bold**`.
+  - **Once, in a sentence near the top.** The repayment guide carries
+    thirty-four across its three, and thirty-four tildes stop being a signal
+    and become texture. It marks none of them and says so once instead.
+
+  Both are consistent WITHIN themselves, which is the part that matters: a
+  table with tildes beside a table without them reads as a mistake in the
+  second one.
+
+  **If you take the single-sentence route, it has to name the exact figures.**
+  A blanket "amounts are rounded" makes a statutory number in the same table
+  look like an estimate. The repayment guide's tables carry the exact $10
+  minimum payment beside rounded payments of $157, $107 and $57, and its note
+  names the $10 minimum and the $50 dependent reduction for precisely that
+  reason. Per-cell marking gets this for free, because the unmarked figure is
+  visibly the exact one.
 - **Statutory figures stay exact.** $5,500, $7,500, the $20,000 and $65,000
   PLUS caps, the $27,000 aggregate. Those are legal ceilings rather than
   estimates, and "about $65,000" is simply false: it is $65,000, or you are
