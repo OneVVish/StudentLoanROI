@@ -1695,8 +1695,13 @@ def render_llms(posts: list, charts: list) -> str:
     text = LLMS_PATH.read_text()
     for heading, body in ((LLMS_GUIDES_HEADING, llms_guides_section(posts)),
                           (LLMS_CHARTS_HEADING, llms_charts_section(charts))):
+        # The trailing newline is load-bearing. The match ends immediately
+        # before the "\n## " of the NEXT heading, so a replacement that ends
+        # flush leaves the following heading glued to this section's last line.
+        # It went unnoticed while Guides was the final section and matched \Z;
+        # the tail is re-stripped on return, so this cannot leave a blank end.
         text, n = re.subn(r"^" + re.escape(heading) + r"\n.*?(?=\n## |\Z)",
-                          lambda _m, b=body: b.rstrip("\n"),
+                          lambda _m, b=body: b.rstrip("\n") + "\n",
                           text, count=1, flags=re.S | re.M)
         if n != 1:
             sys.exit(f"infra/llms.txt: no {heading!r} section to regenerate "
