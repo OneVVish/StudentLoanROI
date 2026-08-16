@@ -175,9 +175,25 @@ anyway spends the credibility the rest of the page depends on.
   *roughly $10,000*, *nearly $38,000 ahead*. An unhedged $17,725 claims a
   precision the median of 1,797 colleges does not have, and it reads like a
   machine that has not thought about what the number is for.
-- **In a table use `~` rather than the word**: `~$71,000`. It keeps a column
-  scannable, where "about" five times over is noise. The renderer passes `~`
-  through untouched, including inside `**bold**`.
+- **In a table, mark the rounding once or mark it per cell, and pick one per
+  guide.** Both are in use and both are right in their place:
+
+  - **Per cell, `~$71,000`.** The default for a short table, and REQUIRED
+    whenever rounded and exact figures share one. The tilde is then the only
+    thing separating them, and a reader can see which is which without leaving
+    the row. The community college guide's three-row cost table works this way.
+    The renderer passes `~` through untouched, including inside `**bold**`.
+  - **Once, in a sentence near the top.** Better when a guide runs several
+    money tables, where a tilde on every cell stops being a signal and becomes
+    texture: the repayment guide carries thirteen money cells across three
+    tables. If you take this route the sentence MUST carve out the exact
+    figures, because a blanket "amounts are rounded" makes a statutory number
+    in the same table look like an estimate. That guide's note names the $50
+    dependent reduction and the $10 minimum for exactly this reason, and
+    without the carve-out the $10 in its last row would read as approximate.
+
+  Do not mix the two inside one guide. A table with tildes beside a table
+  without them reads as a mistake in the second one.
 - **Statutory figures stay exact.** $5,500, $7,500, the $20,000 and $65,000
   PLUS caps, the $27,000 aggregate. Those are legal ceilings rather than
   estimates, and "about $65,000" is simply false: it is $65,000, or you are
