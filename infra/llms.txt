@@ -105,6 +105,11 @@ anywhere with attribution. One page, so each is addressed by fragment.
   $31,000 is the most a dependent undergraduate can borrow federally.
   On a $61,000 salary, income-driven, Standard and 2026 RAP all clear
   it inside a decade, and the whole spread between them is $984.
+- [The 20 best-paid careers that need less than four years of school](https://worthmydegree.com/charts#careers-without-a-bachelors):
+  Total pay over the first ten years of work for the highest-paying
+  occupations BLS says need less than a bachelor's degree. All twenty
+  beat the median bachelor's-level career, and ten of them need no
+  college at all.
 - [Everyone says the rent eats the raise](https://worthmydegree.com/charts#rent-versus-the-raise):
   San Francisco wages against the national median for the same job,
   discounted by what it costs to live there. It is still ahead in all
