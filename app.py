@@ -4952,6 +4952,14 @@ GUIDE_ACTION_PREFIX = "guide_view"
 CHART_LIKE_ACTION_PREFIX = "chart_like"
 CHART_SHARE_ACTION_PREFIX = "chart_share"
 
+# What the gallery's own page read is filed under. It rides the Worker's GUIDES
+# page map, so its reads arrive as "guide_view:slug=charts" alongside the real
+# guides -- one read for the whole grid, not one per chart. Named here because
+# TWO panels key on it in opposite directions: the guides table drops this slug
+# and the infographics panel is the only thing that reads it. A literal in
+# either place would let them disagree about which page they are describing.
+CHART_GALLERY_SLUG = "charts"
+
 # Everything the edge writes directly. These rows never ran the app, carry no
 # session_id, and must be kept out of any panel that means "app activity".
 EDGE_ACTION_PREFIXES = (LANDING_ACTION_PREFIX, LIKE_ACTION_PREFIX,
@@ -18894,10 +18902,89 @@ def _admin_guide_reactions(usage_df: pd.DataFrame) -> pd.DataFrame:
         "Shares": shares.str.split("slug=").str[-1].value_counts(),
     }).fillna(0).astype(int)
     # The index page is a read, not a guide -- counting it as one would put a
-    # row with no article behind it at the top of the table.
-    table = table.drop(index="index", errors="ignore")
+    # row with no article behind it at the top of the table. "charts" goes for
+    # a second reason: the gallery rides the same GUIDES page map in the Worker
+    # so its reads DO arrive as guide_view, but its reactions are written as
+    # chart_like/chart_share, which this table never reads. Left in, it showed
+    # as a guide with real reads and a permanent zero in both other columns.
+    # _admin_chart_reactions is where it belongs.
+    table = table.drop(index=["index", CHART_GALLERY_SLUG], errors="ignore")
     return (table.rename_axis("Guide").reset_index()
             .sort_values("Reads", ascending=False))
+
+
+def _admin_chart_reactions(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """Likes and shares per infographic, most-liked first.
+
+    Deliberately NOT merged into _admin_guide_reactions. A guide and a chart
+    are different objects reacted to for different reasons, the actions are
+    kept apart in the data for exactly that reason (see
+    CHART_LIKE_ACTION_PREFIX), and pooling them here would undo the separation
+    the moment it reached a screen.
+
+    THERE IS NO PER-CHART DENOMINATOR and there cannot be one. The gallery is a
+    single page, so the edge logs one guide_view for the whole grid however
+    many charts a visitor scrolls past. That page total rides on .attrs as
+    `gallery_reads` for the caption to state once; putting it in a column would
+    repeat one number down twelve rows and invite reading it as a per-chart
+    rate. These are raw tallies.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    actions = usage_df["action"].astype(str)
+    likes = actions[actions.str.startswith(CHART_LIKE_ACTION_PREFIX)]
+    shares = actions[actions.str.startswith(CHART_SHARE_ACTION_PREFIX)]
+    reads = int((actions == f"{GUIDE_ACTION_PREFIX}:slug={CHART_GALLERY_SLUG}").sum())
+    if likes.empty and shares.empty and not reads:
+        return pd.DataFrame()
+    table = pd.DataFrame({
+        "Likes": likes.str.split("slug=").str[-1].value_counts(),
+        "Shares": shares.str.split("slug=").str[-1].value_counts(),
+    }).fillna(0).astype(int)
+    table.attrs["gallery_reads"] = reads
+    if table.empty:
+        return table
+    out = (table.rename_axis("Infographic").reset_index()
+                .sort_values(["Likes", "Shares"], ascending=False))
+    # .attrs does not survive reset_index in every pandas version and this one
+    # is read by the caption, so it is set LAST -- the search-caption lesson.
+    out.attrs["gallery_reads"] = reads
+    return out
+
+
+def _admin_chart_destinations(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """Where visitors went from the gallery, out of how many gallery reads.
+
+    The welcome-page twin of this reads landing rows for its denominator. Here
+    the denominator is guide_view on the gallery, which is a real page read
+    rather than an edge landing -- so the same "no click is derived, not
+    observed" caveat applies and the same two leaks with it.
+
+    One difference worth keeping straight: a gallery read and a nav from the
+    gallery are logged by different systems (the Worker and the app), so a
+    click can be recorded whose read was excluded at the edge as a bot or a
+    ?test=1 visit. The estimate is floored at zero for that reason as well.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    actions = usage_df["action"].astype(str)
+    reads = int((actions == f"{GUIDE_ACTION_PREFIX}:slug={CHART_GALLERY_SLUG}").sum())
+    if not reads:
+        return pd.DataFrame()
+    navs = actions.str.extract(
+        rf"^nav:from={NAV_CHARTS}:to=(?P<to>[^:]+)")["to"].dropna()
+    labels = {NAV_CALCULATOR: "The calculator"}
+    labels.update({k: t["label"] for k, t in STANDALONE_TOOLS.items()})
+    rows = [{"Went to": labels.get(dest, dest), "Visitors": int(count)}
+            for dest, count in navs.value_counts().items()]
+    clicked = int(navs.shape[0])
+    rows.append({"Went to": "No click (estimated)",
+                 "Visitors": max(reads - clicked, 0)})
+    table = pd.DataFrame(rows)
+    table["Share of reads"] = [f"{(v / reads * 100):.0f}%" for v in table["Visitors"]]
+    table.attrs["reads"] = reads
+    table.attrs["clicked"] = clicked
+    return table
 
 
 def _admin_n_sessions(*dfs: pd.DataFrame) -> int:
@@ -19210,6 +19297,43 @@ def render_admin_dashboard() -> None:
             "guide was worth passing on, and never as a share *rate*."
         )
         st.dataframe(_reactions, use_container_width=True, hide_index=True)
+
+    _charts = _admin_chart_reactions(usage_df)
+    _chart_dests = _admin_chart_destinations(usage_df)
+    if not _charts.empty or not _chart_dests.empty:
+        st.markdown("#### 📊 Infographics")
+        _gallery_reads = (_charts.attrs.get("gallery_reads")
+                          or _chart_dests.attrs.get("reads", 0))
+        st.caption(
+            f"**{_gallery_reads:,}** reads of the gallery, counted at the edge. "
+            "That figure is the whole PAGE: /charts is one grid, so a visitor "
+            "who scrolls past twelve infographics is one read, and there is no "
+            "per-chart denominator to put beside the likes below. They are raw "
+            "tallies.\n\n"
+            "Everything the guides caption says about identity applies here and "
+            "a little harder. A like is an unauthenticated tap guarded only by "
+            "localStorage, a share is written when the sheet closes or the link "
+            "reaches the clipboard and proves nothing was sent, and repeat "
+            "shares are not de-duplicated. Read them as which pictures were "
+            "worth a tap, never as a count of people."
+        )
+        if not _charts.empty:
+            st.dataframe(_charts, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No likes or shares yet.")
+        if not _chart_dests.empty:
+            _c = _chart_dests.attrs["clicked"]
+            _r = _chart_dests.attrs["reads"]
+            st.caption(
+                f"**What they did next.** {_c:,} of {_r:,} gallery reads "
+                f"followed a link into the app ({_c / _r * 100:.0f}%). "
+                "*No click* is derived, not observed, with the same two leaks "
+                "as the welcome panel: two CTAs count twice against one read, "
+                "and a return visit reads twice. It can also be flattered by "
+                "the read and the click being logged by different systems, so "
+                "a click can survive a read the edge excluded as a bot."
+            )
+            st.dataframe(_chart_dests, use_container_width=True, hide_index=True)
 
     st.markdown("#### 🔗 Traffic by source")
     st.caption(
