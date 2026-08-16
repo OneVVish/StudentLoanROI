@@ -257,6 +257,43 @@ SITE_CSS = """  :root {
     .post-card { transition: none; }
     .post-card:hover { transform: none; }
   }
+  /* ===== THE CHART GALLERY =====
+     Borrows .post-grid for layout and .post-card's frame, then diverges in one
+     structural way: a guide card IS a link, and a chart card CANNOT be, because
+     it carries its own Helpful and Share buttons. An <a> wrapping a <button> is
+     invalid and, worse, swallows the button's click on some browsers. So the
+     picture is the link and the reactions sit outside it as siblings.
+
+     These rules live in SITE_CSS rather than ARTICLE_CSS deliberately. The
+     .guide-card rules once sat in ARTICLE_CSS while the LANDING rendered the
+     markup, so the homepage served cards with no rules at all and the title,
+     summary and date collapsed into one run-on underlined link. Anything a
+     second page might ever render belongs here. */
+  .chart-card { display: flex; flex-direction: column; background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; }
+  .chart-card .shot { display: block; aspect-ratio: 16 / 9; background: var(--tile);
+    text-decoration: none; }
+  .chart-card .shot img { width: 100%; height: 100%; object-fit: cover;
+    object-position: top; display: block; }
+  .chart-card b { display: block; padding: 16px 18px 0; color: var(--deep);
+    font-size: 19px; line-height: 1.28; }
+  .chart-card span.sum { display: block; padding: 10px 18px 0; color: var(--muted);
+    font-size: 15px; }
+  .chart-card .src { padding: 10px 18px 0; margin: 0; color: var(--muted);
+    font-size: 12.5px; }
+  /* margin-top:auto pins the reaction bar to the bottom of the card whatever
+     the summary wraps to, so a row of cards lines its buttons up. */
+  .chart-card .reactions { margin-top: auto; display: flex; align-items: center;
+    gap: 10px; flex-wrap: wrap; padding: 16px 18px; }
+  .chart-card .reactions button { font: inherit; font-size: 14px; cursor: pointer;
+    background: var(--surface); color: var(--deep); border: 1px solid var(--rule);
+    border-radius: 999px; padding: 7px 14px; }
+  .chart-card .reactions button:hover:not(:disabled) { border-color: var(--blue);
+    color: var(--blue); }
+  .chart-card .reactions button:disabled { cursor: default; color: var(--muted); }
+  .chart-card .reactions .count { color: var(--muted); font-size: 13px; }
+  .chart-card .reactions .sharelink { font-size: 12.5px; color: var(--muted);
+    word-break: break-all; }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
   /* ===== ONE CARD, TWO COLOURS =====
      The landing page holds two kinds of card: a tool is something you use, a
@@ -514,7 +551,10 @@ def build_html(f: dict, posts: list = ()) -> str:
   </div>
   <p class="deck" style="margin-top:14px"><a href="/guides"
     style="color:var(--blue);font-weight:600;text-decoration:none">All
-    guides&nbsp;→</a></p>
+    guides&nbsp;→</a>
+    &nbsp;·&nbsp;
+    <a href="/charts"
+    style="color:var(--blue);font-weight:600;text-decoration:none">Charts&nbsp;→</a></p>
 </section>'''
 
     cap_body = "\n".join(
@@ -1182,6 +1222,83 @@ def card_thumb(source: str) -> str:
     return _resized_jpeg(source, CARD_THUMB_WIDTH, "card")
 
 
+# The /charts gallery. Sources live OUTSIDE static/ and outside git.
+CHART_DIR = ROOT / "marketing" / "infographics"
+CHART_FULL_WIDTH = 1400        # the picture on the gallery page itself
+CHART_CARD_W, CHART_CARD_H = 720, 405     # 16:9, matching the guide cards
+
+
+def _chart_jpeg(source: str, out: str, width: int, box=None) -> bool:
+    """One web-sized JPEG in static/ from a full-resolution chart PNG.
+
+    A MISSING SOURCE IS NOT AN ERROR when the output already exists, and that
+    is the whole reason this is not _resized_jpeg. Those sources read from
+    static/, which is committed; these read from marketing/infographics/, which
+    is NOT -- so on a fresh clone the PNGs are simply absent while the JPEGs
+    this produced are sitting in git right where the page expects them.
+    Treating that as a failure would make the repo unbuildable by anyone but
+    the machine that first ran it.
+
+    Returns True when the output exists afterwards, so the caller can decide
+    what to do about a chart it genuinely cannot draw.
+    """
+    from PIL import Image
+
+    src, dst = CHART_DIR / source, ROOT / "static" / out
+    if not src.exists():
+        return dst.exists()
+    if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return True
+    with Image.open(src) as im:
+        im = im.convert("RGB")
+        if box:
+            # Uniform cards from images that are not a uniform shape: these run
+            # from 0.77 (tall) to 1.37 (wide), and a grid of ragged tiles reads
+            # as broken rather than as varied. Cropped from the TOP, not the
+            # centre: every one of these charts puts its headline at the top,
+            # so a centred crop would show the middle of a bar chart and no
+            # indication of what it is about. The card is a doorway; the whole
+            # image is one click away.
+            cw, ch = box
+            scale = max(cw / im.width, ch / im.height)
+            im = im.resize((max(cw, round(im.width * scale)),
+                            max(ch, round(im.height * scale))), Image.LANCZOS)
+            left = (im.width - cw) // 2
+            im = im.crop((left, 0, left + cw, ch))
+        else:
+            height = round(im.height * width / im.width)
+            im = im.resize((width, height), Image.LANCZOS)
+        im.save(dst, "JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True)
+    print(f"  chart image {out}  ({dst.stat().st_size:,} bytes"
+          f" from {src.stat().st_size:,})")
+    return True
+
+
+def load_charts() -> list:
+    """Every chart in content/charts/, newest first.
+
+    Same front-matter parser as the guides, because they are the same kind of
+    file and a second one would drift. `image` is required here where it is
+    optional for a post: a chart with no picture is not a chart.
+    """
+    d = ROOT / "content" / "charts"
+    if not d.exists():
+        return []
+    charts = []
+    for path in sorted(d.glob("*.md")):
+        meta = parse_post(path)
+        if not meta.get("image"):
+            raise ValueError(f"{path.name}: a chart must name an image")
+        meta["full"] = f"info-{meta['slug']}.jpg"
+        meta["card"] = f"card-info-{meta['slug']}.jpg"
+        meta["drawable"] = (
+            _chart_jpeg(meta["image"], meta["full"], CHART_FULL_WIDTH)
+            and _chart_jpeg(meta["image"], meta["card"], 0,
+                            box=(CHART_CARD_W, CHART_CARD_H)))
+        charts.append(meta)
+    return sorted(charts, key=lambda m: m["date"], reverse=True)
+
+
 def article_hero(source: str) -> str:
     """The in-article photograph for a hero. See _resized_jpeg."""
     return _resized_jpeg(source, ARTICLE_HERO_WIDTH, "hero")
@@ -1217,6 +1334,178 @@ def card_image_for(post: dict):
     """
     source = post.get("card") or post.get("hero")
     return card_thumb(source) if source else None
+
+
+CHART_SHARE_BASE = "https://worthmydegree.com/charts"
+
+
+def build_charts_index_html(charts, logo_svg, favicon) -> str:
+    """The /charts gallery: every infographic, each with its own reactions.
+
+    ONE PAGE, NOT ONE PAGE PER CHART. A guide has a body worth its own URL; a
+    chart is a single picture, and six pages each holding one image would be
+    six thin pages competing with each other for the same search intent. The
+    trade is that a share link cannot address a chart on its own, which is what
+    the #slug fragment is for.
+
+    THE REACTION JS IS A LOOP, and that is the whole difference from
+    build_guide_html's version. That one resolves `document.getElementById
+    ("like")` because an article page has exactly one. Six on a page means
+    per-card lookups, so everything keys off the card element and its data-slug.
+    Copying the article version and changing the selector by hand is how the two
+    drift; this reimplements the same three rules deliberately and repeats them
+    in comments where they are easy to lose.
+    """
+    cards = []
+    for c in charts:
+        if not c.get("drawable"):
+            # A chart whose picture cannot be produced is skipped rather than
+            # rendered as a broken image. This happens on a clone that has the
+            # committed JPEGs but not the gitignored PNGs -- in which case the
+            # JPEGs ARE there and this never fires -- or when a manifest names
+            # an image nobody has. missing_static() would fail the build on the
+            # second case anyway; this keeps the page honest in the meantime.
+            continue
+        cards.append(f'''  <div class="chart-card" id="{c["slug"]}">
+    <a class="shot" href="/app/static/{c["full"]}" target="_blank" rel="noopener"
+       aria-label="Open the full-size chart: {c["title"]}">
+      <img src="/app/static/{c["card"]}" alt="{c["description"]}"
+           loading="lazy" width="720" height="405"></a>
+    <b>{c["title"]}</b>
+    <span class="sum">{c["summary"]}</span>
+    <p class="src">{c.get("source", "")}</p>
+    <div class="reactions" data-slug="{c["slug"]}" data-title="{c["title"]}">
+      <button class="like" type="button">&#9829; Helpful</button>
+      <span class="count">&nbsp;</span>
+      <button class="share" type="button">&#128279; Share</button>
+      <span class="sharelink" hidden></span>
+    </div>
+  </div>''')
+    cards = "\n".join(cards)
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+{_page_head("Charts — worthmydegree.com",
+            "Free infographics on what college costs, what majors pay, and "
+            "what the 2026 student loan rules changed. Built from federal data.",
+            CHART_SHARE_BASE, "feature-og-calculator-1200x630.png", favicon)}
+</head>
+<body>
+<div class="wrap">
+<header>
+  <a class="logo" href="/" aria-label="worthmydegree.com">{logo_svg}</a>
+  <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
+</header>
+<section class="guides-band">
+  <h1>Charts: the college money picture, one page at a time</h1>
+  <div class="accent"></div>
+  <p>Every chart is built from federal data: Bureau of Labor Statistics wages,
+  College Scorecard costs and borrowing, New York Fed outcomes. Free to use
+  anywhere, no permission needed. Click any chart for the full-size version.</p>
+</section>
+
+<div class="post-head">
+  <h2>All charts</h2>
+  <span>{len(charts)} chart{"" if len(charts) == 1 else "s"}</span>
+</div>
+<div class="post-grid">
+{cards}
+</div>
+
+<div class="cta" style="padding:34px 0">
+  <a class="btn big" href="/?go=1&amp;from=charts">Run your own numbers, free</a>
+  <div class="trust">Free · anonymous · no sign-up</div>
+</div>
+
+<footer>
+  <a href="/guides" style="color:inherit">Guides</a> ·
+  <a href="/" style="color:inherit">worthmydegree.com</a> · Educational
+  estimate, not financial advice.
+</footer>
+</div>
+{CARRY_QS_JS}
+<script>
+(function () {{
+  var base = {js_string(CHART_SHARE_BASE)};
+  document.querySelectorAll(".chart-card .reactions").forEach(function (bar) {{
+    var slug  = bar.dataset.slug;
+    var title = bar.dataset.title;
+    var url   = base + "#" + slug;
+    var like  = bar.querySelector(".like");
+    var share = bar.querySelector(".share");
+    var out   = bar.querySelector(".count");
+    var link  = bar.querySelector(".sharelink");
+    var key   = "liked:chart:" + slug;
+
+    function render(n) {{
+      out.textContent = n === null ? "" :
+        (n === 1 ? "1 person found this helpful" : n + " people found this helpful");
+    }}
+    // The count is a nicety. If it never arrives the buttons still work.
+    fetch("/api/likes?slug=" + encodeURIComponent(slug) + "&kind=chart")
+      .then(function (r) {{ return r.json(); }})
+      .then(function (d) {{ render(typeof d.count === "number" ? d.count : null); }})
+      .catch(function () {{}});
+    if (localStorage.getItem(key)) {{ like.disabled = true; like.textContent = "\\u2665 Thanks"; }}
+
+    like.addEventListener("click", function () {{
+      if (like.disabled) return;
+      like.disabled = true; like.textContent = "\\u2665 Thanks";
+      try {{ localStorage.setItem(key, "1"); }} catch (e) {{}}
+      // location.search rides along for the reason the guide version gives:
+      // ?src= is the recruitment tag and ?test=1 / ?src=selftest are what let
+      // the Worker refuse to log the author's own taps. CARRY_QS_JS rewrites
+      // <a href> only, so a fetch has to carry it itself.
+      fetch("/api/like" + location.search, {{
+        method: "POST", headers: {{"content-type": "application/json"}},
+        body: JSON.stringify({{slug: slug, kind: "chart"}}),
+      }}).then(function (r) {{ return r.json(); }})
+        .then(function (d) {{ if (typeof d.count === "number") render(d.count); }})
+        .catch(function () {{}});
+    }});
+
+    function record() {{
+      // keepalive, because the native share sheet backgrounds the page on a
+      // phone and an ordinary fetch is cancelled with it.
+      fetch("/api/share" + location.search, {{
+        method: "POST", keepalive: true,
+        headers: {{"content-type": "application/json"}},
+        body: JSON.stringify({{slug: slug, kind: "chart"}}),
+      }}).catch(function () {{}});
+    }}
+    function flash(msg) {{
+      link.hidden = false; link.textContent = msg;
+      setTimeout(function () {{ link.hidden = true; }}, 4000);
+    }}
+    function copy() {{
+      if (navigator.clipboard && navigator.clipboard.writeText) {{
+        navigator.clipboard.writeText(url).then(
+          function () {{ record(); flash("\\u2713 Link copied"); }},
+          function () {{ flash(url); }});
+      }} else {{
+        flash(url);
+      }}
+    }}
+    share.addEventListener("click", function () {{
+      if (navigator.share) {{
+        // AbortError is the reader closing the sheet: a decision, not a
+        // failure. Falling back to a copy would put a link on their clipboard
+        // that they just declined to send, and recording it would count a
+        // cancellation as a share.
+        navigator.share({{title: title, url: url}}).then(record, function (err) {{
+          if (err && err.name === "AbortError") return;
+          copy();
+        }});
+        return;
+      }}
+      copy();
+    }});
+  }});
+}})();
+</script>
+</body>
+</html>
+'''
 
 
 def build_guides_index_html(posts, logo_svg, favicon) -> str:
@@ -1301,19 +1590,27 @@ GUIDES_START = "// {{GUIDES_HTML_START}}"
 GUIDES_END = "// {{GUIDES_HTML_END}}"
 
 
-def inject_guides(worker_src: str, pages: dict) -> str:
+def inject_guides(worker_src: str, pages: dict, chart_slugs=()) -> str:
     """The guide pages as one path -> HTML map, injected like LANDING.
 
     A map rather than a page each: the Worker looks the request up, so adding
     a post never touches routing code. Same reason LANDING is a constant and
     not an import -- the documented fallback deploy is pasting worker.js into
     the Cloudflare dashboard, which an import would break.
+
+    CHART_SLUGS rides in the same block rather than earning its own marker
+    pair. The charts are ONE page, so unlike a guide their slugs cannot be
+    recovered from the keys of this map -- and knownSlug has to be able to
+    reject an arbitrary slug, because /api/like is public and its argument
+    lands in usage_logs.action. Same generated block, same regeneration, one
+    fewer marker to keep in step.
     """
     if GUIDES_START not in worker_src:
         sys.exit(f"worker.js is missing {GUIDES_START} -- add the marker block first")
     block = (f"{GUIDES_START}\n"
              f"// GENERATED by infra/build_site.py -- edit that, not this.\n"
              f"const GUIDES = {json.dumps(pages)};\n"
+             f"const CHART_SLUGS = {json.dumps(sorted(chart_slugs))};\n"
              f"{GUIDES_END}")
     return re.sub(re.escape(GUIDES_START) + r".*?" + re.escape(GUIDES_END),
                   lambda _m: block, worker_src, count=1, flags=re.S)
@@ -1451,7 +1748,8 @@ SITEMAP_START = "<!--GUIDES-->"
 SITEMAP_END = "<!--/GUIDES-->"
 
 
-def inject_sitemap(text: str, posts: list, lastmod: dict = None) -> str:
+def inject_sitemap(text: str, posts: list, lastmod: dict = None,
+                   charts: list = ()) -> str:
     """Guide URLs into both sitemap halves, replacing whatever was there.
 
     Regenerated from the posts every build, so deleting a post removes its URL
@@ -1466,12 +1764,21 @@ def inject_sitemap(text: str, posts: list, lastmod: dict = None) -> str:
     entries = ["  <url>\n    <loc>https://worthmydegree.com/guides</loc>\n"
                "    <changefreq>weekly</changefreq>\n"
                "    <priority>0.7</priority>\n  </url>"]
+    # The gallery sits inside the generated block rather than beside the static
+    # tool URLs, because like the guides it exists only when its content does:
+    # no charts, no page, and a sitemap listing a 301 is worse than one listing
+    # nothing. Weekly like the guides index, since both change when their
+    # contents do.
+    if charts:
+        entries.append("  <url>\n    <loc>https://worthmydegree.com/charts</loc>\n"
+                       "    <changefreq>weekly</changefreq>\n"
+                       "    <priority>0.6</priority>\n  </url>")
     lastmod = lastmod or {}
     entries += [f"  <url>\n    <loc>https://worthmydegree.com/guides/{p['slug']}</loc>\n"
                 f"    <lastmod>{lastmod.get(p['slug'], p['date'])}</lastmod>\n"
                 f"    <changefreq>monthly</changefreq>\n"
                 f"    <priority>0.6</priority>\n  </url>" for p in posts]
-    inner = ("\n" + "\n".join(entries)) if posts else ""
+    inner = ("\n" + "\n".join(entries)) if (posts or charts) else ""
     block = f"{SITEMAP_START}{inner}\n  {SITEMAP_END}"
     return re.sub(re.escape(SITEMAP_START) + r".*?" + re.escape(SITEMAP_END),
                   lambda _m: block, text, count=1, flags=re.S)
@@ -1510,6 +1817,12 @@ def render_all():
         for post in posts:
             pages[f"/guides/{post['slug']}"] = build_guide_html(
                 post, logo_svg, favicon, lastmod.get(post["slug"]))
+    # The chart gallery rides the same pages map, which is what routes it: the
+    # Worker serves anything in that map and 301s everything else to "/", so a
+    # page absent from here is not merely unlinked, it is unreachable.
+    charts = load_charts()
+    if charts:
+        pages["/charts"] = build_charts_index_html(charts, logo_svg, favicon)
     return html, pages, posts, lastmod, manifest
 
 
@@ -1586,8 +1899,10 @@ def main():
     LLMS_PATH.write_text(llms)
 
     worker = inject(WORKER.read_text(), html)
-    worker = inject_guides(worker, pages)
-    worker = inject_sitemap(worker, posts, lastmod)
+    worker = inject_guides(
+        worker, pages, [c["slug"] for c in load_charts()])
+    _charts = load_charts()
+    worker = inject_sitemap(worker, posts, lastmod, _charts)
     worker = inject_llms(worker, llms)
     check_worker_syntax(worker)
     WORKER.write_text(worker)
@@ -1604,7 +1919,7 @@ def main():
     # the two halves used to be a "change both in one PR" comment, and a
     # generated section is one less thing asking a human to remember.
     ref = ROOT / "infra" / "sitemap.xml"
-    ref.write_text(inject_sitemap(ref.read_text(), posts, lastmod))
+    ref.write_text(inject_sitemap(ref.read_text(), posts, lastmod, _charts))
     print(f"  sitemap: {len(posts) + 1} guide URL(s) in both halves")
 
 

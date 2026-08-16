@@ -151,6 +151,46 @@ def main() -> int:
                  f"in the calculator as untagged organic traffic. Include "
                  f"CARRY_QS_JS in the template.")
 
+    # ---- The /charts gallery -------------------------------------------
+    #
+    # Held to the same rules the guides are, because it fails the same quiet
+    # way: it renders, it serves, and only a picture, a route or a reaction is
+    # missing. The one rule that is STRICTER is the image, which is optional
+    # for a post and mandatory here -- a chart with no picture is not a chart.
+    charts = builder.load_charts()
+    chart_slugs = set()
+    for c in charts:
+        where = f"content/charts/{c['slug']}.md"
+        if not SLUG_RE.match(c["slug"]):
+            fail(f"{where}: slug {c['slug']!r} is not URL-safe")
+        if c["slug"] in chart_slugs:
+            fail(f"{where}: duplicate slug {c['slug']!r}")
+        chart_slugs.add(c["slug"])
+        if not c.get("source"):
+            fail(f"{where}: a chart must name a source -- these are published "
+                 f"as standalone pictures and travel without the page")
+        # The committed JPEGs, not the gitignored PNG. A clone has the first
+        # and not the second, and it is the first the page actually serves.
+        for served in (c["full"], c["card"]):
+            if not (ROOT / "static" / served).exists():
+                fail(f"{where}: static/{served} is missing -- the gallery "
+                     f"would render a broken image. Run infra/build_site.py "
+                     f"with marketing/infographics/ present to regenerate it.")
+    if charts:
+        if '"/charts"' not in worker:
+            fail("infra/worker.js has no /charts route -- the Worker 301s "
+                 "anything not in its page map to /, so the gallery would "
+                 "silently redirect to the homepage")
+        # Public endpoint: knownSlug rejects anything not in this list, so a
+        # slug missing here is a like button that 404s.
+        for c in charts:
+            if f'"{c["slug"]}"' not in worker:
+                fail(f"content/charts/{c['slug']}.md: the slug is not in "
+                     f"CHART_SLUGS, so /api/like and /api/share will reject "
+                     f"it and the buttons will fail silently")
+        if "/charts</loc>" not in sitemap:
+            fail("infra/sitemap.xml has no /charts entry")
+
     # The sitemap regeneration must not eat the static entries (it did once).
     for required in ("https://worthmydegree.com/</loc>",
                      "?tool=repayment</loc>", "?tool=schools</loc>",
@@ -167,10 +207,10 @@ def main() -> int:
               "tab title,\n  the preview card or the search listing is wrong "
               "-- none of which the\n  author sees while writing it.")
         return 1
-    print(f"content OK -- {len(posts)} guide(s): front matter complete, "
-          f"Markdown inside the\n  supported subset, images present, slugs "
-          f"URL-safe, every page in the Worker\n  map and the sitemap, and "
-          f"the static URLs survived regeneration.")
+    print(f"content OK -- {len(posts)} guide(s) and {len(charts)} chart(s): "
+          f"front matter complete,\n  Markdown inside the supported subset, "
+          f"images present, slugs URL-safe,\n  every page in the Worker map "
+          f"and the sitemap, every chart slug reachable\n  by the reaction endpoints, and the static URLs survived regeneration.")
     return 0
 
 
