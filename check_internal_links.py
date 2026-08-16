@@ -86,13 +86,18 @@ def check_landing_ctas_tagged(ns, fail):
              f"reject every welcome click and return \"\", so the landing's "
              f"CTAs would log nothing")
     for href in _re.findall(r'href="(/[^"]*)"', html):
-        # Three kinds of link need no origin tag:
+        # Four kinds of link need no origin tag:
         #   * bare "/" points AT this page;
         #   * /guides/* are EDGE pages -- the app never sees the request, so
         #     from= would be meaningless. The Worker logs those reads itself
         #     as guide_view rows;
+        #   * /charts is an edge page for the same reason. Its own CTAs into
+        #     the app DO carry from=charts, which is where that hop is
+        #     counted; tagging the link INTO it would claim a nav the app
+        #     never sees;
         #   * llms.txt leaves the site entirely.
-        if href == "/" or href.startswith("/guides") or "llms.txt" in href:
+        if (href == "/" or href.startswith("/guides")
+                or href.startswith("/charts") or "llms.txt" in href):
             continue
         if f"from={ns['NAV_WELCOME']}" not in href:
             fail(f"landing CTA {href!r} does not carry from={ns['NAV_WELCOME']} "

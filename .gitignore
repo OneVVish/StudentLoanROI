@@ -27,6 +27,17 @@ presentation/
 
 # Marketing/outreach working files (src taxonomy, email templates, launch copy,
 # send logs) -- kept local for the same reason as presentation/
+#
+# marketing/infographics/ holds the FULL-RESOLUTION chart PNGs (~1.6MB, 2080px
+# wide) that the /charts gallery is built from. They stay out of git for the
+# reason brand/guide-*.png does: infra/build_site.py writes web-sized JPEGs
+# into static/ and those ARE committed, so carrying both would put the same
+# picture in the repo twice at ten times the weight. static/ is the archive.
+#
+# The consequence, which is the whole point of writing it down: a fresh clone
+# CANNOT rebuild the gallery images. Three of the six have generator scripts in
+# this folder; the other three were hand-patched from exports that have no
+# source at all. If static/info-*.jpg is ever deleted, it is gone.
 marketing/
 
 # Agent tooling: skills, settings, worktrees. Local working aids, not part of

@@ -4878,7 +4878,14 @@ NAV_CALCULATOR = "calculator"
 # validation already guarding ?from= covers it: an unvalidated origin lets a
 # hand-edited URL write arbitrary text into usage_logs.action.
 NAV_WELCOME = "welcome"
-NAV_ORIGINS = (frozenset({NAV_CALCULATOR, NAV_WELCOME})
+# The static /charts gallery, an ORIGIN only for the same reason welcome is:
+# it lives at the edge and the app can never navigate to it. Without this entry
+# nav_action REJECTS "charts" and returns "", so the gallery's two CTAs would
+# work perfectly for the visitor and log nothing -- the exact silent failure
+# check_internal_links exists to catch, which it cannot see here because it
+# reads the LANDING page's hrefs and this link lives on the charts page.
+NAV_CHARTS = "charts"
+NAV_ORIGINS = (frozenset({NAV_CALCULATOR, NAV_WELCOME, NAV_CHARTS})
                | frozenset(STANDALONE_TOOLS))
 
 
@@ -4934,10 +4941,22 @@ SHARE_ACTION_PREFIX = "article_share"
 # and quite another against 2,000.
 GUIDE_ACTION_PREFIX = "guide_view"
 
+# Reactions on the /charts gallery, kept separate from the article pair above.
+# A chart and a guide are different objects liked for different reasons, and
+# pooling them would be unrecoverable afterwards: both write
+# "<action>:slug=<slug>" and nothing else in the row says which page it came
+# from. Distinct names need no DDL, since usage_logs.action is free text.
+#
+# The gallery is ONE page, so unlike a guide there is no per-chart view count
+# to be a denominator. A chart like has no rate; it is a raw tally.
+CHART_LIKE_ACTION_PREFIX = "chart_like"
+CHART_SHARE_ACTION_PREFIX = "chart_share"
+
 # Everything the edge writes directly. These rows never ran the app, carry no
 # session_id, and must be kept out of any panel that means "app activity".
 EDGE_ACTION_PREFIXES = (LANDING_ACTION_PREFIX, LIKE_ACTION_PREFIX,
-                        SHARE_ACTION_PREFIX, GUIDE_ACTION_PREFIX)
+                        SHARE_ACTION_PREFIX, GUIDE_ACTION_PREFIX,
+                        CHART_LIKE_ACTION_PREFIX, CHART_SHARE_ACTION_PREFIX)
 
 
 def requested_tool() -> str:
