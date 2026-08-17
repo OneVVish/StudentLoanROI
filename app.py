@@ -20159,7 +20159,8 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
     })
     st.dataframe(
         table, use_container_width=True, hide_index=True,
-        column_config={"School": st.column_config.Column("School", width="large")})
+        column_config={"School": st.column_config.Column(
+            "School", width="large", pinned=True)})
 
     _cap(
         "**Rate** is which price you'd be charged"
@@ -20883,7 +20884,12 @@ def render_school_search(always_open: bool = False) -> None:
                 # recognisable from its first forty characters in a way that
                 # "$73,076" is not from "$73,0". The column stays
                 # drag-resizable and the full name is on hover.
-                "School": st.column_config.Column("School", width=280),
+                # PINNED, so the row keeps its identity when the table is
+                # scrolled sideways. Eleven columns do not fit any laptop, let
+                # alone a phone, and the columns a visitor scrolls RIGHT to
+                # reach are the ones they are comparing -- at which point the
+                # school name has left the screen and every row looks the same.
+                "School": st.column_config.Column("School", width=280, pinned=True),
                 # A fixed display_text, so the column is a row of identical
                 # links rather than 25 raw URLs of wildly different lengths --
                 # Scorecard stores everything from a bare domain to a 120-char
