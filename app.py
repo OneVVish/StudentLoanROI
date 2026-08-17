@@ -20895,28 +20895,27 @@ def render_school_search(always_open: bool = False) -> None:
                           "to the sticker price in this table."),
             })
         _cap(
-            "**Rate** is which price you'd be charged"
-            + (f", based on living in {home_state}. " if home_state else ". ")
-            + "*Same either way* means the school charges one price regardless, "
-            "true of most private schools. **Admits** is the share of applicants "
-            "accepted; **—** means the school reports none, usually because it "
-            "admits nearly everyone."
-            + (f" You've limited this to {adm_low}% to {adm_high}%, so every row "
-               "reports a rate and any school that reports none is excluded. "
+            "**Rate** is the price you'd pay"
+            + (f", since you told us you live in {home_state}. " if home_state else ". ")
+            + "*Same either way* means the school charges everyone the same, which "
+            "is true of most private schools. **Admits** is the percentage of "
+            "applicants who are admitted. **—** means the school doesn't report "
+            "it, usually because it takes almost everyone."
+            + (f" You've narrowed this to {adm_low}% to {adm_high}%, so every "
+               "school here reports a rate and the ones that don't are left out. "
                if adm_filtered else " ")
-            + (f"This list is ordered by **{sort_mode.lower()}**."
-               if sort_mode != SEARCH_SORT_DEFAULT else
-               "This list is ordered by cost.")
-            + " Ordering never changes which schools match, only which of the "
-              "matches you see first."
+            + (f"Sorted by {sort_mode.lower()}."
+               if sort_mode != SEARCH_SORT_DEFAULT else "Sorted by cost.")
+            + " Sorting changes the order you see them in, never which schools "
+              "matched."
             # An admit-rate ordering has a hole a cost ordering does not, and
             # it is the same asymmetry the band's own warning describes: a
             # school reporting no rate cannot be placed in the order at all, so
             # it sinks to the bottom and the cap can then cut it. Said only
             # when it is actually true of the list on screen.
             + (f" {_unrated:,} of the {_matched:,} matching schools report no "
-               "admit rate, so they sort last and may fall outside the 25 shown."
-               if sort_mode == "Admit rate" and _unrated else "")
+               "admit rate, so they fall to the bottom and may not make the 25 "
+               "you can see." if sort_mode == "Admit rate" and _unrated else "")
         )
         # The three things render_parent_plus_note's docstring forbids doing
         # with this figure, said once below the table rather than 25 times
@@ -20925,25 +20924,13 @@ def render_school_search(always_open: bool = False) -> None:
         # describes families who borrowed before OBBBA capped the programme.
         # A bare money column would silently assert the opposite of all three.
         _cap(
-            "**Avg net price** is what students who received federal aid "
-            "actually paid, on average, after grants and scholarships: cost "
-            "of attendance minus the aid awarded, from College Scorecard. It "
-            "is usually well below the sticker beside it: about "
-            f"{fmt_money_md(7063)}/year lower at the median school, and less "
-            "than half the sticker at 1,388 of the 5,035 schools here. **The "
-            "list is filtered and sorted on the sticker, not on this**, because it is "
-            "an average over aided students, so it is what usually happens "
-            "rather than what you are guaranteed. **—** means unreported."
+            "**Avg net price** is what students who got federal aid actually "
+            "paid after grants and scholarships, from College Scorecard. We "
+            "still filter and sort on the sticker. **—** means unreported."
         )
         _cap(
-            "**Finish** is the share of first-time, full-time students who "
-            "completed within 150% of the normal time, so six years for a "
-            "four-year degree. It matters here because everything else on "
-            "this page assumes you graduate: the cost is charged in full and "
-            "the salary is a graduate's. It **undercounts** real completion, "
-            "because a student who transfers and finishes elsewhere counts "
-            "against the school they left, and part-time students are not in "
-            "it at all. **—** means unreported."
+            "**Finish** is the share of students who start full time and "
+            "graduate within six years. **—** means unreported."
         )
         # Counted over the rows ON SCREEN, not the whole dataset, so the
         # sentence describes what the visitor is actually looking at -- and so
@@ -20959,19 +20946,14 @@ def render_school_search(always_open: bool = False) -> None:
         _thin_plus = int((_shown_plus & _plus_n.notna()
                           & (_plus_n < PLUS_DEBT_THIN_N)).sum())
         _cap(
-            "**Parents borrowed** is what families of *completers* at that school "
-            "who took Parent PLUS borrowed in total, at the median. It is the parent's "
-            "own debt, separate from every cost column here and from any loan this "
-            "app models for the student. It is not what a typical family borrows: "
-            "families who borrowed nothing are not in it. Congress capped Parent "
-            "PLUS on July 1, 2026, so these are amounts borrowed under the older, "
-            "uncapped rules. **—** means the school reports none. "
-            "The number in brackets is how many families the median is drawn "
-            "from, which is the difference between a pattern and a handful."
-            + (f" **{_thin_plus} of the {_with_plus} schools listed here** report "
-               f"a median based on fewer than {PLUS_DEBT_THIN_N} families, so "
-               "treat those as a rough indication."
-               if _thin_plus else "")
+            "**Parents borrowed** is the parent's own Parent PLUS debt by the "
+            "time their student graduated, at the midpoint. It is not part of any "
+            "price here, it leaves out families who borrowed nothing, and it "
+            "predates the July 1, 2026 cap. The number in brackets is how many "
+            "families it comes from. **—** means none reported."
+            + (f" {_thin_plus} of the {_with_plus} schools listed report a figure "
+               f"based on fewer than {PLUS_DEBT_THIN_N} families, so treat those "
+               "as rough." if _thin_plus else "")
         )
 
         # Said separately from the Parent PLUS caption above, not folded into
@@ -20979,19 +20961,13 @@ def render_school_search(always_open: bool = False) -> None:
         # debt. One paragraph covering both is how a reader ends up adding them.
         if "field_debt_median" in results.columns:
             _cap(
-                f"**Grads borrowed** is the student's own: the median federal "
-                f"debt at graduation for people who completed "
-                f"**{CIP_FAMILY_TITLES.get(family, 'this field')}** *at that "
-                f"school*, already net of scholarships and family money. It is "
-                f"per field rather than per school, which is the point: within "
-                f"one subject it ranges from about "
+                f"**Grads borrowed** is the student's own federal debt at "
+                f"graduation for **{CIP_FAMILY_TITLES.get(family, 'this field')}** "
+                f"*at that school*, at the midpoint. It is per field, not per "
+                f"school, so within one subject it runs from about "
                 f"{fmt_money_md(4049)} to {fmt_money_md(45268)} depending on "
-                f"where you study. Federal loans only, so private borrowing is "
-                f"not in it, and it is **not** a cost: never add it to the price "
-                f"columns. **—** means this school publishes no figure for this "
-                f"field, which is ordinary: coverage runs from about half of "
-                f"schools in engineering and computing to four in five in "
-                f"business and psychology."
+                f"where you study. It is not a cost, so never add it to the "
+                f"prices above. **—** means unreported."
             )
 
         # One selectbox and one button, not a button per row: 25 widgets would
