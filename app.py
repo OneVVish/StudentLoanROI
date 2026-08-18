@@ -5759,6 +5759,22 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # apart; dropping it would make them indistinguishable.
         "hs_baseline_age_aware": True,
         "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", True)),
+        # Real-dollar discounting. These two define what earnings_premium and
+        # roi_pct MEAN in this row, exactly as count_foregone_earnings above
+        # does, so any comparison across rows has to condition on them. Because
+        # the module is off by default this is NOT a seam in the existing
+        # series: false and NULL both mean the undiscounted model, and NULL is
+        # simply a row written before the column existed. The rate is logged
+        # beside the flag because "discounted" is not one treatment -- 1% and 8%
+        # are different scenarios and pooling them would be meaningless.
+        #
+        # On back-out these columns are RETAINED and no longer written, as the
+        # apprenticeship and 2026-plans columns were. See migrations.sql.
+        "discounting_enabled": bool(st.session_state.get("enable_discounting", False)),
+        "discount_rate_real": (
+            float(st.session_state.get("real_discount_rate",
+                                       DEFAULT_REAL_DISCOUNT_RATE * 100)) / 100.0
+            if st.session_state.get("enable_discounting") else None),
         "loan_mode": st.session_state.get("loan_mode", "Simplified"),  # Simplified / Detailed
         "cc_mode_a": cc_mode_a,                                         # none / fulltime / parttime
         # The professional school, and the debt figure it produced. Both are
@@ -6001,6 +6017,15 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         params["cc_esc_b"] = "1" if st.session_state.get("cc_escalating_b") else "0"
     params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
     params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
+    # Real-dollar discounting. The rate rides only when the module is on, for
+    # the reason the professional-school params do: a link from a scenario that
+    # never discounted anything should not carry a rate that built nothing. On
+    # back-out both become dead params, which a recipient's app ignores, so a
+    # stale link degrades to an undiscounted scenario rather than erroring.
+    params["disc"] = "1" if st.session_state.get("enable_discounting") else "0"
+    if st.session_state.get("enable_discounting"):
+        params["dr"] = str(st.session_state.get("real_discount_rate",
+                                                DEFAULT_REAL_DISCOUNT_RATE * 100))
     # In prestige mode the tier REPLACES the school, so ?school= holds a tier
     # label that no school lookup can resolve -- the tier params are what make
     # such a link reconstructable.
@@ -10420,6 +10445,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        include_fees: bool = False,
                        baseline_salary_now: float = None,
                        baseline_salary_in_10y: float = None,
+                       discount_rate: float = 0.0,
+                       inflation_rate: float = 0.0,
                        *, crossover: dict,
                        resolved_professional_debt: float = 0.0) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
@@ -10459,7 +10486,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, subsidized_cap=subsidized_cap,
                                   include_fees=include_fees,
                                   baseline_salary_now=baseline_salary_now,
-                                  baseline_salary_in_10y=baseline_salary_in_10y)
+                                  baseline_salary_in_10y=baseline_salary_in_10y,
+                                  discount_rate=discount_rate,
+                                  inflation_rate=inflation_rate)
     years = roi_window_years
     # Career-mode names are plural BLS occupations ("Software Developers")
     # while Major-mode names are singular ("Computer Science"), so any verb
@@ -15117,6 +15146,31 @@ apply_shared_flag("ai", "enable_ai_mode")
 # in migrations.sql.
 st.session_state.setdefault("count_foregone_earnings", True)
 apply_shared_flag("foregone", "count_foregone_earnings")
+# Real-dollar discounting. Read here, before the widgets in the Advanced
+# expander render, for the same before-the-widget reason every other flag above
+# is: the results section is far below but compute_scenario_results needs the
+# values, and Streamlit forbids assigning a key whose widget already exists.
+# Both are hard-gated on DISCOUNTING_ENABLED so the cheap back-out reaches the
+# seeding as well as the widgets -- a shared link carrying ?disc=1 must not
+# revive a module somebody has switched off.
+st.session_state.setdefault("enable_discounting", False)
+st.session_state.setdefault("real_discount_rate", DEFAULT_REAL_DISCOUNT_RATE * 100)
+if DISCOUNTING_ENABLED:
+    apply_shared_flag("disc", "enable_discounting")
+    # The rate rides the same change-detection sentinel its checkbox does,
+    # rather than a plain setdefault or a live read. A live read makes the
+    # number input impossible to edit -- type over it and the link's value
+    # returns on the next rerun, which is the ?pdebt= bug -- and a setdefault
+    # never lands when a URL is pasted into an open tab, which is the bug
+    # apply_shared_flag exists for. Clamped because a hand-edited ?dr=900 would
+    # otherwise raise on the widget's own max.
+    _dr_raw = st.query_params.get("dr")
+    if _dr_raw is not None and st.session_state.get("_shared_flag_dr") != _dr_raw:
+        st.session_state["_shared_flag_dr"] = _dr_raw
+        _shared_rate = get_shared_float("dr", None)
+        if _shared_rate is not None:
+            _lo, _hi = DISCOUNT_RATE_BOUNDS
+            st.session_state["real_discount_rate"] = min(max(_shared_rate, _lo * 100), _hi * 100)
 enable_prestige_mode = st.session_state["enable_prestige_mode"]
 enable_ai_mode = st.session_state["enable_ai_mode"]
 prestige_tier_a = None
@@ -16138,6 +16192,32 @@ def returning_kwargs() -> dict:
     return kwargs
 
 
+def discounting_kwargs() -> dict:
+    """The real-dollar discounting arguments, or empty when the module is off.
+
+    One dict spread into every compute_scenario_results and find_breakeven_loan
+    call, for exactly the reason returning_kwargs() is one: a dict spread cannot
+    be half-applied, and the failure this prevents is the recorded one. The
+    removed 2026-plans module accumulated three dropped calculate_roi kwargs,
+    the worst of which compared a city-scaled graduate salary against a national
+    baseline and overstated San Francisco's premium by 76%. A break-even solved
+    undiscounted beside a premium that was discounted would be that same shape:
+    two numbers on one screen quietly answering different questions.
+
+    Returns BOTH rates or NEITHER, which is the contract calculate_roi's
+    discounting_is_active() reads. The inflation rate is a constant rather than
+    an input: it is not a preference the way time preference is, and exposing it
+    would invite tuning the one figure the module needs to keep fixed.
+    """
+    if not (DISCOUNTING_ENABLED and st.session_state.get("enable_discounting")):
+        return {}
+    return {
+        "discount_rate": float(st.session_state.get(
+            "real_discount_rate", DEFAULT_REAL_DISCOUNT_RATE * 100)) / 100.0,
+        "inflation_rate": ASSUMED_INFLATION_RATE,
+    }
+
+
 def _sync_foregone_to_enrollment() -> None:
     """Turn foregone earnings on when the visitor says they'll stop working.
 
@@ -16168,13 +16248,21 @@ def _sync_foregone_to_enrollment() -> None:
 
 def breakeven_kwargs() -> dict:
     """The baseline half only -- find_breakeven_loan solves for NEW borrowing,
-    so an existing balance has no place in it."""
+    so an existing balance has no place in it.
+
+    The discounting arguments ride here too, and unlike the baseline half they
+    are NOT conditional on returning mode: a discounted premium beside an
+    undiscounted ceiling would be the 2026-plans failure exactly, two numbers on
+    one screen answering different questions.
+    """
+    kwargs = dict(discounting_kwargs())
     if not is_returning or not returning_baseline_ready():
-        return {}
-    return {
+        return kwargs
+    kwargs.update({
         "baseline_salary_now": float(st.session_state["current_salary"]),
         "baseline_salary_in_10y": float(st.session_state["salary_no_degree_10y"]),
-    }
+    })
+    return kwargs
 
 
 # City drives the wage dataset now, not just the cost-of-living index, so it
@@ -16838,6 +16926,35 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
                "real cost of a degree. Switch it off to ask what a student "
                "gains from here rather than from age 18. See Methodology.",
     )
+    # Real-dollar discounting. Both widgets are inside the DISCOUNTING_ENABLED
+    # gate, so the cheap back-out removes the controls without removing the
+    # expander or reordering anything above them.
+    if DISCOUNTING_ENABLED:
+        enable_discounting = st.checkbox(
+            "Count money later as worth less than money now",
+            key="enable_discounting",
+            on_change=lambda: mark_interaction("enable_discounting"),
+            help="Puts every figure in today's dollars and treats a dollar "
+                 "earned years from now as worth less than one earned today, "
+                 "which is what economists call discounting. Three things "
+                 "change and they do not all push the same way, so the effect "
+                 "on your result depends on the path. Off by default. See "
+                 "Methodology.",
+        )
+        if enable_discounting:
+            st.number_input(
+                "Discount rate (% a year, above inflation)",
+                min_value=DISCOUNT_RATE_BOUNDS[0] * 100,
+                max_value=DISCOUNT_RATE_BOUNDS[1] * 100,
+                step=0.5, format="%.1f",
+                key="real_discount_rate",
+                on_change=lambda: mark_interaction("real_discount_rate"),
+                help="How much less a dollar is worth to you a year from now, "
+                     "after inflation. There is no correct answer: this is a "
+                     "statement about you, not about the economy. Around 2% is "
+                     "roughly what safe savings return above inflation, and "
+                     "higher numbers say you would rather have money sooner.",
+            )
 
 # The in-enrollment opportunity cost is now applied PER SCENARIO (its
 # enrollment_years_a/_b and working_years_a/_b are computed up in the Scenario
@@ -22452,7 +22569,7 @@ if compare_mode:
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                            federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                            professional_debt_basis_key=_prof_basis_a,
-                                           **returning_kwargs())
+                                           **returning_kwargs(), **discounting_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
@@ -22462,7 +22579,7 @@ if compare_mode:
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
                                            professional_debt_basis_key=_prof_basis_b,
-                                           **returning_kwargs())
+                                           **returning_kwargs(), **discounting_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
     # national curve -- the one series genuinely common to A and B -- sits at
@@ -22710,7 +22827,7 @@ else:
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                          federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                            professional_debt_basis_key=_prof_basis_a,
-                                           **returning_kwargs())
+                                           **returning_kwargs(), **discounting_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -23267,7 +23384,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                                        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                                professional_debt_basis_key=_prof_basis_a,
-                                               **returning_kwargs())
+                                               **returning_kwargs(), **discounting_kwargs())
                 # major_b/loan_amount_b/etc. only exist as script variables when
                 # compare_mode is on (they're assigned inside that sidebar
                 # expander) -- referencing them outside an "if compare_mode:"
@@ -23284,7 +23401,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
                                                professional_debt_basis_key=_prof_basis_b,
-                                               **returning_kwargs())
+                                               **returning_kwargs(), **discounting_kwargs())
                     compare_mode_kwargs = dict(
                         compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                         interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,

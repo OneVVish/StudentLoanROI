@@ -2050,3 +2050,46 @@ alter table scenario_events
 -- and the "2026 Tiered Standard Plan". One carried the year and the other did
 -- not, so the pair read as one new plan beside one long-standing one, when both
 -- begin July 1, 2026. The name now says which regime it belongs to.
+
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-17: real-dollar discounting (optional Advanced Analysis module)
+-- ---------------------------------------------------------------------------
+-- Adds two columns describing whether a row's earnings_premium and roi_pct were
+-- computed in today's dollars with future money discounted, and at what rate.
+--
+-- RUN THIS BEFORE DEPLOYING. PostgREST rejects the ENTIRE row on an unknown
+-- column (PGRST204), so until these exist every save from a session that
+-- touched the module is silently lost -- and the survivors are biased toward
+-- "discounting off", which is exactly the comparison the columns exist to make.
+
+ALTER TABLE survey_responses ADD COLUMN IF NOT EXISTS discounting_enabled BOOLEAN;
+ALTER TABLE survey_responses ADD COLUMN IF NOT EXISTS discount_rate_real   NUMERIC;
+ALTER TABLE pdf_downloads    ADD COLUMN IF NOT EXISTS discounting_enabled BOOLEAN;
+ALTER TABLE pdf_downloads    ADD COLUMN IF NOT EXISTS discount_rate_real   NUMERIC;
+ALTER TABLE scenario_shares  ADD COLUMN IF NOT EXISTS discounting_enabled BOOLEAN;
+ALTER TABLE scenario_shares  ADD COLUMN IF NOT EXISTS discount_rate_real   NUMERIC;
+
+-- THIS IS NOT A SEAM IN THE EXISTING SERIES, and that is the whole reason the
+-- module ships off by default. discounting_enabled false and NULL mean the same
+-- thing (NULL is simply a row written before the column existed), so every row
+-- ever recorded remains comparable with every other. Treat NULL as false, the
+-- same rule hs_baseline_age_aware already carries.
+--
+-- What you MUST NOT do is pool discounted rows with undiscounted ones. The two
+-- answer different questions: an undiscounted premium is "how many more dollars
+-- pass through my hands", a discounted one is "what is that worth to me now".
+-- Filter on discounting_enabled IS NOT TRUE for any series that spans this date.
+--
+-- Nor may discounted rows be pooled with EACH OTHER without conditioning on
+-- discount_rate_real. The rate is a visitor-set input bounded 0 to 8%, and 1%
+-- and 8% are not one treatment. The column is NULL whenever the flag is false,
+-- so it never carries a rate that built nothing.
+--
+-- ON BACK-OUT: the module is designed to be removed (see DISCOUNTING_ENABLED in
+-- app.py). If it is, these columns are RETAINED and simply stop being written,
+-- exactly as the apprenticeship_* and 2026-plans columns were. Do not drop them:
+-- the rows written while it was running are the only record of what those
+-- visitors were shown, and a dropped column would leave their premium figures
+-- unexplained rather than merely unusual. Record the back-out date here so the
+-- window is recoverable from this file alone.
