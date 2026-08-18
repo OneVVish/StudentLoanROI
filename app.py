@@ -3222,6 +3222,72 @@ NYFED_MAJOR_SOC_GROUP = {
     "Treatment Therapy": "29",
 }
 
+# ---- Real-dollar discounting (optional "Advanced Analysis" mode) ------------
+# BUILT TO BE BACKED OUT. Everything this module touches is additive: every new
+# argument defaults to its no-op value, HS_GRAD_GROWTH_RATE is not changed, and
+# the existing scalar loan-payment path is untouched. Removing it is deleting
+# this block, the twin block above calculate_roi, and the defaulted parameters
+# at their call sites -- all greppable on DISCOUNTING_ENABLED. Set that constant
+# to False for the cheap back-out, which returns every code path to its default
+# without touching a line of arithmetic. It is a constant rather than an admin
+# checkbox for the reason PRESURVEY_ENABLED is: session_state is per-visitor, so
+# a checkbox would switch the module off for the admin alone, and flipping a
+# constant is a commit, which puts the on/off history in git. "When was this
+# running" is analysis metadata that nothing else in the data records.
+#
+# WHY IT EXISTS. This app sums undiscounted dollars over a window that now runs
+# 35 years on the net-position chart, so the discount choice is doing quiet work
+# in every headline figure. The IFS study of UK lifetime earnings puts the size
+# of it: the same stream reads GBP 150,000 under HM Treasury Green Book
+# discounting and about GBP 260,000 at a 0% real rate.
+#
+# WHAT IT DOES. Discounting only means anything once both sides of the
+# comparison are in the same units, and by default they are not:
+#
+#   * the graduate's growth comes from get_major_growth_rate, a CAGR fitted
+#     from OEWS p25 to p50 where both percentiles are read off ONE release
+#     published the same day. No time passes between the two measurements, so
+#     that rate is a cross-sectional gradient with NO inflation in it.
+#   * the high-school baseline grows at HS_GRAD_GROWTH_RATE, which its own
+#     docstring calls calendar drift.
+#
+# So the module works in today's dollars: the baseline's drift term goes to 0
+# (hs_age_factor already carries its real progression), the graduate stream is
+# left alone because it is already real, nominal loan payments are deflated by
+# ASSUMED_INFLATION_RATE, and everything is then discounted from its own
+# wall-clock year. Three effects, and they do NOT run the same way: zeroing the
+# drift raises the premium, deflating the payments raises it, discounting lowers
+# it for any back-loaded path. The net is path-dependent, and the Methodology
+# says so rather than implying a single direction.
+DISCOUNTING_ENABLED = True
+
+# The ONLY place this app states an inflation assumption. It is used in exactly
+# one place -- deflating nominal loan payments so they can be compared against
+# real earnings -- and that narrowness is deliberate: four different rates in
+# this file already do partly overlapping jobs (HS_GRAD_GROWTH_RATE 2.0%,
+# get_major_growth_rate ~2.14% median, income_for_year's 3.0%,
+# DEFAULT_COA_INFLATION_RATE 2.7%) and a fifth that leaked everywhere would make
+# that worse rather than better.
+#
+# DERIVED, not published as a single figure. CBO's Budget and Economic Outlook:
+# 2026 to 2036 projects PCE inflation returning to the Federal Reserve's 2%
+# long-run goal in 2030 and stable thereafter, and states that CPI-U runs about
+# 0.3 percentage points above PCE (the average gap over the low and stable
+# 2000-2018 period). 2.0 + 0.3 = 2.3. Recheck both components against the
+# current Outlook when refreshing, since the wedge and the long-run goal move
+# independently. [CBO, https://www.cbo.gov/publication/62105]
+ASSUMED_INFLATION_RATE = 0.023
+
+# A real rate, applied to real flows. Deliberately NOT Green Book's 3.5%: that
+# is a SOCIAL discount rate for appraising government spending, and its
+# decomposition is roughly 1.5% pure time preference plus 2% per-capita
+# consumption growth -- the second term belonging to a planner rather than to a
+# seventeen-year-old. 3% is a middle value the visitor can change, because
+# unlike the age-curve baseline (where one answer was simply wrong) time
+# preference genuinely is a personal parameter and an option here is honest.
+DEFAULT_REAL_DISCOUNT_RATE = 0.03
+DISCOUNT_RATE_BOUNDS = (0.0, 0.08)
+
 # ---- 2026 Federal Repayment Plans: RAP & Tiered Standard ------------------
 # Real, enacted federal law: the One Big Beautiful Bill Act (H.R. 1, 2025)
 # replaces existing IDR plans with the Repayment Assistance Plan (RAP) and
@@ -8596,6 +8662,79 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
 
 # ---- 2f. 10-Year ROI ------------------------------------------------------
+
+# ---- Real-dollar discounting (optional "Advanced Analysis" mode) ------------
+# The arithmetic half of the module whose constants and rationale sit in
+# section 1 under the same banner. Two functions, both no-ops at a zero rate,
+# both consumed only by calculate_roi. See DISCOUNTING_ENABLED for how to back
+# the whole thing out.
+
+
+def discounting_is_active(discount_rate: float, inflation_rate: float) -> bool:
+    """Whether calculate_roi should work in today's dollars.
+
+    Callers pass both rates or neither, so either one being non-zero means the
+    module is on. It reads both rather than a separate flag because a flag could
+    disagree with the rates, and because it makes "both zero" the single
+    condition the guard has to prove is bit-identical to the old model.
+
+    Note the 0% case is deliberately still ON when an inflation rate is present:
+    a visitor who enables the module and sets the discount rate to 0 is asking
+    for undiscounted TODAY'S DOLLARS, which still means zeroing the baseline's
+    drift and deflating the loan payments. Today's dollars is the convention,
+    not a side effect of discounting.
+    """
+    return bool(discount_rate) or bool(inflation_rate)
+
+
+def discount_factor(discount_rate: float, year_index: int) -> float:
+    """Present value of one dollar arriving in timeline year `year_index`.
+
+    year_index is WALL-CLOCK from the start of the comparison, never a stream's
+    own index -- the graduate's earnings, the baseline's earnings and the loan
+    payments all begin at different points and calculate_roi offsets each one
+    before calling this. Getting that wrong is the whole risk of this module:
+    every stream still balances its own books, so nothing raises, and the two
+    sides simply come to describe different calendar years. That is the failure
+    check_timeline_alignment.py already exists for.
+    """
+    if not discount_rate:
+        return 1.0
+    return 1.0 / ((1.0 + float(discount_rate)) ** max(int(year_index), 0))
+
+
+def to_todays_dollars(nominal: float, year_index: int, inflation_rate: float) -> float:
+    """A nominal amount paid in wall-clock year `year_index`, in year-0 dollars.
+
+    Loan payments are fixed nominal dollars: the bill is the same number every
+    month for thirty years while everything around it gets more expensive. That
+    is exactly the asymmetry this module exists to price, and it is the ONLY
+    consumer of ASSUMED_INFLATION_RATE.
+    """
+    if not inflation_rate:
+        return float(nominal)
+    return float(nominal) / ((1.0 + float(inflation_rate)) ** max(int(year_index), 0))
+
+
+def annual_loan_payments(repayment_result: dict, years: int) -> list:
+    """Loan dollars paid IN each year 1..years, rather than cumulatively.
+
+    A thin difference over cumulative_loan_paid_by_year so the two cannot
+    disagree about what a schedule says. Discounting needs the per-year series
+    because a payment's present value depends on when it was made, where the
+    undiscounted model only ever needed the total.
+
+    Deliberately NOT a replacement for that function: calculate_roi keeps taking
+    the pre-summed scalar and consults this only when the module is on, so the
+    default path is byte-for-byte what it was.
+    """
+    cumulative = cumulative_loan_paid_by_year(repayment_result, years)
+    out, prior = [], 0.0
+    for total in cumulative:
+        out.append(float(total) - prior)
+        prior = float(total)
+    return out
+
 
 def returning_student_curve(current_salary: float, salary_in_10_years: float,
                             hs_wage_index: float = 1.0):
