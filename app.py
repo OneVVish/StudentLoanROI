@@ -8806,6 +8806,10 @@ def discounting_methodology_bullet() -> str:
   Ticking it changes three things at once, and they do not all push the same
   way, so whether your result gets better or worse depends on the path.
 
+  Every dollar it moves is a pre-tax dollar, like every earnings figure on this
+  page outside the take-home section. Discounting changes when a dollar counts,
+  never whether tax has come out of it.
+
   First, everything moves into today's dollars. The high school baseline stops
   growing 2% a year for rising prices, because that 2% has no equivalent on the
   career side: a career's growth here comes from comparing beginners with
