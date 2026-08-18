@@ -24628,6 +24628,52 @@ real cost of a degree and leaving them out flatters every path.
   against the old rules. See the repayment-plans section above for why
   they are not offered as choices for a 2026+ start.
 
+- **Count money later as worth less than money now.** Off by default. A dollar
+  you will not see for twenty years is worth less to you than a dollar today,
+  and this option says so in the arithmetic. Economists call it discounting.
+  Ticking it changes three things at once, and they do not all push the same
+  way, so whether your result gets better or worse depends on the path.
+
+  First, everything moves into today's dollars. The high school baseline stops
+  growing 2% a year for rising prices, because that 2% has no equivalent on the
+  career side: a career's growth here comes from comparing beginners with
+  mid-career workers measured in the same year, which contains no inflation at
+  all. That correction on its own makes degrees look better.
+
+  Second, loan payments are converted the same way. Your monthly bill is the
+  same number of dollars in year 20 as in year 1, while everything around it
+  has gotten more expensive, so a late payment costs you less in real terms
+  than an early one. That also makes degrees look better, and it is the only
+  place this app states an inflation assumption: 2.3% a year, from CBO's
+  projection of 2.0% long-run PCE inflation plus the 0.3 point gap CBO gives
+  between CPI-U and PCE ([CBO, Budget and Economic
+  Outlook](https://www.cbo.gov/publication/62105)).
+
+  Third, every remaining dollar is discounted from the year it actually
+  arrives, at whatever rate you set. This one makes degrees look worse, and it
+  bites hardest on paths that train for years before they earn.
+
+  There is no correct rate, which is why it is a box you fill in rather than a
+  number we picked for you. It is a statement about you and not about the
+  economy. We default to 3% a year above inflation. Around 2% is roughly what
+  safe savings return above inflation, and a higher number says you would
+  rather have money sooner. We deliberately do not use the 3.5% that the UK
+  Treasury uses for judging government spending, because part of that figure
+  describes a whole country's rising prosperity rather than one person's
+  patience.
+
+  What this does not touch: your take-home pay snapshot and the salary
+  breakdown bars, which describe one year at a time rather than a lifetime
+  total, and the loan balance and payment charts, which show the actual dollars
+  you will owe and hand over. Your total investment is left alone too, since
+  tuition and savings are spent at the start rather than spread across the
+  years.
+
+  One consequence worth expecting: with this on, a long training path can take
+  noticeably longer to come out ahead, and some fall outside the 40 years this
+  app looks across. That is not the tool giving up. It is the honest answer on
+  those terms.
+
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
   fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard
   Regional Public, Out-of-State Public/Mid-Tier Private). The *cost* side is
@@ -24696,17 +24742,20 @@ real cost of a degree and leaving them out flatters every path.
   only changes the *earnings* side of the comparison, since the tuition and
   debt you put in stay the same, so the ROI% still reads as "how much you come out
   ahead for every dollar of tuition," now counting the wages you skipped to be
-  in school. Two simplifications to know about. First, the totals are just
-  each year's dollars added up. The model doesn't treat a dollar earned 10
-  years from now as worth less than a dollar today, which is what economists
-  call "discounting," so this is an earnings comparison rather than a formal
-  net-present-value calculation. Second, the two sides of that comparison
-  treat rising prices differently. A career's pay growth here comes from
-  comparing beginners with mid-career workers measured in the same year, so
-  there is no inflation inside it. The high school baseline instead grows 2%
-  a year, a figure that stands for raises and rising prices together. Over
-  the default 10-year window the gap that opens between those two treatments
-  is small. Over the 35 years the chart draws, it is not.
+  in school. Two simplifications to know about, and one Advanced Analysis
+  option that addresses both. First, the totals are just each year's dollars
+  added up. The model doesn't treat a dollar earned 10 years from now as worth
+  less than a dollar today, which is what economists call "discounting," so
+  this is an earnings comparison rather than a formal net-present-value
+  calculation. Second, the two sides of that comparison treat rising prices
+  differently. A career's pay growth here comes from comparing beginners with
+  mid-career workers measured in the same year, so there is no inflation inside
+  it. The high school baseline instead grows 2% a year, a figure that stands
+  for raises and rising prices together. Over the default 10-year window the
+  gap that opens between those two treatments is small. Over the 35 years the
+  chart draws, it is not. **Count money later as worth less than money now**,
+  under Advanced Analysis, puts both sides in today's dollars and discounts
+  what is left. It is off by default and described in full below.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
