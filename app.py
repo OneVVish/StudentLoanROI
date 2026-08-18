@@ -12598,12 +12598,13 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
          "national curve is drawn beneath it. The bottom and top 10% have no published bound and "
          "are stated in words rather than drawn."],
         ["High school graduate baseline",
-         "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
+         "U.S. Bureau of Labor Statistics, Current Population Survey. Median usual weekly earnings "
          "for full-time workers age 25+ with a high school diploma and no college ($994/week, "
          "2026 Q2, series LEU0252917300), "
          "annualized. This is an all-ages median, not a young graduate's starting pay, so the "
-         "comparison is against a typical working adult without a degree — the more demanding test. "
-         "Wage growth of 2%/yr is an assumption, not a BLS figure."],
+         "comparison is against a typical working adult without a degree, the more demanding test. "
+         "Figures are in today's dollars: the baseline is not grown for inflation, and its "
+         "year-by-year rise comes from the CPS age-earnings curve rather than an assumed rate."],
         ["Cost of attendance & college debt",
          "U.S. Department of Education, College Scorecard, institution file from "
          "the release of June 10, 2026. The cost figures in that release are "
@@ -23988,9 +23989,10 @@ window.""" + hs_young_wage_disclosure() + """
 
 Using that flat figure anyway would cut both ways. Early on it is too
 generous, which makes the degree look *worse* than it is. Later on it is too
-stingy, since 2%/year is slower than real pay climbs in one's twenties. The two
-errors run in opposite directions and partly cancel, but "partly cancel" is
-not the same as "cancel", and neither error is one we have to accept.
+stingy, because pay climbs steeply through one's twenties and a single all-ages
+median does not. The two errors run in opposite directions and partly cancel,
+but "partly cancel" is not the same as "cancel", and neither error is one we
+have to accept.
 
 #### The baseline follows an age curve, and that is now the default
 
@@ -24018,17 +24020,19 @@ instead of climbing from about $32,000, which would make every degree on this
 page look worse than the model actually thinks it is.
 
 One knock-on: with the curve supplying the raises that come from getting older,
-the 2%/year growth stops meaning "raises and cost-of-living together" and means
-calendar drift only.
+there is nothing left for a separate growth rate to describe. It used to add 2%
+a year on top, which double-counted the raises and added inflation besides, and
+it is now zero. The section above on today's dollars explains why.
 
 We still headline the published BLS number, because it's the one a reader can
 look up and check. BLS itself only breaks earnings out by education for ages
 25 and up, so there's no official under-25 figure for high school graduates;
 the one quoted above comes from the underlying Census survey records rather
 than a published table. What we won't do is manufacture a starting wage by
-running our own 2%/year assumption backwards. That 2% describes how wages
-drift over *calendar time*, not how one person's pay climbs with *age*, and
-the two aren't interchangeable. So read
+running an assumed growth rate backwards. A rate describing how wages drift
+over *calendar time* is not how one person's pay climbs with *age*, and the two
+aren't interchangeable. Conflating them is exactly the error the 2% used to
+make. So read
 this comparison as "a degree versus a typical working adult without one,"
 rather than "versus your classmate who skipped college." It's the more
 demanding of the two tests.
