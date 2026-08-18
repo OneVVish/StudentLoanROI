@@ -2114,6 +2114,10 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS discount_rate_real   NUMER
 ALTER TABLE survey_responses ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
 ALTER TABLE pdf_downloads    ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
 ALTER TABLE scenario_shares  ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
+-- And scenario_events, for the reason the discounting migration above records:
+-- maybe_log_scenario_event spreads the same build_scenario_context dict, and it
+-- fires on rerun, so it is the highest-volume writer of the four.
+ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
 
 -- WHAT CHANGED AND WHY IT MATTERS FOR ANALYSIS. The baseline used to grow 2% a
 -- year on TOP of hs_age_factor, which by itself already supplies 2.17%/yr of
