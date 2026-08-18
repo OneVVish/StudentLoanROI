@@ -16941,13 +16941,30 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
                  "on your result depends on the path. Off by default. See "
                  "Methodology.",
         )
-        if enable_discounting:
+        # Rendered ALWAYS and disabled when the box is unticked, never hidden
+        # behind `if enable_discounting`. st.number_input's `value` defaults to
+        # the sentinel "min" rather than to None, so unlike every other widget
+        # in this sidebar it does NOT quietly adopt whatever setdefault put in
+        # session_state -- it adopts min_value instead, on the run where it
+        # first appears. Conditional rendering makes that run happen after the
+        # seeding rather than on the same pass, so the 3% default was silently
+        # becoming 0.0% the moment a visitor ticked the box: the module ran,
+        # every number moved, and the rate it moved by was not the one this app
+        # documents. Found in a browser, which is the only place it is visible.
+        #
+        # Disabling it also neutralises it, per the admit-rate filter's rule:
+        # discounting_kwargs() returns {} whenever the checkbox is off, so the
+        # stored rate cannot move anything while greyed. The value is
+        # deliberately NOT cleared, so unticking and re-ticking restores what
+        # the visitor chose.
+        if DISCOUNTING_ENABLED:
             st.number_input(
                 "Discount rate (% a year, above inflation)",
                 min_value=DISCOUNT_RATE_BOUNDS[0] * 100,
                 max_value=DISCOUNT_RATE_BOUNDS[1] * 100,
                 step=0.5, format="%.1f",
                 key="real_discount_rate",
+                disabled=not enable_discounting,
                 on_change=lambda: mark_interaction("real_discount_rate"),
                 help="How much less a dollar is worth to you a year from now, "
                      "after inflation. There is no correct answer: this is a "
@@ -24669,10 +24686,13 @@ real cost of a degree and leaving them out flatters every path.
   tuition and savings are spent at the start rather than spread across the
   years.
 
-  One consequence worth expecting: with this on, a long training path can take
-  noticeably longer to come out ahead, and some fall outside the 40 years this
-  app looks across. That is not the tool giving up. It is the honest answer on
-  those terms.
+  One consequence worth expecting: the age at which a path comes out ahead can
+  move in either direction here, and which way depends on the rate you set. A
+  low rate can pull it earlier, because putting the baseline in today's dollars
+  helps the degree more than the discounting hurts it. A high rate pushes it
+  later, and can push it past the 40 years this app looks across, in which case
+  the page says so rather than naming an age. That is not the tool giving up.
+  It is the honest answer on those terms.
 
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
   fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard
