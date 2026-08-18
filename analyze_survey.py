@@ -156,6 +156,91 @@ MODULE_FLAGS = [
 # about the historical data only; delete it once pre-migration rows are no
 # longer part of whatever's being analyzed (they're identifiable by
 # session_id IS NULL, which is also when session_id shipped).
+# ---- What an ROI figure MEANS, and when that changed -----------------------
+# roi_pct and earnings_premium are not one quantity across this table's whole
+# history. The baseline they are measured against has been redefined twice, and
+# both changes are UNCONDITIONAL -- they apply to every row from their date
+# whatever the visitor did -- so pooling across them averages incompatible
+# numbers and nothing about the result looks wrong.
+#
+#   pre 2026-07-31   flat BLS age-25+ median for every year of the comparison.
+#   2026-07-31       the baseline follows a real age-earnings curve, AND still
+#                    compounds HS_GRAD_GROWTH_RATE at 2%/yr on top of it.
+#   2026-08-18       that 2% goes to 0. It was an inflation term the graduate
+#                    side never had, so the baseline had been growing at
+#                    roughly twice the median occupation's rate. Every row
+#                    before this date UNDERSTATES its premium and its ROI.
+#
+# The size of it, measured over all 836 occupations at the default 10-year
+# window: median premium +$38,450, and 130 occupations move from a negative
+# premium to a positive one. So even a pass/fail split of "did this beat the
+# baseline" is not comparable across the last seam.
+#
+# Treat NULL as false on both flags, per migrations.sql: a NULL is a row
+# written before that column existed, not a row that opted out.
+BASELINE_ERA_CURRENT = "real units (2026-08-18+)"
+BASELINE_ERA_DRIFT = "age curve + 2% drift (2026-07-31 to 2026-08-17)"
+BASELINE_ERA_FLAT = "flat age-25+ baseline (pre 2026-07-31)"
+BASELINE_ERA_ORDER = [BASELINE_ERA_CURRENT, BASELINE_ERA_DRIFT, BASELINE_ERA_FLAT]
+
+
+def _flag_true(df: pd.DataFrame, column: str) -> pd.Series:
+    """A boolean column read with NULL meaning false, absent column too."""
+    if column not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df[column].fillna(False).astype(bool)
+
+
+def baseline_era(df: pd.DataFrame) -> pd.Series:
+    """Which baseline definition each row's ROI figures were computed against."""
+    era = pd.Series(BASELINE_ERA_FLAT, index=df.index)
+    era[_flag_true(df, "hs_baseline_age_aware")] = BASELINE_ERA_DRIFT
+    era[_flag_true(df, "hs_baseline_real_units")] = BASELINE_ERA_CURRENT
+    return era
+
+
+def comparable_roi_rows(df: pd.DataFrame):
+    """The rows whose ROI figures can honestly be pooled, plus what was dropped.
+
+    Two exclusions, and they are different in kind. The BASELINE ERA is not a
+    choice anyone made -- the model changed under the data -- so older rows are
+    excluded rather than reported beside current ones. DISCOUNTING is opt-in and
+    off by default, but a discounted roi_pct answers "what is this worth to me
+    now" where an undiscounted one answers "how many more dollars pass through
+    my hands", and migrations.sql forbids pooling the two.
+
+    Returns (frame, notes). The notes are printed rather than swallowed: a
+    silent filter that removes most of the sample reads exactly like a small
+    sample, which is the failure this whole module exists to avoid.
+    """
+    notes = []
+    if df.empty:
+        return df, notes
+    era = baseline_era(df)
+    keep = era == BASELINE_ERA_CURRENT
+    for label in BASELINE_ERA_ORDER[1:]:
+        dropped = int((era == label).sum())
+        if dropped:
+            notes.append(f"{dropped} row(s) excluded from ROI figures: {label}. "
+                         f"Their premium is understated against today's model.")
+    discounted = _flag_true(df, "discounting_enabled")
+    if int((discounted & keep).sum()):
+        notes.append(f"{int((discounted & keep).sum())} row(s) excluded from ROI "
+                     f"figures: real-dollar discounting was on, which answers a "
+                     f"different question and must not be pooled with the rest.")
+    keep &= ~discounted
+    return df[keep], notes
+
+
+def describe_baseline_eras(df: pd.DataFrame):
+    """Print the era split before any ROI figure is quoted."""
+    if df.empty:
+        return
+    counts = baseline_era(df).value_counts().reindex(BASELINE_ERA_ORDER).dropna()
+    print("\nBaseline era of these rows (what their ROI figures mean):")
+    print(counts.to_string())
+
+
 ENGAGEMENT_CAVEAT = (
     "CAVEAT: rows predating the 2026-07-15 migration (session_id IS NULL) are\n"
     "  a sample biased toward 'Trade Apprenticeship off' -- sessions using that\n"
@@ -456,20 +541,49 @@ def analyze_engagement(events: pd.DataFrame):
         "Are people taking away good-news scenarios or bad-news ones?",
     )
     events = events.copy()
+    describe_baseline_eras(events)
+    # ONLY the ROI-derived figures are restricted to one baseline era. DTI is
+    # loan against income and the loan amount is what the visitor typed, so
+    # neither moved when the baseline was redefined, and excluding rows from
+    # those would throw away sample for no reason. Splitting them this way is
+    # the point: the seam is specific, and treating it as if it poisoned every
+    # column would be its own kind of wrong.
+    roi_events, roi_notes = comparable_roi_rows(events)
+    for note in roi_notes:
+        print(f"  NOTE: {note}")
     events["dti_bucket"] = events["scenario_a_dti_ratio"].apply(bucket_dti)
-    events["roi_bucket"] = events["scenario_a_roi_pct"].apply(bucket_roi)
-    for col, order, label in [
-        ("dti_bucket", ["<0.5x", "0.5-1x", "1-1.5x", "1.5-2x", "2x+"], "Debt-to-income ratio"),
-        ("roi_bucket", ["Negative", "0-50%", "50-100%", "100-200%", "200%+"], "10-year ROI %"),
+    roi_events = roi_events.copy()
+    if not roi_events.empty:
+        roi_events["roi_bucket"] = roi_events["scenario_a_roi_pct"].apply(bucket_roi)
+    for frame, col, order, label in [
+        (events, "dti_bucket", ["<0.5x", "0.5-1x", "1-1.5x", "1.5-2x", "2x+"],
+         "Debt-to-income ratio (all rows)"),
+        (roi_events, "roi_bucket", ["Negative", "0-50%", "50-100%", "100-200%", "200%+"],
+         "10-year ROI % (current baseline only)"),
     ]:
-        counts = events[col].value_counts().reindex(order).dropna()
+        counts = frame[col].value_counts().reindex(order).dropna() if not frame.empty else None
         print(f"\n{label}:")
-        print(counts.to_string() if not counts.empty else "  (not enough data yet)")
-    for col, label in [("scenario_a_roi_pct", "ROI %"), ("scenario_a_dti_ratio", "DTI ratio"),
-                       ("scenario_a_loan_amount", "Loan amount")]:
-        vals = pd.to_numeric(events[col], errors="coerce").dropna()
+        print(counts.to_string() if counts is not None and not counts.empty
+              else "  (not enough data yet)")
+    for frame, col, label in [
+        (roi_events, "scenario_a_roi_pct", "ROI % (current baseline only)"),
+        (events, "scenario_a_dti_ratio", "DTI ratio (all rows)"),
+        (events, "scenario_a_loan_amount", "Loan amount (all rows)"),
+    ]:
+        if frame.empty:
+            continue
+        vals = pd.to_numeric(frame[col], errors="coerce").dropna()
         if not vals.empty:
             print(f"\n{label}: median {vals.median():,.2f} (min {vals.min():,.2f}, max {vals.max():,.2f})")
+    # Heterogeneity that survives inside the reported set. count_foregone_earnings
+    # is a visitor choice rather than an era, but it also changes what a premium
+    # means, so quoting one median over a mix of both without saying so would be
+    # the same error one level down.
+    if not roi_events.empty and "count_foregone_earnings" in roi_events.columns:
+        foregone = _flag_true(roi_events, "count_foregone_earnings")
+        print(f"\n  Of the ROI rows above, {int(foregone.sum())} counted foregone "
+              f"earnings and {int((~foregone).sum())} did not. That option also "
+              f"changes what a premium means; treat a pooled median with care.")
 
     print_section(
         "ENGAGEMENT: COMPARE MODE USE, BY EVENT TYPE",
@@ -478,11 +592,17 @@ def analyze_engagement(events: pd.DataFrame):
     events["used_compare_mode"] = events["scenario_b_major"].notna()
     ct = pd.crosstab(events["event_type"], events["used_compare_mode"])
     print(ct.to_string())
-    compare_users = events[events["used_compare_mode"]]
+    # The delta is a difference of two roi_pct values, so it carries the seam
+    # exactly as the levels do and is restricted the same way. Derived from
+    # roi_events directly rather than read off `events`: roi_events was taken
+    # before used_compare_mode was assigned, and reading it there is a KeyError.
+    compare_users = roi_events[roi_events["scenario_b_major"].notna()] \
+        if not roi_events.empty else roi_events
     if not compare_users.empty and compare_users["roi_pct_delta"].notna().any():
         deltas = pd.to_numeric(compare_users["roi_pct_delta"], errors="coerce").dropna()
-        print(f"\nAmong Compare Mode engagement events, average |ROI % delta|: "
-              f"{deltas.mean():.1f} points (median {deltas.median():.1f}, n={len(deltas)})")
+        print(f"\nAmong Compare Mode engagement events on the current baseline, "
+              f"average |ROI % delta|: {deltas.mean():.1f} points "
+              f"(median {deltas.median():.1f}, n={len(deltas)})")
 
     print_section(
         "ENGAGEMENT: OPTIONAL MODULE ADOPTION",
@@ -764,7 +884,81 @@ def analyze_interactions(usage_df: pd.DataFrame):
             print(f"    {field:34} {n}")
 
 
+def self_test() -> int:
+    """Exercise the baseline-era logic on a synthetic frame. No network, no keys.
+
+        python3 analyze_survey.py --self-test
+
+    This exists because the seam it guards is invisible: pooling the eras
+    produces a plausible number, never an error, and the live tables cannot be
+    used as a fixture because they are a moving target. Carries negative
+    controls, per the house rule -- a check that passes for the wrong reason is
+    worse than none.
+    """
+    def row(aware, real, disc, roi, foregone=True, b=None):
+        return {"hs_baseline_age_aware": aware, "hs_baseline_real_units": real,
+                "discounting_enabled": disc, "count_foregone_earnings": foregone,
+                "scenario_a_roi_pct": roi, "scenario_a_dti_ratio": 1.2,
+                "scenario_a_loan_amount": 190000, "scenario_a_major": "Computer Science",
+                "scenario_b_major": b, "roi_pct_delta": (15 if b else None),
+                "event_type": "pdf_download"}
+
+    frame = pd.DataFrame([
+        row(None, None, None, 10),      # pre-2026-07-31, flat baseline
+        row(True, None, None, 20),      # age curve, still drifting 2%
+        row(True, True, False, 30),     # current model  <- the only poolable one
+        row(True, True, True, 40),      # current model but discounted
+    ])
+    problems = []
+
+    eras = baseline_era(frame).tolist()
+    want = [BASELINE_ERA_FLAT, BASELINE_ERA_DRIFT, BASELINE_ERA_CURRENT, BASELINE_ERA_CURRENT]
+    if eras != want:
+        problems.append(f"era classification is {eras}, expected {want}")
+
+    kept, notes = comparable_roi_rows(frame)
+    if list(kept["scenario_a_roi_pct"]) != [30]:
+        problems.append(f"kept ROI rows {list(kept['scenario_a_roi_pct'])}, expected [30]: "
+                        "only the current baseline with discounting off is poolable")
+    if len(notes) != 3:
+        problems.append(f"{len(notes)} exclusion notes, expected 3. Every dropped "
+                        "group must be named -- a silent filter reads as a small sample")
+
+    # NEGATIVE CONTROL 1: NULL must mean false, not "unknown, keep it". If a NULL
+    # flag were treated as current, every pre-seam row would pool back in.
+    null_only = pd.DataFrame([row(None, None, None, 10)])
+    if len(comparable_roi_rows(null_only)[0]) != 0:
+        problems.append("negative control: a row with NULL era flags was kept, so "
+                        "pre-seam rows would pool back into the ROI figures")
+
+    # NEGATIVE CONTROL 2: discounting must be excluded even on the current model.
+    disc_only = pd.DataFrame([row(True, True, True, 40)])
+    if len(comparable_roi_rows(disc_only)[0]) != 0:
+        problems.append("negative control: a discounted row was kept, so two "
+                        "different questions would be averaged into one median")
+
+    # NEGATIVE CONTROL 3: the seam must NOT reach the columns it does not affect,
+    # and the caller's frame must survive intact. DTI and loan amount did not
+    # move when the baseline was redefined.
+    if len(frame) != 4:
+        problems.append("negative control: the source frame was mutated in place")
+
+    if problems:
+        print("analyze_survey self-test: FAILED")
+        for problem in problems:
+            print(f"  {problem}")
+        return 1
+    print("analyze_survey self-test OK -- baseline eras classified, only the "
+          "current era pools, discounted rows held out, every exclusion named "
+          "(3 negative controls).")
+    return 0
+
+
 def main():
+    # Before load_supabase_client(), so the self-test needs no keys and touches
+    # no network. It is also why this guard cannot move into __main__ below.
+    if "--self-test" in sys.argv:
+        sys.exit(self_test())
     client = load_supabase_client()
     survey_df = fetch_table(client, "survey_responses")
     usage_df = fetch_table(client, "usage_logs")
