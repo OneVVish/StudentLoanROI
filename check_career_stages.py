@@ -471,6 +471,125 @@ def check_horizon_marked() -> list:
 # ---------------------------------------------------------------------------
 
 
+# The curve must PLATEAU rather than ride the ceiling. Literals, not reads of
+# CAREER_GROWTH_ANCHOR_YEARS or the profile: a check that takes its expectation
+# from the code it polices asserts only that the code equals itself, which this
+# repo has been bitten by twice.
+PLATEAU_START_YEAR = 20
+PLATEAU_ANCHOR_YEARS = 10
+MAX_PINNED_SHARE = 0.10
+
+
+def check_curve_plateaus(ns) -> list:
+    """Growth stops instead of running into the occupation's own p90.
+
+    The failure this replaces was not a crash. The p90 ceiling worked exactly as
+    designed and bounded every runaway; what it could not do was stop the curve
+    ARRIVING there, so at year 35 the model had 595 of 825 occupations sitting
+    pinned at their own 90th percentile. A model that says the typical entrant
+    becomes a top-decile earner in three quarters of all fields is wrong in a way
+    no ceiling can catch, because the ceiling is the thing producing it.
+    """
+    problems = []
+    md = ns["MAJOR_DATA"]
+    for year in (PLATEAU_START_YEAR, 30, 35):
+        pinned = total = 0
+        for title, data in md.items():
+            p90 = (data.get("wage_percentiles") or {}).get("p90")
+            if not p90:
+                continue
+            total += 1
+            if ns["get_annual_salary_for_year"](title, year) >= p90 * 0.999:
+                pinned += 1
+        if total and pinned / total > MAX_PINNED_SHARE:
+            problems.append(
+                f"  at year {year}, {pinned} of {total} occupations "
+                f"({pinned / total:.0%}) sit pinned at their own p90. The curve is "
+                f"riding the ceiling again rather than plateauing, which asserts "
+                f"the typical entrant becomes a top-decile earner.")
+
+    # It must actually STOP, not merely slow: once the age profile plateaus,
+    # two later years must agree.
+    for title in ("Software Developers", "Registered Nurses"):
+        if title not in md:
+            continue
+        late = ns["get_annual_salary_for_year"](title, 30)
+        later = ns["get_annual_salary_for_year"](title, 35)
+        if abs(later - late) > 1.0:
+            problems.append(
+                f"  {title}: year 30 is ${late:,.0f} and year 35 is ${later:,.0f}. "
+                f"CPS has graduate pay flat from age 41, so these must agree.")
+    return problems
+
+
+def check_curve_negative_control(ns) -> list:
+    """RESTORING the old compounding must fail the plateau check.
+
+    The counterfactual has to be the behaviour that was actually replaced, which
+    is the fitted rate compounding for the whole career. A first version of this
+    control simply forced the multiple to 1.0 -- but the salary formula now caps
+    its exponent at the anchor year, so that froze pay at year 10, which is
+    FLATTER than the plateau and left the check passing. It proved nothing, in
+    the same shape as the two controls this repo has already had go vacuous.
+
+    Rebuilding the old curve here rather than reading it from app.py is
+    deliberate for the same reason the literals above are: the point is to
+    compare against the documented previous behaviour, not against whatever the
+    code now does.
+    """
+    real = ns["career_growth_multiple"]
+
+    def old_compounding(practicing_year, start_age=None, _title=[None]):
+        # (1+g)^year / (1+g)^10 -- i.e. undo the exponent cap and let the fitted
+        # rate run the whole way, which is what shipped before this change.
+        rate = ns["get_major_growth_rate"](_title[0]) if _title[0] else 0.0
+        extra = max(practicing_year - PLATEAU_ANCHOR_YEARS, 0)
+        return (1 + rate) ** extra
+
+    # The multiple has no way to know which occupation it is being called for,
+    # so the control patches the salary function itself instead.
+    real_salary = ns["get_annual_salary_for_year"]
+
+    def old_salary(title, year_index):
+        data = ns["MAJOR_DATA"][title]
+        unpaid = int(data.get("unpaid_training_years", 0) or 0)
+        stipend = int(data.get("stipend_training_years", 0) or 0)
+        if year_index < unpaid:
+            return 0.0
+        if year_index < unpaid + stipend:
+            return data.get("stipend_salary", 0)
+        practicing = year_index - unpaid - stipend
+        salary = data["starting_salary"] * (1 + ns["get_major_growth_rate"](title)) ** practicing
+        ceiling = ns["career_earnings_ceiling"](title)
+        return min(salary, ceiling) if ceiling else salary
+
+    ns["get_annual_salary_for_year"] = old_salary
+    try:
+        if not check_curve_plateaus(ns):
+            return ["  negative control did not fire: restoring the old "
+                    "compounding still looked plateaued, so this check cannot "
+                    "tell a plateau from a curve riding the ceiling."]
+    finally:
+        ns["get_annual_salary_for_year"] = real_salary
+        ns["career_growth_multiple"] = real
+    return []
+
+
+def check_curve_inert_early(ns) -> list:
+    """The age curve must not touch year 10 or anything before it."""
+    problems = []
+    for practicing_year in range(0, 11):
+        multiple = ns["career_growth_multiple"](practicing_year, 22)
+        if multiple != 1.0:
+            problems.append(
+                f"  career_growth_multiple({practicing_year}) is {multiple}, not 1.0. "
+                f"Every figure at the default horizon depends on this being inert.")
+    if ns["career_growth_multiple"](35, None) != 1.0:
+        problems.append("  a missing start age must return 1.0 so the model falls "
+                        "back to the old compounding rather than to nonsense.")
+    return problems
+
+
 def main() -> int:
     ns = load_app_namespace()
     problems = []
@@ -487,6 +606,11 @@ def main() -> int:
         ("stages are per-path", lambda: check_stages_per_path(ns)),
         ("stage merge", lambda: check_stage_merge(ns)),
         ("stage merge / negative control", lambda: check_stage_merge_negative_control(ns)),
+        ("curve plateaus rather than riding the ceiling",
+         lambda: check_curve_plateaus(ns)),
+        ("curve plateaus / negative control",
+         lambda: check_curve_negative_control(ns)),
+        ("age curve is inert through year 10", lambda: check_curve_inert_early(ns)),
         ("chart span", lambda: check_chart_span(ns)),
         ("horizon marked in both twins", check_horizon_marked),
     ):
@@ -504,8 +628,9 @@ def main() -> int:
           f"bit-identical through year 10, level shifts carry the distribution, "
           f"late stages follow the training structure, a four-stage path merges "
           f"with a two-stage one without dropping either, and the 35-year chart "
-          f"still meets its metric at the horizon "
-          f"({checks} checks, 3 negative controls).")
+          f"still meets its metric at the horizon, and the curve plateaus "
+          f"instead of riding the ceiling "
+          f"({checks} checks, 4 negative controls).")
     return 0
 
 
