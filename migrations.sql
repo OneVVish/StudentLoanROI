@@ -2069,6 +2069,14 @@ ALTER TABLE pdf_downloads    ADD COLUMN IF NOT EXISTS discounting_enabled BOOLEA
 ALTER TABLE pdf_downloads    ADD COLUMN IF NOT EXISTS discount_rate_real   NUMERIC;
 ALTER TABLE scenario_shares  ADD COLUMN IF NOT EXISTS discounting_enabled BOOLEAN;
 ALTER TABLE scenario_shares  ADD COLUMN IF NOT EXISTS discount_rate_real   NUMERIC;
+-- scenario_events too. It is easy to miss because CLAUDE.md's rule names three
+-- tables, but maybe_log_scenario_event spreads the SAME build_scenario_context
+-- dict, and the 2026-07-31 migration for hs_baseline_age_aware /
+-- count_foregone_earnings correctly covered all four. It is also the highest
+-- volume writer of the four, because it fires on RERUN rather than at a commit
+-- point, so omitting it loses the most rows.
+ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS discounting_enabled BOOLEAN;
+ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS discount_rate_real   NUMERIC;
 
 -- THIS IS NOT A SEAM IN THE EXISTING SERIES, and that is the whole reason the
 -- module ships off by default. discounting_enabled false and NULL mean the same
