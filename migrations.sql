@@ -2101,3 +2101,43 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS discount_rate_real   NUMER
 -- visitors were shown, and a dropped column would leave their premium figures
 -- unexplained rather than merely unusual. Record the back-out date here so the
 -- window is recoverable from this file alone.
+
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-18: the high-school baseline moved to real (today's-dollar) units
+-- ---------------------------------------------------------------------------
+-- HS_GRAD_GROWTH_RATE went from 0.02 to 0.0. This is a HARD SEAM in
+-- earnings_premium and roi_pct across all five tables, and unlike the
+-- discounting module it is NOT opt-in: every row from this date is computed a
+-- different way, whatever the visitor did.
+
+ALTER TABLE survey_responses ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
+ALTER TABLE pdf_downloads    ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
+ALTER TABLE scenario_shares  ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
+-- And scenario_events, for the reason the discounting migration above records:
+-- maybe_log_scenario_event spreads the same build_scenario_context dict, and it
+-- fires on rerun, so it is the highest-volume writer of the four.
+ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOOLEAN;
+
+-- WHAT CHANGED AND WHY IT MATTERS FOR ANALYSIS. The baseline used to grow 2% a
+-- year on TOP of hs_age_factor, which by itself already supplies 2.17%/yr of
+-- real progression from 18 to 40. The graduate side has no such term: its
+-- growth is a cross-sectional OEWS p25-to-p50 gradient, median 2.14%/yr, with
+-- no inflation in it at all. So the baseline compounded at roughly twice the
+-- median career's rate, and every earnings_premium and roi_pct written before
+-- this date is UNDERSTATED as a result.
+--
+-- Measured over all 836 occupations at the default 10-year window: median
+-- premium +$38,450, and 130 occupations move from a negative premium to a
+-- positive one. At 35 years: median +$755,137 and 294 occupations flip.
+--
+-- Treat NULL as false, the same rule hs_baseline_age_aware carries. DO NOT POOL
+-- ACROSS THIS DATE for any premium or ROI figure. A count of sessions or
+-- searches is unaffected; anything derived from the ROI model is not. The sign
+-- flips are the sharpest reason: "did this major beat the baseline" is a
+-- different question before and after, for 130 of 836 occupations at the
+-- default horizon, so even a categorical pass/fail breakdown is not comparable.
+--
+-- This column is a constant True, like hs_baseline_age_aware. It is written
+-- anyway because rows before the change carry NULL, and that is the only thing
+-- in the data that separates the two eras.

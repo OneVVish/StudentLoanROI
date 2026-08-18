@@ -674,20 +674,23 @@ def hs_wage_for_timeline_year(year_index: int, hs_wage_index: float,
     baseline, which additionally scales each year by that age's share of the
     all-ages median.
 
-    The two rates are doing different jobs once this is on, which is the point.
-    HS_GRAD_GROWTH_RATE stops standing for "raises AND cost-of-living" and
-    becomes calendar drift only -- how the whole wage distribution moves over
-    time -- because the raises a person gets for getting older now come from
-    the profile instead. The arithmetic on the drift term is unchanged; what
-    changes is that a real age-earnings curve is layered on top of it.
+    The age curve is where the baseline's raises come from. It used to be
+    layered ON TOP of a 2% drift term, which double-counted growth and is what
+    HS_GRAD_GROWTH_RATE's comment now records at length.
 
-    drift_rate=None means HS_GRAD_GROWTH_RATE, i.e. every existing caller is
-    unaffected. The real-dollar discounting module passes 0.0 to strip the
-    calendar drift, leaving the age curve to carry the baseline's real
-    progression on its own -- see DISCOUNTING_ENABLED. The default is None
-    rather than HS_GRAD_GROWTH_RATE itself because a default argument is
-    evaluated when this function is DEFINED and that constant is not assigned
-    until several hundred lines below, which would be a NameError at import.
+    HS_GRAD_GROWTH_RATE IS NOW 0.0, so this baseline is flat in real terms and
+    hs_age_factor carries all of its progression. That is the point: the 2% it
+    used to carry was an inflation term the graduate side had no counterpart
+    for, and it penalised every degree. See that constant for the full
+    reasoning and the two independently sourced rates that agree once it is
+    gone.
+
+    drift_rate therefore has nothing to strip today and is kept for the case
+    the app ever models calendar drift properly, on both sides at once. The
+    default is None rather than HS_GRAD_GROWTH_RATE itself because a default
+    argument is evaluated when this function is DEFINED and that constant is
+    not assigned until several hundred lines below, which would be a NameError
+    at import.
     """
     drift = HS_GRAD_GROWTH_RATE if drift_rate is None else float(drift_rate)
     wage = HS_GRAD_SALARY * hs_wage_index * (1 + drift) ** year_index
@@ -954,7 +957,45 @@ def build_major_data(csv_path: str, mode: str = DATASET_MODE_CAREER, city: str =
 # federal government shutdown, and BLS did not produce that quarter. The 2025
 # annual average is an 11-month figure.
 HS_GRAD_SALARY = 51688
-HS_GRAD_GROWTH_RATE = 0.02
+
+# ZERO ON PURPOSE, and it is the whole reason this comment is long.
+#
+# This was 0.02, described as "raises AND cost-of-living" and later, once
+# hs_age_factor took over the raises, as calendar drift alone. Both readings
+# put an INFLATION term on the baseline that the graduate side has no
+# counterpart for, and that asymmetry silently penalised every degree:
+#
+#   * a career's growth comes from get_major_growth_rate, a CAGR fitted from
+#     OEWS p25 to p50 where BOTH percentiles are read off one release published
+#     the same day. No time passes between the two measurements, so the rate is
+#     a cross-sectional gradient with no inflation in it. Median 2.15% across
+#     the 825 occupations.
+#   * hs_age_factor already carries the baseline's real progression, and it is
+#     steep: 0.624 at 18 to 1.000 at 36, which is 2.17%/yr of real growth to
+#     age 40 on its own.
+#
+# So the baseline compounded at roughly 4.2%/yr through exactly the years the
+# comparison covers, against a median occupation's 2.15%, and after 40 the age
+# curve plateaus while the drift kept compounding forever against a graduate
+# already capped at their own p90.
+#
+# At zero the two sides are finally the same kind of number, and the check that
+# says so is not this file's own arithmetic: the baseline's real progression is
+# 2.17%/yr from CPS ASEC microdata, the graduate's is 2.15%/yr from OEWS, two
+# independently sourced figures landing 0.02 points apart. The 2% was never a
+# third growth rate. It was inflation wearing a growth label.
+#
+# EVERY FIGURE IN THIS APP IS THEREFORE IN TODAY'S DOLLARS. Anything added
+# later that grows a stream over time has to say which side of that line it is
+# on. The frozen 2024 tax brackets and the p90 career ceiling are already real
+# and are correct as they stand; a nominal term introduced anywhere would have
+# to be matched on both sides or it reintroduces exactly this bug.
+#
+# The constant is kept rather than deleted because hs_wage_for_timeline_year
+# still needs a drift to apply, and a named zero is where a future decision to
+# model calendar drift PROPERLY -- on both sides at once -- would land.
+# check_baseline_units.py is the guard.
+HS_GRAD_GROWTH_RATE = 0.0
 
 # Age-earnings profile for that same population, from build_hs_age_profile.py.
 # Read for DISCLOSURE ONLY -- it does not feed the model, and the ROI numbers
@@ -3251,24 +3292,22 @@ NYFED_MAJOR_SOC_GROUP = {
 # of it: the same stream reads GBP 150,000 under HM Treasury Green Book
 # discounting and about GBP 260,000 at a 0% real rate.
 #
-# WHAT IT DOES. Discounting only means anything once both sides of the
-# comparison are in the same units, and by default they are not:
+# WHAT IT DOES. Discounting only means anything once every flow is in the same
+# units, and getting there was a PREREQUISITE this module surfaced rather than
+# something it provides. Both earnings streams are now real: the graduate's
+# growth is a cross-sectional OEWS gradient with no inflation in it, and
+# HS_GRAD_GROWTH_RATE was zeroed once it became clear the 2% it carried was an
+# inflation term the graduate side had no counterpart for. See that constant.
 #
-#   * the graduate's growth comes from get_major_growth_rate, a CAGR fitted
-#     from OEWS p25 to p50 where both percentiles are read off ONE release
-#     published the same day. No time passes between the two measurements, so
-#     that rate is a cross-sectional gradient with NO inflation in it.
-#   * the high-school baseline grows at HS_GRAD_GROWTH_RATE, which its own
-#     docstring calls calendar drift.
+# What is left for the module to do is two things. Loan payments are still
+# NOMINAL -- the bill is the same number of dollars in year 20 as in year 1 --
+# so they are deflated by ASSUMED_INFLATION_RATE, which raises the premium. Then
+# every flow is discounted from its own wall-clock year, which lowers it for any
+# back-loaded path. The two do not run the same way, the net is path-dependent,
+# and the Methodology says so rather than implying a single direction.
 #
-# So the module works in today's dollars: the baseline's drift term goes to 0
-# (hs_age_factor already carries its real progression), the graduate stream is
-# left alone because it is already real, nominal loan payments are deflated by
-# ASSUMED_INFLATION_RATE, and everything is then discounted from its own
-# wall-clock year. Three effects, and they do NOT run the same way: zeroing the
-# drift raises the premium, deflating the payments raises it, discounting lowers
-# it for any back-loaded path. The net is path-dependent, and the Methodology
-# says so rather than implying a single direction.
+# This block used to describe a third effect, zeroing the baseline's drift. That
+# became unconditional and belongs to the model now, not to this option.
 DISCOUNTING_ENABLED = True
 
 # The ONLY place this app states an inflation assumption. It is used in exactly
@@ -5758,6 +5797,15 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # age curve carry NULL/false and the column is what tells the two eras
         # apart; dropping it would make them indistinguishable.
         "hs_baseline_age_aware": True,
+        # THE SECOND ERA MARKER ON THIS BASELINE, and it works exactly like the
+        # one above. Constant True from the day HS_GRAD_GROWTH_RATE went to 0.0,
+        # written anyway because rows from before carry NULL and that is the only
+        # thing separating a premium computed against a baseline compounding an
+        # inflation term from one computed against a real baseline. Treat NULL as
+        # false. Unlike discounting_enabled below, this is NOT opt-in and NOT
+        # comparable across the seam: every row before it understates its
+        # earnings_premium and roi_pct. See migrations.sql.
+        "hs_baseline_real_units": True,
         "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", True)),
         # Real-dollar discounting. These two define what earnings_premium and
         # roi_pct MEAN in this row, exactly as count_foregone_earnings above
@@ -8803,31 +8851,25 @@ def discounting_methodology_bullet() -> str:
     return """- **Count money later as worth less than money now.** Off by default. A dollar
   you will not see for twenty years is worth less to you than a dollar today,
   and this option says so in the arithmetic. Economists call it discounting.
-  Ticking it changes three things at once, and they do not all push the same
-  way, so whether your result gets better or worse depends on the path.
+  Ticking it changes two things, and they do not push the same way, so whether
+  your result gets better or worse depends on the path.
 
   Every dollar it moves is a pre-tax dollar, like every earnings figure on this
   page outside the take-home section. Discounting changes when a dollar counts,
   never whether tax has come out of it.
 
-  First, everything moves into today's dollars. The high school baseline stops
-  growing 2% a year for rising prices, because that 2% has no equivalent on the
-  career side: a career's growth here comes from comparing beginners with
-  mid-career workers measured in the same year, which contains no inflation at
-  all. That correction on its own makes degrees look better.
+  First, your loan payments are converted into today's dollars. Every salary on
+  this page already is, but a loan is not: your monthly bill is the same number
+  of dollars in year 20 as in year 1, while everything around it has gotten
+  more expensive, so a late payment really does cost you less than an early
+  one. This makes degrees look better, and it is the only place this app states
+  an inflation assumption: 2.3% a year, from CBO's projection of 2.0% long-run
+  PCE inflation plus the 0.3 point gap CBO gives between CPI-U and PCE ([CBO,
+  Budget and Economic Outlook](https://www.cbo.gov/publication/62105)).
 
-  Second, loan payments are converted the same way. Your monthly bill is the
-  same number of dollars in year 20 as in year 1, while everything around it
-  has gotten more expensive, so a late payment costs you less in real terms
-  than an early one. That also makes degrees look better, and it is the only
-  place this app states an inflation assumption: 2.3% a year, from CBO's
-  projection of 2.0% long-run PCE inflation plus the 0.3 point gap CBO gives
-  between CPI-U and PCE ([CBO, Budget and Economic
-  Outlook](https://www.cbo.gov/publication/62105)).
-
-  Third, every remaining dollar is discounted from the year it actually
-  arrives, at whatever rate you set. This one makes degrees look worse, and it
-  bites hardest on paths that train for years before they earn.
+  Second, every dollar is discounted from the year it actually arrives, at
+  whatever rate you set. This makes degrees look worse, and it bites hardest on
+  paths that train for years before they earn.
 
   There is no correct rate, which is why it is a box you fill in rather than a
   number we picked for you. It is a statement about you and not about the
@@ -9021,21 +9063,22 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # of nothing, silently. Binding it once makes that mistake unavailable
     # rather than merely documented.
     #
-    # In real mode the drift term goes to 0 and the age curve carries the
-    # baseline's progression alone. A returning student's baseline is instead
-    # two salaries they typed, which are nominal figures in their head, so that
-    # curve is deflated rather than de-drifted. Both stay bound to the ONE
-    # callable for the reason above: the part-time community-college years only
-    # cancel in the premium if both sides are computed identically.
+    # The HS baseline needs no de-drifting: HS_GRAD_GROWTH_RATE is 0.0, so it
+    # is already in today's dollars and the age curve carries its progression
+    # alone. This branch used to pass drift_rate=0.0 here; that became a no-op
+    # when the constant was zeroed, and a dead branch a guard still exercises is
+    # worse than none. A returning student's baseline is different, and still
+    # needs the conversion: it is two salaries the visitor typed, which are
+    # nominal figures in their head. Both stay bound to the ONE callable for the
+    # reason above -- the part-time community-college years only cancel in the
+    # premium if both sides are computed identically.
     if baseline_curve is not None:
         baseline_wage = (
             (lambda y: to_todays_dollars(baseline_curve(y), y, inflation_rate))
             if real_mode else baseline_curve)
     else:
         baseline_wage = (
-            lambda y: hs_wage_for_timeline_year(
-                y, hs_wage_index, baseline_start_age,
-                drift_rate=0.0 if real_mode else None))
+            lambda y: hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age))
 
     hs_cumulative_earnings = sum(
         baseline_wage(y) * discount_factor(discount_rate, y)
@@ -12555,12 +12598,13 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
          "national curve is drawn beneath it. The bottom and top 10% have no published bound and "
          "are stated in words rather than drawn."],
         ["High school graduate baseline",
-         "U.S. Bureau of Labor Statistics, Current Population Survey — median usual weekly earnings "
+         "U.S. Bureau of Labor Statistics, Current Population Survey. Median usual weekly earnings "
          "for full-time workers age 25+ with a high school diploma and no college ($994/week, "
          "2026 Q2, series LEU0252917300), "
          "annualized. This is an all-ages median, not a young graduate's starting pay, so the "
-         "comparison is against a typical working adult without a degree — the more demanding test. "
-         "Wage growth of 2%/yr is an assumption, not a BLS figure."],
+         "comparison is against a typical working adult without a degree, the more demanding test. "
+         "Figures are in today's dollars: the baseline is not grown for inflation, and its "
+         "year-by-year rise comes from the CPS age-earnings curve rather than an assumed rate."],
         ["Cost of attendance & college debt",
          "U.S. Department of Education, College Scorecard, institution file from "
          "the release of June 10, 2026. The cost figures in that release are "
@@ -23916,9 +23960,22 @@ annualized). That
 anchor sets the level; the next section explains why the figure actually used
 in each year varies with age rather than sitting flat.
 [Source: BLS Current Population Survey, series LEU0252917300](https://www.bls.gov/news.release/wkyeng.htm).
-We assume this grows a modest 2%/year (a stand-in for normal raises and
-cost-of-living bumps) since BLS doesn't publish a real year-by-year
-trajectory for this group the way it does for individual careers.
+Every figure on this page is in today's dollars, so that anchor does not
+grow for inflation and neither does any career salary. What the baseline does
+gain, year by year, is the raises a person actually gets for getting older,
+and those come from the age curve described next.
+
+It used to grow 2% a year on top of that age curve, as a stand-in for raises
+and rising prices together. That was wrong in a way worth stating plainly,
+because it worked against the degree. A career's pay growth here is measured
+by comparing beginners with mid-career workers in the same year, so it
+contains no inflation at all, and the high school baseline was the only side
+of the comparison getting an inflation term. Between that 2% and the age
+curve the baseline was climbing about twice as fast as the typical career it
+was being measured against. Removing it raises almost every degree's earnings
+premium, which is the direction that flatters this page's own conclusion, so
+it is worth being clear that the old number was not cautious. It was simply
+counting the same growth twice on one side only.
 
 #### One thing to know about that baseline: it's an all-ages figure
 
@@ -23932,9 +23989,10 @@ window.""" + hs_young_wage_disclosure() + """
 
 Using that flat figure anyway would cut both ways. Early on it is too
 generous, which makes the degree look *worse* than it is. Later on it is too
-stingy, since 2%/year is slower than real pay climbs in one's twenties. The two
-errors run in opposite directions and partly cancel, but "partly cancel" is
-not the same as "cancel", and neither error is one we have to accept.
+stingy, because pay climbs steeply through one's twenties and a single all-ages
+median does not. The two errors run in opposite directions and partly cancel,
+but "partly cancel" is not the same as "cancel", and neither error is one we
+have to accept.
 
 #### The baseline follows an age curve, and that is now the default
 
@@ -23962,17 +24020,19 @@ instead of climbing from about $32,000, which would make every degree on this
 page look worse than the model actually thinks it is.
 
 One knock-on: with the curve supplying the raises that come from getting older,
-the 2%/year growth stops meaning "raises and cost-of-living together" and means
-calendar drift only.
+there is nothing left for a separate growth rate to describe. It used to add 2%
+a year on top, which double-counted the raises and added inflation besides, and
+it is now zero. The section above on today's dollars explains why.
 
 We still headline the published BLS number, because it's the one a reader can
 look up and check. BLS itself only breaks earnings out by education for ages
 25 and up, so there's no official under-25 figure for high school graduates;
 the one quoted above comes from the underlying Census survey records rather
 than a published table. What we won't do is manufacture a starting wage by
-running our own 2%/year assumption backwards. That 2% describes how wages
-drift over *calendar time*, not how one person's pay climbs with *age*, and
-the two aren't interchangeable. So read
+running an assumed growth rate backwards. A rate describing how wages drift
+over *calendar time* is not how one person's pay climbs with *age*, and the two
+aren't interchangeable. Conflating them is exactly the error the 2% used to
+make. So read
 this comparison as "a degree versus a typical working adult without one,"
 rather than "versus your classmate who skipped college." It's the more
 demanding of the two tests.
@@ -24798,18 +24858,12 @@ real cost of a degree and leaving them out flatters every path.
   only changes the *earnings* side of the comparison, since the tuition and
   debt you put in stay the same, so the ROI% still reads as "how much you come out
   ahead for every dollar of tuition," now counting the wages you skipped to be
-  in school. Two simplifications to know about. First, the totals are just
-  each year's dollars
-  added up. The model doesn't treat a dollar earned 10 years from now as worth
-  less than a dollar today, which is what economists call "discounting," so
-  this is an earnings comparison rather than a formal net-present-value
-  calculation. Second, the two sides of that comparison treat rising prices
-  differently. A career's pay growth here comes from comparing beginners with
-  mid-career workers measured in the same year, so there is no inflation inside
-  it. The high school baseline instead grows 2% a year, a figure that stands
-  for raises and rising prices together. Over the default 10-year window the
-  gap that opens between those two treatments is small. Over the 35 years the
-  chart draws, it is not.""" + discounting_methodology_pointer() + """
+  in school. One simplification to know about: the totals are just each year's
+  dollars added up. Both sides are in today's dollars, so nothing here is
+  inflated and nothing needs deflating, but the model also doesn't treat a
+  dollar earned 10 years from now as worth less than a dollar today, which is
+  what economists call "discounting." So this is an earnings comparison rather
+  than a formal net-present-value calculation.""" + discounting_methodology_pointer() + """
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not

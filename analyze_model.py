@@ -335,7 +335,7 @@ def print_summary(df: pd.DataFrame, ns: dict, rate: float, flat_baseline: bool =
     print(f"\n{line}\nBREAK-EVEN DEBT BY MAJOR\n"
           f"At what undergrad loan does each major stop beating a debt-free HS grad?\n{line}")
     print(f"Model: {ns['ROI_WINDOW_YEARS']}-year window, HS baseline "
-          f"${ns['HS_GRAD_SALARY']:,}/yr growing {ns['HS_GRAD_GROWTH_RATE']*100:.0f}%/yr, "
+          f"${ns['HS_GRAD_SALARY']:,}/yr in today's dollars, real progression from the age curve, "
           f"loan rate {rate}%.")
     # Named in the output because two runs of this script now answer different
     # questions and their tables look identical otherwise.

@@ -120,8 +120,14 @@ def disabled_source() -> str:
 
 
 def roi_grid(ns, discount_rate=0.0, inflation_rate=0.0, payments=None,
-             enrollment_shift=0):
-    """Every fixture scenario's ROI, as a flat dict for exact comparison."""
+             enrollment_shift=0, omit_kwargs=False):
+    """Every fixture scenario's ROI, as a flat dict for exact comparison.
+
+    omit_kwargs calls calculate_roi WITHOUT the three discounting arguments, the
+    way every pre-module caller does. That is what the leak control needs: the
+    question is not whether the module can be forced on, it is whether a caller
+    who passes nothing still gets the undiscounted model.
+    """
     out = {}
     for major in FIXTURE_MAJORS:
         if major not in ns["MAJOR_DATA"]:
@@ -129,14 +135,18 @@ def roi_grid(ns, discount_rate=0.0, inflation_rate=0.0, payments=None,
         for years in (5, 10, 20, 35):
             for enrollment in (0, 4, 9):
                 for working in (0, 2):
-                    result = ns["calculate_roi"](
-                        major, 45_000.0, INVESTMENT, col_index=COL, years=years,
-                        hs_wage_index=WAGE_INDEX,
+                    common = dict(
+                        col_index=COL, years=years, hs_wage_index=WAGE_INDEX,
                         personal_contribution=CONTRIBUTION,
                         enrollment_years=enrollment + enrollment_shift,
-                        working_years=working, baseline_start_age=18,
-                        discount_rate=discount_rate, inflation_rate=inflation_rate,
-                        loan_payments_by_year=(payments[:years] if payments else None))
+                        working_years=working, baseline_start_age=18)
+                    if not omit_kwargs:
+                        common.update(
+                            discount_rate=discount_rate,
+                            inflation_rate=inflation_rate,
+                            loan_payments_by_year=(payments[:years] if payments else None))
+                    result = ns["calculate_roi"](
+                        major, 45_000.0, INVESTMENT, **common)
                     for key in ("earnings_premium", "roi_pct",
                                 "major_net_position", "hs_net_position"):
                         out[(major, years, enrollment, working, key)] = result[key]
@@ -157,15 +167,32 @@ def check_bit_identical_when_off(ns, plain_ns) -> list:
             f"no-op when off -- every logged row and the default page depend on "
             f"it.")
 
-    # NEGATIVE CONTROL: a module that leaked into the default path must fail.
+    # NEGATIVE CONTROL: a module that leaked into the DEFAULT path must fail.
+    #
+    # This used to force discounting_is_active to return True and compare the
+    # grid against `plain`. That stopped discriminating the day
+    # HS_GRAD_GROWTH_RATE went to 0.0: with both rates at zero and no payment
+    # series the module became arithmetically identity, so forcing it on
+    # changed nothing and the control passed while proving nothing. The leak
+    # worth guarding is a non-zero DEFAULT reaching a caller that passes no
+    # discounting arguments at all, which is every pre-module call site and
+    # analyze_model.py.
     leaked = load_app_namespace(
-        open(APP).read().replace(
-            "    return bool(discount_rate) or bool(inflation_rate)",
-            "    return True", 1))
-    if roi_grid(leaked) == plain:
+        open(APP).read()
+        .replace("                   discount_rate: float = 0.0,",
+                 "                   discount_rate: float = 0.03,", 1)
+        .replace("                   inflation_rate: float = 0.0,",
+                 "                   inflation_rate: float = 0.023,", 1))
+    if roi_grid(leaked, omit_kwargs=True) == roi_grid(ns, omit_kwargs=True):
         problems.append(
-            "negative control did not fire: forcing the module ON left every "
-            "figure unchanged, so this check cannot tell a no-op from a leak.")
+            "negative control did not fire: giving calculate_roi non-zero "
+            "discounting DEFAULTS left a no-kwargs caller's figures unchanged, "
+            "so this check cannot tell a no-op from a leak.")
+    if roi_grid(ns, omit_kwargs=True) != plain:
+        problems.append(
+            "a caller that passes no discounting arguments does not reproduce "
+            "the undiscounted model, so the module is reaching the default "
+            "path.")
     return problems
 
 
