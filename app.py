@@ -11668,6 +11668,17 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     fig.add_hline(y=0, line=dict(color="#999999", width=1, dash="dot"))
     _tickvals, _ticktext = money_k_ticks(frame["Net Position"])
     fig.update_layout(
+        # Transparent so the card behind it (NET_POSITION_CARD_KEY) shows
+        # through. Plotly's default paper is opaque white, which put a white
+        # block inside the tinted panel and made the card look like a mistake.
+        # Transparent also means this needs no dark-mode variant: it takes
+        # whatever surface it is dropped onto, which is the same reason
+        # STACK_SEPARATOR is semi-transparent rather than theme-guessing.
+        #
+        # Chrome only. The matplotlib twin deliberately does NOT match: there is
+        # no card in the PDF, and the chart-twin rule is about what a chart
+        # SHOWS -- its series and splits -- not what colour the paper is.
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         title_font_size=14, hovermode="x unified",
         # Explicit ticks, not yaxis_tickprefix: Plotly's own SI prefix flips to
         # "M" past a million, which put this axis in different units from the
@@ -11725,6 +11736,11 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
 # looking at. Silent: the button downloads happily either way.
 NET_POSITION_REFERENCE_KEY = "net_position_reference"
 
+# The card wrapping the net-position block. A constant because section 3's
+# CSS and this renderer must name the same key, and a literal in two places is
+# how they come to disagree.
+NET_POSITION_CARD_KEY = "net_position_card"
+
 
 def net_position_reference_on() -> bool:
     """Whether the debt-free reference line is switched on.
@@ -11757,7 +11773,18 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     impossible -- that raises StreamlitDuplicateElementKey, the lesson
     render_salary_flow_charts already carries.
     """
-    target = container if container is not None else st
+    # The whole block sits in a tinted card so the page's headline picture
+    # reads as one object rather than as a checkbox, a chart and two captions
+    # that happen to be adjacent. Keyed so the CSS in section 3 can reach it;
+    # `.st-key-` is Streamlit 1.58's container class and is re-verified there.
+    #
+    # The tint is deliberately a near-neutral surface, not a saturated colour.
+    # Four series already carry meaning on this chart (SERIES_BLUE, ORANGE,
+    # AQUA, RED plus their dashed twins), and a card competing with them would
+    # take colour away from the data -- the same reasoning STACK_SEPARATOR's
+    # comment gives for using a gap rather than a border between bands.
+    target = (container if container is not None else st).container(
+        border=True, key=NET_POSITION_CARD_KEY)
     show_reference = target.checkbox(
         "Show this path with no loan", key=NET_POSITION_REFERENCE_KEY,
         help="Adds a line for the same career at the same salary, carrying no "
@@ -15139,6 +15166,34 @@ st.markdown(
         {_ACTION_HOV} {{
             background-color: #c04d1f;
             border-color: #c04d1f;
+        }}
+    }}
+    </style>""",
+    unsafe_allow_html=True,
+)
+
+# The net-position card. Same `.st-key-` scoping and the same
+# prefers-color-scheme pairing as the action buttons above, and the same
+# version caveat: this is Streamlit 1.58's container class, so re-verify it on
+# a bump. A rename fails silently and simply leaves the card untinted.
+#
+# Near-neutral on purpose. This chart already carries four meaningful series
+# colours plus their dashed twins, and a saturated card would compete with the
+# data it frames. Light mode is a cool off-white a shade away from the page;
+# dark mode lifts slightly off Streamlit's #0E1117 rather than tinting, since a
+# coloured panel on a dark surface reads as an alert.
+st.markdown(
+    f"""<style>
+    .st-key-{NET_POSITION_CARD_KEY} {{
+        background-color: #f4f7fb;
+        border: 1px solid #d8e0ea;
+        border-radius: 12px;
+        padding: 0.5rem 0.75rem;
+    }}
+    @media (prefers-color-scheme: dark) {{
+        .st-key-{NET_POSITION_CARD_KEY} {{
+            background-color: #161b23;
+            border-color: #2b323c;
         }}
     }}
     </style>""",
