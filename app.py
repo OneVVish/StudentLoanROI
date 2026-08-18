@@ -629,6 +629,82 @@ def load_hs_age_profile(csv_path: str) -> list:
     return df.sort_values("age_low").to_dict("records")
 
 
+@st.cache_data
+def load_grad_age_profile(csv_path: str) -> list:
+    """Age bands for bachelor's-and-above, ascending, from
+    build_hs_age_profile.py --population grad. [] when absent, which makes the
+    curve fall back to the old constant compounding rather than fail."""
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return []
+    return df.sort_values("age_low").to_dict("records")
+
+
+def grad_age_factor(age: int) -> float:
+    """This age's pay as a multiple of the graduate 25+ median, from CPS.
+
+    Same shape-not-level rule as hs_age_factor, and the same ratio_to_25plus
+    field for the same reason: a ratio survives a vintage change where dollars
+    would silently mix income years. Returns 0.0 when the profile is missing,
+    which callers read as "no profile, keep the old behaviour".
+    """
+    bands = load_grad_age_profile(GRAD_AGE_PROFILE_CSV_PATH)
+    if not bands:
+        return 0.0
+    try:
+        if age < int(bands[0]["age_low"]):
+            return float(bands[0]["ratio_to_25plus"])
+        for band in bands:
+            if int(band["age_low"]) <= age <= int(band["age_high"]):
+                return float(band["ratio_to_25plus"])
+        return float(bands[-1]["ratio_to_25plus"])
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
+def career_growth_multiple(practicing_year: int, start_age: int = None) -> float:
+    """How much a career's pay has grown since year 10, as a multiple.
+
+    1.0 at or before year 10, so EVERY figure at the default horizon is
+    untouched -- that is the safety argument for this whole function and what
+    check_career_stages.py asserts.
+
+    Beyond year 10 the growth follows the observed graduate age curve rather
+    than compounding the fitted rate forever. The fitted rate is solved from
+    OEWS p25 to p50, a span the data supports, and CLAUDE.md has long recorded
+    that extending it is fiction past about fifteen years. The p90 ceiling
+    bounded the runaway but replaced it with a different false claim: at year
+    35, 595 of 825 occupations sat pinned exactly at their own 90th percentile,
+    i.e. the model said the typical entrant becomes a top-decile earner in
+    almost three quarters of all fields.
+
+    CPS says otherwise, from the same release the HS baseline's curve comes
+    from: graduate pay rises to about 1.10 of the 25+ median by age 41 and is
+    FLAT from there to 64. Applied after year 10 that is roughly a further 1.24x
+    and then a plateau, which drops the occupations pinned at p90 from 595 to
+    22.
+
+    The first ten years are deliberately NOT taken from CPS. That curve is
+    pooled across all occupations, so its early steepness includes people
+    moving between occupations entirely, which this app does not model -- it
+    prices one occupation at a time. Within-occupation progression is exactly
+    what OEWS p25-to-p50 measures, so each source is used only where it is the
+    better witness.
+
+    start_age=None means the profile is unavailable or the caller has no age,
+    and returns 1.0: the curve then compounds as it always did, and the p90
+    ceiling is still there to catch it.
+    """
+    if practicing_year <= CAREER_GROWTH_ANCHOR_YEARS or start_age is None:
+        return 1.0
+    anchor = grad_age_factor(start_age + CAREER_GROWTH_ANCHOR_YEARS)
+    later = grad_age_factor(start_age + practicing_year)
+    if not anchor or not later:
+        return 1.0
+    return max(later / anchor, 1.0)
+
+
 def hs_age_factor(age: int) -> float:
     """This age's wage as a multiple of the all-ages (25+) median, from the
     CPS age profile. 1.0 when the profile is missing, which makes every caller
@@ -1005,6 +1081,20 @@ HS_GRAD_GROWTH_RATE = 0.0
 # instead of a hardcoded one that goes stale the moment either the baseline or
 # the microdata is refreshed.
 HS_AGE_PROFILE_CSV_PATH = "data/hs_age_profile.csv"
+
+# The same file's graduate half (build_hs_age_profile.py --population grad).
+# SHAPE ONLY: every salary level still comes from OEWS, per occupation. This
+# supplies the one thing OEWS cannot, an age dimension, and it is what stops the
+# career curve compounding a ten-year-fitted rate for thirty-five years. See
+# career_growth_multiple.
+GRAD_AGE_PROFILE_CSV_PATH = "data/grad_age_profile.csv"
+
+# Where the OEWS-fitted growth rate stops and the observed age curve takes over.
+# TEN, because that is the span the rate is fitted across: get_major_growth_rate
+# solves for the climb from p25 to p50, which this app reads as entry to about
+# ten years in. Before this year the model is unchanged and every logged figure
+# at the default horizon still reconciles; after it, growth follows CPS.
+CAREER_GROWTH_ANCHOR_YEARS = 10
 
 # The age a high school graduate starts working, and therefore the age the
 # baseline's timeline begins at when foregone earnings are counted. 18 rather
@@ -4365,11 +4455,22 @@ def get_annual_salary_for_year(major_name: str, year_index: int) -> float:
     if year_index < years_to_practice:
         return data.get("stipend_salary", 0)
     practicing_year = year_index - years_to_practice
-    salary = data["starting_salary"] * (1 + get_major_growth_rate(major_name)) ** practicing_year
-    # And it stops at the top of the occupation's own published wage range.
-    # See career_earnings_ceiling: the growth rate is estimated to reach the
-    # MEDIAN at year 10, and compounding it for a whole career walks straight
-    # out of the data it was fitted to.
+    # Years 0-10: the OEWS-fitted rate, exactly as before. Beyond that the
+    # fitted rate stops compounding and the observed graduate age curve takes
+    # over -- see career_growth_multiple for why each source is used only where
+    # it is the better witness.
+    capped_year = min(practicing_year, CAREER_GROWTH_ANCHOR_YEARS)
+    salary = data["starting_salary"] * (1 + get_major_growth_rate(major_name)) ** capped_year
+    # The age practicing pay begins: 18, plus the bachelor's, plus whatever
+    # unpaid school or stipend years this path spends first. Computed from the
+    # locals already resolved above rather than looked up again, so it cannot
+    # drift from the years the branches above actually used.
+    practice_start_age = HS_GRAD_START_AGE + UNDERGRAD_YEARS + years_to_practice
+    salary *= career_growth_multiple(practicing_year, practice_start_age)
+    # And it still stops at the top of the occupation's own published wage
+    # range. That ceiling used to be doing this job alone, which bounded the
+    # runaway but pinned 595 of 825 occupations exactly at their own p90 by year
+    # 35. With the age curve in front of it, it is a backstop again: 22 remain.
     ceiling = career_earnings_ceiling(major_name)
     return min(salary, ceiling) if ceiling else salary
 
@@ -5806,6 +5907,15 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # comparable across the seam: every row before it understates its
         # earnings_premium and roi_pct. See migrations.sql.
         "hs_baseline_real_units": True,
+        # The graduate earnings curve stopped compounding its ten-year-fitted
+        # rate for a whole career on 2026-08-18 and now plateaus along the CPS
+        # graduate age profile. NARROWER than the two flags above: every figure
+        # through year 10 is bit-identical, so a row at the DEFAULT horizon
+        # means what it always did. Only rows whose roi_horizon_years exceeds 10
+        # changed, plus anything read off the 35-year chart or the Year 20/30
+        # career stages. Condition on this AND on roi_horizon_years; see
+        # migrations.sql.
+        "career_curve_plateaus": True,
         "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", True)),
         # Real-dollar discounting. These two define what earnings_premium and
         # roi_pct MEAN in this row, exactly as count_foregone_earnings above
@@ -23625,19 +23735,34 @@ grad" pay. This growth rate is our own estimate built from real BLS wage
 data, not something BLS itself publishes. BLS doesn't track how any one
 person's paycheck actually changes over 10 years.
 
-**Pay stops climbing at the top of the published range.** The growth rate
+**Pay climbs quickly for about ten years, then levels off.** The growth rate
 above is fitted over ten years, so applying it for a whole career says a
 typical worker keeps out-earning their own occupation indefinitely. It does not
-hold: run uncapped, 302 of the 825 occupations here pass what the best-paid 10%
+hold: run that way, 302 of the 825 occupations here pass what the best-paid 10%
 of their own field make by year 30, and a surgeon reaches $1.6 million against
-a published top-10% figure of $655,320. So the salary curve flattens at that
-top-10% wage (BLS OEWS 90th percentile, for your city where the city publishes
-one). Two things that follows from: a tenth of any occupation does earn more
-than this, so it is a modeling floor rather than a limit on anybody; and
-because the curve is nominal, the flattening also stops it drifting with
-inflation, which makes long-horizon figures cautious rather than generous.
-Nothing at ten years or under is affected: no occupation in the file reaches
-its own ceiling that early.
+a published top-10% figure of $655,320.
+
+So after year 10 the fitted rate stops compounding and the curve follows what
+Census records actually show graduates earning at each age. Those show pay
+rising to about 10% above the all-ages median by the early forties and then
+staying flat, so the model does the same: roughly a quarter more than the
+year-10 figure, and then level. We use the government's occupation data for
+what each job pays and the Census records only for the shape of a career over
+time, because neither source can answer both questions. The first ten years
+deliberately do not use the Census shape, since that data pools every
+occupation together and its early steepness partly reflects people changing
+occupations entirely, which this page does not model.
+
+There is still a hard ceiling at the top-10% wage for the occupation (BLS OEWS
+90th percentile, for your city where the city publishes one), but it is now a
+backstop rather than the thing shaping the curve. Before this change 595 of 825
+occupations sat exactly at that ceiling by year 35, which said the typical
+entrant becomes a top-10% earner in nearly three quarters of all fields; 21 do
+now. A tenth of any occupation does earn more than the ceiling, so it remains a
+modeling floor rather than a limit on anybody.
+
+Nothing at ten years or under is affected by any of this, which is checked
+rather than assumed: every salary in the file is identical through year 10.
 
 | Major | BLS Occupation (SOC) | 25th Pctile | Median |
 |---|---|---|---|

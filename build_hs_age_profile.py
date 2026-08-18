@@ -89,6 +89,42 @@ COLUMNS_TO_LOAD = [
 # excluded, as are codes below it (38 and under = no diploma).
 HS_GRAD_ATTAINMENT_CODE = 39
 
+# Bachelor's degree and above: 43 bachelor's, 44 master's, 45 professional,
+# 46 doctorate. This is the population the app's GRADUATE side describes, so
+# the graduate profile pools all four rather than taking 43 alone -- a
+# doctoral occupation's curve is not a bachelor's curve, and the app models
+# both from one shape.
+#
+# The profile built from this is used for its SHAPE ONLY, never its level.
+# app.py takes every salary level from OEWS, per occupation; what CPS supplies
+# is the one thing OEWS structurally cannot, which is an age dimension. See
+# GRAD_AGE_PROFILE_PATH in app.py.
+GRAD_ATTAINMENT_MIN_CODE = 43
+
+# The two populations this script can profile. Adding one means adding a
+# predicate here and nothing else.
+POPULATIONS = {
+    "hs": {
+        "label": "high school graduates, no college",
+        "predicate": lambda df: df["A_HGA"] == HS_GRAD_ATTAINMENT_CODE,
+        "default_output": "data/hs_age_profile.csv",
+    },
+    "grad": {
+        "label": "bachelor's degree and above",
+        "predicate": lambda df: df["A_HGA"] >= GRAD_ATTAINMENT_MIN_CODE,
+        "default_output": "data/grad_age_profile.csv",
+    },
+}
+
+# A sanity band on the graduate/high-school median ratio, checked whenever the
+# graduate profile is built. BLS's published weekly-earnings series put
+# bachelor's-and-above around 1.7 to 1.9 times high-school-only, and computing
+# BOTH from the same microdata makes this a real check on the attainment filter
+# rather than a restatement of it -- if A_HGA's codes are ever renumbered, this
+# is what notices. It is deliberately wide: the point is to catch a filter that
+# has stopped meaning what it says, not to pin a number.
+GRAD_HS_RATIO_BAND = (1.4, 2.2)
+
 # Class-of-worker codes for wage and salary workers: private, federal, state
 # and local government. Deliberately excludes the self-employed (incorporated
 # and not), matching BLS's "wage and salary workers" universe -- self-employment
@@ -184,7 +220,41 @@ def load_cps_asec(csv_path: str) -> pd.DataFrame:
         & (raw["WSAL_VAL"] > 0)
         & (raw["A_CLSWKR"].isin(WAGE_SALARY_CLASS_CODES))
     ]
-    return employed[employed["A_HGA"] == HS_GRAD_ATTAINMENT_CODE]
+    return employed
+
+
+def validate_grad_ratio(employed: pd.DataFrame) -> float:
+    """Reference median for the graduate profile, checked against the HS one.
+
+    There is no app.py constant for graduate pay to validate against the way
+    HS_GRAD_SALARY anchors the other profile, so the check is a RELATIVE one:
+    both medians come from this same file, and their ratio has to land in the
+    band BLS's published series imply. That makes it a real test of the
+    attainment filter -- if A_HGA's codes are renumbered, or `>= 43` stops
+    meaning "bachelor's and above", the ratio moves and this raises. Comparing
+    the graduate median against itself would test nothing.
+    """
+    adults = employed[employed["A_AGE"] >= 25]
+    grads = adults[POPULATIONS["grad"]["predicate"](adults)]
+    hs = adults[POPULATIONS["hs"]["predicate"](adults)]
+    if grads.empty or hs.empty:
+        raise ValueError("No age-25+ graduates or high school graduates matched "
+                         "-- check the attainment filters.")
+    grad_median = weighted_median(grads["WSAL_VAL"].values, grads["MARSUPWT"].values)
+    hs_median = weighted_median(hs["WSAL_VAL"].values, hs["MARSUPWT"].values)
+    ratio = grad_median / hs_median
+    low, high = GRAD_HS_RATIO_BAND
+    print("Validation -- age 25+ median annual wage, both from this file")
+    print(f"  bachelor's and above : ${grad_median:>9,.0f}  (n={len(grads):,} unweighted)")
+    print(f"  high school only     : ${hs_median:>9,.0f}  (n={len(hs):,} unweighted)")
+    print(f"  ratio                : {ratio:>9.2f}  (expected {low} to {high})")
+    if not low <= ratio <= high:
+        raise ValueError(
+            f"The graduate/high-school median ratio is {ratio:.2f}, outside the "
+            f"{low}-{high} band BLS's published series imply. Most likely A_HGA's "
+            f"codes changed meaning in this release. Do not publish this profile "
+            f"until it reconciles.")
+    return grad_median
 
 
 def validate_against_published(hs_grads: pd.DataFrame, baseline: int) -> float:
@@ -293,8 +363,14 @@ if __name__ == "__main__":
     parser.add_argument("input_csv",
                         help="Path to the CPS ASEC person file (pppub##.csv), from "
                              "asecpub##csv.zip at www2.census.gov/programs-surveys/cps/datasets/")
-    parser.add_argument("-o", "--output", default="data/hs_age_profile.csv",
-                        help="Output CSV path (default: data/hs_age_profile.csv)")
+    parser.add_argument("--population", choices=sorted(POPULATIONS), default="hs",
+                        help="Which population to profile: 'hs' (high school only, "
+                             "the ROI baseline) or 'grad' (bachelor's and above, the "
+                             "shape the graduate earnings curve decelerates along). "
+                             "Default: hs, so the original invocation is unchanged.")
+    parser.add_argument("-o", "--output", default=None,
+                        help="Output CSV path (default: per --population, "
+                             "data/hs_age_profile.csv or data/grad_age_profile.csv)")
     parser.add_argument("--min-sample", type=int, default=DEFAULT_MIN_SAMPLE,
                         help=f"Minimum unweighted observations per age band "
                              f"(default: {DEFAULT_MIN_SAMPLE})")
@@ -303,10 +379,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-        hs_grads = load_cps_asec(args.input_csv)
-        baseline = read_app_baseline(args.app)
-        reference = validate_against_published(hs_grads, baseline)
-        profile = build_age_profile(hs_grads, reference, args.min_sample)
+        employed = load_cps_asec(args.input_csv)
+        population = POPULATIONS[args.population]
+        print(f"Population: {population['label']}\n")
+        if args.population == "grad":
+            reference = validate_grad_ratio(employed)
+        else:
+            reference = validate_against_published(
+                employed[population["predicate"](employed)],
+                read_app_baseline(args.app))
+        profile = build_age_profile(
+            employed[population["predicate"](employed)], reference, args.min_sample)
     except FileNotFoundError:
         raise SystemExit(
             f"Error: could not find '{args.input_csv}'. Download asecpub##csv.zip from "
@@ -315,7 +398,8 @@ if __name__ == "__main__":
     except ValueError as exc:
         raise SystemExit(f"Error: {exc}")
 
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-    profile.to_csv(args.output, index=False)
-    print(f"\nWrote {len(profile)} rows to {args.output}")
+    output = args.output or POPULATIONS[args.population]["default_output"]
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    profile.to_csv(output, index=False)
+    print(f"\nWrote {len(profile)} rows to {output}")
     print_summary(profile, reference, baseline)
