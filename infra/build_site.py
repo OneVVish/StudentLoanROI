@@ -46,6 +46,20 @@ WORKER = ROOT / "infra" / "worker.js"
 START_MARK = "// {{LANDING_HTML_START}}"
 END_MARK = "// {{LANDING_HTML_END}}"
 
+# The organizational status line in every page footer. Kept identical to
+# app.py's ORG_STATUS_LINE, which puts the same sentence on every generated
+# PDF; the two are separate constants because this file never imports app.py,
+# so changing one means changing both in the same commit.
+#
+# THE WORDING IS THE CLAIM AND IT IS DELIBERATELY NARROW. Incorporation with
+# the California Secretary of State is an entity, not a tax status. "Nonprofit"
+# on its own is read by most people as "donations are deductible", which is
+# 501(c)(3) and a separate IRS determination; soliciting donations in
+# California would additionally need registration with the Attorney General's
+# Registry of Charities and Fundraisers. So no "charity", no "tax-exempt", no
+# EIN, until the filing that licenses each one exists.
+ORG_STATUS_LINE = "Worth My Degree Inc. is a California nonprofit corporation."
+
 
 # --- content ---------------------------------------------------------------
 #
@@ -697,6 +711,7 @@ def build_html(f: dict, posts: list = ()) -> str:
   (February 2026), College Scorecard (2024 data,
   released June 2026), IPEDS (2023) and CPS ASEC (2025).
   Educational estimate, not financial advice.<br>
+  {ORG_STATUS_LINE}<br>
   <a href="/llms.txt" style="color:inherit">Plain-text summary</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a>
 </footer>
@@ -990,6 +1005,7 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
   (February 2026), College Scorecard (2024 data,
   released June 2026), IPEDS (2023) and CPS ASEC (2025).
   Educational estimate, not financial advice.<br>
+  {ORG_STATUS_LINE}<br>
   <a href="/guides" style="color:inherit">All guides</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a>
 </footer>
@@ -1420,7 +1436,8 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 <footer>
   <a href="/guides" style="color:inherit">Guides</a> ·
   <a href="/" style="color:inherit">worthmydegree.com</a> · Educational
-  estimate, not financial advice.
+  estimate, not financial advice.<br>
+  {ORG_STATUS_LINE}
 </footer>
 </div>
 {CARRY_QS_JS}
@@ -1564,7 +1581,8 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
 </section>
 <footer>
   <a href="/" style="color:inherit">worthmydegree.com</a> · Educational
-  estimate, not financial advice.
+  estimate, not financial advice.<br>
+  {ORG_STATUS_LINE}
 </footer>
 </div>
 {CARRY_QS_JS}

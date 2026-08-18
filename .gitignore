@@ -40,6 +40,20 @@ presentation/
 # source at all. If static/info-*.jpg is ever deleted, it is gone.
 marketing/
 
+# check_reel.py sits at the repo root with the other guards and is the ONE that
+# cannot be committed: it imports marketing/reel.py and reel_data.py, and runs
+# on marketing/reels/*.md, all of which are inside the ignore above. Committed,
+# it would be the first tracked file in this repo that cannot run in a fresh
+# clone -- a guard that fails on checkout teaches everyone to skip guards.
+#
+# The alternative was un-ignoring the reel engine (a !marketing/*.py negation)
+# so the guard had its dependencies. That is the better end state and is a
+# bigger decision than a gitignore line, because it would also pull in the
+# chart scripts, the src taxonomy and the outreach copy this folder exists to
+# keep private. Ignored for now, deliberately, and NOT because the guard is
+# unimportant: it is what stops a reel stating a stale figure out loud.
+check_reel.py
+
 # Agent tooling: skills, settings, worktrees. Local working aids, not part of
 # the app -- same reasoning as CLAUDE.md, which is also deliberately untracked.
 # Ignored rather than merely untracked because commits here are routinely
