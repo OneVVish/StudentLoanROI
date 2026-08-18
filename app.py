@@ -664,7 +664,8 @@ def hs_age_factor(age: int) -> float:
 
 
 def hs_wage_for_timeline_year(year_index: int, hs_wage_index: float,
-                               baseline_start_age: int = None) -> float:
+                               baseline_start_age: int = None,
+                               drift_rate: float = None) -> float:
     """The high-school baseline's wage in year `year_index` of the comparison
     timeline.
 
@@ -679,8 +680,17 @@ def hs_wage_for_timeline_year(year_index: int, hs_wage_index: float,
     time -- because the raises a person gets for getting older now come from
     the profile instead. The arithmetic on the drift term is unchanged; what
     changes is that a real age-earnings curve is layered on top of it.
+
+    drift_rate=None means HS_GRAD_GROWTH_RATE, i.e. every existing caller is
+    unaffected. The real-dollar discounting module passes 0.0 to strip the
+    calendar drift, leaving the age curve to carry the baseline's real
+    progression on its own -- see DISCOUNTING_ENABLED. The default is None
+    rather than HS_GRAD_GROWTH_RATE itself because a default argument is
+    evaluated when this function is DEFINED and that constant is not assigned
+    until several hundred lines below, which would be a NameError at import.
     """
-    wage = HS_GRAD_SALARY * hs_wage_index * (1 + HS_GRAD_GROWTH_RATE) ** year_index
+    drift = HS_GRAD_GROWTH_RATE if drift_rate is None else float(drift_rate)
+    wage = HS_GRAD_SALARY * hs_wage_index * (1 + drift) ** year_index
     if baseline_start_age is None:
         return wage
     return wage * hs_age_factor(baseline_start_age + year_index)
@@ -3222,6 +3232,72 @@ NYFED_MAJOR_SOC_GROUP = {
     "Treatment Therapy": "29",
 }
 
+# ---- Real-dollar discounting (optional "Advanced Analysis" mode) ------------
+# BUILT TO BE BACKED OUT. Everything this module touches is additive: every new
+# argument defaults to its no-op value, HS_GRAD_GROWTH_RATE is not changed, and
+# the existing scalar loan-payment path is untouched. Removing it is deleting
+# this block, the twin block above calculate_roi, and the defaulted parameters
+# at their call sites -- all greppable on DISCOUNTING_ENABLED. Set that constant
+# to False for the cheap back-out, which returns every code path to its default
+# without touching a line of arithmetic. It is a constant rather than an admin
+# checkbox for the reason PRESURVEY_ENABLED is: session_state is per-visitor, so
+# a checkbox would switch the module off for the admin alone, and flipping a
+# constant is a commit, which puts the on/off history in git. "When was this
+# running" is analysis metadata that nothing else in the data records.
+#
+# WHY IT EXISTS. This app sums undiscounted dollars over a window that now runs
+# 35 years on the net-position chart, so the discount choice is doing quiet work
+# in every headline figure. The IFS study of UK lifetime earnings puts the size
+# of it: the same stream reads GBP 150,000 under HM Treasury Green Book
+# discounting and about GBP 260,000 at a 0% real rate.
+#
+# WHAT IT DOES. Discounting only means anything once both sides of the
+# comparison are in the same units, and by default they are not:
+#
+#   * the graduate's growth comes from get_major_growth_rate, a CAGR fitted
+#     from OEWS p25 to p50 where both percentiles are read off ONE release
+#     published the same day. No time passes between the two measurements, so
+#     that rate is a cross-sectional gradient with NO inflation in it.
+#   * the high-school baseline grows at HS_GRAD_GROWTH_RATE, which its own
+#     docstring calls calendar drift.
+#
+# So the module works in today's dollars: the baseline's drift term goes to 0
+# (hs_age_factor already carries its real progression), the graduate stream is
+# left alone because it is already real, nominal loan payments are deflated by
+# ASSUMED_INFLATION_RATE, and everything is then discounted from its own
+# wall-clock year. Three effects, and they do NOT run the same way: zeroing the
+# drift raises the premium, deflating the payments raises it, discounting lowers
+# it for any back-loaded path. The net is path-dependent, and the Methodology
+# says so rather than implying a single direction.
+DISCOUNTING_ENABLED = True
+
+# The ONLY place this app states an inflation assumption. It is used in exactly
+# one place -- deflating nominal loan payments so they can be compared against
+# real earnings -- and that narrowness is deliberate: four different rates in
+# this file already do partly overlapping jobs (HS_GRAD_GROWTH_RATE 2.0%,
+# get_major_growth_rate ~2.14% median, income_for_year's 3.0%,
+# DEFAULT_COA_INFLATION_RATE 2.7%) and a fifth that leaked everywhere would make
+# that worse rather than better.
+#
+# DERIVED, not published as a single figure. CBO's Budget and Economic Outlook:
+# 2026 to 2036 projects PCE inflation returning to the Federal Reserve's 2%
+# long-run goal in 2030 and stable thereafter, and states that CPI-U runs about
+# 0.3 percentage points above PCE (the average gap over the low and stable
+# 2000-2018 period). 2.0 + 0.3 = 2.3. Recheck both components against the
+# current Outlook when refreshing, since the wedge and the long-run goal move
+# independently. [CBO, https://www.cbo.gov/publication/62105]
+ASSUMED_INFLATION_RATE = 0.023
+
+# A real rate, applied to real flows. Deliberately NOT Green Book's 3.5%: that
+# is a SOCIAL discount rate for appraising government spending, and its
+# decomposition is roughly 1.5% pure time preference plus 2% per-capita
+# consumption growth -- the second term belonging to a planner rather than to a
+# seventeen-year-old. 3% is a middle value the visitor can change, because
+# unlike the age-curve baseline (where one answer was simply wrong) time
+# preference genuinely is a personal parameter and an option here is honest.
+DEFAULT_REAL_DISCOUNT_RATE = 0.03
+DISCOUNT_RATE_BOUNDS = (0.0, 0.08)
+
 # ---- 2026 Federal Repayment Plans: RAP & Tiered Standard ------------------
 # Real, enacted federal law: the One Big Beautiful Bill Act (H.R. 1, 2025)
 # replaces existing IDR plans with the Repayment Assistance Plan (RAP) and
@@ -5683,6 +5759,22 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # apart; dropping it would make them indistinguishable.
         "hs_baseline_age_aware": True,
         "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", True)),
+        # Real-dollar discounting. These two define what earnings_premium and
+        # roi_pct MEAN in this row, exactly as count_foregone_earnings above
+        # does, so any comparison across rows has to condition on them. Because
+        # the module is off by default this is NOT a seam in the existing
+        # series: false and NULL both mean the undiscounted model, and NULL is
+        # simply a row written before the column existed. The rate is logged
+        # beside the flag because "discounted" is not one treatment -- 1% and 8%
+        # are different scenarios and pooling them would be meaningless.
+        #
+        # On back-out these columns are RETAINED and no longer written, as the
+        # apprenticeship and 2026-plans columns were. See migrations.sql.
+        "discounting_enabled": bool(st.session_state.get("enable_discounting", False)),
+        "discount_rate_real": (
+            float(st.session_state.get("real_discount_rate",
+                                       DEFAULT_REAL_DISCOUNT_RATE * 100)) / 100.0
+            if st.session_state.get("enable_discounting") else None),
         "loan_mode": st.session_state.get("loan_mode", "Simplified"),  # Simplified / Detailed
         "cc_mode_a": cc_mode_a,                                         # none / fulltime / parttime
         # The professional school, and the debt figure it produced. Both are
@@ -5925,6 +6017,15 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         params["cc_esc_b"] = "1" if st.session_state.get("cc_escalating_b") else "0"
     params["prestige"] = "1" if st.session_state.get("enable_prestige_mode") else "0"
     params["ai"] = "1" if st.session_state.get("enable_ai_mode") else "0"
+    # Real-dollar discounting. The rate rides only when the module is on, for
+    # the reason the professional-school params do: a link from a scenario that
+    # never discounted anything should not carry a rate that built nothing. On
+    # back-out both become dead params, which a recipient's app ignores, so a
+    # stale link degrades to an undiscounted scenario rather than erroring.
+    params["disc"] = "1" if st.session_state.get("enable_discounting") else "0"
+    if st.session_state.get("enable_discounting"):
+        params["dr"] = str(st.session_state.get("real_discount_rate",
+                                                DEFAULT_REAL_DISCOUNT_RATE * 100))
     # In prestige mode the tier REPLACES the school, so ?school= holds a tier
     # label that no school lookup can resolve -- the tier params are what make
     # such a link reconstructable.
@@ -8597,6 +8698,162 @@ def simulate_rap_schedule(principal: float, annual_rate_pct: float, major_name: 
 
 # ---- 2f. 10-Year ROI ------------------------------------------------------
 
+# ---- Real-dollar discounting (optional "Advanced Analysis" mode) ------------
+# The arithmetic half of the module whose constants and rationale sit in
+# section 1 under the same banner. Two functions, both no-ops at a zero rate,
+# both consumed only by calculate_roi. See DISCOUNTING_ENABLED for how to back
+# the whole thing out.
+
+
+def discounting_is_active(discount_rate: float, inflation_rate: float) -> bool:
+    """Whether calculate_roi should work in today's dollars.
+
+    Callers pass both rates or neither, so either one being non-zero means the
+    module is on. It reads both rather than a separate flag because a flag could
+    disagree with the rates, and because it makes "both zero" the single
+    condition the guard has to prove is bit-identical to the old model.
+
+    Note the 0% case is deliberately still ON when an inflation rate is present:
+    a visitor who enables the module and sets the discount rate to 0 is asking
+    for undiscounted TODAY'S DOLLARS, which still means zeroing the baseline's
+    drift and deflating the loan payments. Today's dollars is the convention,
+    not a side effect of discounting.
+    """
+    return bool(discount_rate) or bool(inflation_rate)
+
+
+def discount_factor(discount_rate: float, year_index: int) -> float:
+    """Present value of one dollar arriving in timeline year `year_index`.
+
+    year_index is WALL-CLOCK from the start of the comparison, never a stream's
+    own index -- the graduate's earnings, the baseline's earnings and the loan
+    payments all begin at different points and calculate_roi offsets each one
+    before calling this. Getting that wrong is the whole risk of this module:
+    every stream still balances its own books, so nothing raises, and the two
+    sides simply come to describe different calendar years. That is the failure
+    check_timeline_alignment.py already exists for.
+    """
+    if not discount_rate:
+        return 1.0
+    return 1.0 / ((1.0 + float(discount_rate)) ** max(int(year_index), 0))
+
+
+def to_todays_dollars(nominal: float, year_index: int, inflation_rate: float) -> float:
+    """A nominal amount paid in wall-clock year `year_index`, in year-0 dollars.
+
+    Loan payments are fixed nominal dollars: the bill is the same number every
+    month for thirty years while everything around it gets more expensive. That
+    is exactly the asymmetry this module exists to price, and it is the ONLY
+    consumer of ASSUMED_INFLATION_RATE.
+    """
+    if not inflation_rate:
+        return float(nominal)
+    return float(nominal) / ((1.0 + float(inflation_rate)) ** max(int(year_index), 0))
+
+
+def annual_loan_payments(repayment_result: dict, years: int) -> list:
+    """Loan dollars paid IN each year 1..years, rather than cumulatively.
+
+    A thin difference over cumulative_loan_paid_by_year so the two cannot
+    disagree about what a schedule says. Discounting needs the per-year series
+    because a payment's present value depends on when it was made, where the
+    undiscounted model only ever needed the total.
+
+    Deliberately NOT a replacement for that function: calculate_roi keeps taking
+    the pre-summed scalar and consults this only when the module is on, so the
+    default path is byte-for-byte what it was.
+    """
+    cumulative = cumulative_loan_paid_by_year(repayment_result, years)
+    out, prior = [], 0.0
+    for total in cumulative:
+        out.append(float(total) - prior)
+        prior = float(total)
+    return out
+
+
+def discounting_methodology_pointer() -> str:
+    """The one sentence pointing at the module from the foregone-earnings
+    section, or "" when it is off.
+
+    Separate from the bullet because it sits in a different paragraph hundreds
+    of lines away, and because it is the half that goes wrong more quietly: it
+    promises a control "described in full below" and a checkbox by name, so
+    with the module off it sends a reader hunting for two things that are not
+    there. The sentence it follows stands on its own without it.
+    """
+    if not DISCOUNTING_ENABLED:
+        return ""
+    return (" **Count money later as worth less than money now**, under "
+            "Advanced Analysis, puts both sides in today's dollars and "
+            "discounts what is left. It is off by default and described in "
+            "full below.")
+
+
+def discounting_methodology_bullet() -> str:
+    """The Methodology entry for the discounting module, or "" when it is off.
+
+    Spliced into the footer literal the way hs_young_wage_disclosure() is, so
+    that DISCOUNTING_ENABLED = False is a COMPLETE off state rather than one
+    that leaves a page describing a checkbox the visitor cannot find. Two
+    surfaces disagreeing about what this app offers is the failure mode this
+    codebase records most often, and the cheap back-out should not create one.
+    """
+    if not DISCOUNTING_ENABLED:
+        return ""
+    return """- **Count money later as worth less than money now.** Off by default. A dollar
+  you will not see for twenty years is worth less to you than a dollar today,
+  and this option says so in the arithmetic. Economists call it discounting.
+  Ticking it changes three things at once, and they do not all push the same
+  way, so whether your result gets better or worse depends on the path.
+
+  Every dollar it moves is a pre-tax dollar, like every earnings figure on this
+  page outside the take-home section. Discounting changes when a dollar counts,
+  never whether tax has come out of it.
+
+  First, everything moves into today's dollars. The high school baseline stops
+  growing 2% a year for rising prices, because that 2% has no equivalent on the
+  career side: a career's growth here comes from comparing beginners with
+  mid-career workers measured in the same year, which contains no inflation at
+  all. That correction on its own makes degrees look better.
+
+  Second, loan payments are converted the same way. Your monthly bill is the
+  same number of dollars in year 20 as in year 1, while everything around it
+  has gotten more expensive, so a late payment costs you less in real terms
+  than an early one. That also makes degrees look better, and it is the only
+  place this app states an inflation assumption: 2.3% a year, from CBO's
+  projection of 2.0% long-run PCE inflation plus the 0.3 point gap CBO gives
+  between CPI-U and PCE ([CBO, Budget and Economic
+  Outlook](https://www.cbo.gov/publication/62105)).
+
+  Third, every remaining dollar is discounted from the year it actually
+  arrives, at whatever rate you set. This one makes degrees look worse, and it
+  bites hardest on paths that train for years before they earn.
+
+  There is no correct rate, which is why it is a box you fill in rather than a
+  number we picked for you. It is a statement about you and not about the
+  economy. We default to 3% a year above inflation. Around 2% is roughly what
+  safe savings return above inflation, and a higher number says you would
+  rather have money sooner. We deliberately do not use the 3.5% that the UK
+  Treasury uses for judging government spending, because part of that figure
+  describes a whole country's rising prosperity rather than one person's
+  patience.
+
+  What this does not touch: your take-home pay snapshot and the salary
+  breakdown bars, which describe one year at a time rather than a lifetime
+  total, and the loan balance and payment charts, which show the actual dollars
+  you will owe and hand over. Your total investment is left alone too, since
+  tuition and savings are spent at the start rather than spread across the
+  years.
+
+  One consequence worth expecting: the age at which a path comes out ahead can
+  move in either direction here, and which way depends on the rate you set. A
+  low rate can pull it earlier, because putting the baseline in today's dollars
+  helps the degree more than the discounting hurts it. A high rate pushes it
+  later, and can push it past the 40 years this app looks across, in which case
+  the page says so rather than naming an age. That is not the tool giving up.
+  It is the honest answer on those terms."""
+
+
 def returning_student_curve(current_salary: float, salary_in_10_years: float,
                             hs_wage_index: float = 1.0):
     """The baseline for someone already working: what they'd earn WITHOUT the
@@ -8637,7 +8894,10 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
                    enrollment_years: int = 0,
                    working_years: int = 0,
                    baseline_start_age: int = None,
-                   baseline_curve=None) -> dict:
+                   baseline_curve=None,
+                   discount_rate: float = 0.0,
+                   inflation_rate: float = 0.0,
+                   loan_payments_by_year: list = None) -> dict:
     """
     ROI = (major's cumulative earnings over `years`, minus loan payments made
     in that window, minus any personal_contribution) compared against the
@@ -8701,9 +8961,43 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     where you live, consistent with the loan repayment simulation itself
     not being COL-adjusted either. Only earnings/purchasing power get
     adjusted, never debt.
+
+    discount_rate/inflation_rate/loan_payments_by_year are the optional
+    real-dollar discounting module (see DISCOUNTING_ENABLED). BOTH RATES AT 0.0
+    MUST BE BIT-IDENTICAL to the undiscounted model, which is the safety
+    argument for the whole feature and what check_discounting.py asserts first.
+    Callers pass both or neither.
+
+    When it is on, three things change and they do not pull the same way. The
+    baseline loses its calendar drift (its age curve already carries the real
+    progression, and the graduate side has no drift term to match it against),
+    which RAISES the premium. Nominal loan payments are expressed in year-0
+    dollars, which RAISES it. Everything is then discounted from its own
+    wall-clock year, which LOWERS it for any back-loaded path. Net is
+    path-dependent, and nothing here should be described as making degrees look
+    better or worse.
+
+    The wall-clock offsets are the delicate part and they are already implied by
+    arguments this function receives, so no new timeline concept is introduced:
+    the baseline's year y sits at t=y (it is the side that already sums
+    `years + enrollment_years`), while the graduate's earnings and the loan
+    payments both sit at t=enrollment_years+y because both run on the
+    graduate's own post-enrollment clock. Get this wrong and nothing raises --
+    each stream still balances its own books, the two just come to describe
+    different calendar years. That is precisely the failure
+    check_timeline_alignment.py exists for, and discounting is what makes these
+    offsets load-bearing where the old model only ever had to count them.
+
+    loan_payments_by_year is consulted ONLY when the module is on. The scalar
+    total_loan_payments_in_window stays the default path untouched, so this is
+    an addition rather than a replacement.
     """
+    real_mode = discounting_is_active(discount_rate, inflation_rate)
+
     major_cumulative_earnings = sum(
-        get_annual_salary_for_year(major_name, y) for y in range(years)
+        get_annual_salary_for_year(major_name, y)
+        * discount_factor(discount_rate, enrollment_years + y)
+        for y in range(years)
     )
     # The baseline has to live in the same city as the graduate it's being
     # compared to. HS_GRAD_SALARY is a national BLS figure, so a city that
@@ -8726,11 +9020,26 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # that replaced one and not the other would invent an earnings premium out
     # of nothing, silently. Binding it once makes that mistake unavailable
     # rather than merely documented.
-    baseline_wage = baseline_curve or (
-        lambda y: hs_wage_for_timeline_year(y, hs_wage_index, baseline_start_age))
+    #
+    # In real mode the drift term goes to 0 and the age curve carries the
+    # baseline's progression alone. A returning student's baseline is instead
+    # two salaries they typed, which are nominal figures in their head, so that
+    # curve is deflated rather than de-drifted. Both stay bound to the ONE
+    # callable for the reason above: the part-time community-college years only
+    # cancel in the premium if both sides are computed identically.
+    if baseline_curve is not None:
+        baseline_wage = (
+            (lambda y: to_todays_dollars(baseline_curve(y), y, inflation_rate))
+            if real_mode else baseline_curve)
+    else:
+        baseline_wage = (
+            lambda y: hs_wage_for_timeline_year(
+                y, hs_wage_index, baseline_start_age,
+                drift_rate=0.0 if real_mode else None))
 
     hs_cumulative_earnings = sum(
-        baseline_wage(y) for y in range(years + enrollment_years)
+        baseline_wage(y) * discount_factor(discount_rate, y)
+        for y in range(years + enrollment_years)
     )
     # Part-time-while-working community-college years: the major side earns a
     # HS-equivalent wage for the first `working_years` of the timeline (front,
@@ -8743,12 +9052,33 @@ def calculate_roi(major_name: str, total_loan_payments_in_window: float,
     # sides are computed identically. Scaling one and not the other would
     # invent an earnings premium out of the part-time community-college path.
     major_working_earnings = sum(
-        baseline_wage(y) for y in range(working_years)
+        baseline_wage(y) * discount_factor(discount_rate, y)
+        for y in range(working_years)
     )
+
+    # The loan cost. Off, this is the scalar it has always been. On, each year's
+    # payment is expressed in year-0 dollars and then discounted from the year
+    # it was actually made -- both at t=enrollment_years+y, the graduate's own
+    # clock, because a schedule's month 1 is the first month after enrollment
+    # ends (in-school deferment having already shifted it) and not the first
+    # year of the comparison.
+    #
+    # personal_contribution deliberately stays undiscounted: it is money the
+    # visitor typed in today's dollars and it is spent during enrollment, so it
+    # already sits at roughly t=0. total_investment, the ROI% denominator, is
+    # left alone for the same reason.
+    if real_mode and loan_payments_by_year is not None:
+        loan_cost = sum(
+            to_todays_dollars(payment, enrollment_years + y, inflation_rate)
+            * discount_factor(discount_rate, enrollment_years + y)
+            for y, payment in enumerate(loan_payments_by_year)
+        )
+    else:
+        loan_cost = total_loan_payments_in_window
 
     major_net_position_nominal = (
         major_cumulative_earnings + major_working_earnings
-        - total_loan_payments_in_window - personal_contribution
+        - loan_cost - personal_contribution
     )
     hs_net_position_nominal = hs_cumulative_earnings
 
@@ -8829,6 +9159,14 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
     this line removes.
     """
     paid_by_year = cumulative_loan_paid_by_year(scenario["repayment_result"], years)
+    # The real-dollar discounting module needs the per-year payments rather than
+    # the running total, since a payment's present value depends on when it was
+    # made. Read off the scenario, not session_state, so every point on the
+    # chart is drawn on the terms the headline metric was computed under.
+    discount_rate = scenario.get("discount_rate", 0.0) or 0.0
+    inflation_rate = scenario.get("inflation_rate", 0.0) or 0.0
+    real_mode = discounting_is_active(discount_rate, inflation_rate)
+    per_year = annual_loan_payments(scenario["repayment_result"], years) if real_mode else None
     # Rebuilt from the scalars the scenario was computed under, so the chart's
     # baseline is the SAME baseline as the metric above it. Omitting this
     # kwarg -- the one baseline argument this call site ever dropped -- made
@@ -8842,7 +9180,7 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
         else None)
     points = []
     for year in range(1, years + 1):
-        def _run(loan_paid):
+        def _run(loan_paid, payments):
             return calculate_roi(
                 scenario["major"], loan_paid, 0,
                 col_index=col_index, years=year, hs_wage_index=hs_wage_index,
@@ -8851,13 +9189,20 @@ def build_net_position_series(scenario: dict, col_index: float, hs_wage_index: f
                 working_years=scenario["working_years"],
                 baseline_start_age=scenario.get("baseline_start_age"),
                 baseline_curve=baseline_curve,
+                discount_rate=discount_rate,
+                inflation_rate=inflation_rate,
+                loan_payments_by_year=payments,
             )
-        result = _run(paid_by_year[year - 1])
+        result = _run(paid_by_year[year - 1],
+                      per_year[:year] if per_year is not None else None)
         point = {"year": year,
                  "major": result["major_net_position"],
                  "hs": result["hs_net_position"]}
         if include_debt_free:
-            point["debt_free"] = _run(0.0)["major_net_position"]
+            # No payment series needed: the scalar 0.0 and a series of zeros
+            # discount to the same nothing, and this line exists precisely to
+            # remove the borrowing.
+            point["debt_free"] = _run(0.0, None)["major_net_position"]
         points.append(point)
     return points
 
@@ -9609,7 +9954,9 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                               baseline_salary_now: float = None,
                               baseline_salary_in_10y: float = None,
                               existing_debt: float = 0.0,
-                              existing_debt_rate: float = None) -> dict:
+                              existing_debt_rate: float = None,
+                              discount_rate: float = 0.0,
+                              inflation_rate: float = 0.0) -> dict:
     """Run the full loan-payoff + ROI pipeline for one scenario. Shared by
     the single-scenario view and Compare Mode (and the survey's context
     capture) so every caller runs the exact same calculation code -- no
@@ -9814,7 +10161,13 @@ def compute_scenario_results(major_name: str, loan_amount: float,
                                 personal_contribution=personal_contribution,
                                 enrollment_years=enrollment_years,
                                 working_years=working_years,
-                                baseline_curve=baseline_curve)
+                                baseline_curve=baseline_curve,
+                                discount_rate=discount_rate,
+                                inflation_rate=inflation_rate,
+                                loan_payments_by_year=(
+                                    annual_loan_payments(repayment_result, roi_window_years)
+                                    if discounting_is_active(discount_rate, inflation_rate)
+                                    else None))
 
     # The other half of that split: what the visitor actually pays each month,
     # and when they are actually free, DOES include the existing balance --
@@ -9959,6 +10312,15 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         # returning-student one, under a legend naming the returning baseline.
         "baseline_salary_now": baseline_salary_now,
         "baseline_salary_in_10y": baseline_salary_in_10y,
+        # Same reasoning one line up, for the real-dollar discounting module:
+        # build_net_position_series re-runs calculate_roi once per year and has
+        # to do it on the terms this scenario was computed under, or the chart's
+        # last point stops equalling the metric above it -- the one invariant
+        # that whole function exists to hold. Read from here, never from
+        # session_state, which is also what keeps find_breakeven_loan's cache
+        # honest.
+        "discount_rate": discount_rate,
+        "inflation_rate": inflation_rate,
         "roi_result": roi_result,
         # None unless the cap-and-gap split was applied (Detailed mode); the
         # results page / PDF show the federal-vs-gap breakdown when it's set.
@@ -9994,7 +10356,9 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
                          professional_debt: float = None,
                          include_fees: bool = False,
                          baseline_salary_now: float = None,
-                         baseline_salary_in_10y: float = None) -> dict:
+                         baseline_salary_in_10y: float = None,
+                         discount_rate: float = 0.0,
+                         inflation_rate: float = 0.0) -> dict:
     """The undergraduate loan at which `major_name` stops beating a debt-free
     high school graduate — i.e. where earnings_premium crosses zero.
 
@@ -10061,6 +10425,12 @@ def find_breakeven_loan(major_name: str, interest_rate: float, repayment_strateg
             # screen quietly answering different questions.
             baseline_salary_now=baseline_salary_now,
             baseline_salary_in_10y=baseline_salary_in_10y,
+            # Explicit parameters rather than a session_state read, for the same
+            # reason professional_debt is one: this function is @st.cache_data,
+            # and a value read inside the cached call does not key the cache, so
+            # the ceiling would go stale the moment the visitor moved the rate.
+            discount_rate=discount_rate,
+            inflation_rate=inflation_rate,
         )["roi_result"]["earnings_premium"]
 
     if premium_at(0.0) <= 0:
@@ -10158,6 +10528,8 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                        include_fees: bool = False,
                        baseline_salary_now: float = None,
                        baseline_salary_in_10y: float = None,
+                       discount_rate: float = 0.0,
+                       inflation_rate: float = 0.0,
                        *, crossover: dict,
                        resolved_professional_debt: float = 0.0) -> dict:
     """find_breakeven_loan framed against what this visitor is actually
@@ -10197,7 +10569,9 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
                                   federal_cap=federal_cap, plus_cap=plus_cap, gap_rate=gap_rate, dependents=dependents, professional_debt=professional_debt, subsidized_cap=subsidized_cap,
                                   include_fees=include_fees,
                                   baseline_salary_now=baseline_salary_now,
-                                  baseline_salary_in_10y=baseline_salary_in_10y)
+                                  baseline_salary_in_10y=baseline_salary_in_10y,
+                                  discount_rate=discount_rate,
+                                  inflation_rate=inflation_rate)
     years = roi_window_years
     # Career-mode names are plural BLS occupations ("Software Developers")
     # while Major-mode names are singular ("Computer Science"), so any verb
@@ -14855,6 +15229,31 @@ apply_shared_flag("ai", "enable_ai_mode")
 # in migrations.sql.
 st.session_state.setdefault("count_foregone_earnings", True)
 apply_shared_flag("foregone", "count_foregone_earnings")
+# Real-dollar discounting. Read here, before the widgets in the Advanced
+# expander render, for the same before-the-widget reason every other flag above
+# is: the results section is far below but compute_scenario_results needs the
+# values, and Streamlit forbids assigning a key whose widget already exists.
+# Both are hard-gated on DISCOUNTING_ENABLED so the cheap back-out reaches the
+# seeding as well as the widgets -- a shared link carrying ?disc=1 must not
+# revive a module somebody has switched off.
+st.session_state.setdefault("enable_discounting", False)
+st.session_state.setdefault("real_discount_rate", DEFAULT_REAL_DISCOUNT_RATE * 100)
+if DISCOUNTING_ENABLED:
+    apply_shared_flag("disc", "enable_discounting")
+    # The rate rides the same change-detection sentinel its checkbox does,
+    # rather than a plain setdefault or a live read. A live read makes the
+    # number input impossible to edit -- type over it and the link's value
+    # returns on the next rerun, which is the ?pdebt= bug -- and a setdefault
+    # never lands when a URL is pasted into an open tab, which is the bug
+    # apply_shared_flag exists for. Clamped because a hand-edited ?dr=900 would
+    # otherwise raise on the widget's own max.
+    _dr_raw = st.query_params.get("dr")
+    if _dr_raw is not None and st.session_state.get("_shared_flag_dr") != _dr_raw:
+        st.session_state["_shared_flag_dr"] = _dr_raw
+        _shared_rate = get_shared_float("dr", None)
+        if _shared_rate is not None:
+            _lo, _hi = DISCOUNT_RATE_BOUNDS
+            st.session_state["real_discount_rate"] = min(max(_shared_rate, _lo * 100), _hi * 100)
 enable_prestige_mode = st.session_state["enable_prestige_mode"]
 enable_ai_mode = st.session_state["enable_ai_mode"]
 prestige_tier_a = None
@@ -15876,6 +16275,32 @@ def returning_kwargs() -> dict:
     return kwargs
 
 
+def discounting_kwargs() -> dict:
+    """The real-dollar discounting arguments, or empty when the module is off.
+
+    One dict spread into every compute_scenario_results and find_breakeven_loan
+    call, for exactly the reason returning_kwargs() is one: a dict spread cannot
+    be half-applied, and the failure this prevents is the recorded one. The
+    removed 2026-plans module accumulated three dropped calculate_roi kwargs,
+    the worst of which compared a city-scaled graduate salary against a national
+    baseline and overstated San Francisco's premium by 76%. A break-even solved
+    undiscounted beside a premium that was discounted would be that same shape:
+    two numbers on one screen quietly answering different questions.
+
+    Returns BOTH rates or NEITHER, which is the contract calculate_roi's
+    discounting_is_active() reads. The inflation rate is a constant rather than
+    an input: it is not a preference the way time preference is, and exposing it
+    would invite tuning the one figure the module needs to keep fixed.
+    """
+    if not (DISCOUNTING_ENABLED and st.session_state.get("enable_discounting")):
+        return {}
+    return {
+        "discount_rate": float(st.session_state.get(
+            "real_discount_rate", DEFAULT_REAL_DISCOUNT_RATE * 100)) / 100.0,
+        "inflation_rate": ASSUMED_INFLATION_RATE,
+    }
+
+
 def _sync_foregone_to_enrollment() -> None:
     """Turn foregone earnings on when the visitor says they'll stop working.
 
@@ -15906,13 +16331,21 @@ def _sync_foregone_to_enrollment() -> None:
 
 def breakeven_kwargs() -> dict:
     """The baseline half only -- find_breakeven_loan solves for NEW borrowing,
-    so an existing balance has no place in it."""
+    so an existing balance has no place in it.
+
+    The discounting arguments ride here too, and unlike the baseline half they
+    are NOT conditional on returning mode: a discounted premium beside an
+    undiscounted ceiling would be the 2026-plans failure exactly, two numbers on
+    one screen answering different questions.
+    """
+    kwargs = dict(discounting_kwargs())
     if not is_returning or not returning_baseline_ready():
-        return {}
-    return {
+        return kwargs
+    kwargs.update({
         "baseline_salary_now": float(st.session_state["current_salary"]),
         "baseline_salary_in_10y": float(st.session_state["salary_no_degree_10y"]),
-    }
+    })
+    return kwargs
 
 
 # City drives the wage dataset now, not just the cost-of-living index, so it
@@ -16576,6 +17009,52 @@ with st.sidebar.expander("🧪 Advanced Analysis Settings"):
                "real cost of a degree. Switch it off to ask what a student "
                "gains from here rather than from age 18. See Methodology.",
     )
+    # Real-dollar discounting. Both widgets are inside the DISCOUNTING_ENABLED
+    # gate, so the cheap back-out removes the controls without removing the
+    # expander or reordering anything above them.
+    if DISCOUNTING_ENABLED:
+        enable_discounting = st.checkbox(
+            "Count money later as worth less than money now",
+            key="enable_discounting",
+            on_change=lambda: mark_interaction("enable_discounting"),
+            help="Puts every figure in today's dollars and treats a dollar "
+                 "earned years from now as worth less than one earned today, "
+                 "which is what economists call discounting. Three things "
+                 "change and they do not all push the same way, so the effect "
+                 "on your result depends on the path. Off by default. See "
+                 "Methodology.",
+        )
+        # Rendered ALWAYS and disabled when the box is unticked, never hidden
+        # behind `if enable_discounting`. st.number_input's `value` defaults to
+        # the sentinel "min" rather than to None, so unlike every other widget
+        # in this sidebar it does NOT quietly adopt whatever setdefault put in
+        # session_state -- it adopts min_value instead, on the run where it
+        # first appears. Conditional rendering makes that run happen after the
+        # seeding rather than on the same pass, so the 3% default was silently
+        # becoming 0.0% the moment a visitor ticked the box: the module ran,
+        # every number moved, and the rate it moved by was not the one this app
+        # documents. Found in a browser, which is the only place it is visible.
+        #
+        # Disabling it also neutralises it, per the admit-rate filter's rule:
+        # discounting_kwargs() returns {} whenever the checkbox is off, so the
+        # stored rate cannot move anything while greyed. The value is
+        # deliberately NOT cleared, so unticking and re-ticking restores what
+        # the visitor chose.
+        if DISCOUNTING_ENABLED:
+            st.number_input(
+                "Discount rate (% a year, above inflation)",
+                min_value=DISCOUNT_RATE_BOUNDS[0] * 100,
+                max_value=DISCOUNT_RATE_BOUNDS[1] * 100,
+                step=0.5, format="%.1f",
+                key="real_discount_rate",
+                disabled=not enable_discounting,
+                on_change=lambda: mark_interaction("real_discount_rate"),
+                help="How much less a dollar is worth to you a year from now, "
+                     "after inflation. There is no correct answer: this is a "
+                     "statement about you, not about the economy. Around 2% is "
+                     "roughly what safe savings return above inflation, and "
+                     "higher numbers say you would rather have money sooner.",
+            )
 
 # The in-enrollment opportunity cost is now applied PER SCENARIO (its
 # enrollment_years_a/_b and working_years_a/_b are computed up in the Scenario
@@ -22190,7 +22669,7 @@ if compare_mode:
                                            baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                            federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                            professional_debt_basis_key=_prof_basis_a,
-                                           **returning_kwargs())
+                                           **returning_kwargs(), **discounting_kwargs())
     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                            personal_contribution_b, city_info["col_index"],
                                            roi_window_years=roi_horizon_years,
@@ -22200,7 +22679,7 @@ if compare_mode:
                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
                                            professional_debt_basis_key=_prof_basis_b,
-                                           **returning_kwargs())
+                                           **returning_kwargs(), **discounting_kwargs())
 
     # Both wage charts reserve the same number of geography rows, so the
     # national curve -- the one series genuinely common to A and B -- sits at
@@ -22448,7 +22927,7 @@ else:
                                          baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                          federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                            professional_debt_basis_key=_prof_basis_a,
-                                           **returning_kwargs())
+                                           **returning_kwargs(), **discounting_kwargs())
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -23005,7 +23484,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
                                                        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
                                                professional_debt_basis_key=_prof_basis_a,
-                                               **returning_kwargs())
+                                               **returning_kwargs(), **discounting_kwargs())
                 # major_b/loan_amount_b/etc. only exist as script variables when
                 # compare_mode is on (they're assigned inside that sidebar
                 # expander) -- referencing them outside an "if compare_mode:"
@@ -23022,7 +23501,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
                                                            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
                                                professional_debt_basis_key=_prof_basis_b,
-                                               **returning_kwargs())
+                                               **returning_kwargs(), **discounting_kwargs())
                     compare_mode_kwargs = dict(
                         compare_mode=True, major_b=major_b, loan_amount_b=loan_amount_b,
                         interest_rate_b=interest_rate_b, repayment_strategy_b=repayment_strategy_b,
@@ -24249,6 +24728,8 @@ real cost of a degree and leaving them out flatters every path.
   against the old rules. See the repayment-plans section above for why
   they are not offered as choices for a 2026+ start.
 
+""" + discounting_methodology_bullet() + """
+
 - **College Prestige & Cost Estimator.** Replaces the school lookup with a
   fixed cost-per-tier bucket (Elite Private, Top Public/Public Ivy, Standard
   Regional Public, Out-of-State Public/Mid-Tier Private). The *cost* side is
@@ -24317,11 +24798,18 @@ real cost of a degree and leaving them out flatters every path.
   only changes the *earnings* side of the comparison, since the tuition and
   debt you put in stay the same, so the ROI% still reads as "how much you come out
   ahead for every dollar of tuition," now counting the wages you skipped to be
-  in school. One simplification to know about: the totals are just each year's
-  real (inflation-adjusted) dollars added up. The model doesn't treat a dollar
-  earned 10 years from now as worth less than a dollar today (what economists
-  call "discounting"). It's a straightforward apples-to-apples earnings
-  comparison, not a formal net-present-value calculation.
+  in school. Two simplifications to know about. First, the totals are just
+  each year's dollars
+  added up. The model doesn't treat a dollar earned 10 years from now as worth
+  less than a dollar today, which is what economists call "discounting," so
+  this is an earnings comparison rather than a formal net-present-value
+  calculation. Second, the two sides of that comparison treat rising prices
+  differently. A career's pay growth here comes from comparing beginners with
+  mid-career workers measured in the same year, so there is no inflation inside
+  it. The high school baseline instead grows 2% a year, a figure that stands
+  for raises and rising prices together. Over the default 10-year window the
+  gap that opens between those two treatments is small. Over the 35 years the
+  chart draws, it is not.""" + discounting_methodology_pointer() + """
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
