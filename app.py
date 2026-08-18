@@ -5907,6 +5907,15 @@ def build_scenario_context(major, loan_amount, interest_rate, repayment_strategy
         # comparable across the seam: every row before it understates its
         # earnings_premium and roi_pct. See migrations.sql.
         "hs_baseline_real_units": True,
+        # The graduate earnings curve stopped compounding its ten-year-fitted
+        # rate for a whole career on 2026-08-18 and now plateaus along the CPS
+        # graduate age profile. NARROWER than the two flags above: every figure
+        # through year 10 is bit-identical, so a row at the DEFAULT horizon
+        # means what it always did. Only rows whose roi_horizon_years exceeds 10
+        # changed, plus anything read off the 35-year chart or the Year 20/30
+        # career stages. Condition on this AND on roi_horizon_years; see
+        # migrations.sql.
+        "career_curve_plateaus": True,
         "count_foregone_earnings": bool(st.session_state.get("count_foregone_earnings", True)),
         # Real-dollar discounting. These two define what earnings_premium and
         # roi_pct MEAN in this row, exactly as count_foregone_earnings above
@@ -23726,19 +23735,34 @@ grad" pay. This growth rate is our own estimate built from real BLS wage
 data, not something BLS itself publishes. BLS doesn't track how any one
 person's paycheck actually changes over 10 years.
 
-**Pay stops climbing at the top of the published range.** The growth rate
+**Pay climbs quickly for about ten years, then levels off.** The growth rate
 above is fitted over ten years, so applying it for a whole career says a
 typical worker keeps out-earning their own occupation indefinitely. It does not
-hold: run uncapped, 302 of the 825 occupations here pass what the best-paid 10%
+hold: run that way, 302 of the 825 occupations here pass what the best-paid 10%
 of their own field make by year 30, and a surgeon reaches $1.6 million against
-a published top-10% figure of $655,320. So the salary curve flattens at that
-top-10% wage (BLS OEWS 90th percentile, for your city where the city publishes
-one). Two things that follows from: a tenth of any occupation does earn more
-than this, so it is a modeling floor rather than a limit on anybody; and
-because the curve is nominal, the flattening also stops it drifting with
-inflation, which makes long-horizon figures cautious rather than generous.
-Nothing at ten years or under is affected: no occupation in the file reaches
-its own ceiling that early.
+a published top-10% figure of $655,320.
+
+So after year 10 the fitted rate stops compounding and the curve follows what
+Census records actually show graduates earning at each age. Those show pay
+rising to about 10% above the all-ages median by the early forties and then
+staying flat, so the model does the same: roughly a quarter more than the
+year-10 figure, and then level. We use the government's occupation data for
+what each job pays and the Census records only for the shape of a career over
+time, because neither source can answer both questions. The first ten years
+deliberately do not use the Census shape, since that data pools every
+occupation together and its early steepness partly reflects people changing
+occupations entirely, which this page does not model.
+
+There is still a hard ceiling at the top-10% wage for the occupation (BLS OEWS
+90th percentile, for your city where the city publishes one), but it is now a
+backstop rather than the thing shaping the curve. Before this change 595 of 825
+occupations sat exactly at that ceiling by year 35, which said the typical
+entrant becomes a top-10% earner in nearly three quarters of all fields; 21 do
+now. A tenth of any occupation does earn more than the ceiling, so it remains a
+modeling floor rather than a limit on anybody.
+
+Nothing at ten years or under is affected by any of this, which is checked
+rather than assumed: every salary in the file is identical through year 10.
 
 | Major | BLS Occupation (SOC) | 25th Pctile | Median |
 |---|---|---|---|

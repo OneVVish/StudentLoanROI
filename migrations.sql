@@ -2141,3 +2141,32 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS hs_baseline_real_units BOO
 -- This column is a constant True, like hs_baseline_age_aware. It is written
 -- anyway because rows before the change carry NULL, and that is the only thing
 -- in the data that separates the two eras.
+
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-18: the career earnings curve plateaus instead of compounding
+-- ---------------------------------------------------------------------------
+ALTER TABLE survey_responses ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOLEAN;
+ALTER TABLE pdf_downloads    ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOLEAN;
+ALTER TABLE scenario_shares  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOLEAN;
+ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOLEAN;
+
+-- All four tables, because build_scenario_context is spread into all four.
+--
+-- THIS SEAM IS NARROWER THAN THE OTHER TWO, and the difference matters for
+-- analysis. get_major_growth_rate is fitted from OEWS p25 to p50, and beyond
+-- year 10 the model used to keep compounding it, which put 595 of 825
+-- occupations exactly at their own p90 by year 35. It now follows the CPS
+-- graduate age profile after year 10 and plateaus; 21 remain at the ceiling.
+--
+-- Every salary through year 10 is BIT-IDENTICAL -- 9,196 points across all 836
+-- occupations, verified against the pre-change file. So:
+--
+--   * rows with roi_horizon_years = 10 (the default, and the large majority)
+--     are UNAFFECTED and pool freely across this date.
+--   * rows with a longer horizon changed, and are not comparable across it.
+--
+-- Condition on career_curve_plateaus AND roi_horizon_years together. Filtering
+-- on the flag alone needlessly discards every default-horizon row, which is
+-- most of the table; ignoring it pools incomparable long-horizon figures.
+-- Treat NULL as false, as with the other era flags.
