@@ -9413,6 +9413,53 @@ def net_position_crossover(scenario: dict, col_index: float, hs_wage_index: floa
     return {"year": year, "age": age}
 
 
+def crossover_caption(crossovers: list, labels: list, drawn_years: int) -> str:
+    """One line under the net-position chart saying where each path passes the
+    baseline, or "" when there is nothing useful to say.
+
+    The fact is already in the verdict list at the top of the page. Repeating it
+    HERE is deliberate and is the same call the compare report makes by putting
+    the crossover in both its summary strip and its break-even block: the list
+    is what a reader scans, and this is where they are looking at the picture
+    the number describes. The chart is a hundred lines of page away from that
+    list by the time it renders.
+
+    It earns its place on the case the picture cannot show. The chart draws 25
+    years and net_position_crossover searches 40, so a path that gets ahead at
+    year 31 has its crossing OFF THE RIGHT EDGE -- the reader looks for two
+    lines meeting, finds none, and the verdict's "age 37" reads as wrong. This
+    says so in words instead.
+
+    Wording comes from crossover_phrase, never assembled here: three surfaces
+    already state this moment and a fourth wording it itself is how "ahead at
+    40" and "ahead in year 18" end up on one page describing the same event.
+    """
+    if not crossovers or all(c is None for c in crossovers):
+        return ""
+    parts = []
+    off_chart = False
+    for label, crossover in zip(labels, crossovers):
+        if crossover is None:
+            continue
+        year = crossover.get("year")
+        phrase = crossover_phrase(crossover)
+        if year is not None and year > drawn_years:
+            off_chart = True
+            parts.append(f"{label}: {phrase}, past the right edge of this chart")
+        elif year is not None:
+            parts.append(f"{label}: {phrase}")
+        else:
+            parts.append(f"{label}: {phrase}")
+    if not parts:
+        return ""
+    lead = ("Where each path passes the baseline. "
+            if len(parts) > 1 else "Where this path passes the baseline. ")
+    tail = ("" if not off_chart else
+            " A crossing past the edge is still real; the chart simply stops "
+            "before it.")
+    return lead + "; ".join(parts) + "." + tail
+
+
 def crossover_phrase(crossover: dict, max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> str:
     """net_position_crossover as words: "age 28", "year 6", or "not within 40
     years".
@@ -11805,6 +11852,23 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
             baseline_head_start_years=baseline_head_start_years),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
+    # Computed here rather than passed in. This function already holds the exact
+    # arguments net_position_crossover takes, so the caption cannot disagree
+    # with the verdict list that states the same moment -- and there is no new
+    # parameter for a caller to forget, which is the failure mode that made
+    # `crossover` a REQUIRED argument of breakeven_summary and build_share_card.
+    #
+    # Safe to compute here specifically because this is a renderer: it runs once
+    # per rerun. The rule it must not break is compute_scenario_results, which
+    # must never stamp this -- find_breakeven_loan bisects by calling that, so a
+    # 40-year sweep inside it would run once per bisection step.
+    _drawn = net_position_chart_years(roi_window_years)
+    _caption = crossover_caption(
+        [net_position_crossover(scenario, col_index, hs_wage_index)
+         for _, scenario in scenario_pairs],
+        [label for label, _ in scenario_pairs], _drawn)
+    if _caption:
+        target.caption(_caption)
     if show_reference:
         # The cost still gets stated when it cannot be drawn. Without this the
         # chart answers "what does the borrowing cost" with a line the reader
