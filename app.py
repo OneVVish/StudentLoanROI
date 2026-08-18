@@ -11438,6 +11438,33 @@ def net_position_axis_title(scenarios: list) -> str:
     return "Years after graduation"
 
 
+# How large a borrowing cost has to be, as a share of the chart's drawn range,
+# before a dashed no-loan twin is worth drawing. A literal, not derived from the
+# chart's pixel height: the height is a Plotly default that can move, and the
+# question here is "would a reader see two lines", which a share of the range
+# answers stably. 1% of a 450px plot is about four pixels, which is roughly
+# where a dashed line stops reading as separate from the solid one under it.
+NET_POSITION_MIN_VISIBLE_GAP = 0.01
+
+
+def net_position_gap_is_visible(gap: float, points: list) -> bool:
+    """Whether a no-loan twin would be distinguishable from its own line.
+
+    Measured against the DRAWN RANGE rather than against the loan, because that
+    is what decides whether two lines separate on screen. A $13,000 loan is a
+    real cost and an invisible one on a chart that reaches $5M, and the reader
+    who cannot see it concludes borrowing is free.
+    """
+    if gap <= 0 or not points:
+        return False
+    highs = [p.get("debt_free", p["major"]) for p in points] + [p["major"] for p in points]
+    lows = [p["hs"] for p in points] + [p["major"] for p in points]
+    span = max(highs) - min(lows)
+    if span <= 0:
+        return False
+    return gap / span >= NET_POSITION_MIN_VISIBLE_GAP
+
+
 def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
                         roi_window_years: int,
                         include_debt_free: bool = False) -> pd.DataFrame:
@@ -11463,13 +11490,28 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
     "Debt-free" would describe a person who is not in that comparison, which is
     the exact bug that vocabulary exists to have ended.
 
-    A scenario that pays nothing gets no reference line, because it would be
-    drawn directly on top of its own -- two legend entries for one line, with
-    the reader left to work out that they coincide.
+    A scenario whose borrowing cannot be SEEN gets no reference line, because it
+    would be drawn directly on top of its own -- two legend entries for one
+    line, with the reader left to work out that they coincide.
+
+    That test used to be exact equality, which only caught a loan of literally
+    zero. It missed the far commoner case: Simplified mode is the default and a
+    school-reported debt is typically small, so UC Berkeley's ~$13,000 costs
+    $13,588 across 35 years against a line reaching $5M. That is 0.26% of the
+    drawn range, about one pixel, and the dashed twin sat exactly on its solid
+    line. Reported as "the no loan line is the same as the loan line", which is
+    precisely the confusion the rule above exists to prevent -- the guard simply
+    was not measuring what a reader can see.
+
+    Suppressed lines are recorded on the frame's `.attrs` so the caption can
+    state the cost in dollars instead. A number is the right substitute for a
+    picture here: the finding is real and worth having (borrowing that little
+    against a career really is negligible), it just cannot be drawn.
     """
     series = {}
     baselines = {}
     debt_free = {}
+    suppressed = []
     no_loan_suffix = counterfactual_vocab()["no_loan_suffix"]
     for label, scenario in scenarios:
         points = build_net_position_series(scenario, col_index, hs_wage_index,
@@ -11479,8 +11521,14 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
         baselines[label] = [p["hs"] for p in points]
         if include_debt_free:
             values = [p["debt_free"] for p in points]
-            if values != series[label]:
+            gap = max((free - owed for free, owed in zip(values, series[label])),
+                      default=0.0)
+            if gap <= 0:
+                pass                      # borrowed nothing: no second line at all
+            elif net_position_gap_is_visible(gap, points):
                 debt_free[f"{label}{no_loan_suffix}"] = values
+            else:
+                suppressed.append((label, gap))
 
     # Added after the paths and before the baseline, so the legend reads in the
     # order the chart is explained: each path, then the same path unborrowed,
@@ -11505,7 +11553,13 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
     for label, values in series.items():
         for year, value in enumerate(values, start=1):
             rows.append({"year": year, "Series": label, "Net Position": value})
-    return pd.DataFrame(rows)
+    frame = pd.DataFrame(rows)
+    # LAST statement before the return, deliberately: pandas drops .attrs across
+    # a merge, and the search-result caption was already bitten by setting one
+    # too early. Nothing merges this frame today, so the ordering is belt and
+    # braces rather than a live fix.
+    frame.attrs["no_loan_suppressed"] = suppressed
+    return frame
 
 
 # How far the net-position chart runs, whatever window the metrics above it
@@ -11513,15 +11567,27 @@ def net_position_frame(scenarios: list, col_index: float, hs_wage_index: float,
 # training paths the crossover lands well outside a ten-year view: the app
 # already TELLS a dentist they come out ahead at 40 (net_position_crossover
 # searches 40 years to say so) while the chart stopped at 10 and could not show
-# it. Thirty-five years after a bachelor's is age 57 on a four-year path, which
-# is as far as "when am I ahead" stays a real question.
+# it.
+#
+# TWENTY-FIVE since 2026-08-18, down from 35, for a reason that did not exist
+# before that date: the earnings curve now plateaus along the CPS graduate age
+# profile instead of compounding, so it is flat from about year 20 and the last
+# decade of a 35-year chart was a straight line carrying no news. Twenty-five
+# years after a bachelor's is age 47 on a four-year path.
+#
+# What it costs, measured rather than guessed: over 250 occupations at a
+# $190,000 loan, 209 cross and only 9 of those (4%) cross after year 25, the
+# median crossing at year 4. Those 9 are the long training paths, and they are
+# the ones this window was lengthened for -- so the trade is deliberate. They
+# still get the answer IN WORDS from crossover_phrase ("comes out ahead at age
+# 37"), which is what the chart could not do when it stopped at 10.
 #
 # The metric above the chart still describes the visitor's own horizon, so that
 # year is MARKED rather than being where the line stops -- see
 # build_net_position_chart. The invariant is unchanged in substance: the point
 # at year = horizon still equals the metric by construction, it is simply no
 # longer the last point.
-NET_POSITION_CHART_YEARS = 35
+NET_POSITION_CHART_YEARS = 25
 
 
 def net_position_chart_years(roi_window_years: int) -> int:
@@ -11713,12 +11779,28 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
     if show_reference:
-        target.caption(
-            "The dashed line is the same career with no loan at all. The gap "
-            "between a path and its dashed twin is what the borrowing costs. A "
-            "path that borrows nothing has only one line, because the two would "
-            "be the same line."
-        )
+        # The cost still gets stated when it cannot be drawn. Without this the
+        # chart answers "what does the borrowing cost" with a line the reader
+        # cannot find, which reads as "nothing" -- and the old caption's promise
+        # that "the gap is what the borrowing costs" made that worse.
+        suppressed = frame.attrs.get("no_loan_suppressed") or []
+        drawn = any(is_no_loan_series(name) for name in frame["Series"].unique())
+        if drawn:
+            target.caption(
+                "The dashed line is the same career with no loan at all. The gap "
+                "between a path and its dashed twin is what the borrowing costs. "
+                "A path that borrows nothing has only one line, because the two "
+                "would be the same line."
+            )
+        if suppressed:
+            costs = ", ".join(
+                f"{label} {fmt_money_md(cost)}" for label, cost in suppressed)
+            target.caption(
+                f"Borrowing costs too little here to separate on this chart, so "
+                f"there is no second line for it: {costs} over the years shown. "
+                f"That is a real cost and a small one next to a career's total "
+                f"earnings, which is the honest reason it cannot be seen."
+            )
 
 
 def cc_chart_label_suffix(cc_mode) -> str:
@@ -23125,17 +23207,24 @@ else:
                                      reported_debt_a, school_name_a,
                                      program_years_a, simplified_scale_a)
     else:
-        st.caption(
-            "Here's how your loan builds up year by year. Cost of Attendance "
-            "grows by the estimated inflation rate each year, while Personal "
-            "Contribution and Grants & Scholarships stay the same."
-        )
-        render_centered_table(pd.DataFrame([
-            {"Year": f"{row['year']} ({start_year_a + row['year'] - 1})",
-             "Cost of Attendance": fmt_money(row["coa"]),
-             "Loan Amount This Year": fmt_money(row["loan_amount"])}
-            for row in loan_schedule_a
-        ]))
+        # Collapsed: this is the arithmetic BEHIND the total, and the total is
+        # the line immediately below it. Leaving it open put a table and, with
+        # the two repayment charts further down, most of a screen between the
+        # visitor and the verdict chart. The disclosure branch above stays
+        # inline -- it explains what an unusual loan figure IS, which is not
+        # detail a reader should have to go looking for.
+        with st.expander("See how your loan builds up year by year"):
+            st.caption(
+                "Cost of Attendance grows by the estimated inflation rate each "
+                "year, while Personal Contribution and Grants & Scholarships "
+                "stay the same."
+            )
+            render_centered_table(pd.DataFrame([
+                {"Year": f"{row['year']} ({start_year_a + row['year'] - 1})",
+                 "Cost of Attendance": fmt_money(row["coa"]),
+                 "Loan Amount This Year": fmt_money(row["loan_amount"])}
+                for row in loan_schedule_a
+            ]))
     # `scenario`, not `scenario_a`: that name belongs to the compare branch.
     # This is the single-scenario branch, and it defines its own at line ~20331.
     _loan_metric_label, _loan_metric_value = total_loan_metric(
@@ -23195,15 +23284,23 @@ else:
     render_forgiveness_note(repayment_result, strategy_label,
                             total_interest=_shown["total_interest"])
 
-    st.plotly_chart(
-        build_balance_chart(repayment_result["schedule"], strategy_label,
-                            tranches=repayment_result.get("tranches")),
-        use_container_width=True, config=PLOTLY_CHART_CONFIG,
-    )
-    # What "Varies (IDR)" above actually looks like. Shared helper, called
-    # from the compare branch too -- a chart in one arm only is an H2
-    # confound, not a cosmetic difference.
-    render_payment_chart(_shown, strategy_label)
+    # Both repayment charts, collapsed together. They answer "what does paying
+    # this back look like", which is a follow-up question -- the metrics above
+    # already give the payment, the payoff date and the interest. Everything
+    # that WARNS stays inline above (the forgiveness note, the financing and
+    # Parent PLUS notes); only the pictures move.
+    #
+    # This does not break arm parity. render_payment_chart is still called from
+    # both branches, and the compare branch draws its own comparison charts
+    # rather than these, so the two arms already show different pictures here.
+    with st.expander("See the repayment charts"):
+        st.plotly_chart(
+            build_balance_chart(repayment_result["schedule"], strategy_label,
+                                tranches=repayment_result.get("tranches")),
+            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+        )
+        # What "Varies (IDR)" above actually looks like.
+        render_payment_chart(_shown, strategy_label)
 
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
     # Rendered via the shared helper so Compare Mode shows the same figures --
