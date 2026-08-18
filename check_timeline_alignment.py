@@ -498,25 +498,59 @@ def negative_controls(ns):
     ns["net_position_axis_title"] = real_title
 
     # (e) The tempting definition -- the FIRST year ahead rather than the year
-    # it stays ahead from. Several paths lead in year 1 on salary alone, fall
-    # behind once loan payments start, and recover later; reporting year 1 there
-    # names an age the reader does not stay ahead at.
-    real_crossover = ns["net_position_crossover"]
-    def first_crossing(scenario, col_index, hs_wage_index, max_years=None):
+    # it stays ahead from. Some paths lead early on salary alone, fall behind
+    # once loan payments start, and recover later; reporting the first year
+    # there names an age the reader does not stay ahead at.
+    #
+    # THE FIXTURE IS FOUND, NOT NAMED. This control used to run against
+    # check_crossover's fixed sample, which held three occupations picked
+    # because they showed the pattern. Zeroing HS_GRAD_GROWTH_RATE lowered the
+    # baseline enough that all three now get ahead and stay ahead, so the
+    # control silently stopped discriminating while still passing -- the exact
+    # failure this file exists to prevent, arriving in the file itself. The
+    # property is still real (30 of 836 occupations show it), so the control
+    # searches for one and says so loudly if the model ever stops producing any.
+    def first_crossing(scenario):
         points = ns["build_net_position_series"](
-            scenario, col_index, hs_wage_index,
-            max_years or ns["NET_POSITION_CROSSOVER_MAX_YEARS"])
+            scenario, 100.0, 1.0, ns["NET_POSITION_CROSSOVER_MAX_YEARS"])
         for point in points:
             if point["major"] >= point["hs"]:
-                age = (scenario["baseline_start_age"]
-                       + (scenario.get("enrollment_years") or 0) + point["year"])
-                return {"year": point["year"], "age": age}
-        return {"year": None, "age": None}
-    ns["net_position_crossover"] = first_crossing
-    if not check_crossover(ns):
-        problems.append("  taking the FIRST year ahead rather than the year it "
-                        "stays ahead from did not fail the crossover check")
-    ns["net_position_crossover"] = real_crossover
+                return point["year"]
+        return None
+
+    def is_non_monotonic(scenario):
+        points = ns["build_net_position_series"](
+            scenario, 100.0, 1.0, ns["NET_POSITION_CROSSOVER_MAX_YEARS"])
+        ahead = [p["major"] >= p["hs"] for p in points]
+        return True in ahead and not all(ahead[ahead.index(True):])
+
+    fixture = None
+    for title in sorted(ns["MAJOR_DATA"]):
+        for enroll in (False, True):
+            try:
+                candidate = crossover_scenario(ns, title, enroll=enroll)
+            except Exception:
+                continue
+            if is_non_monotonic(candidate):
+                fixture = (title, enroll, candidate)
+                break
+        if fixture:
+            break
+
+    if fixture is None:
+        problems.append("  no occupation now leads, falls behind and recovers, "
+                        "so this control has no fixture and cannot prove the "
+                        "crossover uses the FINAL run rather than the first")
+    else:
+        title, enroll, scenario = fixture
+        naive = first_crossing(scenario)
+        real = ns["net_position_crossover"](scenario, 100.0, 1.0)["year"]
+        if naive == real:
+            problems.append(
+                f"  on {title} (foregone {'on' if enroll else 'off'}), which "
+                f"leads then falls behind then recovers, the first-crossing "
+                f"rule and net_position_crossover both report year {real}. The "
+                f"crossover is not using the final unbroken run.")
 
     # (f) The bug this fixed: one basis for every path, so a professional loan
     # row reads $190,000 under a metric showing $469,900.
