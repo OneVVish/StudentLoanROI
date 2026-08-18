@@ -24317,11 +24317,17 @@ real cost of a degree and leaving them out flatters every path.
   only changes the *earnings* side of the comparison, since the tuition and
   debt you put in stay the same, so the ROI% still reads as "how much you come out
   ahead for every dollar of tuition," now counting the wages you skipped to be
-  in school. One simplification to know about: the totals are just each year's
-  real (inflation-adjusted) dollars added up. The model doesn't treat a dollar
-  earned 10 years from now as worth less than a dollar today (what economists
-  call "discounting"). It's a straightforward apples-to-apples earnings
-  comparison, not a formal net-present-value calculation.
+  in school. Two simplifications to know about. First, the totals are just
+  each year's dollars added up. The model doesn't treat a dollar earned 10
+  years from now as worth less than a dollar today, which is what economists
+  call "discounting," so this is an earnings comparison rather than a formal
+  net-present-value calculation. Second, the two sides of that comparison
+  treat rising prices differently. A career's pay growth here comes from
+  comparing beginners with mid-career workers measured in the same year, so
+  there is no inflation inside it. The high school baseline instead grows 2%
+  a year, a figure that stands for raises and rising prices together. Over
+  the default 10-year window the gap that opens between those two treatments
+  is small. Over the 35 years the chart draws, it is not.
 
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
