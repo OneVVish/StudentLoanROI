@@ -90,6 +90,10 @@
      needs the extra specificity of `.tools .grid`, so the 720px breakpoint
      below has to restate it or the cards stay 2-up on a phone. */
   .tools .grid { grid-template-columns: repeat(2, 1fr); }
+  /* The pathways band has four cards too, and the same stranded-card problem
+     the comment above describes. Same fix, same specificity requirement, so
+     the 720px breakpoint restates this one as well. */
+  .paths .grid { grid-template-columns: repeat(2, 1fr); }
   /* ===== The tools band =====
      The tools are the product, so they sit above the guides and carry a
      background of their own: edge to edge, the section reads as its own zone
@@ -252,6 +256,7 @@
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
     .tools .grid { grid-template-columns: 1fr; }
+    .paths .grid { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
