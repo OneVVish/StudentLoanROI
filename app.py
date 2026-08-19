@@ -12749,6 +12749,20 @@ def _density_at(row: dict, x: float) -> float:
 # from any host correctly points readers at the canonical one).
 APP_URL = "https://worthmydegree.com"
 
+# The organizational status line on every generated PDF. THE WORDING IS THE
+# CLAIM AND IT IS DELIBERATELY NARROW: incorporation with the California
+# Secretary of State is an entity, not a tax status. "Nonprofit" alone, or
+# "registered nonprofit", is read by most people as "donations are deductible",
+# which is 501(c)(3) and is a separate IRS determination. Anything soliciting
+# donations in California would additionally need registration with the
+# Attorney General's Registry of Charities and Fundraisers (Form CT-1).
+#
+# So: no "charity", no "tax-exempt", no "tax-deductible", no EIN, until the
+# corresponding filing exists. Widen this string only alongside the letter that
+# licenses it. The audience is families deciding what to believe about a site
+# that asks them for nothing, and the status line has to survive them checking.
+ORG_STATUS_LINE = "Worth My Degree Inc. is a California nonprofit corporation."
+
 
 # The report's palette, matching the on-screen app so a downloaded PDF looks
 # like it came from the same product rather than from reportlab's defaults.
@@ -12897,7 +12911,9 @@ def _draw_pdf_header_footer(canvas, doc,
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(PDF_MUTED)
     canvas.drawString(doc.leftMargin, 34, "Educational estimate — not financial advice. Figures are averages and will differ from any individual's actual outcome.")
-    canvas.drawString(doc.leftMargin, 24, f"Generated {now_local().strftime('%B %d, %Y at %I:%M %p %Z')}")
+    canvas.drawString(doc.leftMargin, 24,
+                      f"Generated {now_local().strftime('%B %d, %Y at %I:%M %p %Z')}"
+                      f"  ·  {ORG_STATUS_LINE}")
     canvas.setFont("Helvetica-Bold", 8)
     canvas.setFillColor(PDF_INK)
     canvas.drawRightString(page_width - doc.rightMargin, 24, f"Page {canvas.getPageNumber()}")
@@ -25427,5 +25443,9 @@ real cost of a degree and leaving them out flatters every path.
 *This tool produces educational estimates for a student research project,
 not financial advice. Figures are national averages/percentiles and will not
 reflect any individual's actual salary, cost of living, or loan terms.*
+
+*""" + ORG_STATUS_LINE + """ Incorporation is a fact about the entity and not
+a tax status: this site solicits no donations, and nothing paid to it would be
+tax-deductible.*
         """
     st.markdown(methodology_text.replace("$", r"\$"))
