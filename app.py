@@ -10150,6 +10150,27 @@ def combine_repayment_results(primary: dict, secondary: dict) -> dict:
     return out
 
 
+def alternate_2026_plan(strategy_label: str) -> str:
+    """The 2026 plan to draw BESIDE the one the visitor picked.
+
+    RAP and the Tiered Standard Plan are the two plans a 2026 borrower actually
+    chooses between, and both begin July 1 2026. So the pairing is RAP <-> Tiered
+    when one of them is selected, and RAP otherwise: the legacy plans are only
+    reachable through the Advanced Analysis toggle, and RAP is the default for a
+    2026 start, so it is the right thing to measure an old plan against.
+
+    A FUNCTION, in section 2, rather than a conditional written inline at the
+    render site. This app has already shipped and deleted a RAP-versus-Tiered
+    comparison once (2026-08-03, see migrations.sql): it lived in section 5 as a
+    second code path that had to be kept in step with calculate_roi by hand, and
+    that is where hs_wage_index went missing and put a 76% overstatement on
+    screen. Anything a guard can reach cannot rot that way.
+    """
+    if strategy_label == RAP_STRATEGY_LABEL:
+        return TIERED_STANDARD_STRATEGY_LABEL
+    return RAP_STRATEGY_LABEL
+
+
 def compute_scenario_results(major_name: str, loan_amount: float,
                               interest_rate: float, repayment_strategy: str,
                               personal_contribution: float = 0.0,
@@ -11945,15 +11966,25 @@ def cc_chart_label_suffix(cc_mode) -> str:
 
 
 def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
-                                    schedule_b: pd.DataFrame, label_b: str):
+                                    schedule_b: pd.DataFrame, label_b: str,
+                                    color_map: dict = None):
     """Overlay both scenarios' loan balance curves on one chart for direct
-    side-by-side comparison, instead of two separate charts."""
+    side-by-side comparison, instead of two separate charts.
+
+    color_map=None keeps Streamlit's default sequence, which is what Compare
+    Mode has always drawn: two steps of ONE hue, #83c9ff against #0068c9. That
+    is survivable there, where the two series carry different major names and
+    the reader chose both. It is not survivable for the repayment-plan
+    comparison, whose two labels are long, similar and the entire point of the
+    chart, so that caller passes the validated pair instead. Optional rather
+    than mandatory so Compare Mode is untouched by this."""
     combined = pd.concat([
         schedule_a.assign(Scenario=label_a),
         schedule_b.assign(Scenario=label_b),
     ])
     fig = px.line(
         combined, x="year", y="balance", color="Scenario",
+        color_discrete_map=color_map or {},
         title="Loan Balance Over Time",
         labels={"year": DURATION_AXIS_TITLE, "balance": "Remaining Balance ($)"},
     )
@@ -11975,7 +12006,8 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
 
 
 def build_comparison_payment_chart(result_a: dict, label_a: str,
-                                    result_b: dict, label_b: str):
+                                    result_b: dict, label_b: str,
+                                    color_map: dict = None):
     """Both scenarios' monthly payment on one chart, the twin of
     build_comparison_balance_chart.
 
@@ -11996,6 +12028,8 @@ def build_comparison_payment_chart(result_a: dict, label_a: str,
     combined = pd.concat(frames)
     fig = px.line(
         combined, x="year", y="payment", color="Scenario",
+        # See the balance twin: None keeps Compare Mode's existing colours.
+        color_discrete_map=color_map or {},
         title="Monthly Payment Over Time",
         labels={"year": DURATION_AXIS_TITLE, "payment": "Monthly payment ($)"},
     )
@@ -23306,16 +23340,29 @@ if compare_mode:
                 city_info["col_index"], get_metro_wage_index(city),
                 key="share_card_compare", signature=_pdf_sig)
 else:
-    scenario = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                         personal_contribution, city_info["col_index"],
-                                         roi_window_years=roi_horizon_years,
-                                         hs_wage_index=get_metro_wage_index(city),
-                                         enrollment_years=enrollment_years_a,
-                                         working_years=working_years_a,
-                                         baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
-                                         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
-                                           professional_debt_basis_key=_prof_basis_a,
-                                           **returning_kwargs(), **discounting_kwargs())
+    # ONE dict, spread into BOTH plan computations below. The repayment-plan
+    # comparison further down runs this same function again with a different
+    # strategy, and the only thing that may differ between the two calls is the
+    # strategy itself. Listing these arguments twice is exactly how the deleted
+    # 2026-plans module went wrong -- its second path dropped hs_wage_index and
+    # put a 76% overstatement on screen (see migrations.sql, 2026-08-03). A dict
+    # spread cannot be half-applied, which is the same reasoning behind
+    # returning_kwargs() and discounting_kwargs().
+    _scenario_kwargs = dict(
+        personal_contribution=personal_contribution,
+        col_index=city_info["col_index"],
+        roi_window_years=roi_horizon_years,
+        hs_wage_index=get_metro_wage_index(city),
+        enrollment_years=enrollment_years_a,
+        working_years=working_years_a,
+        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
+        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a,
+        dependents=rap_dependents, professional_debt=professional_debt_a,
+        include_fees=True, subsidized_cap=subsidized_cap_a,
+        professional_debt_basis_key=_prof_basis_a,
+        **returning_kwargs(), **discounting_kwargs())
+    scenario = compute_scenario_results(major, loan_amount, interest_rate,
+                                         repayment_strategy, **_scenario_kwargs)
     effective_principal = scenario["effective_principal"]
     repayment_result = scenario["repayment_result"]
     strategy_label = scenario["strategy_label"]
@@ -23446,13 +23493,54 @@ else:
     # both branches, and the compare branch draws its own comparison charts
     # rather than these, so the two arms already show different pictures here.
     with st.expander("See the repayment charts"):
+        # BOTH 2026 plans, not just the selected one. RAP and Tiered Standard
+        # both begin July 1 2026 and are the two a borrower actually chooses
+        # between, and they differ in exactly the two things these charts draw:
+        # RAP's payment is a share of income with unpaid interest waived, so its
+        # balance can rise before it falls, while Tiered is a fixed term. A
+        # dropdown makes a visitor hold one curve in their head to compare it
+        # with the other.
+        #
+        # The alternate is computed by calling compute_scenario_results again
+        # with the SAME _scenario_kwargs and a different strategy. That is the
+        # whole design: no second model, no parallel path, nothing to keep in
+        # step by hand. See alternate_2026_plan for why that matters here
+        # specifically.
+        _alt_strategy = alternate_2026_plan(strategy_label)
+        _alt = compute_scenario_results(major, loan_amount, interest_rate,
+                                        _alt_strategy, **_scenario_kwargs)
+        _alt_repayment = _alt["repayment_result"]
+        _alt_shown = _alt.get("combined_repayment") or _alt_repayment
+        # Selected plan FIRST in both charts, so the line the rest of the page
+        # describes is the one the eye lands on.
+        # STACK_COLORS, not the default sequence. Streamlit's default gives two
+        # steps of one hue (#83c9ff against #0068c9), which is the weakest
+        # possible pair for a chart whose whole job is telling two plans apart,
+        # and their labels are long and similar so the legend cannot rescue it.
+        # SERIES_BLUE and SERIES_ORANGE are the pair this file already checked
+        # for protanopia separation and the chroma floor -- see their comment.
+        _plan_colors = {strategy_label: STACK_COLORS[0],
+                        _alt["strategy_label"]: STACK_COLORS[1]}
         st.plotly_chart(
-            build_balance_chart(repayment_result["schedule"], strategy_label,
-                                tranches=repayment_result.get("tranches")),
+            build_comparison_balance_chart(
+                repayment_result["schedule"], strategy_label,
+                _alt_repayment["schedule"], _alt["strategy_label"],
+                color_map=_plan_colors),
             use_container_width=True, config=PLOTLY_CHART_CONFIG,
         )
-        # What "Varies (IDR)" above actually looks like.
-        render_payment_chart(_shown, strategy_label)
+        _alt_pay = build_comparison_payment_chart(
+            _shown, strategy_label, _alt_shown, _alt["strategy_label"],
+            color_map=_plan_colors)
+        if _alt_pay is not None:
+            st.plotly_chart(_alt_pay, use_container_width=True,
+                            config=PLOTLY_CHART_CONFIG)
+        st.caption(
+            f"Both 2026 plans on one axis. Every figure elsewhere on this page "
+            f"uses {strategy_label}, the plan you picked; "
+            f"{_alt['strategy_label']} is drawn here only so you can see what "
+            f"the other one would look like. Switch the plan in the sidebar to "
+            f"make it the one everything else describes."
+        )
 
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
     # Rendered via the shared helper so Compare Mode shows the same figures --

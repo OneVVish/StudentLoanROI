@@ -401,7 +401,19 @@ def check_chart_span(ns) -> list:
         professional_debt=279_900, include_fees=True)
 
     drawn = ns["net_position_chart_years"](horizon)
-    if drawn < 35:
+    # 25, not 35. The span was shortened on 2026-08-18 once the earnings curve
+    # began plateauing, so the last decade of a 35-year chart was a straight
+    # line carrying no news. A LITERAL rather than NET_POSITION_CHART_YEARS: a
+    # check that reads its expectation from the constant it polices asserts only
+    # that the constant equals itself, which this repo has been bitten by three
+    # times in one week.
+    #
+    # THIS CHECK WAS STALE AT 35 FROM 2026-08-18 AND FAILED SILENTLY THROUGH
+    # FIVE MERGES, because the runs that reported on it matched strings in the
+    # last line of output instead of reading the exit code, and this guard's
+    # last line is a detail line containing neither "FAIL" nor "failing". Read
+    # exit codes.
+    if drawn < 25:
         problems.append(
             f"  the chart draws {drawn} years; it exists to reach the crossover "
             f"on the training paths, which lands well past a ten-year view.")

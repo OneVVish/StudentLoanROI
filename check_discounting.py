@@ -407,18 +407,43 @@ def check_rates_travel_together(ns) -> list:
             "numbers on one screen answering different questions, which is the "
             "recorded 2026-plans failure.")
 
-    # Every compute_scenario_results call in the app body must spread it. The
-    # 2026-plans module accumulated three dropped kwargs exactly this way.
+    # Every compute_scenario_results call in the app body must carry the rates.
+    # The 2026-plans module accumulated three dropped kwargs exactly this way.
+    #
+    # ONE LEVEL OF INDIRECTION IS ALLOWED, and has to be: the RAP-versus-Tiered
+    # comparison builds a single _scenario_kwargs dict and spreads it into both
+    # plan computations, precisely so the two cannot diverge. That is the
+    # stronger form of what this check is asking for, so refusing it would push
+    # the code back toward listing the arguments twice -- the thing that broke
+    # the deleted module. So a spread of a NAME counts when that name is
+    # assigned from a dict that itself spreads discounting_kwargs().
+    carriers = {"discounting_kwargs"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Call) or getattr(value.func, "id", None) != "dict":
+            continue
+        if any(getattr(getattr(k.value, "func", None), "id", None) == "discounting_kwargs"
+               for k in value.keywords if k.arg is None):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    carriers.add(target.id)
+
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == "compute_scenario_results"):
-            spread = {getattr(k.value, "func", None) and getattr(k.value.func, "id", None)
-                      for k in node.keywords if k.arg is None}
+            spread = set()
+            for k in node.keywords:
+                if k.arg is not None:
+                    continue
+                spread.add(getattr(getattr(k.value, "func", None), "id", None))
+                spread.add(getattr(k.value, "id", None))
             explicit = {k.arg for k in node.keywords}
-            if "discounting_kwargs" not in spread and "discount_rate" not in explicit:
+            if not (spread & carriers) and "discount_rate" not in explicit:
                 problems.append(
                     f"a compute_scenario_results call at line {node.lineno} "
-                    f"neither spreads discounting_kwargs() nor passes the rates "
+                    f"neither carries discounting_kwargs() nor passes the rates "
                     f"explicitly, so that scenario is computed undiscounted "
                     f"while the rest of the page is not.")
     return problems
