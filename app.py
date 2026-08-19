@@ -11860,10 +11860,19 @@ NET_POSITION_OVERLAY_OPTIONS = (NET_POSITION_OVERLAY_NONE,
                                 NET_POSITION_OVERLAY_PLAN)
 NET_POSITION_OVERLAY_KEY = "net_position_overlay"
 
-# The card wrapping the net-position block. A constant because section 3's
-# CSS and this renderer must name the same key, and a literal in two places is
+# The cards wrapping each results section. Constants because section 3's CSS
+# and these renderers must name the same key, and a literal in two places is
 # how they come to disagree.
+#
+# NET_POSITION_CARD_KEY frames the chart ALONE and is used only where no
+# section card surrounds it (Compare Mode). In the single-scenario branch the
+# whole verdict section is the card, so the chart draws without one -- see
+# render_net_position_chart's `own_card`. Two cards nested inside each other
+# read as a rendering fault, not as structure.
 NET_POSITION_CARD_KEY = "net_position_card"
+VERDICT_CARD_KEY = "verdict_card"
+LOAN_CARD_KEY = "loan_card"
+TAKEHOME_CARD_KEY = "takehome_card"
 
 
 def net_position_reference_on() -> bool:
@@ -11940,7 +11949,8 @@ def net_position_overlay_pairs(scenario_pairs: list, alternate_pair,
 def render_net_position_chart(scenario_pairs: list, col_index: float,
                                hs_wage_index: float, roi_window_years: int,
                                baseline_head_start_years: int = 0,
-                               container=None, alternate_pair=None) -> None:
+                               container=None, alternate_pair=None,
+                               own_card: bool = True) -> None:
     """The net-position chart and its one view control, for BOTH result
     branches.
 
@@ -11963,8 +11973,14 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     # AQUA, RED plus their dashed twins), and a card competing with them would
     # take colour away from the data -- the same reasoning STACK_SEPARATOR's
     # comment gives for using a gap rather than a border between bands.
-    target = (container if container is not None else st).container(
-        border=True, key=NET_POSITION_CARD_KEY)
+    # own_card=False where a section card already frames this block (the
+    # single-scenario verdict section). Nesting one card inside another reads
+    # as a rendering fault rather than as structure, and the outer card is
+    # already doing the job this one was added for: making the headline
+    # picture one object instead of a radio, a chart and two captions that
+    # happen to be adjacent.
+    _base = container if container is not None else st
+    target = _base.container(border=True, key=NET_POSITION_CARD_KEY) if own_card else _base
     # The plan option is offered only when the caller supplied the alternate
     # scenario. Compare Mode does not: its two-series axis is already spent on
     # scenarios A and B, and a second plan for each would be five lines.
@@ -15458,31 +15474,53 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# The net-position card. Same `.st-key-` scoping and the same
-# prefers-color-scheme pairing as the action buttons above, and the same
-# version caveat: this is Streamlit 1.58's container class, so re-verify it on
-# a bump. A rename fails silently and simply leaves the card untinted.
+# The results cards. Same `.st-key-` scoping and the same prefers-color-scheme
+# pairing as the action buttons above, and the same version caveat: this is
+# Streamlit 1.58's container class, so re-verify it on a bump. A rename fails
+# silently and simply leaves the cards untinted.
 #
-# Near-neutral on purpose. This chart already carries four meaningful series
-# colours plus their dashed twins, and a saturated card would compete with the
-# data it frames. Light mode is a cool off-white a shade away from the page;
-# dark mode lifts slightly off Streamlit's #0E1117 rather than tinting, since a
-# coloured panel on a dark surface reads as an alert.
+# ALL FOUR ARE NEAR-NEUTRAL, and that is the constraint rather than a
+# preference. These cards frame charts that carry meaning in colour -- the
+# net-position chart has four series plus their dashed twins, and the
+# salary-flow bars encode the loan payment against three tax greys -- so a
+# saturated panel takes colour away from the data it is framing. The hues
+# differ enough to tell one section from the next while scrolling and not
+# enough to compete: roughly a cool blue-grey, a warm sand and a cool green,
+# each a shade off the page rather than a wash over it.
+#
+# Dark mode lifts off Streamlit's #0E1117 and keeps only a trace of the hue.
+# A coloured panel on a dark surface reads as an alert, which is a meaning
+# none of these sections has.
+#
+# A REGISTRY, not four copied blocks. Four hand-written rules is how one of
+# them comes to disagree about a radius or a padding, and the fourth was
+# already the odd one out before this loop existed.
+RESULT_CARD_TINTS = {
+    # key: (light background, light border, dark background, dark border)
+    VERDICT_CARD_KEY:      ("#f4f7fb", "#d8e0ea", "#161b23", "#2b323c"),
+    LOAN_CARD_KEY:         ("#fbf8f3", "#ebe0d2", "#1c1a16", "#35302a"),
+    TAKEHOME_CARD_KEY:     ("#f3f9f5", "#d7e8dd", "#151b17", "#28322b"),
+    # Compare Mode draws the chart without a section card around it, so it
+    # keeps a card of its own. Same tint as the verdict card it stands in for.
+    NET_POSITION_CARD_KEY: ("#f4f7fb", "#d8e0ea", "#161b23", "#2b323c"),
+}
+
 st.markdown(
-    f"""<style>
-    .st-key-{NET_POSITION_CARD_KEY} {{
-        background-color: #f4f7fb;
-        border: 1px solid #d8e0ea;
-        border-radius: 12px;
-        padding: 0.5rem 0.75rem;
-    }}
-    @media (prefers-color-scheme: dark) {{
-        .st-key-{NET_POSITION_CARD_KEY} {{
-            background-color: #161b23;
-            border-color: #2b323c;
-        }}
-    }}
-    </style>""",
+    "<style>"
+    + "".join(
+        f".st-key-{key} {{"
+        f" background-color: {light_bg};"
+        f" border: 1px solid {light_border};"
+        f" border-radius: 12px;"
+        f" padding: 0.5rem 0.75rem; }}"
+        for key, (light_bg, light_border, _, _) in RESULT_CARD_TINTS.items())
+    + "@media (prefers-color-scheme: dark) {"
+    + "".join(
+        f".st-key-{key} {{"
+        f" background-color: {dark_bg};"
+        f" border-color: {dark_border}; }}"
+        for key, (_, _, dark_bg, dark_border) in RESULT_CARD_TINTS.items())
+    + "}</style>",
     unsafe_allow_html=True,
 )
 
@@ -23534,186 +23572,193 @@ else:
     # question the visitor came with, and the loan mechanics are the working.
     # A reader who stops scrolling early was previously left with the loan and
     # never reached the comparison.
-    financial_position_container = st.container()
+    financial_position_container = st.container(border=True,
+                                                key=VERDICT_CARD_KEY)
 
     # ---- 5c-1. Loan Information --------------------------------------------
 
-    st.subheader(f"💳 Loan Information: {strategy_label}")
+    with st.container(border=True, key=LOAN_CARD_KEY):
+        st.subheader(f"💳 Loan Information: {strategy_label}")
 
-    render_cc_path_note(cc_mode_a, major)
+        render_cc_path_note(cc_mode_a, major)
 
-    loan_caption = get_loan_principal_caption(scenario)
-    if loan_caption:
-        st.caption(loan_caption)
+        loan_caption = get_loan_principal_caption(scenario)
+        if loan_caption:
+            st.caption(loan_caption)
 
-    # Computed unconditionally (it's cheap) so the PDF builder always has it; the
-    # on-screen table below is what's shown conditionally.
-    # Every cc_* argument must match the sidebar's own build above. This is the
-    # displayed table; that one is the loan. They are two calls to the same
-    # function and the only thing keeping them equal is passing the same
-    # arguments -- a hard-coded finance_cc_years here would print a schedule
-    # that contradicts the total beside it.
-    # cost_years_a, not program_years_a: this table is the year-by-year build-up
-    # of the loan shown directly above it, so it has to be the SAME schedule the
-    # loan was summed from. With program_years it printed the professional
-    # years as rows whose amounts were not in the total.
-    loan_schedule_a = compute_loan_schedule_by_year(
-        effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
-        years=cost_years_a,
-        cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a,
-        finance_cc_years=cc_financed_a, cc_upper_division_premium=cc_premium_a
-    )
-    # The what-this-figure-is prose is shared with the compare panels (see
-    # render_loan_basis_disclosure); only the Detailed year-by-year table
-    # below stays branch-local. The loan is the college-reported figure in
-    # the Simplified cases, not a per-year cost buildup, so a year-by-year
-    # COA->loan table would contradict the total there.
-    if (loan_basis_a in ("no_program", "reported_scaled", "graduate_reported")
-            or loan_source_a == "college"):
-        render_loan_basis_disclosure(loan_basis_a, loan_source_a, default_loan_a,
-                                     reported_debt_a, school_name_a,
-                                     program_years_a, simplified_scale_a)
-    else:
-        # Collapsed: this is the arithmetic BEHIND the total, and the total is
-        # the line immediately below it. Leaving it open put a table and, with
-        # the two repayment charts further down, most of a screen between the
-        # visitor and the verdict chart. The disclosure branch above stays
-        # inline -- it explains what an unusual loan figure IS, which is not
-        # detail a reader should have to go looking for.
-        with st.expander("See how your loan builds up year by year"):
-            st.caption(
-                "Cost of Attendance grows by the estimated inflation rate each "
-                "year, while Personal Contribution and Grants & Scholarships "
-                "stay the same."
-            )
-            render_centered_table(pd.DataFrame([
-                {"Year": f"{row['year']} ({start_year_a + row['year'] - 1})",
-                 "Cost of Attendance": fmt_money(row["coa"]),
-                 "Loan Amount This Year": fmt_money(row["loan_amount"])}
-                for row in loan_schedule_a
-            ]))
-    # `scenario`, not `scenario_a`: that name belongs to the compare branch.
-    # This is the single-scenario branch, and it defines its own at line ~20331.
-    _loan_metric_label, _loan_metric_value = total_loan_metric(
-        scenario, loan_amount, loan_basis_a, program_years_a, cost_years_a)
-    st.metric(_loan_metric_label, fmt_money(_loan_metric_value))
-    # "Overridden" is measured against whichever default is active, so the note
-    # only fires on a real manual change (not on the expected college-vs-personal
-    # gap that exists by design).
-    if abs(loan_amount - default_loan_a) >= 1:
-        if loan_source_a == "college":
-            st.caption((
-                f"You changed the loan from the college-reported {fmt_money(default_loan_a)} to "
-                f"{fmt_money(loan_amount)} in the sidebar -- every calculation below uses your amount."
-            ).replace("$", r"\$"))
+        # Computed unconditionally (it's cheap) so the PDF builder always has it; the
+        # on-screen table below is what's shown conditionally.
+        # Every cc_* argument must match the sidebar's own build above. This is the
+        # displayed table; that one is the loan. They are two calls to the same
+        # function and the only thing keeping them equal is passing the same
+        # arguments -- a hard-coded finance_cc_years here would print a schedule
+        # that contradicts the total beside it.
+        # cost_years_a, not program_years_a: this table is the year-by-year build-up
+        # of the loan shown directly above it, so it has to be the SAME schedule the
+        # loan was summed from. With program_years it printed the professional
+        # years as rows whose amounts were not in the total.
+        loan_schedule_a = compute_loan_schedule_by_year(
+            effective_coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a, inflation_rate_a,
+            years=cost_years_a,
+            cc_years=cc_years_a, cc_coa_per_year=effective_cc_coa_per_year_a,
+            finance_cc_years=cc_financed_a, cc_upper_division_premium=cc_premium_a
+        )
+        # The what-this-figure-is prose is shared with the compare panels (see
+        # render_loan_basis_disclosure); only the Detailed year-by-year table
+        # below stays branch-local. The loan is the college-reported figure in
+        # the Simplified cases, not a per-year cost buildup, so a year-by-year
+        # COA->loan table would contradict the total there.
+        if (loan_basis_a in ("no_program", "reported_scaled", "graduate_reported")
+                or loan_source_a == "college"):
+            render_loan_basis_disclosure(loan_basis_a, loan_source_a, default_loan_a,
+                                         reported_debt_a, school_name_a,
+                                         program_years_a, simplified_scale_a)
         else:
-            st.caption((
-                f"You overrode the calculated total ({fmt_money(computed_loan_amount_a)}) in the "
-                "sidebar -- the table above still shows the calculated year-by-year breakdown, "
-                "but every calculation below uses your overridden total instead."
-            ).replace("$", r"\$"))
+            # Collapsed: this is the arithmetic BEHIND the total, and the total is
+            # the line immediately below it. Leaving it open put a table and, with
+            # the two repayment charts further down, most of a screen between the
+            # visitor and the verdict chart. The disclosure branch above stays
+            # inline -- it explains what an unusual loan figure IS, which is not
+            # detail a reader should have to go looking for.
+            with st.expander("See how your loan builds up year by year"):
+                st.caption(
+                    "Cost of Attendance grows by the estimated inflation rate each "
+                    "year, while Personal Contribution and Grants & Scholarships "
+                    "stay the same."
+                )
+                render_centered_table(pd.DataFrame([
+                    {"Year": f"{row['year']} ({start_year_a + row['year'] - 1})",
+                     "Cost of Attendance": fmt_money(row["coa"]),
+                     "Loan Amount This Year": fmt_money(row["loan_amount"])}
+                    for row in loan_schedule_a
+                ]))
+        # `scenario`, not `scenario_a`: that name belongs to the compare branch.
+        # This is the single-scenario branch, and it defines its own at line ~20331.
+        _loan_metric_label, _loan_metric_value = total_loan_metric(
+            scenario, loan_amount, loan_basis_a, program_years_a, cost_years_a)
+        st.metric(_loan_metric_label, fmt_money(_loan_metric_value))
+        # "Overridden" is measured against whichever default is active, so the note
+        # only fires on a real manual change (not on the expected college-vs-personal
+        # gap that exists by design).
+        if abs(loan_amount - default_loan_a) >= 1:
+            if loan_source_a == "college":
+                st.caption((
+                    f"You changed the loan from the college-reported {fmt_money(default_loan_a)} to "
+                    f"{fmt_money(loan_amount)} in the sidebar -- every calculation below uses your amount."
+                ).replace("$", r"\$"))
+            else:
+                st.caption((
+                    f"You overrode the calculated total ({fmt_money(computed_loan_amount_a)}) in the "
+                    "sidebar -- the table above still shows the calculated year-by-year breakdown, "
+                    "but every calculation below uses your overridden total instead."
+                ).replace("$", r"\$"))
 
-    # See the compare branch: combined_repayment includes any existing balance
-    # and equals repayment_result when there is none.
-    _shown = scenario.get("combined_repayment") or repayment_result
-    # A fourth column only when there IS forgiveness. An always-present
-    # "Forgiven: $0" would read as a plan feature that failed rather than one
-    # that never applied -- and under Standard or Tiered Standard nothing is
-    # forgivable at all, so the metric would be meaningless there.
-    _forgiven = _shown.get("forgiven_amount", 0) or 0
-    loan_metric_cols = st.columns(4 if _forgiven > 0 else 3)
-    loan_metric_cols[0].metric(
-        "Monthly Payment",
-        fmt_money(_shown["monthly_payment"]) if "monthly_payment" in _shown else "Varies (IDR)",
-    )
-    loan_metric_cols[1].metric("Payoff Timeline", f"{_shown['payoff_years']:.1f} yrs")
-    loan_metric_cols[2].metric("Total Interest Paid", fmt_money(_shown["total_interest"]))
-    if _forgiven > 0:
-        loan_metric_cols[3].metric(
-            "Loan Forgiven", fmt_money(_forgiven),
-            help="Balance written off at the end of the plan's term. Taxable as "
-                 "ordinary income in the year it is discharged (since January 1, "
-                 "2026), and that tax is not included in any figure here.",
+        # See the compare branch: combined_repayment includes any existing balance
+        # and equals repayment_result when there is none.
+        _shown = scenario.get("combined_repayment") or repayment_result
+        # A fourth column only when there IS forgiveness. An always-present
+        # "Forgiven: $0" would read as a plan feature that failed rather than one
+        # that never applied -- and under Standard or Tiered Standard nothing is
+        # forgivable at all, so the metric would be meaningless there.
+        _forgiven = _shown.get("forgiven_amount", 0) or 0
+        loan_metric_cols = st.columns(4 if _forgiven > 0 else 3)
+        loan_metric_cols[0].metric(
+            "Monthly Payment",
+            fmt_money(_shown["monthly_payment"]) if "monthly_payment" in _shown else "Varies (IDR)",
         )
-    render_payoff_age(scenario, st.session_state.get("current_age") if is_returning else None,
-                       program_years_a)
-    if scenario.get("existing_debt"):
-        st.caption(
-            f"Includes {fmt_money(scenario['existing_debt'])} of student debt you already "
-            "owe. That is in the payment and the payoff date, but not charged against "
-            "this degree, since you'd be repaying it either way.".replace("$", chr(92) + "$")
-        )
+        loan_metric_cols[1].metric("Payoff Timeline", f"{_shown['payoff_years']:.1f} yrs")
+        loan_metric_cols[2].metric("Total Interest Paid", fmt_money(_shown["total_interest"]))
+        if _forgiven > 0:
+            loan_metric_cols[3].metric(
+                "Loan Forgiven", fmt_money(_forgiven),
+                help="Balance written off at the end of the plan's term. Taxable as "
+                     "ordinary income in the year it is discharged (since January 1, "
+                     "2026), and that tax is not included in any figure here.",
+            )
+        render_payoff_age(scenario, st.session_state.get("current_age") if is_returning else None,
+                           program_years_a)
+        if scenario.get("existing_debt"):
+            st.caption(
+                f"Includes {fmt_money(scenario['existing_debt'])} of student debt you already "
+                "owe. That is in the payment and the payoff date, but not charged against "
+                "this degree, since you'd be repaying it either way.".replace("$", chr(92) + "$")
+            )
 
-    render_financing_note(scenario.get("financing"))
+        render_financing_note(scenario.get("financing"))
 
-    render_parent_plus_note(coa_match_a)
+        render_parent_plus_note(coa_match_a)
 
-    render_forgiveness_note(repayment_result, strategy_label,
-                            total_interest=_shown["total_interest"])
+        render_forgiveness_note(repayment_result, strategy_label,
+                                total_interest=_shown["total_interest"])
 
-    # Both repayment charts, collapsed together. They answer "what does paying
-    # this back look like", which is a follow-up question -- the metrics above
-    # already give the payment, the payoff date and the interest. Everything
-    # that WARNS stays inline above (the forgiveness note, the financing and
-    # Parent PLUS notes); only the pictures move.
-    #
-    # This does not break arm parity. render_payment_chart is still called from
-    # both branches, and the compare branch draws its own comparison charts
-    # rather than these, so the two arms already show different pictures here.
-    with st.expander("See the repayment charts"):
-        # BOTH 2026 plans, not just the selected one. RAP and Tiered Standard
-        # both begin July 1 2026 and are the two a borrower actually chooses
-        # between, and they differ in exactly the two things these charts draw:
-        # RAP's payment is a share of income with unpaid interest waived, so its
-        # balance can rise before it falls, while Tiered is a fixed term. A
-        # dropdown makes a visitor hold one curve in their head to compare it
-        # with the other.
+        # Both repayment charts, collapsed together. They answer "what does paying
+        # this back look like", which is a follow-up question -- the metrics above
+        # already give the payment, the payoff date and the interest. Everything
+        # that WARNS stays inline above (the forgiveness note, the financing and
+        # Parent PLUS notes); only the pictures move.
         #
-        # The alternate is computed by calling compute_scenario_results again
-        # with the SAME _scenario_kwargs and a different strategy. That is the
-        # whole design: no second model, no parallel path, nothing to keep in
-        # step by hand. See alternate_2026_plan for why that matters here
-        # specifically.
-        _alt_strategy = alternate_2026_plan(strategy_label)
-        _alt = compute_scenario_results(major, loan_amount, interest_rate,
-                                        _alt_strategy, **_scenario_kwargs)
-        _alt_repayment = _alt["repayment_result"]
-        _alt_shown = _alt.get("combined_repayment") or _alt_repayment
-        # Selected plan FIRST in both charts, so the line the rest of the page
-        # describes is the one the eye lands on.
-        # STACK_COLORS, not the default sequence. Streamlit's default gives two
-        # steps of one hue (#83c9ff against #0068c9), which is the weakest
-        # possible pair for a chart whose whole job is telling two plans apart,
-        # and their labels are long and similar so the legend cannot rescue it.
-        # SERIES_BLUE and SERIES_ORANGE are the pair this file already checked
-        # for protanopia separation and the chroma floor -- see their comment.
-        _plan_colors = {strategy_label: STACK_COLORS[0],
-                        _alt["strategy_label"]: STACK_COLORS[1]}
-        st.plotly_chart(
-            build_comparison_balance_chart(
-                repayment_result["schedule"], strategy_label,
-                _alt_repayment["schedule"], _alt["strategy_label"],
-                color_map=_plan_colors),
-            use_container_width=True, config=PLOTLY_CHART_CONFIG,
-        )
-        _alt_pay = build_comparison_payment_chart(
-            _shown, strategy_label, _alt_shown, _alt["strategy_label"],
-            color_map=_plan_colors)
-        if _alt_pay is not None:
-            st.plotly_chart(_alt_pay, use_container_width=True,
-                            config=PLOTLY_CHART_CONFIG)
-        st.caption(
-            f"Both 2026 plans on one axis. Every figure elsewhere on this page "
-            f"uses {strategy_label}, the plan you picked; "
-            f"{_alt['strategy_label']} is drawn here only so you can see what "
-            f"the other one would look like. Switch the plan in the sidebar to "
-            f"make it the one everything else describes."
-        )
+        # This does not break arm parity. render_payment_chart is still called from
+        # both branches, and the compare branch draws its own comparison charts
+        # rather than these, so the two arms already show different pictures here.
+        with st.expander("See the repayment charts"):
+            # BOTH 2026 plans, not just the selected one. RAP and Tiered Standard
+            # both begin July 1 2026 and are the two a borrower actually chooses
+            # between, and they differ in exactly the two things these charts draw:
+            # RAP's payment is a share of income with unpaid interest waived, so its
+            # balance can rise before it falls, while Tiered is a fixed term. A
+            # dropdown makes a visitor hold one curve in their head to compare it
+            # with the other.
+            #
+            # The alternate is computed by calling compute_scenario_results again
+            # with the SAME _scenario_kwargs and a different strategy. That is the
+            # whole design: no second model, no parallel path, nothing to keep in
+            # step by hand. See alternate_2026_plan for why that matters here
+            # specifically.
+            _alt_strategy = alternate_2026_plan(strategy_label)
+            _alt = compute_scenario_results(major, loan_amount, interest_rate,
+                                            _alt_strategy, **_scenario_kwargs)
+            _alt_repayment = _alt["repayment_result"]
+            _alt_shown = _alt.get("combined_repayment") or _alt_repayment
+            # Selected plan FIRST in both charts, so the line the rest of the page
+            # describes is the one the eye lands on.
+            # STACK_COLORS, not the default sequence. Streamlit's default gives two
+            # steps of one hue (#83c9ff against #0068c9), which is the weakest
+            # possible pair for a chart whose whole job is telling two plans apart,
+            # and their labels are long and similar so the legend cannot rescue it.
+            # SERIES_BLUE and SERIES_ORANGE are the pair this file already checked
+            # for protanopia separation and the chroma floor -- see their comment.
+            _plan_colors = {strategy_label: STACK_COLORS[0],
+                            _alt["strategy_label"]: STACK_COLORS[1]}
+            st.plotly_chart(
+                build_comparison_balance_chart(
+                    repayment_result["schedule"], strategy_label,
+                    _alt_repayment["schedule"], _alt["strategy_label"],
+                    color_map=_plan_colors),
+                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+            )
+            _alt_pay = build_comparison_payment_chart(
+                _shown, strategy_label, _alt_shown, _alt["strategy_label"],
+                color_map=_plan_colors)
+            if _alt_pay is not None:
+                st.plotly_chart(_alt_pay, use_container_width=True,
+                                config=PLOTLY_CHART_CONFIG)
+            st.caption(
+                f"Both 2026 plans on one axis. Every figure elsewhere on this page "
+                f"uses {strategy_label}, the plan you picked; "
+                f"{_alt['strategy_label']} is drawn here only so you can see what "
+                f"the other one would look like. Switch the plan in the sidebar to "
+                f"make it the one everything else describes."
+            )
 
     # ---- 5d. Real-World Take-Home Snapshot --------------------------------
     # Rendered via the shared helper so Compare Mode shows the same figures --
     # see render_takehome_block. The returned values feed the PDF below.
-    _th = render_takehome_block(scenario, major, city, city_info)
+    #
+    # Carded at the CALL SITE rather than inside the helper: Compare Mode calls
+    # it twice from inside its two scenario columns, so a card built into the
+    # helper would put one inside each column instead of around the section.
+    with st.container(border=True, key=TAKEHOME_CARD_KEY):
+        _th = render_takehome_block(scenario, major, city, city_info)
     takehome_stages = _th["stages"]
 
     # Executes here (it needs `_alt` from the repayment charts above)
@@ -23765,6 +23810,9 @@ else:
             get_metro_wage_index(city), roi_horizon_years,
             baseline_head_start_years=scenario["enrollment_years"],
             alternate_pair=(f"{major} on {_alt['strategy_label']}", _alt),
+            # The verdict section is already a card; a second one inside it
+            # would be a card in a card.
+            own_card=False,
         )
 
     # The break-even: how much debt this path can carry before it stops
