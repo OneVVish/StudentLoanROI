@@ -23523,6 +23523,19 @@ else:
     strategy_label = scenario["strategy_label"]
     roi_result = scenario["roi_result"]
 
+    # The verdict renders FIRST, and this is how. Section 5e executes in its
+    # original place further down -- it has to, because it reads `_alt`, which
+    # the repayment-chart block below computes -- but writes into this
+    # container, so its output lands here, above the loan detail. Same trick as
+    # top_actions_container, which is why the PDF and Share buttons sit at the
+    # top of a page whose data is not resolved until the bottom.
+    #
+    # Leading with it because it is the answer: "how does this turn out" is the
+    # question the visitor came with, and the loan mechanics are the working.
+    # A reader who stops scrolling early was previously left with the loan and
+    # never reached the comparison.
+    financial_position_container = st.container()
+
     # ---- 5c-1. Loan Information --------------------------------------------
 
     st.subheader(f"💳 Loan Information: {strategy_label}")
@@ -23703,53 +23716,56 @@ else:
     _th = render_takehome_block(scenario, major, city, city_info)
     takehome_stages = _th["stages"]
 
-    # ---- 5e. Financial Position (horizon per the sidebar's ROI Horizon) -----
+    # Executes here (it needs `_alt` from the repayment charts above)
+    # but RENDERS into the container created above Loan Information.
+    with financial_position_container:
+        # ---- 5e. Financial Position (horizon per the sidebar's ROI Horizon) -----
 
-    _cf = counterfactual_vocab()
-    _cf_window = _cf["window_phrase"].format(years=roi_horizon_years)
-    st.subheader(f"📊 {roi_horizon_years}-Year Financial Position")
-    st.caption((
-        f"This compares two paths over {_cf_window}: going into "
-        f"**{major}** (paying off the loan above along the way) vs. {_cf['instead_of']} "
-        f"and taking on **no loan for this degree**. "
-        f"Both numbers are adjusted for the cost of living in **{city}** -- that's what "
-        f"**\"COL-Adjusted\"** means -- so it's a fair, apples-to-apples comparison of real "
-        f"spending power, not just which raw number is bigger. **Earnings Premium** is simply "
-        f"the difference between the two: how much more (or less) you'd have after "
-        f"{roi_horizon_years} years by choosing {major} instead of {_cf['instead_of_short']}."
-    ).replace("$", r"\$"))
+        _cf = counterfactual_vocab()
+        _cf_window = _cf["window_phrase"].format(years=roi_horizon_years)
+        st.subheader(f"📊 {roi_horizon_years}-Year Financial Position")
+        st.caption((
+            f"This compares two paths over {_cf_window}: going into "
+            f"**{major}** (paying off the loan along the way) vs. {_cf['instead_of']} "
+            f"and taking on **no loan for this degree**. "
+            f"Both numbers are adjusted for the cost of living in **{city}** -- that's what "
+            f"**\"COL-Adjusted\"** means -- so it's a fair, apples-to-apples comparison of real "
+            f"spending power, not just which raw number is bigger. **Earnings Premium** is simply "
+            f"the difference between the two: how much more (or less) you'd have after "
+            f"{roi_horizon_years} years by choosing {major} instead of {_cf['instead_of_short']}."
+        ).replace("$", r"\$"))
 
-    investment_caption = get_total_investment_caption(scenario)
-    if investment_caption:
-        st.caption(investment_caption)
+        investment_caption = get_total_investment_caption(scenario)
+        if investment_caption:
+            st.caption(investment_caption)
 
-    position_cols = st.columns(3)
-    position_cols[0].metric(
-        f"{_cf['metric_label']}: {roi_horizon_years}-Yr Net Position{_cf['no_loan_suffix']}",
-        fmt_money(roi_result["hs_net_position"]),
-    )
-    position_cols[1].metric(f"{major}: {roi_horizon_years}-Yr Net Position", fmt_money(roi_result["major_net_position"]))
-    position_cols[2].metric(
-        "Earnings Premium (COL-Adjusted)",
-        fmt_money(roi_result["earnings_premium"]),
-        delta=fmt_roi_delta(roi_result["roi_pct"]),
-        help=f"How much more money you'd have after {roi_horizon_years} years by going into "
-             f"this career instead of {_cf['instead_of']} -- "
-             "bigger is better. \"COL-Adjusted\" means we've factored in how "
-             "expensive it is to live in your chosen city, so this is a fair "
-             "comparison no matter where you live.",
-    )
+        position_cols = st.columns(3)
+        position_cols[0].metric(
+            f"{_cf['metric_label']}: {roi_horizon_years}-Yr Net Position{_cf['no_loan_suffix']}",
+            fmt_money(roi_result["hs_net_position"]),
+        )
+        position_cols[1].metric(f"{major}: {roi_horizon_years}-Yr Net Position", fmt_money(roi_result["major_net_position"]))
+        position_cols[2].metric(
+            "Earnings Premium (COL-Adjusted)",
+            fmt_money(roi_result["earnings_premium"]),
+            delta=fmt_roi_delta(roi_result["roi_pct"]),
+            help=f"How much more money you'd have after {roi_horizon_years} years by going into "
+                 f"this career instead of {_cf['instead_of']} -- "
+                 "bigger is better. \"COL-Adjusted\" means we've factored in how "
+                 "expensive it is to live in your chosen city, so this is a fair "
+                 "comparison no matter where you live.",
+        )
 
-    # The alternate plan computed for the repayment charts above is offered here
-    # too, as one more line the visitor can switch on. Same scenario object, so
-    # the two charts cannot disagree about what the other plan does, and no
-    # third computation.
-    render_net_position_chart(
-        [(major, scenario)], city_info["col_index"],
-        get_metro_wage_index(city), roi_horizon_years,
-        baseline_head_start_years=scenario["enrollment_years"],
-        alternate_pair=(f"{major} on {_alt['strategy_label']}", _alt),
-    )
+        # The alternate plan computed for the repayment charts above is offered here
+        # too, as one more line the visitor can switch on. Same scenario object, so
+        # the two charts cannot disagree about what the other plan does, and no
+        # third computation.
+        render_net_position_chart(
+            [(major, scenario)], city_info["col_index"],
+            get_metro_wage_index(city), roi_horizon_years,
+            baseline_head_start_years=scenario["enrollment_years"],
+            alternate_pair=(f"{major} on {_alt['strategy_label']}", _alt),
+        )
 
     # The break-even: how much debt this path can carry before it stops
     # beating a high school graduate, framed against what's actually being
