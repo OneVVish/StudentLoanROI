@@ -11876,17 +11876,66 @@ def net_position_reference_on() -> bool:
     the same reason: the guards and analyze_model.py exec this section with no
     session_state at all, where the answer is "off".
 
-    STILL THE ONLY THING THE PDF NEEDS TO KNOW about this control, which is why
-    pdf_memo_signature carries it unchanged. The third overlay option draws the
-    other repayment plan on SCREEN only: the matplotlib twin renders the frame
-    it is given, and that frame is built without the alternate pair, so options
-    one and three produce the same PDF and the memo is right to treat them
-    alike.
+    It answers ONE of the three options. Anything deciding what the chart draws
+    must read net_position_overlay_mode instead -- this returns False for both
+    "just this path" and "the other 2026 plan", which are different pictures.
+    """
+    return net_position_overlay_mode() == NET_POSITION_OVERLAY_NO_LOAN
+
+
+def net_position_overlay_mode() -> str:
+    """Which comparison line the visitor asked for, as the stored option string.
+
+    The PDF needs the MODE and not a boolean. Both PDF surfaces read it: the
+    frame builder, to know whether to add a series, and pdf_memo_signature, to
+    keep the three options in separate memo slots. Carrying the boolean there
+    collapsed "just this path" and "the other 2026 plan" into one signature, so
+    switching between them served whichever report had been built first.
+
+    Same session_state-not-a-parameter treatment as selected_salary_flow_period,
+    and wrapped for the same reason: the guards and analyze_model.py exec this
+    section with no session_state at all, where the answer is "off".
     """
     try:
-        return st.session_state.get(NET_POSITION_OVERLAY_KEY) == NET_POSITION_OVERLAY_NO_LOAN
+        return st.session_state.get(NET_POSITION_OVERLAY_KEY,
+                                    NET_POSITION_OVERLAY_NONE)
     except Exception:
-        return False
+        return NET_POSITION_OVERLAY_NONE
+
+
+def net_position_overlay_pairs(scenario_pairs: list, alternate_pair,
+                                overlay: str):
+    """The (pairs, color_map) for a net-position chart, for BOTH renderers.
+
+    A chart twin whose two halves decide independently what series to draw is
+    the drift this file records against the balance chart's principal/interest
+    split, which shipped Plotly-only. That failure is worse here, because the
+    thing that would go missing is the line the visitor explicitly asked for --
+    and it went missing exactly that way: the report printed one plan under a
+    screen showing two, with nothing marking the omission.
+
+    BOTH lines are renamed, not just the added one. Left as "Computer Science"
+    the original says nothing about which plan it is drawn on, so the reader can
+    identify the line they did not choose and not the one they did. The plan is
+    the only thing separating these two series, which makes it the thing the
+    legend has to carry -- and in a printed report there is no hover to fall
+    back on.
+
+    Returns the pairs unchanged and a None map for every other overlay, so the
+    no-loan twin and Compare Mode keep exactly what they have always drawn.
+    """
+    if overlay != NET_POSITION_OVERLAY_PLAN or alternate_pair is None:
+        return list(scenario_pairs), None
+    base_label, base_scenario = scenario_pairs[0]
+    label = f"{base_label} on {base_scenario['strategy_label']}"
+    # Three validated hues rather than the default sequence: the two plan lines
+    # are the same career and would otherwise land on two steps of one blue.
+    # SERIES_BLUE/ORANGE are the pair this file already checked for protanopia
+    # separation and the chroma floor; AQUA keeps the baseline clear of both.
+    return ([(label, base_scenario), alternate_pair],
+            {label: SERIES_BLUE,
+             alternate_pair[0]: SERIES_ORANGE,
+             counterfactual_vocab()["legend_label"]: SERIES_AQUA})
 
 
 def render_net_position_chart(scenario_pairs: list, col_index: float,
@@ -11945,28 +11994,10 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     # produce the same one, which they do here -- same major, same enrollment,
     # only the repayment plan differs. Reusing that is what keeps this from
     # being a second chart implementation.
-    pairs = list(scenario_pairs)
-    _plan_overlay_colors = None
-    if overlay == NET_POSITION_OVERLAY_PLAN and alternate_pair is not None:
-        # BOTH lines name their plan, not just the added one. Left as "Computer
-        # Science" the original says nothing about which plan it is drawn on,
-        # so the reader can identify the line they did not choose and not the
-        # one they did. The plan is the only thing separating these two series,
-        # which makes it the thing the legend has to carry.
-        _main_label, _main_scenario = scenario_pairs[0]
-        _main_label = f"{_main_label} on {_main_scenario['strategy_label']}"
-        pairs = [(_main_label, _main_scenario), alternate_pair]
-        # Three validated hues rather than the default sequence: the two plan
-        # lines are the same career and would otherwise land on two steps of one
-        # blue. SERIES_BLUE/ORANGE are the pair this file already checked for
-        # protanopia separation and the chroma floor; AQUA keeps the baseline
-        # clear of both. Only this case gets a map, so the no-loan twin and
-        # Compare Mode keep exactly what they have always drawn.
-        _plan_overlay_colors = {
-            _main_label: SERIES_BLUE,
-            alternate_pair[0]: SERIES_ORANGE,
-            counterfactual_vocab()["legend_label"]: SERIES_AQUA,
-        }
+    # Shared with the PDF builder, so the report cannot draw a different set of
+    # series than the screen -- see net_position_overlay_pairs.
+    pairs, _plan_overlay_colors = net_position_overlay_pairs(
+        scenario_pairs, alternate_pair, overlay)
     # Drawn to 35 years whatever window the metrics use -- see
     # net_position_chart_years. `roi_window_years` still goes to the CHART, not
     # to the frame: that is the year it marks, not the year it stops at.
@@ -13915,14 +13946,20 @@ def build_pdf_comparison_payment_chart(result_a: dict, label_a: str,
 
 def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
                                   axis_title: str,
-                                  baseline_head_start_years: int = 0) -> Image:
+                                  baseline_head_start_years: int = 0,
+                                  color_map: dict = None) -> Image:
     """PDF counterpart to build_net_position_chart. Takes the same prebuilt
     frame, so the two can't disagree about the trajectory -- what is hand-kept
     in sync is the styling, the zero line, and the head-start annotation (see
     CLAUDE.md on the chart twins). The annotation matters MORE here than on
     screen: the report is read detached from the app, so a baseline that
     opens several years of wages ahead has no sidebar option nearby to
-    explain it and reads as a modelling error."""
+    explain it and reads as a modelling error.
+
+    `color_map` mirrors the Plotly twin's, and exists for the two-plan overlay:
+    those lines are the same career on different plans, so left to the default
+    cycle they are told apart by the legend alone. Absent, matplotlib's cycle is
+    used exactly as before."""
     fig, ax = _pdf_subplots(figsize=(6, 3.5))
     for label, group in frame.groupby("Series", sort=False):
         # Dashed for the no-loan reference lines, from the same predicate the
@@ -13931,6 +13968,7 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         # at all once someone puts it through a black-and-white printer.
         ax.plot(group["year"], group["Net Position"], marker="o", markersize=3,
                 linewidth=2, label=label,
+                color=(color_map or {}).get(label),
                 linestyle="--" if is_no_loan_series(label) else "-")
     ax.axhline(0, color="#999999", linewidth=1, linestyle=":")
     # The visitor's window, marked, exactly as the Plotly twin marks it: the
@@ -14325,7 +14363,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                                 subsidized_cap_a: float = None,
                                 professional_debt_a: float = None,
                                 professional_school_a: str = None,
-                                include_fees: bool = False) -> bytes:
+                                include_fees: bool = False,
+                                alternate_pair=None) -> bytes:
     """PDF mirroring the on-screen single-scenario view: profile summary,
     Loan Information (+ per-year table + balance chart), Real-World
     Take-Home (+ take-home charts), and the Financial Position section (+ ROI
@@ -14517,6 +14556,12 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                 axis_max=_flow_axis_max, divisor=_flow_divisor)
             if _flow_img is not None:
                 story.append(KeepTogether(_flow_img))
+    # The net-position series and their colours, resolved once through the
+    # helper the screen renderer uses. Reading the overlay MODE rather than the
+    # no-loan boolean is what lets "the other 2026 plan" reach the report at
+    # all: that boolean is False for it and for "just this path" alike.
+    _pdf_np_pairs, _pdf_np_colors = net_position_overlay_pairs(
+        [(major, scenario)], alternate_pair, net_position_overlay_mode())
     story += [
         # Financial Position starts its own page too: with Take-Home filling
         # its page above, this header rendered orphaned at the bottom of that
@@ -14538,13 +14583,15 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             styles["caption"]),
         Spacer(1, 12),
         build_pdf_net_position_chart(
-            # The debt-free reference line rides into the report whenever the
-            # visitor had it switched on, the same treatment the take-home
-            # Annual/Monthly toggle gets: a static report cannot carry a
-            # control, so it prints the chart that was on screen when the
-            # button was pressed. Built inside net_position_frame, so this
-            # cannot be the Plotly-only half of a chart twin.
-            net_position_frame([(major, scenario)], col_index,
+            # WHICHEVER comparison line was on screen rides into the report: a
+            # static report cannot carry a control, so it prints what the
+            # visitor was looking at when they pressed the button, the same
+            # treatment the take-home Annual/Monthly toggle gets. Both the
+            # series list and the colours come from net_position_overlay_pairs,
+            # shared with the screen, so this cannot become the Plotly-only
+            # half of a chart twin -- which is exactly what it was: the report
+            # drew one plan under a screen showing two.
+            net_position_frame(_pdf_np_pairs, col_index,
                                 get_metro_wage_index(city),
                                 net_position_chart_years(roi_window_years),
                                 include_debt_free=net_position_reference_on()),
@@ -14552,7 +14599,8 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             net_position_axis_title([(major, scenario)]),
             # Same value the on-screen chart passes -- with foregone earnings
             # off, enrollment_years is 0 and the annotation stays away.
-            baseline_head_start_years=scenario["enrollment_years"]),
+            baseline_head_start_years=scenario["enrollment_years"],
+            color_map=_pdf_np_colors),
     ]
 
     # Mirrors the on-screen break-even banner -- same breakeven_summary call,
@@ -23371,7 +23419,7 @@ if compare_mode:
         cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
         cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
     ), selected_salary_flow_period(), loan_amount, loan_amount_b,
-       net_position_reference_on())
+       net_position_overlay_mode())
     compare_pdf_bytes = memoized_pdf("compare", _pdf_sig, lambda: generate_pdf_report_compare(
         city, major, school_name_a, in_state_a, coa_per_year_a, personal_contribution_per_year_a,
         grants_per_year_a, interest_rate, repayment_strategy, scenario_a,
@@ -23803,7 +23851,12 @@ else:
         roi_horizon_years=roi_horizon_years,
         cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
     ), selected_salary_flow_period(), loan_amount,
-       net_position_reference_on())
+       # The overlay MODE, not net_position_reference_on(). That boolean is
+       # False for "just this path" AND for "the other 2026 plan", so the two
+       # shared one memo slot and switching between them served whichever
+       # report had been built first -- silently, the button downloading
+       # happily either way.
+       net_position_overlay_mode())
     single_pdf_bytes = memoized_pdf("single", _pdf_sig, lambda: generate_pdf_report_single(
         major, city, school_name_a, in_state_a, takehome_stages,
         coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
@@ -23815,6 +23868,11 @@ else:
         loan_basis_a=loan_basis_a, reported_debt_a=reported_debt_a,
         federal_cap_a=federal_cap_a, plus_cap_a=plus_cap_a, gap_rate_a=gap_rate_a, dependents=rap_dependents, professional_debt_a=professional_debt_a, professional_school_a=st.session_state.get('prof_school_a'), include_fees=True, subsidized_cap_a=subsidized_cap_a,
         cc_info_a=_cc_info_for_pdf(cc_mode_a, cc_state_key_a, effective_cc_coa_per_year_a, cc_oop_a, cc_years_a),
+        # Built identically to the on-screen chart's, from the same _alt. Passed
+        # unconditionally: net_position_overlay_pairs ignores it unless the
+        # visitor actually selected that overlay, so there is no state to keep
+        # in step here.
+        alternate_pair=(f"{major} on {_alt['strategy_label']}", _alt),
     ))
     with top_actions_container:
         single_pdf_col, single_share_col, single_card_col = st.columns(3)
