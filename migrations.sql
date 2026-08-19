@@ -2195,10 +2195,23 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOL
 --     build-up table, and the balance and payment charts). Every WARNING stays
 --     inline: the forgiveness note, the financing note, the Parent PLUS note
 --     and the loan-basis disclosure.
+--   * THE NET-POSITION BLOCK IS WRAPPED IN A TINTED CARD, so the checkbox, the
+--     chart and its captions read as one panel. The figure itself was made
+--     transparent to sit on it. Screen only: there is no card in the PDF, and
+--     the matplotlib twin is deliberately unchanged, since the chart-twin rule
+--     governs what a chart SHOWS rather than what colour its paper is.
+--   * A CAPTION UNDER THE CHART NAMES WHERE EACH PATH PASSES THE BASELINE,
+--     wording taken from crossover_phrase so it cannot disagree with the
+--     verdict list that states the same moment. It exists for the case the
+--     picture cannot show: the chart draws 25 years and net_position_crossover
+--     searches 40, so a crossing at year 33 is off the right edge and the
+--     caption says so instead of leaving the reader to hunt for two lines
+--     meeting.
 --
--- NO FIGURE MOVED as a result of any of this. The three changes are in
--- net_position_frame, NET_POSITION_CHART_YEARS and two st.expander calls;
--- no constant, simulator or ROI path was touched, so every logged
+-- NO FIGURE MOVED as a result of any of this. The five changes are in
+-- net_position_frame, NET_POSITION_CHART_YEARS, two st.expander calls, one
+-- keyed st.container plus its CSS, and one caption built from an existing
+-- shared helper; no constant, simulator or ROI path was touched, so every logged
 -- earnings_premium, roi_pct, monthly_payment and payoff figure means on
 -- 2026-08-19 exactly what it meant on 2026-08-17. Note that the SAME DATE
 -- carries three real definitional seams (hs_baseline_real_units,
