@@ -18,7 +18,7 @@ An income-driven payment used to be a percentage of discretionary income. Discre
 
 RAP does not subtract a living allowance. It charges a percentage of adjusted gross income, all of it, and the percentage climbs by one point for every $10,000 of income. One percent applies up to $20,000, two percent up to $30,000, and so on to a ceiling of ten percent above $100,000. Below $10,000 of income the schedule stops descending and a flat $10 applies.
 
-Both halves of that sentence matter. Removing the allowance raises the payment for people who earn little, because the protected slice was worth proportionally most to them. Charging the percentage on everything rather than on the remainder raises it again for people who earn a lot, because ten percent of all income is a larger number than ten percent of income above an allowance. In between, the lower band percentages win, and RAP is genuinely cheaper.
+Charging the percentage on everything rather than on the remainder raises the payment for people who earn a lot, because ten percent of all income is a larger number than ten percent of income above an allowance. In between, the lower band percentages win, and RAP is genuinely cheaper.
 
 Here is the same borrower at seven incomes, comparing what each formula asks for in the first month:
 
