@@ -11991,10 +11991,27 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     # must never stamp this -- find_breakeven_loan bisects by calling that, so a
     # 40-year sweep inside it would run once per bisection step.
     _drawn = net_position_chart_years(roi_window_years)
+    # The plan is NAMED, and that is accuracy rather than decoration: the
+    # crossover depends on it. RAP charges a share of income and finishes
+    # sooner, Tiered charges less and runs longer, so the same career overtakes
+    # the baseline at different ages on the two plans. A sentence giving an age
+    # without saying which plan produced it is quietly incomplete, and in
+    # Compare Mode the two scenarios can be on different plans entirely.
+    #
+    # Built from each scenario's OWN strategy_label plus the base label from
+    # scenario_pairs, never from the chart's series names -- those already carry
+    # the plan when the overlay is on, and reusing them would print it twice.
+    _caption_pairs = list(scenario_pairs)
+    if overlay == NET_POSITION_OVERLAY_PLAN and alternate_pair is not None:
+        # Same base label, the alternate's scenario: with both lines drawn, both
+        # crossings are on screen and naming only one leaves the reader to guess
+        # which line the age belongs to.
+        _caption_pairs = _caption_pairs + [(scenario_pairs[0][0], alternate_pair[1])]
     _caption = crossover_caption(
         [net_position_crossover(scenario, col_index, hs_wage_index)
-         for _, scenario in scenario_pairs],
-        [label for label, _ in scenario_pairs], _drawn,
+         for _, scenario in _caption_pairs],
+        [f"{label} on {scenario['strategy_label']}"
+         for label, scenario in _caption_pairs], _drawn,
         net_position_axis_title(scenario_pairs))
     if _caption:
         target.caption(_caption)
