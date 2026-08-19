@@ -11452,14 +11452,13 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
     return fig
 
 
-# One sentence, three renderers (single arm, compare arm, both PDFs): what
+# One sentence, four renderers (single arm, compare arm, both PDFs): what
 # the "Varies (IDR)" metric means. Same discipline as
 # WAGE_DISTRIBUTION_CAPTION -- the explanation of how to read a chart should
-# not be maintained in three places.
+# not be maintained in four places.
 PAYMENT_CHART_CAPTION = (
     "Your payment isn't one number: on an income-driven plan it is a share of "
-    "your income, so it climbs as your salary does. The metric above is the "
-    "first month; this is the whole path."
+    "your income, so it climbs as your salary does."
 )
 
 
