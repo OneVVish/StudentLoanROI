@@ -16,9 +16,9 @@ Dollar amounts here are rounded for readability. The exact figures are the ones 
 
 An income-driven payment used to be a percentage of discretionary income. Discretionary income is what is left after a living allowance is subtracted from what you earn, so the first several thousand dollars of income were protected before any percentage applied. IBR charges 10 percent of that remainder for loans first disbursed on or after July 1, 2014, and 15 percent for a first loan before it.
 
-RAP does not subtract a living allowance. It charges a percentage of adjusted gross income, all of it, and the percentage climbs by one point for every $10,000 of income. One percent applies up to $20,000, two percent up to $30,000, and so on to a ceiling of ten percent above $100,000. Below $10,000 of income the schedule stops descending and a flat $10 applies.
+RAP does not subtract a living allowance. It charges a percentage of adjusted gross income, or AGI, and it charges on the whole of it. The percentage climbs by one point for every $10,000 of income. One percent applies up to $20,000, two percent up to $30,000, and so on to a ceiling of ten percent above $100,000. Below $10,000 of income the schedule stops descending and a flat $10 applies.
 
-Charging the percentage on everything rather than on the remainder raises the payment for people who earn a lot, because ten percent of all income is a larger number than ten percent of income above an allowance. In between, the lower band percentages win, and RAP is genuinely cheaper.
+Charging the percentage on AGI rather than on discretionary income raises the payment for people who earn a lot, because ten percent of all income is a larger number than ten percent of income above an allowance. In between, the lower band percentages win, and RAP is genuinely cheaper.
 
 Here is the same borrower at seven incomes, comparing what each formula asks for in the first month:
 
