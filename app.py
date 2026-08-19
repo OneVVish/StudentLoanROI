@@ -1332,7 +1332,13 @@ def render_major_careers(major_name: str, compact: bool = False) -> None:
         st.caption("**💼 Careers this major commonly leads to**  \n" + body)
         st.caption(caption)
     else:
-        with st.expander("💼 Careers this major commonly leads to"):
+        # Open by default. This is the answer to "what job does this actually
+        # lead to", which is the question behind choosing a major at all, and
+        # collapsed it read as an optional aside -- an expander asks the reader
+        # to already know the list is worth opening. Left as an expander rather
+        # than plain text so it can still be folded away once read; the compact
+        # branch above is the one that cannot be.
+        with st.expander("💼 Careers this major commonly leads to", expanded=True):
             st.markdown(body)
             st.caption(caption)
 
