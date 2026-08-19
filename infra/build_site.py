@@ -93,8 +93,20 @@ CARRY_QS_JS = """<script>
   var qs = location.search.replace(/^\\?/, "");
   if (!qs) return;
   document.querySelectorAll('a[href^="/"]').forEach(function (a) {
-    if (a.getAttribute("href").indexOf("llms.txt") !== -1) return;
-    a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;
+    var href = a.getAttribute("href");
+    if (href.indexOf("llms.txt") !== -1) return;
+    // The query goes BEFORE the fragment. This used to append blindly, which
+    // turned /charts#some-slug into /charts#some-slug?v=1: the anchor then
+    // matches no element, so the link stops jumping to the chart it names, AND
+    // the carried value ends up inside the fragment where nothing reads it --
+    // so ?src= is silently lost on exactly the links this script exists to
+    // protect. Harmless until the first fragment link, which the landing's
+    // infographic cards are.
+    var hash = "";
+    var cut = href.indexOf("#");
+    if (cut !== -1) { hash = href.slice(cut); href = href.slice(0, cut); }
+    a.setAttribute("href",
+      href + (href.indexOf("?") === -1 ? "?" : "&") + qs + hash);
   });
 })();
 </script>"""
@@ -177,6 +189,22 @@ SITE_CSS = """  :root {
      the comment above describes. Same fix, same specificity requirement, so
      the 720px breakpoint restates this one as well. */
   .paths .grid { grid-template-columns: repeat(2, 1fr); }
+  /* The landing's infographic cards. Two up, matching .guides, and a picture
+     on top because a chart IS the picture. Deliberately NOT .chart-card: that
+     one carries the gallery's Helpful and Share buttons and its own reaction
+     JS, and neither belongs on a doorway card. */
+  .infos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .infos .info-card { display: block; text-decoration: none; overflow: hidden;
+    background: var(--tile); border-radius: 12px; }
+  /* Square, and deliberately NOT object-fit: cover -- _chart_jpeg's pad branch
+     has already padded the file to this ratio, so the whole infographic is on
+     screen. A cover rule here would crop the padded file a second time. */
+  .infos .info-card img { display: block; width: 100%; height: auto;
+    aspect-ratio: 1 / 1; background: var(--surface); }
+  .infos .info-card b { display: block; padding: 16px 18px 0; font-size: 17px;
+    color: var(--deep); }
+  .infos .info-card span { display: block; padding: 8px 18px 18px;
+    color: var(--muted); font-size: 15px; }
   /* ===== The tools band =====
      The tools are the product, so they sit above the guides and carry a
      background of their own: edge to edge, the section reads as its own zone
@@ -340,6 +368,7 @@ SITE_CSS = """  :root {
     .grid { grid-template-columns: 1fr; }
     .tools .grid { grid-template-columns: 1fr; }
     .paths .grid { grid-template-columns: 1fr; }
+    .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
@@ -534,7 +563,7 @@ def money(v):
     return f"${v:,.0f}"
 
 
-def build_html(f: dict, posts: list = ()) -> str:
+def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     logo_svg = (ROOT / "brand/logo-horizontal-light.svg").read_text()
     # The lockup ships its own width/height; the page sizes it with CSS.
     logo_svg = re.sub(r'width="\d+" height="\d+"', "", logo_svg, count=1)
@@ -556,10 +585,41 @@ def build_html(f: dict, posts: list = ()) -> str:
   </div>
   <p class="deck" style="margin-top:14px"><a href="/guides"
     style="color:var(--blue);font-weight:600;text-decoration:none">All
-    guides&nbsp;→</a>
-    &nbsp;·&nbsp;
-    <a href="/charts"
-    style="color:var(--blue);font-weight:600;text-decoration:none">Infographics&nbsp;→</a></p>
+    guides&nbsp;→</a></p>
+</section>'''
+
+    # Two infographics, with their pictures, below the guides band. The guides
+    # band is text because a post has no picture on the landing; a chart IS a
+    # picture, so a text card would be advertising the one thing it cannot show.
+    #
+    # TWO, not the twelve on /charts: this is a doorway, not the gallery. The
+    # cards link to /charts#slug, which opens the Infographics page scrolled to
+    # that chart -- the same fragment addressing llms.txt already uses, and the
+    # only way to point at one picture on a one-page gallery.
+    #
+    # Ordered by charts_by_rank: most liked when a ranking has been committed,
+    # newest first otherwise. Only DRAWABLE charts are eligible, matching the
+    # /charts page, since a card whose thumbnail is missing is a broken card
+    # rather than a card without a picture.
+    charts_section = ""
+    eligible = [c for c in charts_by_rank(list(charts)) if c.get("drawable")]
+    if eligible:
+        chart_cards = "\n".join(
+            f'''    <a class="info-card" href="/charts#{c["slug"]}">
+      <img src="/app/static/{c["land"]}" alt="{c["description"]}"
+           loading="lazy" width="640" height="640">
+      <b>{c["title"]}</b><span>{c["summary"]}</span></a>'''
+            for c in eligible[:2])
+        charts_section = f'''<section>
+  <h2>Infographics</h2>
+  <p class="deck">One picture, one finding, sourced. Twelve of them, free to
+  share.</p>
+  <div class="infos">
+{chart_cards}
+  </div>
+  <p class="deck" style="margin-top:14px"><a href="/charts"
+    style="color:var(--blue);font-weight:600;text-decoration:none">All
+    infographics&nbsp;→</a></p>
 </section>'''
 
     cap_body = "\n".join(
@@ -721,6 +781,8 @@ def build_html(f: dict, posts: list = ()) -> str:
 <div class="wrap">
 
 {guides_section}
+
+{charts_section}
 
 <div class="cta">
   <h2>Two minutes. Zero forms.</h2>
@@ -1264,9 +1326,21 @@ def card_thumb(source: str) -> str:
 CHART_DIR = ROOT / "marketing" / "infographics"
 CHART_FULL_WIDTH = 1400        # the picture on the gallery page itself
 CHART_CARD_W, CHART_CARD_H = 720, 405     # 16:9, matching the guide cards
+# The LANDING band shows the whole picture instead, padded to a square rather
+# than cropped to 16:9. Two different jobs, so two different files: the gallery
+# is a grid of twelve doorways where uniformity is what makes it scannable, and
+# the landing band is two cards carrying the finding itself, where a headline
+# sliced off at both margins is the thing a reader notices first.
+#
+# Square because these run 0.77 to 1.37 and a square is the shape that pads all
+# of them least -- 11% and 15% on the two showing today, against the 40%+ a
+# 16:9 box would put on the portrait ones. The padding takes each chart's OWN
+# border colour, so on the dark charts the letterbox is invisible and the card
+# reads as one picture rather than a picture in a frame.
+CHART_LAND_PX = 640
 
 
-def _chart_jpeg(source: str, out: str, width: int, box=None) -> bool:
+def _chart_jpeg(source: str, out: str, width: int, box=None, pad=None) -> bool:
     """One web-sized JPEG in static/ from a full-resolution chart PNG.
 
     A MISSING SOURCE IS NOT AN ERROR when the output already exists, and that
@@ -1303,6 +1377,26 @@ def _chart_jpeg(source: str, out: str, width: int, box=None) -> bool:
                             max(ch, round(im.height * scale))), Image.LANCZOS)
             left = (im.width - cw) // 2
             im = im.crop((left, 0, left + cw, ch))
+        elif pad:
+            # Contain, not cover: the whole picture, centred on a canvas of the
+            # image's own border colour. Sampled as the median of the four
+            # edges rather than one corner pixel, so a stray bright pixel or a
+            # logo sitting in a corner cannot pick the colour for the whole
+            # card.
+            pw, ph = pad
+            scale = min(pw / im.width, ph / im.height)
+            im = im.resize((max(1, round(im.width * scale)),
+                            max(1, round(im.height * scale))), Image.LANCZOS)
+            edge = []
+            for x in range(0, im.width, max(1, im.width // 64)):
+                edge += [im.getpixel((x, 0)), im.getpixel((x, im.height - 1))]
+            for y in range(0, im.height, max(1, im.height // 64)):
+                edge += [im.getpixel((0, y)), im.getpixel((im.width - 1, y))]
+            bg = tuple(sorted(c[i] for c in edge)[len(edge) // 2]
+                       for i in range(3))
+            canvas = Image.new("RGB", (pw, ph), bg)
+            canvas.paste(im, ((pw - im.width) // 2, (ph - im.height) // 2))
+            im = canvas
         else:
             height = round(im.height * width / im.width)
             im = im.resize((width, height), Image.LANCZOS)
@@ -1329,12 +1423,48 @@ def load_charts() -> list:
             raise ValueError(f"{path.name}: a chart must name an image")
         meta["full"] = f"info-{meta['slug']}.jpg"
         meta["card"] = f"card-info-{meta['slug']}.jpg"
+        meta["land"] = f"land-info-{meta['slug']}.jpg"
         meta["drawable"] = (
             _chart_jpeg(meta["image"], meta["full"], CHART_FULL_WIDTH)
             and _chart_jpeg(meta["image"], meta["card"], 0,
-                            box=(CHART_CARD_W, CHART_CARD_H)))
+                            box=(CHART_CARD_W, CHART_CARD_H))
+            and _chart_jpeg(meta["image"], meta["land"], 0,
+                            pad=(CHART_LAND_PX, CHART_LAND_PX)))
         charts.append(meta)
     return sorted(charts, key=lambda m: m["date"], reverse=True)
+
+
+CHART_RANKING_FILE = ROOT / "content" / "charts" / "_ranking.json"
+
+
+def charts_by_rank(charts: list) -> list:
+    """Charts ordered most-liked first, or newest first when no ranking exists.
+
+    THE RANKING IS A COMMITTED FILE, not a query. Likes live in Supabase, and
+    this landing page is baked into infra/worker.js and served from Cloudflare
+    precisely so it needs nothing at view time -- the note on landing_view in
+    CLAUDE.md records that an external reference on this page would cost it the
+    one property that makes it worth having, since it renders when the origin is
+    down. Reading Supabase at BUILD time instead would only move the dependency:
+    the build would then fail whenever the database is unreachable, which it was
+    on the day this was written.
+
+    So infra/rank_charts.py writes the order into _ranking.json when the network
+    allows, that file is committed and reviewable in a diff, and this reads it.
+    Missing or unreadable, the order falls back to newest first, which is what
+    load_charts already returns. A stale ranking is a wrong ORDER; a failed
+    build is no page.
+
+    Slugs in the file that no longer exist are ignored, and charts missing from
+    the file keep their newest-first order after the ranked ones, so adding a
+    chart never silently drops it from the running.
+    """
+    try:
+        ranked = json.loads(CHART_RANKING_FILE.read_text()).get("by_likes") or []
+    except (FileNotFoundError, ValueError, AttributeError):
+        return charts
+    position = {slug: i for i, slug in enumerate(ranked)}
+    return sorted(charts, key=lambda c: position.get(c["slug"], len(position)))
 
 
 def article_hero(source: str) -> str:
@@ -1883,7 +2013,12 @@ def render_all():
     if changed:
         print(f"  lastmod -> {today} (body changed): {', '.join(changed)}")
 
-    html = build_html(facts, posts)
+    # Loaded BEFORE build_html, which now needs it for the landing's
+    # infographic cards. Still exactly one load_charts() call in this function,
+    # which the note below the pages map asks for -- it is not a pure read, it
+    # writes the JPEGs, so extra calls were real work rather than just clutter.
+    charts = load_charts()
+    html = build_html(facts, posts, charts)
     pages = {}
     if posts:
         pages["/guides"] = build_guides_index_html(posts, logo_svg, favicon)
@@ -1893,7 +2028,6 @@ def render_all():
     # The chart gallery rides the same pages map, which is what routes it: the
     # Worker serves anything in that map and 301s everything else to "/", so a
     # page absent from here is not merely unlinked, it is unreachable.
-    charts = load_charts()
     if charts:
         pages["/charts"] = build_charts_index_html(charts, logo_svg, favicon)
     return html, pages, posts, lastmod, manifest

@@ -94,6 +94,22 @@
      the comment above describes. Same fix, same specificity requirement, so
      the 720px breakpoint restates this one as well. */
   .paths .grid { grid-template-columns: repeat(2, 1fr); }
+  /* The landing's infographic cards. Two up, matching .guides, and a picture
+     on top because a chart IS the picture. Deliberately NOT .chart-card: that
+     one carries the gallery's Helpful and Share buttons and its own reaction
+     JS, and neither belongs on a doorway card. */
+  .infos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .infos .info-card { display: block; text-decoration: none; overflow: hidden;
+    background: var(--tile); border-radius: 12px; }
+  /* Square, and deliberately NOT object-fit: cover -- _chart_jpeg's pad branch
+     has already padded the file to this ratio, so the whole infographic is on
+     screen. A cover rule here would crop the padded file a second time. */
+  .infos .info-card img { display: block; width: 100%; height: auto;
+    aspect-ratio: 1 / 1; background: var(--surface); }
+  .infos .info-card b { display: block; padding: 16px 18px 0; font-size: 17px;
+    color: var(--deep); }
+  .infos .info-card span { display: block; padding: 8px 18px 18px;
+    color: var(--muted); font-size: 15px; }
   /* ===== The tools band =====
      The tools are the product, so they sit above the guides and carry a
      background of their own: edge to edge, the section reads as its own zone
@@ -257,6 +273,7 @@
     .grid { grid-template-columns: 1fr; }
     .tools .grid { grid-template-columns: 1fr; }
     .paths .grid { grid-template-columns: 1fr; }
+    .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
@@ -454,8 +471,20 @@
   var qs = location.search.replace(/^\?/, "");
   if (!qs) return;
   document.querySelectorAll('a[href^="/"]').forEach(function (a) {
-    if (a.getAttribute("href").indexOf("llms.txt") !== -1) return;
-    a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;
+    var href = a.getAttribute("href");
+    if (href.indexOf("llms.txt") !== -1) return;
+    // The query goes BEFORE the fragment. This used to append blindly, which
+    // turned /charts#some-slug into /charts#some-slug?v=1: the anchor then
+    // matches no element, so the link stops jumping to the chart it names, AND
+    // the carried value ends up inside the fragment where nothing reads it --
+    // so ?src= is silently lost on exactly the links this script exists to
+    // protect. Harmless until the first fragment link, which the landing's
+    // infographic cards are.
+    var hash = "";
+    var cut = href.indexOf("#");
+    if (cut !== -1) { hash = href.slice(cut); href = href.slice(0, cut); }
+    a.setAttribute("href",
+      href + (href.indexOf("?") === -1 ? "?" : "&") + qs + hash);
   });
 })();
 </script>
