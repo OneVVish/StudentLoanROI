@@ -10822,8 +10822,25 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
             ),
             "status": "beyond_search_max", "breakeven_loan": None, "headroom": None,
             "positive": True, "label": "Good news",
+            # NOT "more than $1,000,000", which is what this said until
+            # 2026-08-18. Two things wrong with a number here. It reads as
+            # permission to borrow one, which is the exact failure the headroom
+            # wording below was rewritten to avoid, and from a tool whose job is
+            # making debt legible that is the worst possible misread. And it is
+            # not a finding about the degree at all: BREAKEVEN_SEARCH_MAX_LOAN is
+            # this function's own search bound, so the sentence was really saying
+            # "we stopped looking at a million", which no visitor can know.
+            #
+            # It also stopped being a rare branch. 69% of occupations land here
+            # now, against 50% before the baseline was put in real units, so this
+            # is the row most visitors actually read.
+            #
+            # What replaces it is the true statement: nobody can borrow that
+            # much for a degree. The federal aggregate is $57,500 for a
+            # dependent undergraduate and PLUS is capped since July 1 2026, so
+            # the loan is not what decides this one.
             "points": breakeven_points(
-                loan_amount, f"more than {fmt_money(BREAKEVEN_SEARCH_MAX_LOAN)}",
+                loan_amount, "more than anyone could borrow for this",
                 crossover, years, resolved_professional_debt),
         }
 
