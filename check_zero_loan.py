@@ -510,6 +510,33 @@ def check_twins_and_memo() -> list:
                 f"twins must read the same predicate, or screen and print "
                 f"disagree about which line is the hypothetical one.")
 
+    # BOTH renderers must resolve their series through the shared helper, or
+    # the report draws a different chart than the screen. This is the defect
+    # that shipped: generate_pdf_report_single built its frame from a literal
+    # [(major, scenario)], so "Add the other 2026 repayment plan" reached the
+    # screen and never the PDF -- one line printed under a two-line chart, with
+    # nothing marking the omission, and the legend not naming the plan either.
+    #
+    # Asserted as "calls the helper" rather than by inspecting the argument,
+    # because the frame call takes a variable and a check that reads the
+    # variable's NAME would pass on any local that happened to be spelled
+    # right. The helper is also what renames both series to carry their plan,
+    # so this covers the legend half too.
+    for fn in ("render_net_position_chart", "generate_pdf_report_single"):
+        node = next((n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == fn), None)
+        if node is None:
+            problems.append(f"  {fn} is gone.")
+            continue
+        if not any(isinstance(sub, ast.Name)
+                   and sub.id == "net_position_overlay_pairs"
+                   for sub in ast.walk(node)):
+            problems.append(
+                f"  {fn} does not go through net_position_overlay_pairs, so "
+                f"screen and print can disagree about which series the "
+                f"net-position chart carries. The two-plan overlay reached the "
+                f"screen and not the report exactly this way.")
+
     calculator_sigs = [m for m, where in memo_sig_calls if where == "(module)"]
     if len(calculator_sigs) < 2:
         problems.append(
