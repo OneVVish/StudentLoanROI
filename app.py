@@ -11750,7 +11750,7 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         # The frame's COLUMN stays "Net Position" -- it is the key the PDF
         # twin and net_position_frame both read -- and only the displayed
         # name changes here.
-        title="Cumulative Gross Pay minus loan payments (Tax not considered)",
+        title="Cumulative Median Gross Pay minus loan payments (Tax not considered)",
         # The title counts from the END of school, never from starting it: with
         # foregone earnings counted, year 1 is the graduate's first year out
         # while the baseline already carries the enrolled years' wages, so the
@@ -11759,7 +11759,7 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
         # names is net_position_axis_title's job, and it is a REQUIRED argument
         # rather than a constant because it differs per path.
         labels={"year": axis_title,
-                 "Net Position": "Cumulative gross pay minus loan payments ($)"},
+                 "Net Position": "Cumulative median gross pay minus loan payments ($)"},
     )
     fig.update_traces(line=dict(width=3))
     # Dashed for the no-loan reference lines, matching the PDF twin. Iterated
@@ -13987,13 +13987,13 @@ def build_pdf_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
             f"{counterfactual_vocab()['head_start']}.",
             xy=(0.0, 1.02), xycoords="axes fraction", ha="left",
             fontsize=8, color="#666666")
-        ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
+        ax.set_title("Cumulative Median Gross Pay minus loan payments (Tax not considered)",
                      fontsize=11, pad=22)
     else:
-        ax.set_title("Cumulative Gross Pay minus loan payments (Tax not considered)",
+        ax.set_title("Cumulative Median Gross Pay minus loan payments (Tax not considered)",
                      fontsize=11)
     ax.set_xlabel(axis_title)
-    ax.set_ylabel("Cumulative gross pay minus loan payments ($)")
+    ax.set_ylabel("Cumulative median gross pay minus loan payments ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
     ax.grid(True, alpha=0.3)
     legend = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22),
@@ -24780,7 +24780,7 @@ six-figure event. Read every forgiveness number on this page with that in mind.
 
 ### Earnings, ROI and the net-position chart
 
-#### Cumulative Gross Pay minus loan payments
+#### Cumulative Median Gross Pay minus loan payments
 
 These figures are *before
 tax*. The ROI model sums each year's gross salary and subtracts the loan
