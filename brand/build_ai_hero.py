@@ -136,6 +136,15 @@ PROMPTS = {
         "no face is in the frame. Documentary photography, muted natural "
         "colour, unposed. No text, no charts, no screens showing content.",
         20260815, 4),
+    "repayment-plans-2026-what-changed": (
+        "Two nearly identical printed forms lying side by side on a plain desk "
+        "in flat window light, one slightly out of alignment with the other, a "
+        "pen resting across the corner of the left one, an adult hand just "
+        "entering the frame from the right. Photographed from above at a slight "
+        "angle so no face is in the frame. Documentary photography, muted "
+        "natural colour, unposed. No text, no charts, no screens showing "
+        "content.",
+        20260819, 4),
     "for-counselors-the-money-conversation": (
         "A small high school counselor's office in late afternoon light, two "
         "chairs turned toward each other across a corner of a desk, a student's "
