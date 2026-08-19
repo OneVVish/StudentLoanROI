@@ -36,8 +36,6 @@ The crossings sit at roughly $30,000 and roughly $80,000. Neither is a clean lin
 
 One consequence deserves saying plainly rather than leaving in the table. Under IBR an income at or below the living allowance produces a payment of zero. Under RAP there is no zero. The floor is $10, and the floor is also what bounds the dependent reduction, so a borrower with children and very little income lands on $10 rather than on nothing.
 
-That said, the bottom of that range is further down than a typical full-time wage. The lowest occupational median in the federal wage data is about $31,000 across all 825 occupations, so for someone working full time in almost any of them the relevant comparison is the middle of the table, where RAP is the cheaper monthly payment. The bottom rows describe part-time work, a gap between jobs, or a year of very low earnings, which are common enough events without being the typical case.
-
 ## A smaller payment is not a smaller debt
 
 Take a borrower who left with $27,000, which is the aggregate federal limit for a dependent undergraduate, on an income of $45,000. Five plans, one balance, one person:
