@@ -57,7 +57,12 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # guide read was logged WITH its src, and only the click into the app lost the
 # tag -- so the funnel showed reads and no conversions, which reads as a
 # content problem rather than a measurement one.
-CARRY_MARKER = 'a.href += (a.href.indexOf("?") === -1 ? "?" : "&") + qs;'
+# Updated 2026-08-18 when the script learned to put the query BEFORE the
+# fragment. The marker deliberately spans the "+ hash" tail as well as the
+# append, so reverting to the old blind `a.href += ... + qs` fails this too --
+# that version silently ate the carried value into the fragment on any
+# fragment-bearing link, which the landing's infographic cards are the first of.
+CARRY_MARKER = 'href + (href.indexOf("?") === -1 ? "?" : "&") + qs + hash);'
 
 
 def load_builder():
