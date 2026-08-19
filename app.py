@@ -18962,11 +18962,11 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
     # tool should not have to click to reach it.
     with st.expander("💸 Already have loans? Compare repayment plans",
                      expanded=always_open):
-        st.caption(
-            "For a balance you already owe. Everything else on this page is "
-            "about whether to borrow in the first place. This is about what "
-            "to do once you have."
-        )
+        # The three-sentence preamble that used to sit here was removed on
+        # 2026-08-18. The expander's own title already says "Already have
+        # loans?", and on the standalone page STANDALONE_TOOLS' caption says
+        # "For a balance you already owe" a few lines above it, so the sentence
+        # was restating the heading in both places it rendered.
         if not always_open:
             st.caption(
                 "Comparing plans is a question of its own: "
