@@ -459,9 +459,15 @@ def check_twins_and_memo() -> list:
                 frame_calls.append(
                     (any(k.arg == "include_debt_free" for k in node.keywords), self.fn))
             if name == "pdf_memo_signature":
+                # net_position_overlay_mode, NOT net_position_reference_on.
+                # The boolean is False for "just this path" AND for "the other
+                # 2026 plan", so a signature carrying it puts two different
+                # charts in one memo slot: switching between them serves
+                # whichever report was built first, with the button downloading
+                # happily either way. The mode string separates all three.
                 mentions = any(
-                    isinstance(sub, ast.Name) and sub.id == "net_position_reference_on"
-                    or isinstance(sub, ast.Attribute) and sub.attr == "net_position_reference_on"
+                    isinstance(sub, ast.Name) and sub.id == "net_position_overlay_mode"
+                    or isinstance(sub, ast.Attribute) and sub.attr == "net_position_overlay_mode"
                     for a in node.args for sub in ast.walk(a))
                 memo_sig_calls.append((mentions, self.fn))
             self.generic_visit(node)
@@ -511,7 +517,7 @@ def check_twins_and_memo() -> list:
             f"and compare) at module level, found {len(calculator_sigs)}.")
     elif not all(calculator_sigs):
         problems.append(
-            "  a calculator PDF signature omits net_position_reference_on(). "
+            "  a calculator PDF signature omits net_position_overlay_mode(). "
             "The toggle is a main-page widget, so check_share_coverage's "
             "sidebar sweep cannot see it and this is the only thing standing "
             "between it and a stale report.")
