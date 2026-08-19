@@ -104,6 +104,10 @@
      needs the extra specificity of `.tools .grid`, so the 720px breakpoint
      below has to restate it or the cards stay 2-up on a phone. */
   .tools .grid { grid-template-columns: repeat(2, 1fr); }
+  /* The pathways band has four cards too, and the same stranded-card problem
+     the comment above describes. Same fix, same specificity requirement, so
+     the 720px breakpoint restates this one as well. */
+  .paths .grid { grid-template-columns: repeat(2, 1fr); }
   /* ===== The tools band =====
      The tools are the product, so they sit above the guides and carry a
      background of their own: edge to edge, the section reads as its own zone
@@ -266,6 +270,7 @@
     .stats { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
     .tools .grid { grid-template-columns: 1fr; }
+    .paths .grid { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
@@ -332,10 +337,43 @@
       years first. One page, same math on both sides.</p></div>
     <div class="tile"><b>🎓 Graduate &amp; professional</b>
       <p>Medicine, dentistry, law, the MBA and five more, priced per school
-      from federal data, residency years modelled.</p></div>
+      from federal data, residency years modeled.</p></div>
     <div class="tile"><b>📄 Take it with you</b>
       <p>Every result exports as a PDF report or a shareable image, sourced
       down to the footnote.</p></div>
+  </div>
+</section>
+
+<!-- Pathways. Placed BEFORE the tools band on purpose: the tools band says
+     what the site does, and this says who it is for. A visitor who assumes
+     this is a four-year-college calculator stops reading before the tools.
+     Plain .tile inside .wrap, matching the feature section above, rather than
+     a second full-bleed .tools band -- two tinted bands in a row merge into
+     one and neither heading lands.
+     No links. Three of these four are sidebar selections rather than pages,
+     so there is nothing to link to, and one linked tile among four reads as
+     the only one that works. The tools band directly below carries the CTAs. -->
+<section class="paths">
+  <h2>Not every path runs through a four-year college</h2>
+  <p class="deck">The comparison changes with the life. Each of these is
+  modeled in full, priced from the same federal data as everything else.</p>
+  <div class="grid">
+    <div class="tile"><b>🔧 Straight to work</b>
+      <p>487 of the 836 careers here are entered with no degree at all. They
+      are priced as a real option: no tuition, no loan, and none of the years
+      of pay a degree gives up.</p></div>
+    <div class="tile"><b>🏫 Community college first</b>
+      <p>Four ways through: two years then transfer, part time while working,
+      an associate's on its own, or a bachelor's awarded by the community
+      college itself.</p></div>
+    <div class="tile"><b>📚 Graduate &amp; professional school</b>
+      <p>Master's and doctoral, plus medicine, dentistry, law, the MBA and five
+      more, with the unpaid school years and residency stipends inside the
+      arithmetic.</p></div>
+    <div class="tile"><b>🔁 Returning student</b>
+      <p>Going back at 35 or 49 is measured against the salary you already
+      earn, not against a debt-free eighteen-year-old. Every sentence on the
+      page changes with it.</p></div>
   </div>
 </section>
 
