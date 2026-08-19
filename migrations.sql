@@ -2170,3 +2170,65 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOL
 -- on the flag alone needlessly discards every default-horizon row, which is
 -- most of the table; ignoring it pools incomparable long-horizon figures.
 -- Treat NULL as false, as with the other era flags.
+
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-18 -- THE RESULTS PAGE WAS RESHAPED, no DDL.
+--
+-- No column changed and no row is invalid. This is a PRESENTATION seam, the
+-- same kind as the 2026-08-12 wording one above and recorded for the same
+-- reason: what a visitor was shown changed, while what was measured did not.
+--
+-- What changed, all in the single-scenario results branch:
+--   * THE NET-POSITION CHART DRAWS 25 YEARS, down from 35. The earnings curve
+--     began plateauing on this same date (career_curve_plateaus above), so the
+--     last decade had become a straight line. Of 250 occupations at a $190,000
+--     loan, 209 cross the baseline and only 9 of those cross after year 25, so
+--     the shortened window hides a crossing for about 4% of paths -- which
+--     still get it in words from crossover_phrase.
+--   * THE NO-LOAN REFERENCE LINE IS SUPPRESSED WHEN IT CANNOT BE SEEN. Its
+--     test was exact equality and is now a share of the drawn range, so a
+--     small loan no longer draws a dashed twin directly on top of its solid
+--     line. Where it is suppressed the caption states the borrowing cost in
+--     dollars instead. Affects only sessions with that opt-in checkbox on.
+--   * THE LOAN DETAIL IS COLLAPSED behind two expanders (the year-by-year
+--     build-up table, and the balance and payment charts). Every WARNING stays
+--     inline: the forgiveness note, the financing note, the Parent PLUS note
+--     and the loan-basis disclosure.
+--   * THE NET-POSITION BLOCK IS WRAPPED IN A TINTED CARD, so the checkbox, the
+--     chart and its captions read as one panel. The figure itself was made
+--     transparent to sit on it. Screen only: there is no card in the PDF, and
+--     the matplotlib twin is deliberately unchanged, since the chart-twin rule
+--     governs what a chart SHOWS rather than what colour its paper is.
+--   * A CAPTION UNDER THE CHART NAMES WHERE EACH PATH PASSES THE BASELINE,
+--     wording taken from crossover_phrase so it cannot disagree with the
+--     verdict list that states the same moment. It exists for the case the
+--     picture cannot show: the chart draws 25 years and net_position_crossover
+--     searches 40, so a crossing at year 33 is off the right edge and the
+--     caption says so instead of leaving the reader to hunt for two lines
+--     meeting.
+--
+-- NO FIGURE MOVED as a result of any of this. The five changes are in
+-- net_position_frame, NET_POSITION_CHART_YEARS, two st.expander calls, one
+-- keyed st.container plus its CSS, and one caption built from an existing
+-- shared helper; no constant, simulator or ROI path was touched, so every logged
+-- earnings_premium, roi_pct, monthly_payment and payoff figure means on
+-- 2026-08-19 exactly what it meant on 2026-08-17. Note that the SAME DATE
+-- carries three real definitional seams (hs_baseline_real_units,
+-- career_curve_plateaus, discounting_enabled) -- those are the ones that move
+-- numbers, and they are recorded above with their own flags.
+--
+-- WHY THIS IS RECORDED AT ALL. The paper's outcomes are survey answers and
+-- engagement, and both respond to what is visible without scrolling. Collapsing
+-- two charts and a table moves the verdict chart most of a screen closer, so
+-- PDF-download and share RATES either side of this date are not measuring the
+-- same page. Condition on the date, or say in the write-up that layout was held
+-- constant only within each side of it.
+--
+-- THE EXPERIMENT ARMS ARE UNAFFECTED RELATIVE TO EACH OTHER, but check this if
+-- the layout is touched again: the expanders are single-branch-only, and that
+-- is defensible ONLY because Compare Mode already draws its own comparison
+-- charts here rather than these ones, so the two arms were never showing the
+-- same pictures at this point in the page. render_payment_chart is still
+-- called from both branches. A future collapse of something the two arms DO
+-- share would be a genuine H2 confound.
