@@ -11721,7 +11721,8 @@ def is_no_loan_series(name) -> bool:
 
 def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
                               axis_title: str,
-                              baseline_head_start_years: int = 0):
+                              baseline_head_start_years: int = 0,
+                              color_map: dict = None):
     """Net position year by year, for every path on the page plus the
     high-school baseline.
 
@@ -11738,6 +11739,13 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
     """
     fig = px.line(
         frame, x="year", y="Net Position", color="Series", markers=True,
+        # None keeps Streamlit's default sequence, which is what every existing
+        # case draws. The repayment-plan overlay passes an explicit map: its two
+        # series are the SAME career on two plans, so the default's two steps of
+        # one hue (#83c9ff against #0068c9) put them on top of each other -- the
+        # worst case for the sequence and the one comparison that cannot survive
+        # it. Measured off the rendered chart, not guessed.
+        color_discrete_map=color_map or {},
         # "Net position" is accounting vocabulary; the reader is 17. The
         # quantity is cumulative earnings minus loan payments, so say that.
         # The frame's COLUMN stays "Net Position" -- it is the key the PDF
@@ -11834,7 +11842,24 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
 # sweep -- so it must ride pdf_memo_signature's `extras` at both call sites, or
 # the Download PDF button serves a report drawn without the line the visitor is
 # looking at. Silent: the button downloads happily either way.
-NET_POSITION_REFERENCE_KEY = "net_position_reference"
+# One overlay at a time, as a radio rather than two checkboxes, so the
+# exclusivity is structural instead of enforced. The chart already carries the
+# path, its baseline and (in Compare Mode) a second path; letting the no-loan
+# twin and the other repayment plan both switch on takes a three-series chart
+# to five and neither comparison survives it.
+#
+# A NEW key, not the old checkbox's. A keyed Streamlit widget RAISES when its
+# stored value is absent from its options, and a session that predates this
+# change has a BOOLEAN sitting under net_position_reference -- handing that to a
+# radio whose options are strings is the reconcile_cc_mode failure with no
+# reconcile in front of it. The old key is simply left behind.
+NET_POSITION_OVERLAY_NONE = "Just this path"
+NET_POSITION_OVERLAY_NO_LOAN = "Add the same path with no loan"
+NET_POSITION_OVERLAY_PLAN = "Add the other 2026 repayment plan"
+NET_POSITION_OVERLAY_OPTIONS = (NET_POSITION_OVERLAY_NONE,
+                                NET_POSITION_OVERLAY_NO_LOAN,
+                                NET_POSITION_OVERLAY_PLAN)
+NET_POSITION_OVERLAY_KEY = "net_position_overlay"
 
 # The card wrapping the net-position block. A constant because section 3's
 # CSS and this renderer must name the same key, and a literal in two places is
@@ -11850,9 +11875,16 @@ def net_position_reference_on() -> bool:
     -- the same treatment selected_salary_flow_period() gets, and wrapped for
     the same reason: the guards and analyze_model.py exec this section with no
     session_state at all, where the answer is "off".
+
+    STILL THE ONLY THING THE PDF NEEDS TO KNOW about this control, which is why
+    pdf_memo_signature carries it unchanged. The third overlay option draws the
+    other repayment plan on SCREEN only: the matplotlib twin renders the frame
+    it is given, and that frame is built without the alternate pair, so options
+    one and three produce the same PDF and the memo is right to treat them
+    alike.
     """
     try:
-        return bool(st.session_state.get(NET_POSITION_REFERENCE_KEY, False))
+        return st.session_state.get(NET_POSITION_OVERLAY_KEY) == NET_POSITION_OVERLAY_NO_LOAN
     except Exception:
         return False
 
@@ -11860,7 +11892,7 @@ def net_position_reference_on() -> bool:
 def render_net_position_chart(scenario_pairs: list, col_index: float,
                                hs_wage_index: float, roi_window_years: int,
                                baseline_head_start_years: int = 0,
-                               container=None) -> None:
+                               container=None, alternate_pair=None) -> None:
     """The net-position chart and its one view control, for BOTH result
     branches.
 
@@ -11885,24 +11917,67 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     # comment gives for using a gap rather than a border between bands.
     target = (container if container is not None else st).container(
         border=True, key=NET_POSITION_CARD_KEY)
-    show_reference = target.checkbox(
-        "Show this path with no loan", key=NET_POSITION_REFERENCE_KEY,
-        help="Adds a line for the same career at the same salary, carrying no "
-             "loan at all. The gap between the two lines is what the borrowing "
-             "costs you, separately from what the degree earns. Everything else "
-             "on this chart compares you against a different life; this compares "
-             "you against yourself.",
+    # The plan option is offered only when the caller supplied the alternate
+    # scenario. Compare Mode does not: its two-series axis is already spent on
+    # scenarios A and B, and a second plan for each would be five lines.
+    options = list(NET_POSITION_OVERLAY_OPTIONS)
+    if alternate_pair is None:
+        options.remove(NET_POSITION_OVERLAY_PLAN)
+        # A stored "other plan" from a single-scenario run would raise the
+        # moment Compare Mode renders this radio, since Streamlit rejects a
+        # value absent from the options. Same reconcile the cc_mode radio does.
+        if st.session_state.get(NET_POSITION_OVERLAY_KEY) == NET_POSITION_OVERLAY_PLAN:
+            st.session_state[NET_POSITION_OVERLAY_KEY] = NET_POSITION_OVERLAY_NONE
+    st.session_state.setdefault(NET_POSITION_OVERLAY_KEY, NET_POSITION_OVERLAY_NONE)
+    overlay = target.radio(
+        "Add a comparison line", options, key=NET_POSITION_OVERLAY_KEY,
+        horizontal=True,
+        help="**No loan** draws the same career at the same salary carrying no "
+             "loan at all, so the gap between the two is what the borrowing "
+             "costs you rather than what the degree earns. **The other 2026 "
+             "plan** redraws this path on the repayment plan you did not pick. "
+             "One at a time: everything else on this chart is already a "
+             "comparison, and stacking two makes neither readable.",
     )
+    show_reference = overlay == NET_POSITION_OVERLAY_NO_LOAN
+    # The alternate plan is a second PAIR, not a second frame. net_position_frame
+    # already takes two labelled scenarios and emits one baseline when both
+    # produce the same one, which they do here -- same major, same enrollment,
+    # only the repayment plan differs. Reusing that is what keeps this from
+    # being a second chart implementation.
+    pairs = list(scenario_pairs)
+    _plan_overlay_colors = None
+    if overlay == NET_POSITION_OVERLAY_PLAN and alternate_pair is not None:
+        # BOTH lines name their plan, not just the added one. Left as "Computer
+        # Science" the original says nothing about which plan it is drawn on,
+        # so the reader can identify the line they did not choose and not the
+        # one they did. The plan is the only thing separating these two series,
+        # which makes it the thing the legend has to carry.
+        _main_label, _main_scenario = scenario_pairs[0]
+        _main_label = f"{_main_label} on {_main_scenario['strategy_label']}"
+        pairs = [(_main_label, _main_scenario), alternate_pair]
+        # Three validated hues rather than the default sequence: the two plan
+        # lines are the same career and would otherwise land on two steps of one
+        # blue. SERIES_BLUE/ORANGE are the pair this file already checked for
+        # protanopia separation and the chroma floor; AQUA keeps the baseline
+        # clear of both. Only this case gets a map, so the no-loan twin and
+        # Compare Mode keep exactly what they have always drawn.
+        _plan_overlay_colors = {
+            _main_label: SERIES_BLUE,
+            alternate_pair[0]: SERIES_ORANGE,
+            counterfactual_vocab()["legend_label"]: SERIES_AQUA,
+        }
     # Drawn to 35 years whatever window the metrics use -- see
     # net_position_chart_years. `roi_window_years` still goes to the CHART, not
     # to the frame: that is the year it marks, not the year it stops at.
-    frame = net_position_frame(scenario_pairs, col_index, hs_wage_index,
+    frame = net_position_frame(pairs, col_index, hs_wage_index,
                                 net_position_chart_years(roi_window_years),
                                 include_debt_free=show_reference)
     target.plotly_chart(
         build_net_position_chart(
             frame, roi_window_years, net_position_axis_title(scenario_pairs),
-            baseline_head_start_years=baseline_head_start_years),
+            baseline_head_start_years=baseline_head_start_years,
+            color_map=_plan_overlay_colors),
         use_container_width=True, config=PLOTLY_CHART_CONFIG,
     )
     # Computed here rather than passed in. This function already holds the exact
@@ -11916,10 +11991,27 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     # must never stamp this -- find_breakeven_loan bisects by calling that, so a
     # 40-year sweep inside it would run once per bisection step.
     _drawn = net_position_chart_years(roi_window_years)
+    # The plan is NAMED, and that is accuracy rather than decoration: the
+    # crossover depends on it. RAP charges a share of income and finishes
+    # sooner, Tiered charges less and runs longer, so the same career overtakes
+    # the baseline at different ages on the two plans. A sentence giving an age
+    # without saying which plan produced it is quietly incomplete, and in
+    # Compare Mode the two scenarios can be on different plans entirely.
+    #
+    # Built from each scenario's OWN strategy_label plus the base label from
+    # scenario_pairs, never from the chart's series names -- those already carry
+    # the plan when the overlay is on, and reusing them would print it twice.
+    _caption_pairs = list(scenario_pairs)
+    if overlay == NET_POSITION_OVERLAY_PLAN and alternate_pair is not None:
+        # Same base label, the alternate's scenario: with both lines drawn, both
+        # crossings are on screen and naming only one leaves the reader to guess
+        # which line the age belongs to.
+        _caption_pairs = _caption_pairs + [(scenario_pairs[0][0], alternate_pair[1])]
     _caption = crossover_caption(
         [net_position_crossover(scenario, col_index, hs_wage_index)
-         for _, scenario in scenario_pairs],
-        [label for label, _ in scenario_pairs], _drawn,
+         for _, scenario in _caption_pairs],
+        [f"{label} on {scenario['strategy_label']}"
+         for label, scenario in _caption_pairs], _drawn,
         net_position_axis_title(scenario_pairs))
     if _caption:
         target.caption(_caption)
@@ -23585,10 +23677,15 @@ else:
              "comparison no matter where you live.",
     )
 
+    # The alternate plan computed for the repayment charts above is offered here
+    # too, as one more line the visitor can switch on. Same scenario object, so
+    # the two charts cannot disagree about what the other plan does, and no
+    # third computation.
     render_net_position_chart(
         [(major, scenario)], city_info["col_index"],
         get_metro_wage_index(city), roi_horizon_years,
         baseline_head_start_years=scenario["enrollment_years"],
+        alternate_pair=(f"{major} on {_alt['strategy_label']}", _alt),
     )
 
     # The break-even: how much debt this path can carry before it stops
