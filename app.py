@@ -9413,51 +9413,66 @@ def net_position_crossover(scenario: dict, col_index: float, hs_wage_index: floa
     return {"year": year, "age": age}
 
 
-def crossover_caption(crossovers: list, labels: list, drawn_years: int) -> str:
-    """One line under the net-position chart saying where each path passes the
+def crossover_caption(crossovers: list, labels: list, drawn_years: int,
+                       axis_title: str) -> str:
+    """One line under the net-position chart naming when each path overtakes the
     baseline, or "" when there is nothing useful to say.
 
+    Says the whole thing in a sentence rather than leaving the reader to join an
+    age to a chart: "Computer Science overtakes a debt-free high school graduate
+    at age 26, 3 years after your bachelor's degree."
+
+    THE BASELINE IS NAMED FROM counterfactual_vocab(), never written here. A
+    returning student is not measured against a high school graduate, and
+    hard-coding that noun is the exact bug that vocabulary exists to have ended.
+
+    THE MOMENT COMES FROM THE AXIS TITLE for the same reason. "Years after your
+    bachelor's degree" is true of a plain four-year major and of every training
+    path, but not of a career needing no degree, and not of two paths of
+    different lengths on one axis. net_position_axis_title already decides that
+    question for the chart, so reusing it means the sentence under the picture
+    and the label on it cannot disagree.
+
     The fact is already in the verdict list at the top of the page. Repeating it
-    HERE is deliberate and is the same call the compare report makes by putting
-    the crossover in both its summary strip and its break-even block: the list
-    is what a reader scans, and this is where they are looking at the picture
-    the number describes. The chart is a hundred lines of page away from that
-    list by the time it renders.
+    here is the same call the compare report makes by stating the crossover in
+    both its summary strip and its break-even block: the list is what a reader
+    scans, and this is where they are looking at the picture it describes.
 
     It earns its place on the case the picture cannot show. The chart draws 25
-    years and net_position_crossover searches 40, so a path that gets ahead at
-    year 31 has its crossing OFF THE RIGHT EDGE -- the reader looks for two
-    lines meeting, finds none, and the verdict's "age 37" reads as wrong. This
-    says so in words instead.
-
-    Wording comes from crossover_phrase, never assembled here: three surfaces
-    already state this moment and a fourth wording it itself is how "ahead at
-    40" and "ahead in year 18" end up on one page describing the same event.
+    years and net_position_crossover searches 40, so a crossing at year 33 is
+    off the right edge; the reader looks for two lines meeting, finds none, and
+    the verdict's age reads as wrong. This says so in words.
     """
     if not crossovers or all(c is None for c in crossovers):
         return ""
-    parts = []
-    off_chart = False
+    baseline = counterfactual_vocab()["baseline_noun"]
+    # "Years after your bachelor's degree" -> "after your bachelor's degree".
+    moment = axis_title[6:] if axis_title.startswith("Years ") else axis_title.lower()
+    parts, off_chart = [], False
     for label, crossover in zip(labels, crossovers):
         if crossover is None:
             continue
-        year = crossover.get("year")
-        phrase = crossover_phrase(crossover)
-        if year is not None and year > drawn_years:
+        year, age = crossover.get("year"), crossover.get("age")
+        if year is None:
+            parts.append(f"{label} does not overtake {baseline} within "
+                         f"{NET_POSITION_CROSSOVER_MAX_YEARS} years.")
+            continue
+        when = f"{year} year{'' if year == 1 else 's'} {moment}"
+        # The age is the more useful half and can be absent: analyze_model.py
+        # runs the flat pre-curve baseline, where there is no age to name.
+        lead = (f"{label} overtakes {baseline} at age {age}, {when}."
+                if age is not None else
+                f"{label} overtakes {baseline} {when}.")
+        if year > drawn_years:
             off_chart = True
-            parts.append(f"{label}: {phrase}, past the right edge of this chart")
-        elif year is not None:
-            parts.append(f"{label}: {phrase}")
-        else:
-            parts.append(f"{label}: {phrase}")
+            lead = lead[:-1] + ", past the right edge of this chart."
+        parts.append(lead)
     if not parts:
         return ""
-    lead = ("Where each path passes the baseline. "
-            if len(parts) > 1 else "Where this path passes the baseline. ")
     tail = ("" if not off_chart else
             " A crossing past the edge is still real; the chart simply stops "
             "before it.")
-    return lead + "; ".join(parts) + "." + tail
+    return " ".join(parts) + tail
 
 
 def crossover_phrase(crossover: dict, max_years: int = NET_POSITION_CROSSOVER_MAX_YEARS) -> str:
@@ -11866,7 +11881,8 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     _caption = crossover_caption(
         [net_position_crossover(scenario, col_index, hs_wage_index)
          for _, scenario in scenario_pairs],
-        [label for label, _ in scenario_pairs], _drawn)
+        [label for label, _ in scenario_pairs], _drawn,
+        net_position_axis_title(scenario_pairs))
     if _caption:
         target.caption(_caption)
     if show_reference:
