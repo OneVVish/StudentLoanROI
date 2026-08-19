@@ -105,6 +105,10 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [The degree sets the debt, the specialty sets the pay](https://worthmydegree.com/charts#professional-debt-versus-pay):
+  The 20 professional careers carrying the most student debt, against
+  what each earns over 30 years. Every medicine row borrowed the same
+  $205,000 and takes home between $5.4M and $12.0M.
 - [Borrow the federal maximum for a bachelor's and the plan barely matters](https://worthmydegree.com/charts#borrow-the-federal-maximum):
   $31,000 is the most a dependent undergraduate can borrow federally.
   On a $61,000 salary, income-driven, Standard and 2026 RAP all clear
