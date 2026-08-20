@@ -12172,6 +12172,44 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
             )
 
 
+def compare_plans_differ(scenario_a: dict, scenario_b: dict) -> bool:
+    """Whether Compare Mode's two scenarios sit on different repayment plans.
+
+    `repayment_strategy_b` is its own sidebar control, so this is a real case
+    rather than a theoretical one.
+    """
+    return scenario_a.get("strategy_label") != scenario_b.get("strategy_label")
+
+
+def compare_series_label(prefix: str, scenario: dict, cc_mode,
+                         plans_differ: bool) -> str:
+    """One series label for Compare Mode's repayment charts, on screen and in
+    the PDF.
+
+    ONE BUILDER, because this string was written out twelve times across the
+    two surfaces -- balance, payment and net position, each in both places --
+    and that is precisely how a chart twin comes to label its series
+    differently from its sibling.
+
+    THE PLAN IS NAMED ONLY WHEN THE TWO SCENARIOS DISAGREE ABOUT IT, and that
+    condition is the whole point. When the plans differ, the plan is doing
+    visible work in the picture: RAP's balance can climb before it falls while
+    a Tiered term is fixed, so two curves of different shape are being read as
+    a fact about the two CAREERS when the repayment plan is what separates
+    them. When both scenarios are on the same plan it explains nothing about
+    the difference, and repeating it on every series just makes an already long
+    label longer on an already narrow chart.
+
+    The page was inconsistent with itself before this: crossover_caption reads
+    each scenario's own strategy_label and prints "A: Computer Science on 2026
+    RAP", directly below a legend that said only "A: Computer Science".
+    """
+    base = f"{prefix}: {scenario['major']}{cc_chart_label_suffix(cc_mode)}"
+    if plans_differ and scenario.get("strategy_label"):
+        return f"{base} on {scenario['strategy_label']}"
+    return base
+
+
 def cc_chart_label_suffix(cc_mode) -> str:
     """Compact community-college-path tag appended to a scenario's label in the
     side-by-side comparison charts (on screen and in the PDF), so a 2+2 transfer
@@ -15279,6 +15317,12 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     reason."""
     styles = _pdf_styles()
     _cf = counterfactual_vocab()
+    # The printed charts label their series exactly as the screen does, from the
+    # same builder -- see compare_series_label. A report read detached from the
+    # app is where an unexplained difference in curve shape is least
+    # recoverable, so if the plan is what separates the two paths it has to be
+    # on the chart rather than only in the panel headings.
+    _pdf_plans_differ = compare_plans_differ(scenario_a, scenario_b)
     # ONE sweep per scenario, read by both the summary strip and the break-even
     # block below it. net_position_crossover re-runs the ROI model for forty
     # years, so computing it at each use would run it four times to print two
@@ -15378,17 +15422,19 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         Paragraph(_strip_emoji("📊 Side-by-Side Charts"), styles["section"]),
         Spacer(1, 6),
         build_pdf_comparison_balance_chart(
-            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
-            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}",
+            scenario_a["repayment_result"]["schedule"],
+            compare_series_label("A", scenario_a, (cc_info_a or {}).get('mode'), _pdf_plans_differ),
+            scenario_b["repayment_result"]["schedule"],
+            compare_series_label("B", scenario_b, (cc_info_b or {}).get('mode'), _pdf_plans_differ),
         ),
         # Print twin of the compare branch's overlaid payment chart, on the
         # same either-side-varies condition.
         *([Spacer(1, 12),
            build_pdf_comparison_payment_chart(
                scenario_a.get("combined_repayment") or scenario_a["repayment_result"],
-               f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}",
+               compare_series_label("A", scenario_a, (cc_info_a or {}).get('mode'), _pdf_plans_differ),
                scenario_b.get("combined_repayment") or scenario_b["repayment_result"],
-               f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}"),
+               compare_series_label("B", scenario_b, (cc_info_b or {}).get('mode'), _pdf_plans_differ)),
            Paragraph(_strip_emoji(PAYMENT_CHART_CAPTION), styles["caption"])]
           if (payment_varies(scenario_a.get("combined_repayment") or scenario_a["repayment_result"])
               or payment_varies(scenario_b.get("combined_repayment") or scenario_b["repayment_result"]))
@@ -15396,8 +15442,8 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         Spacer(1, 12),
         build_pdf_net_position_chart(
             net_position_frame(
-                [(f"A: {scenario_a['major']}{cc_chart_label_suffix((cc_info_a or {}).get('mode'))}", scenario_a),
-                 (f"B: {scenario_b['major']}{cc_chart_label_suffix((cc_info_b or {}).get('mode'))}", scenario_b)],
+                [(compare_series_label("A", scenario_a, (cc_info_a or {}).get('mode'), _pdf_plans_differ), scenario_a),
+                 (compare_series_label("B", scenario_b, (cc_info_b or {}).get('mode'), _pdf_plans_differ), scenario_b)],
                 col_index, get_metro_wage_index(city),
                 net_position_chart_years(roi_window_years),
                 include_debt_free=net_position_reference_on()),
@@ -23461,6 +23507,11 @@ if compare_mode:
                                                federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
                                                professional_debt_basis_key=_prof_basis_b,
                                                **returning_kwargs(), **discounting_kwargs())
+        # Resolved once, here, because both scenarios now exist and every
+        # chart below needs the same answer. Named on the charts only when
+        # the two disagree about the plan; see compare_series_label for why
+        # the condition is the point rather than a nicety.
+        _plans_differ = compare_plans_differ(scenario_a, scenario_b)
 
         # Both wage charts reserve the same number of geography rows, so the
         # national curve -- the one series genuinely common to A and B -- sits at
@@ -23557,8 +23608,10 @@ if compare_mode:
     with st.container(border=True, key=LOAN_CARD_KEY):
         st.plotly_chart(
             build_comparison_balance_chart(
-                scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
-                scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}",
+                scenario_a["repayment_result"]["schedule"],
+                compare_series_label("A", scenario_a, cc_mode_a, _plans_differ),
+                scenario_b["repayment_result"]["schedule"],
+                compare_series_label("B", scenario_b, cc_mode_b, _plans_differ),
             ),
             use_container_width=True, config=PLOTLY_CHART_CONFIG,
         )
@@ -23572,8 +23625,8 @@ if compare_mode:
         _pay_b = scenario_b.get("combined_repayment") or scenario_b["repayment_result"]
         if payment_varies(_pay_a) or payment_varies(_pay_b):
             _pay_fig = build_comparison_payment_chart(
-                _pay_a, f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
-                _pay_b, f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}")
+                _pay_a, compare_series_label("A", scenario_a, cc_mode_a, _plans_differ),
+                _pay_b, compare_series_label("B", scenario_b, cc_mode_b, _plans_differ))
             if _pay_fig is not None:
                 st.plotly_chart(_pay_fig, use_container_width=True,
                                 config=PLOTLY_CHART_CONFIG)
@@ -23583,8 +23636,8 @@ if compare_mode:
     # container is already a card; a second one inside it would be a card in a
     # card, the same pairing the single branch uses.
     render_net_position_chart(
-        [(f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}", scenario_a),
-         (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
+        [(compare_series_label("A", scenario_a, cc_mode_a, _plans_differ), scenario_a),
+         (compare_series_label("B", scenario_b, cc_mode_b, _plans_differ), scenario_b)],
         city_info["col_index"], get_metro_wage_index(city), roi_horizon_years,
         baseline_head_start_years=max(scenario_a["enrollment_years"],
                                        scenario_b["enrollment_years"]),
