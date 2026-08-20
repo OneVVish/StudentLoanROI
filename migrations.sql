@@ -2232,3 +2232,35 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOL
 -- same pictures at this point in the page. render_payment_chart is still
 -- called from both branches. A future collapse of something the two arms DO
 -- share would be a genuine H2 confound.
+
+-- ---------------------------------------------------------------------------
+-- 2026-08-20: community-college cost moved to IPEDS, and gained a NON-RESIDENT
+-- rate. NO DDL. cc_coa_a / cc_coa_b already exist and still hold the per-year
+-- figure; what changed is where it comes from and that it now depends on a
+-- residency answer the app never asked before.
+--
+-- TWO SEPARATE CHANGES IN ONE COMMIT, and only the second is a real seam.
+--
+-- 1. The in-district figures moved from a hand-typed NCES dict to
+--    data/cc_costs_clean.csv, built from IPEDS by build_cc_costs.py. The two
+--    sources agree closely -- median relative change across the 48 covered
+--    states is 5% -- so this is a refinement rather than a break, and the
+--    corroboration is the point: two independent federal sources landing
+--    within a few percent is what makes either believable. California moved
+--    $1,390 -> $1,288.
+--
+-- 2. A non-resident is now charged the OUT-OF-STATE rate. Before this every
+--    visitor got the resident price whatever state they selected, so any
+--    logged community-college scenario where the visitor was not a resident of
+--    the selected state UNDERSTATES the cost -- by about 2x at the median and
+--    7.7x in California. There is no flag on the old rows saying whether the
+--    visitor was resident, because the app never asked, so those rows cannot
+--    be corrected on read. Treat cc_coa_* before this date as in-district
+--    regardless of the state, which is what it was.
+--
+-- The new share param is cc_res_a ("1"/"0"). It is NOT a column: residency
+-- reaches the database only through the cc_coa_* figure it produces.
+--
+-- Four states are uncovered by IPEDS -- AK, DE, FL, NV -- because their
+-- community colleges award bachelor's degrees and are filed as four-year
+-- institutions. Those fall back to the national figure and the sidebar says so.
