@@ -23409,6 +23409,32 @@ def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
 
 
 if compare_mode:
+    # The verdict renders FIRST here too. Section 5c's net-position block
+    # executes further down -- it needs both scenarios, which are computed
+    # inside the card below -- but writes into this container, so its output
+    # lands above the A/B panels. Same mechanism as the single branch and as
+    # top_actions_container.
+    #
+    # ALIGNING THE ORDER IS AN H2 REQUIREMENT, not a preference. Compare Mode
+    # is the randomly assigned contrast arm, so the two arms are meant to
+    # differ in exactly one way -- contrast framing -- and every other
+    # difference is a confound the study never intended. Leading the single
+    # branch with the verdict and this one with the loan panels was such a
+    # difference, and it was the wrong way round: this is the arm whose entire
+    # purpose is the comparison, and its net-position chart was last on the
+    # page.
+    compare_position_container = st.container(border=True, key=VERDICT_CARD_KEY)
+    # The heading belongs to the container, not to the code below it, so the
+    # card is not an unlabelled chart. Same wording as the single branch's,
+    # because it is the same figure over the same window -- a second phrasing
+    # would be one more difference between the arms.
+    compare_position_container.subheader(
+        f"📊 {roi_horizon_years}-Year Financial Position")
+    compare_position_container.caption(
+        f"Both paths over {roi_horizon_years} years, against "
+        f"{counterfactual_vocab()['instead_of']}. Each scenario's own figures "
+        f"are in its panel below.")
+
     # Compare Mode gets the same carded sections as the single branch. It
     # shipped with none of them, so half of all visitors -- the arm is
     # assigned by coin flip -- saw an uncarded page. Under the H2 parity
@@ -23552,12 +23578,17 @@ if compare_mode:
                 st.plotly_chart(_pay_fig, use_container_width=True,
                                 config=PLOTLY_CHART_CONFIG)
                 st.caption(PAYMENT_CHART_CAPTION)
+    # Executes here (both scenarios exist by now) and RENDERS into the
+    # container reserved at the top of this branch. own_card=False because that
+    # container is already a card; a second one inside it would be a card in a
+    # card, the same pairing the single branch uses.
     render_net_position_chart(
         [(f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}", scenario_a),
          (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
         city_info["col_index"], get_metro_wage_index(city), roi_horizon_years,
         baseline_head_start_years=max(scenario_a["enrollment_years"],
                                        scenario_b["enrollment_years"]),
+        container=compare_position_container, own_card=False,
     )
 
     ai_context = {}
