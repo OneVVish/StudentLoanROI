@@ -11879,6 +11879,10 @@ NET_POSITION_CARD_KEY = "net_position_card"
 VERDICT_CARD_KEY = "verdict_card"
 LOAN_CARD_KEY = "loan_card"
 TAKEHOME_CARD_KEY = "takehome_card"
+# Compare Mode's A/B block. Its own key rather than VERDICT_CARD_KEY because
+# only one branch runs per rerun, so the two never collide, and a distinct
+# name makes it greppable which arm a card belongs to.
+COMPARE_CARD_KEY = "compare_card"
 
 
 def net_position_reference_on() -> bool:
@@ -15504,6 +15508,8 @@ st.markdown(
 RESULT_CARD_TINTS = {
     # key: (light background, light border, dark background, dark border)
     VERDICT_CARD_KEY:      ("#f4f7fb", "#d8e0ea", "#161b23", "#2b323c"),
+    # Compare Mode's headline block, so it takes the verdict tint.
+    COMPARE_CARD_KEY:      ("#f4f7fb", "#d8e0ea", "#161b23", "#2b323c"),
     LOAN_CARD_KEY:         ("#fbf8f3", "#ebe0d2", "#1c1a16", "#35302a"),
     TAKEHOME_CARD_KEY:     ("#f3f9f5", "#d7e8dd", "#151b17", "#28322b"),
     # Compare Mode draws the chart without a section card around it, so it
@@ -23280,140 +23286,149 @@ def build_module_context(prestige_tier_a=None, prestige_tier_b=None,
 
 
 if compare_mode:
-    st.subheader("⚖️ Scenario Comparison")
-    scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
-                                           personal_contribution, city_info["col_index"],
-                                           roi_window_years=roi_horizon_years,
-                                           hs_wage_index=get_metro_wage_index(city),
-                                           enrollment_years=enrollment_years_a,
-                                           working_years=working_years_a,
-                                           baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
-                                           federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
-                                           professional_debt_basis_key=_prof_basis_a,
-                                           **returning_kwargs(), **discounting_kwargs())
-    scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
-                                           personal_contribution_b, city_info["col_index"],
-                                           roi_window_years=roi_horizon_years,
-                                           hs_wage_index=get_metro_wage_index(city),
-                                           enrollment_years=enrollment_years_b,
-                                           working_years=working_years_b,
-                                           baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
-                                           federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
-                                           professional_debt_basis_key=_prof_basis_b,
-                                           **returning_kwargs(), **discounting_kwargs())
+    # Compare Mode gets the same carded sections as the single branch. It
+    # shipped with none of them, so half of all visitors -- the arm is
+    # assigned by coin flip -- saw an uncarded page. Under the H2 parity
+    # rule that is a difference between the arms the study never intended.
+    with st.container(border=True, key=COMPARE_CARD_KEY):
+        st.subheader("⚖️ Scenario Comparison")
+        scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
+                                               personal_contribution, city_info["col_index"],
+                                               roi_window_years=roi_horizon_years,
+                                               hs_wage_index=get_metro_wage_index(city),
+                                               enrollment_years=enrollment_years_a,
+                                               working_years=working_years_a,
+                                               baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
+                                               federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
+                                               professional_debt_basis_key=_prof_basis_a,
+                                               **returning_kwargs(), **discounting_kwargs())
+        scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
+                                               personal_contribution_b, city_info["col_index"],
+                                               roi_window_years=roi_horizon_years,
+                                               hs_wage_index=get_metro_wage_index(city),
+                                               enrollment_years=enrollment_years_b,
+                                               working_years=working_years_b,
+                                               baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
+                                               federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
+                                               professional_debt_basis_key=_prof_basis_b,
+                                               **returning_kwargs(), **discounting_kwargs())
 
-    # Both wage charts reserve the same number of geography rows, so the
-    # national curve -- the one series genuinely common to A and B -- sits at
-    # the same height in each column. Computed before either panel renders,
-    # since neither can see the other's occupation.
-    _wage_slots = max(wage_distribution_rows(scenario_a["major"]),
-                       wage_distribution_rows(scenario_b["major"]))
+        # Both wage charts reserve the same number of geography rows, so the
+        # national curve -- the one series genuinely common to A and B -- sits at
+        # the same height in each column. Computed before either panel renders,
+        # since neither can see the other's occupation.
+        _wage_slots = max(wage_distribution_rows(scenario_a["major"]),
+                           wage_distribution_rows(scenario_b["major"]))
 
-    col_a, col_b = st.columns(2)
-    render_scenario_panel(
-        col_a, scenario_a, "A", roi_horizon_years,
-        loan_amount, interest_rate, repayment_strategy,
-        city_info["col_index"], career_data_source,
-        hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
-        cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
-        loan_basis=loan_basis_a, program_years=program_years_a, cost_years=cost_years_a,
-        current_age=st.session_state.get("current_age") if is_returning else None,
-        loan_source=loan_source_a, default_loan=default_loan_a,
-        reported_debt=reported_debt_a, school_name=school_name_a,
-        simplified_scale=simplified_scale_a, coa_match=coa_match_a,
-    )
-    render_scenario_panel(
-        col_b, scenario_b, "B", roi_horizon_years,
-        loan_amount_b, interest_rate_b, repayment_strategy_b,
-        city_info["col_index"], career_data_source,
-        hs_wage_index=get_metro_wage_index(city),
-        federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
-        cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
-        loan_basis=loan_basis_b, program_years=program_years_b, cost_years=cost_years_b,
-        current_age=st.session_state.get("current_age") if is_returning else None,
-        loan_source=loan_source_b, default_loan=default_loan_b,
-        reported_debt=reported_debt_b, school_name=school_name_b,
-        simplified_scale=simplified_scale_b, coa_match=coa_match_b,
-    )
+        col_a, col_b = st.columns(2)
+        render_scenario_panel(
+            col_a, scenario_a, "A", roi_horizon_years,
+            loan_amount, interest_rate, repayment_strategy,
+            city_info["col_index"], career_data_source,
+            hs_wage_index=get_metro_wage_index(city),
+            federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
+            cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
+            loan_basis=loan_basis_a, program_years=program_years_a, cost_years=cost_years_a,
+            current_age=st.session_state.get("current_age") if is_returning else None,
+            loan_source=loan_source_a, default_loan=default_loan_a,
+            reported_debt=reported_debt_a, school_name=school_name_a,
+            simplified_scale=simplified_scale_a, coa_match=coa_match_a,
+        )
+        render_scenario_panel(
+            col_b, scenario_b, "B", roi_horizon_years,
+            loan_amount_b, interest_rate_b, repayment_strategy_b,
+            city_info["col_index"], career_data_source,
+            hs_wage_index=get_metro_wage_index(city),
+            federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
+            cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
+            loan_basis=loan_basis_b, program_years=program_years_b, cost_years=cost_years_b,
+            current_age=st.session_state.get("current_age") if is_returning else None,
+            loan_source=loan_source_b, default_loan=default_loan_b,
+            reported_debt=reported_debt_b, school_name=school_name_b,
+            simplified_scale=simplified_scale_b, coa_match=coa_match_b,
+        )
 
-    # Career mode's underemployment text is national and identical for both
-    # scenarios, so it renders once here rather than twice inside the panels.
-    # Major mode's is per-major and lives in the panel instead.
-    if dataset_mode == DATASET_MODE_CAREER:
-        # Same reasoning for the wage-distribution explanation: the CHARTS are
-        # per-occupation and genuinely differ between A and B, but the sentence
-        # explaining how to read one is identical, and printing it under both
-        # columns just doubled it.
-        if any(get_wage_distribution_context(s["major"])
-               for s in (scenario_a, scenario_b)):
-            st.caption(WAGE_DISTRIBUTION_CAPTION)
-        st.info(underemployment_disclosure(None))
+        # Career mode's underemployment text is national and identical for both
+        # scenarios, so it renders once here rather than twice inside the panels.
+        # Major mode's is per-major and lives in the panel instead.
+        if dataset_mode == DATASET_MODE_CAREER:
+            # Same reasoning for the wage-distribution explanation: the CHARTS are
+            # per-occupation and genuinely differ between A and B, but the sentence
+            # explaining how to read one is identical, and printing it under both
+            # columns just doubled it.
+            if any(get_wage_distribution_context(s["major"])
+                   for s in (scenario_a, scenario_b)):
+                st.caption(WAGE_DISTRIBUTION_CAPTION)
+            st.info(underemployment_disclosure(None))
 
-    # Take-home, per scenario. Compare Mode had none of this: the contrast arm
-    # is randomly assigned, so half of all visitors never saw their disposable
-    # income, which made the two arms differ by more than the contrast H2
-    # claims to measure. Charts off -- the columns are narrow and the same
-    # split is stated numerically by the ratio metric.
-    st.subheader(f"🏙️ Real-World Take-Home: {city}")
-    th_col_a, th_col_b = st.columns(2)
-    # Returns captured for the PDF below, same as the single branch does --
-    # the compare report renders these stages as tables.
-    with th_col_a:
-        panel_heading(f"A: {scenario_a['major']}")
-        _th_a = render_takehome_block(scenario_a, major, city, city_info,
-                                      show_charts=False, heading=False, stage_layout="stacked")
-    with th_col_b:
-        panel_heading(f"B: {scenario_b['major']}")
-        _th_b = render_takehome_block(scenario_b, major_b, city, city_info,
-                                      show_charts=False, heading=False, stage_layout="stacked")
+        # Take-home, per scenario. Compare Mode had none of this: the contrast arm
+        # is randomly assigned, so half of all visitors never saw their disposable
+        # income, which made the two arms differ by more than the contrast H2
+        # claims to measure. Charts off -- the columns are narrow and the same
+        # split is stated numerically by the ratio metric.
+    with st.container(border=True, key=TAKEHOME_CARD_KEY):
+        st.subheader(f"🏙️ Real-World Take-Home: {city}")
+        th_col_a, th_col_b = st.columns(2)
+        # Returns captured for the PDF below, same as the single branch does --
+        # the compare report renders these stages as tables.
+        with th_col_a:
+            panel_heading(f"A: {scenario_a['major']}")
+            _th_a = render_takehome_block(scenario_a, major, city, city_info,
+                                          show_charts=False, heading=False, stage_layout="stacked")
+        with th_col_b:
+            panel_heading(f"B: {scenario_b['major']}")
+            _th_b = render_takehome_block(scenario_b, major_b, city, city_info,
+                                          show_charts=False, heading=False, stage_layout="stacked")
 
-    # The bars render BELOW the two scenario columns, not inside them, and one
-    # row per career stage puts A next to B.
-    #
-    # Inside the columns they would be half-width and each scenario would own
-    # its own x-scale, so the reader's actual question -- is B's payment a
-    # bigger bite than A's -- would be answered by two bars that are not to
-    # scale with each other. Below, at the top level, all four share one axis
-    # and one nesting level is free again (the columns above spent this
-    # branch's only one, which is why the NUMBERS up there are stacked).
-    #
-    # Grouped by stage rather than by scenario for the same reason the
-    # balance and payment charts overlay A and B instead of drawing two: the
-    # comparison should be adjacent, not held in the reader's head.
-    # Merged by stage LABEL, never zipped: a dentist has four stages and a
-    # software developer two, and zip() silently truncates to the shorter --
-    # A's Year 20 and Year 30 computed, returned, and dropped, with the section
-    # still rendering and still looking complete. See pair_takehome_stages.
-    _flow_rows = takehome_flow_rows(
-        _th_a["stages"], _th_b["stages"],
-        f"A: {scenario_a['major']}", f"B: {scenario_b['major']}")
-    if _flow_rows:
-        render_salary_flow_charts(_flow_rows, key_prefix="compare")
+        # The bars render BELOW the two scenario columns, not inside them, and one
+        # row per career stage puts A next to B.
+        #
+        # Inside the columns they would be half-width and each scenario would own
+        # its own x-scale, so the reader's actual question -- is B's payment a
+        # bigger bite than A's -- would be answered by two bars that are not to
+        # scale with each other. Below, at the top level, all four share one axis
+        # and one nesting level is free again (the columns above spent this
+        # branch's only one, which is why the NUMBERS up there are stacked).
+        #
+        # Grouped by stage rather than by scenario for the same reason the
+        # balance and payment charts overlay A and B instead of drawing two: the
+        # comparison should be adjacent, not held in the reader's head.
+        # Merged by stage LABEL, never zipped: a dentist has four stages and a
+        # software developer two, and zip() silently truncates to the shorter --
+        # A's Year 20 and Year 30 computed, returned, and dropped, with the section
+        # still rendering and still looking complete. See pair_takehome_stages.
+        _flow_rows = takehome_flow_rows(
+            _th_a["stages"], _th_b["stages"],
+            f"A: {scenario_a['major']}", f"B: {scenario_b['major']}")
+        if _flow_rows:
+            render_salary_flow_charts(_flow_rows, key_prefix="compare")
 
-    st.plotly_chart(
-        build_comparison_balance_chart(
-            scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
-            scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}",
-        ),
-        use_container_width=True, config=PLOTLY_CHART_CONFIG,
-    )
-    # ONE overlaid chart, like the balance chart above it -- comparing the two
-    # payment paths is the whole point of this arm, and two separate charts
-    # made the reader do that comparison by eye across a gap. Rendered when
-    # EITHER side varies: a fixed plan's flat line is exactly the thing a
-    # climbing one should be read against, so suppressing it would hide half
-    # the comparison.
-    _pay_a = scenario_a.get("combined_repayment") or scenario_a["repayment_result"]
-    _pay_b = scenario_b.get("combined_repayment") or scenario_b["repayment_result"]
-    if payment_varies(_pay_a) or payment_varies(_pay_b):
-        _pay_fig = build_comparison_payment_chart(
-            _pay_a, f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
-            _pay_b, f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}")
-        if _pay_fig is not None:
-            st.plotly_chart(_pay_fig, use_container_width=True,
-                            config=PLOTLY_CHART_CONFIG)
-            st.caption(PAYMENT_CHART_CAPTION)
+    # The comparison charts get the loan tint, matching the single branch
+    # where the same charts live inside the Loan Information card.
+    with st.container(border=True, key=LOAN_CARD_KEY):
+        st.plotly_chart(
+            build_comparison_balance_chart(
+                scenario_a["repayment_result"]["schedule"], f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
+                scenario_b["repayment_result"]["schedule"], f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}",
+            ),
+            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+        )
+        # ONE overlaid chart, like the balance chart above it -- comparing the two
+        # payment paths is the whole point of this arm, and two separate charts
+        # made the reader do that comparison by eye across a gap. Rendered when
+        # EITHER side varies: a fixed plan's flat line is exactly the thing a
+        # climbing one should be read against, so suppressing it would hide half
+        # the comparison.
+        _pay_a = scenario_a.get("combined_repayment") or scenario_a["repayment_result"]
+        _pay_b = scenario_b.get("combined_repayment") or scenario_b["repayment_result"]
+        if payment_varies(_pay_a) or payment_varies(_pay_b):
+            _pay_fig = build_comparison_payment_chart(
+                _pay_a, f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}",
+                _pay_b, f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}")
+            if _pay_fig is not None:
+                st.plotly_chart(_pay_fig, use_container_width=True,
+                                config=PLOTLY_CHART_CONFIG)
+                st.caption(PAYMENT_CHART_CAPTION)
     render_net_position_chart(
         [(f"A: {scenario_a['major']}{cc_chart_label_suffix(cc_mode_a)}", scenario_a),
          (f"B: {scenario_b['major']}{cc_chart_label_suffix(cc_mode_b)}", scenario_b)],
