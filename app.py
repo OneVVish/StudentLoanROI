@@ -15507,14 +15507,19 @@ st.markdown(
 # already the odd one out before this loop existed.
 RESULT_CARD_TINTS = {
     # key: (light background, light border, dark background, dark border)
-    VERDICT_CARD_KEY:      ("#f4f7fb", "#d8e0ea", "#161b23", "#2b323c"),
+    # DEEPENED 2026-08-20. The first set sat about two percent off white, which
+    # was reported twice as "I don't see cards" -- on a bright screen the tint
+    # was invisible and only the border showed. These are roughly three times
+    # the depth and still nowhere near the saturation of the chart series they
+    # frame, which is the constraint that made them pale in the first place.
+    VERDICT_CARD_KEY:      ("#e8eef7", "#c6d4e6", "#161b23", "#2b323c"),
     # Compare Mode's headline block, so it takes the verdict tint.
-    COMPARE_CARD_KEY:      ("#f4f7fb", "#d8e0ea", "#161b23", "#2b323c"),
-    LOAN_CARD_KEY:         ("#fbf8f3", "#ebe0d2", "#1c1a16", "#35302a"),
-    TAKEHOME_CARD_KEY:     ("#f3f9f5", "#d7e8dd", "#151b17", "#28322b"),
+    COMPARE_CARD_KEY:      ("#e8eef7", "#c6d4e6", "#161b23", "#2b323c"),
+    LOAN_CARD_KEY:         ("#f7efe2", "#e0cdb2", "#1c1a16", "#35302a"),
+    TAKEHOME_CARD_KEY:     ("#e7f3ec", "#c2ddcd", "#151b17", "#28322b"),
     # Compare Mode draws the chart without a section card around it, so it
     # keeps a card of its own. Same tint as the verdict card it stands in for.
-    NET_POSITION_CARD_KEY: ("#f4f7fb", "#d8e0ea", "#161b23", "#2b323c"),
+    NET_POSITION_CARD_KEY: ("#e8eef7", "#c6d4e6", "#161b23", "#2b323c"),
 }
 
 st.markdown(
