@@ -3571,8 +3571,13 @@ REPAYMENT_STRATEGY_HELP = (
     "set by how much you owe -- nothing is forgiven. The pre-2026 plans "
     "(Standard 10-Year, IBR-style IDR) are closed to new loans; tick "
     "'Compare against pre-2026 repayment plans' under Advanced Analysis to "
-    "see them anyway. Details in Methodology."
+    "see them anyway."
 )
+
+# The guide that covers this control at length. A slug rather than a URL: the
+# link has to be built by guides_url, which carries ?test= and ?src= out of the
+# app, and which is defined ~1,750 lines below this constant.
+REPAYMENT_GUIDE_SLUG = "repayment-plans-2026-what-changed"
 
 
 def income_driven_label_for(start_year) -> str:
@@ -5311,6 +5316,29 @@ def internal_tool_url(tool: str = "") -> str:
     # could get wrong is naming the wrong origin.
     params["from"] = current_page_key()
     return "./?" + urlencode(params) if params else "./"
+
+
+def repayment_strategy_help() -> str:
+    """REPAYMENT_STRATEGY_HELP plus a pointer to the guide on the same subject.
+
+    A FUNCTION, not a longer constant, because the link has to come from
+    guides_url and that is defined below the constant. Same treatment
+    hs_young_wage_disclosure gets for the Methodology sentence it splices in.
+
+    Both call sites read this rather than the constant, so the sidebar's two
+    Repayment Strategy controls (Scenario A and Scenario B) cannot end up
+    offering different further reading -- which is the arm-parity failure this
+    codebase keeps recording, arriving through a tooltip.
+
+    The pointer REPLACES "Details in Methodology" rather than joining it. The
+    Methodology is a reference: it states the assumption and cites it. Somebody
+    hovering this control is asking what the two plans are, which is a question
+    the guide answers with worked numbers and the Methodology answers with a
+    citation.
+    """
+    return (f"{REPAYMENT_STRATEGY_HELP} Full explanation, with what each plan "
+            f"costs on the same balance: [the 2026 repayment plans]"
+            f"({guides_url(REPAYMENT_GUIDE_SLUG)}).")
 
 
 def guides_url(slug: str = "") -> str:
@@ -16943,7 +16971,7 @@ repayment_strategy = _sb_pay.selectbox(
     "How you'll repay", repayment_strategy_options,
     key="repayment_strategy_a",
     on_change=lambda: mark_interaction("repayment_strategy_a"),
-    help=REPAYMENT_STRATEGY_HELP,
+    help=repayment_strategy_help(),
 )
 
 # Dependent children, for RAP only -- it reduces the monthly payment by $50 per
@@ -18461,7 +18489,7 @@ if compare_mode:
         repayment_strategy_b = st.selectbox(
             "How you'll repay", repayment_strategy_options_b,
             key="repayment_strategy_b", on_change=lambda: mark_interaction("repayment_strategy_b"),
-            help=REPAYMENT_STRATEGY_HELP,
+            help=repayment_strategy_help(),
         )
 
 
