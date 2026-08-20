@@ -70,6 +70,9 @@ COST_FLOOR = 500
 # $8,000, so $10,000 leaves real headroom and still traps an extra zero on all
 # fifty entries.
 COST_CEILING = 10_000
+# The out-of-state rate is a different quantity and needs its own ceiling:
+# it runs to $17,740 in Tennessee, which is real rather than a typo.
+OUT_OF_STATE_CEILING = 30_000
 # NO RELATIVE OUTLIER CHECK, and that is a deliberate deletion rather than an
 # omission. One was written -- "no state above 3x the table median" -- and it
 # was DEAD: the median is $4,790, so it could only fire above $14,370, which the
@@ -197,10 +200,59 @@ def check_fallback(ns):
     return problems
 
 
+def check_residency(ns):
+    """The IPEDS file carries both rates, and a non-resident is never cheaper."""
+    problems = []
+    table = ns["load_cc_costs"]()
+    if not table:
+        problems.append(
+            "  data/cc_costs_clean.csv did not load, so every state falls back "
+            "to the hand-typed in-district dict and the non-resident rate is "
+            "the national median for everybody. Rebuild it with "
+            "build_cc_costs.py")
+        return problems
+
+    for state, rates in sorted(table.items()):
+        if rates["out"] < rates["in"]:
+            problems.append(
+                f"  {state} prices a non-resident (${rates['out']:,.0f}) BELOW "
+                f"a resident (${rates['in']:,.0f}), which no community college "
+                f"does. The two columns are probably swapped")
+        for label, value in (("in", rates["in"]), ("out", rates["out"])):
+            if not (COST_FLOOR <= value <= OUT_OF_STATE_CEILING):
+                problems.append(
+                    f"  {state} {label}-rate is ${value:,.0f}, outside the "
+                    f"${COST_FLOOR:,} to ${OUT_OF_STATE_CEILING:,} band")
+
+    # THE DEFECT THIS WHOLE PATH EXISTS TO REMOVE. A non-resident in a state
+    # the file does not cover must fall back to a NON-RESIDENT figure. Falling
+    # back to the in-district default would price them as a local, silently,
+    # which is exactly what the app did before this file existed.
+    resolve = ns["community_college_cost_for_state"]
+    in_default = ns["COMMUNITY_COLLEGE_COA_DEFAULT"]
+    for absent in (None, "ZZ"):
+        got = resolve(absent, False)
+        if got <= in_default:
+            problems.append(
+                f"  a non-resident with no state data resolved to ${got:,}, at "
+                f"or below the in-district default of ${in_default:,}. That "
+                f"prices a non-resident as a local, which is the defect the "
+                f"out-of-state column exists to fix")
+
+    # And residency must actually change the answer where the data supports it.
+    if resolve("CA", True) == resolve("CA", False):
+        problems.append(
+            "  the in_district flag changes nothing for California, where the "
+            "published gap is nearly eightfold, so the flag is not reaching "
+            "the lookup")
+    return problems
+
+
 def main() -> int:
     ns = load_app_namespace()
     problems = (check_coverage(ns) + check_keying(ns)
-                + check_values(ns) + check_fallback(ns))
+                + check_values(ns) + check_fallback(ns)
+                + check_residency(ns))
 
     table = ns["COMMUNITY_COLLEGE_COST_BY_STATE"]
     if problems:

@@ -2267,11 +2267,81 @@ SEARCH_REGIONS = {
              "UT", "WA", "WY"),
 }
 
+CC_COSTS_PATH = "data/cc_costs_clean.csv"
+
+
+@st.cache_data(show_spinner=False)
+def load_cc_costs() -> dict:
+    """Per-state community-college tuition and fees, both residency rates.
+
+    From build_cc_costs.py over IPEDS: median annual tuition plus required fees
+    at each state's public two-year institutions, in-district and out-of-state
+    out of ONE parse of one release so the two can never disagree about vintage.
+
+    Returns {state: {"in": float, "out": float}}. A missing file degrades to an
+    empty dict, which sends every lookup to COMMUNITY_COLLEGE_COST_BY_STATE
+    below -- a deploy without the CSV loses the non-resident rate rather than
+    the page.
+    """
+    try:
+        frame = pd.read_csv(CC_COSTS_PATH)
+    except Exception:
+        return {}
+    return {row["state"]: {"in": float(row["in_district"]),
+                           "out": float(row["out_of_state"])}
+            for _, row in frame.iterrows()
+            if pd.notna(row.get("in_district")) and pd.notna(row.get("out_of_state"))}
+
+
+def cc_national_out_of_state() -> int:
+    """Median out-of-state figure across the states the IPEDS file covers.
+
+    Falls back to twice the in-district national default when the file is
+    absent, which is the observed national multiple -- deliberately NOT the
+    in-district figure, since silently pricing a non-resident as a resident is
+    the exact defect this whole path exists to remove.
+    """
+    table = load_cc_costs()
+    if table:
+        values = sorted(v["out"] for v in table.values())
+        return int(round(values[len(values) // 2]))
+    return COMMUNITY_COLLEGE_COA_DEFAULT * 2
+
+
+def cc_state_is_covered(state_key) -> bool:
+    """Whether IPEDS prices this state's public two-year sector at all.
+
+    False for Alaska, Delaware, Florida and Nevada, whose community colleges
+    award bachelor's degrees and are therefore filed as four-year institutions.
+    The caption says so rather than letting a national fallback pass as a state
+    figure.
+    """
+    return bool(state_key) and state_key in load_cc_costs()
+
+
 # Helper: default annual CC cost for a state abbrev (None/unknown -> national).
-def community_college_cost_for_state(state_key) -> int:
+#
+# `in_district` is the residency question and it is a REAL fork, not a rounding:
+# the out-of-state rate is about twice the in-district one at the median and
+# 7.7x in California, which is simultaneously the cheapest state for a resident
+# and the likeliest to be picked by somebody who is not one. Before this the app
+# charged every visitor the resident price whatever state they chose, while the
+# four-year side had been residency-aware from the start.
+#
+# It defaults to True so every existing caller keeps the behaviour it had.
+def community_college_cost_for_state(state_key, in_district: bool = True) -> int:
+    table = load_cc_costs()
+    if state_key and state_key in table:
+        return int(round(table[state_key]["in" if in_district else "out"]))
+    # Uncovered state, or no CSV. The hand-typed NCES dict is in-district only,
+    # so a non-resident there falls back to the national out-of-state median
+    # rather than being quietly handed a resident price.
+    if not in_district:
+        return cc_national_out_of_state()
     if not state_key:
         return COMMUNITY_COLLEGE_COA_DEFAULT
-    return COMMUNITY_COLLEGE_COST_BY_STATE.get(state_key, COMMUNITY_COLLEGE_COA_DEFAULT)
+    return COMMUNITY_COLLEGE_COST_BY_STATE.get(state_key,
+                                               COMMUNITY_COLLEGE_COA_DEFAULT)
 
 # Cost of Attendance inflation estimate: CAGR between these two fixed
 # College Scorecard data years (school-specific, via the API's year-prefixed
@@ -6062,6 +6132,7 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
                         grants_per_year_b=None, interest_rate_b=None, repayment_strategy_b=None,
                         start_year_a=None, start_year_b=None, roi_horizon_years=None,
                         cc_mode_a="none", cc_state_a="__national__", cc_coa_per_year_a=None,
+                        cc_in_district_a=True,
                         cc_mode_b="none", cc_state_b="__national__", cc_coa_per_year_b=None) -> dict:
     """Every Scenario A (and, when compare_mode, Scenario B) input as a flat
     {query_param_name: value} dict of strings -- the exact shape
@@ -6107,6 +6178,11 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
         "cc_mode_a": cc_mode_a,
         "cc_state_a": cc_state_a,
         "cc_coa_a": str(cc_coa_per_year_a),
+        # Residency rides the link because it MOVES THE PRICE: the out-of-state
+        # rate is about twice the in-district one at the median and 7.7x in
+        # California. A link that dropped it would rebuild the scenario at the
+        # other rate and look entirely normal doing it.
+        "cc_res_a": "1" if cc_in_district_a else "0",
     }
     # Returning-student mode. Read from session_state rather than added to this
     # function's signature, the same way loan_mode/dependency are -- they have
@@ -16434,8 +16510,45 @@ if cc_transfer_a:
              "your school's state (then your work city's), and sets the cost "
              "below. Source: NCES via the Education Data Initiative (2025).",
     )
+    # RESIDENCY, the same question the four-year school already asks. Defaults
+    # to true only when the chosen community-college state is the one the
+    # visitor looks resident in, so picking another state does not quietly hand
+    # them that state's resident price.
+    _cc_state_resolved_a = None if cc_state_key_a == "__national__" else cc_state_key_a
+    # Derived inline, NOT via suggested_home_state(): that is defined ~4,000
+    # lines below this point, so calling it here is a NameError at runtime that
+    # py_compile cannot see. These are the same two signals it reads, and both
+    # are already resolved a few lines above.
+    _home_a = (_school_state_a if st.session_state.get("in_state_a") else None) \
+        or _city_state_a
+    _shared_res_a = get_shared_default("cc_res_a", "")
+    st.session_state.setdefault(
+        "cc_in_district_a",
+        _shared_res_a == "1" if _shared_res_a in ("0", "1")
+        else (bool(_cc_state_resolved_a) and _cc_state_resolved_a == _home_a))
+    cc_in_district_a = _sb_pay.checkbox(
+        "I'd pay in-district community-college rates",
+        key="cc_in_district_a",
+        on_change=lambda: mark_interaction("cc_in_district_a"),
+        help="Community colleges charge residents of their own district far "
+             "less than everyone else: about twice as much at the median and "
+             "nearly eight times in California. Tick this only if you live in "
+             "the state selected above. Source: IPEDS 2023.",
+    )
     _state_cost_a = community_college_cost_for_state(
-        None if cc_state_key_a == "__national__" else cc_state_key_a)
+        _cc_state_resolved_a, in_district=cc_in_district_a)
+    # The autofill must re-fire when RESIDENCY changes, not only when the state
+    # does. Without this the visitor unticks the box, the price stays at the
+    # resident figure, and the control silently does nothing.
+    st.session_state.setdefault("cc_residency_seen_a", cc_in_district_a)
+    if st.session_state["cc_residency_seen_a"] != cc_in_district_a:
+        st.session_state["cc_residency_seen_a"] = cc_in_district_a
+        st.session_state["cc_coa_per_year_a"] = int(_state_cost_a)
+    if _cc_state_resolved_a and not cc_state_is_covered(_cc_state_resolved_a):
+        _sb_pay.caption(
+            f"IPEDS files {US_STATES[_cc_state_resolved_a]}'s community colleges "
+            f"as four-year institutions, because they award bachelor's degrees, "
+            f"so this is a national figure rather than that state's.")
     # Cost auto-fills from the state, but a manual (or shared-link) override
     # survives until the state itself changes -- same pattern as the COA/loan
     # auto-fill below.
@@ -16455,6 +16568,11 @@ if cc_transfer_a:
 else:
     cc_coa_per_year_a = 0.0
     cc_state_key_a = "__national__"
+    # Set here too, or the four build_share_params call sites raise NameError
+    # the moment a visitor is not on a community-college path -- which is the
+    # default. True is the harmless value: with no CC years there is no CC cost
+    # for a residency rate to apply to.
+    cc_in_district_a = True
 # Loan amount is derived, not entered: Cost of Attendance minus whatever
 # isn't borrowed, per financed year. With a community-college path the CC years
 # add $0 to the loan (paid out of pocket) -- only the university_years are
@@ -23480,6 +23598,7 @@ if compare_mode:
         start_year_a=start_year_a, start_year_b=start_year_b,
         roi_horizon_years=roi_horizon_years,
         cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+        cc_in_district_a=cc_in_district_a,
         cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
     ), selected_salary_flow_period(), loan_amount, loan_amount_b,
        net_position_overlay_mode())
@@ -23528,6 +23647,7 @@ if compare_mode:
                 start_year_a=start_year_a, start_year_b=start_year_b,
                 roi_horizon_years=roi_horizon_years,
                 cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+        cc_in_district_a=cc_in_district_a,
                 cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
             )})
             save_scenario_share({**build_scenario_context(
@@ -23939,6 +24059,7 @@ else:
         interest_rate, repayment_strategy, False, start_year_a=start_year_a,
         roi_horizon_years=roi_horizon_years,
         cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+        cc_in_district_a=cc_in_district_a,
     ), selected_salary_flow_period(), loan_amount,
        # The overlay MODE, not net_position_reference_on(). That boolean is
        # False for "just this path" AND for "the other 2026 plan", so the two
@@ -23983,6 +24104,7 @@ else:
                 interest_rate, repayment_strategy, False, start_year_a=start_year_a,
                 roi_horizon_years=roi_horizon_years,
                 cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+        cc_in_district_a=cc_in_district_a,
             )})
             save_scenario_share({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
