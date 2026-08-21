@@ -105,6 +105,11 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [What the extra year of California community college buys](https://worthmydegree.com/charts#community-college-both-careers):
+  The two credentials a California community college awards, side by
+  side and to the same scale. Two years and about $2,576 for an
+  associate's degree, against one year and about $1,288 for a
+  certificate, measured by total pay over the first ten years of work.
 - [Two years of California community college costs $2,576](https://worthmydegree.com/charts#community-college-careers):
   Careers BLS says need an associate's degree, at California wages, by
   total pay over ten years. Two years in-district is about $2,576
