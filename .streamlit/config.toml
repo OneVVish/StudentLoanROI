@@ -12,36 +12,3 @@ toolbarMode = "minimal"
 # emails and og:image can reference them at worthmydegree.com. The files are
 # COPIES of brand/ output; re-copy after regenerating (brand/README.md).
 enableStaticServing = true
-
-# THE SITE IS SERVED FROM worthmydegree.com THROUGH A CLOUDFLARE WORKER, and
-# Streamlit Community Cloud does not know that. Its /_stcore/host-config
-# advertises a fixed allowedOrigins list -- https://*.streamlit.app,
-# share.streamlit.io and friends -- and our domain is not in it and cannot be
-# added, because that list comes from the platform rather than from this file.
-#
-# With the origin check on, /_stcore/health and the websocket both answer 403 to
-# a request arriving from worthmydegree.com, which the frontend surfaces as
-# "Cannot connect to Streamlit (HTTP status: 403) ... could be due to the app's
-# CORS settings". The app itself is fine: studentloanroi.streamlit.app serves it
-# perfectly at the same moment, which is how to tell this apart from a crash.
-#
-# Observed 2026-08-21, immediately after a reboot, with no change to worker.js
-# routing and none to this file since 2026-08-11. Community Cloud re-provisioned
-# with the check enforced; it had been lax before. Custom domains are not an
-# officially supported Community Cloud feature, so expect this to be able to
-# come back.
-#
-# WHAT IT COSTS. Turning off XSRF protection means a third-party page can cause
-# a visitor's browser to make requests to this app. There is no login, no
-# account and nothing to take over, so the exposure is limited to the writes the
-# app makes on its own: a pageview row, a scenario_event, and the survey. Rows
-# rather than damage. That is the trade being made, and it is worth revisiting.
-#
-# THE NARROWER FIX, if it is ever worth the risk: have the Worker rewrite the
-# Origin header on /_stcore requests to the .streamlit.app host, so the check
-# passes with XSRF protection left on. Not done here because it touches the
-# websocket path, and CLAUDE.md records that wrapping that path is how you hang
-# every session at once -- not a change to make during an outage, with no way to
-# test it except in production.
-enableCORS = false
-enableXsrfProtection = false
