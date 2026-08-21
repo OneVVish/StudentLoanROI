@@ -620,7 +620,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     if eligible:
         chart_cards = "\n".join(
             f'''    <a class="info-card" href="/charts#{c["slug"]}">
-      <img src="/app/static/{c["land"]}" alt="{c["description"]}"
+      <img src="/app/static/{c["land_url"]}" alt="{c["description"]}"
            loading="lazy" width="640" height="640">
       <b>{c["title"]}</b><span>{c["summary"]}</span></a>'''
             for c in eligible[:2])
@@ -1356,6 +1356,19 @@ CHART_CARD_W, CHART_CARD_H = 720, 405     # 16:9, matching the guide cards
 CHART_LAND_PX = 640
 
 
+def cache_bust(name: str) -> str:
+    """`?v=<content hash>` for a stable-named asset, or "" when it is absent.
+
+    The query is enough: Cloudflare's Cache API and every browser key on the
+    full URL, so changed bytes get a new key without renaming a committed file
+    and without touching the several places that reference these names.
+    """
+    path = ROOT / "static" / name
+    if not path.exists():
+        return ""
+    return "?v=" + hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+
+
 def _chart_jpeg(source: str, out: str, width: int, box=None, pad=None) -> bool:
     """One web-sized JPEG in static/ from a full-resolution chart PNG.
 
@@ -1446,6 +1459,21 @@ def load_charts() -> list:
                             box=(CHART_CARD_W, CHART_CARD_H))
             and _chart_jpeg(meta["image"], meta["land"], 0,
                             pad=(CHART_LAND_PX, CHART_LAND_PX)))
+        # A CORRECTED CHART IS INVISIBLE FOR AN HOUR WITHOUT THIS. These
+        # filenames are STABLE and the file is regenerated in place, so a
+        # redeploy mints no new URL and the edge keeps serving the old bytes
+        # for the whole /app/static TTL. That is the opposite of the assumption
+        # EDGE_CACHED rests on -- Streamlit's own bundles are content-hashed, so
+        # a redeploy renames them and the TTL can never serve a stale byte.
+        # Reported as "the images in the gallery are the older versions".
+        # A SEPARATE KEY, not the filename with a query glued on. Three
+        # consumers mean "a file on disk" (the two _chart_jpeg calls above and
+        # check_content's served-image sweep) and three mean "a URL a browser
+        # fetches". Overwriting the one key made the guard report every chart in
+        # the gallery as a missing image, which is the guard working correctly
+        # against a name that had quietly changed meaning.
+        for key in ("full", "card", "land"):
+            meta[f"{key}_url"] = meta[key] + cache_bust(meta[key])
         charts.append(meta)
     return sorted(charts, key=lambda m: m["date"], reverse=True)
 
@@ -1551,9 +1579,9 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
             # second case anyway; this keeps the page honest in the meantime.
             continue
         cards.append(f'''  <div class="chart-card" id="{c["slug"]}">
-    <a class="shot" href="/app/static/{c["full"]}" target="_blank" rel="noopener"
+    <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: {c["title"]}">
-      <img src="/app/static/{c["card"]}" alt="{c["description"]}"
+      <img src="/app/static/{c["card_url"]}" alt="{c["description"]}"
            loading="lazy" width="720" height="405"></a>
     <b>{c["title"]}</b>
     <span class="sum">{c["summary"]}</span>
@@ -2098,7 +2126,7 @@ def missing_static(html: str, pages: dict) -> list:
     """
     refs = set()
     for doc in (html, *pages.values()):
-        refs |= set(re.findall(r'/app/static/([^"\')\s]+)', doc))
+        refs |= set(re.findall(r'/app/static/([^"\')\s?]+)', doc))
     return sorted(r for r in refs if not (ROOT / "static" / r).exists())
 
 
