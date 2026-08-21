@@ -6409,10 +6409,29 @@ def session_query_params() -> dict:
 # iframe layers exist in between (confirmed via a live browser test
 # against the deployed app, where window.parent.location.href returned
 # the wrapper iframe's own URL, not the page the visitor actually sees).
+# PINNED TO THE CANONICAL HOST, not window.top.location.href.
+#
+# The app answers on two hosts: worthmydegree.com (Railway, canonical) and the
+# legacy studentloanroi.streamlit.app. Copying the address bar meant a visitor
+# on the legacy host handed NEW recipients a legacy link. Nothing broke -- the
+# scenario round-trips identically -- but the old URL exists to keep already
+# printed material working, not to mint more of itself, and every such share
+# split traffic attribution across two hosts and worked against the canonical
+# consolidation the edge layer is for.
+#
+# The QUERY STRING is what carries the scenario, so it is preserved exactly;
+# only the origin is replaced. pathname rides along rather than being assumed
+# to be "/" so a future subpath deployment cannot silently drop it.
+#
+# {APP_URL} is substituted by copy_url_to_clipboard_js() at CALL time. It
+# cannot be an f-string here: APP_URL is assigned ~6,500 lines below this
+# constant, and a second literal copy of the domain is exactly the drift this
+# codebase keeps recording.
 COPY_URL_TO_CLIPBOARD_JS = """
 <script>
 (function() {
-    const url = window.top.location.href;
+    const loc = window.top.location;
+    const url = "{APP_URL}" + loc.pathname + loc.search;
     function legacyCopy(text) {
         const doc = window.top.document;
         const textarea = doc.createElement("textarea");
@@ -6433,6 +6452,17 @@ COPY_URL_TO_CLIPBOARD_JS = """
 })();
 </script>
 """
+
+
+def copy_url_to_clipboard_js() -> str:
+    """The clipboard snippet with the canonical host substituted in.
+
+    A function because APP_URL is defined far below the template and this has
+    to resolve at call time. Every caller uses this rather than the raw
+    constant, so a share cannot copy whichever host the visitor happens to be
+    on.
+    """
+    return COPY_URL_TO_CLIPBOARD_JS.replace("{APP_URL}", APP_URL)
 
 
 def save_pdf_download(context: dict) -> bool:
@@ -19358,7 +19388,7 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
             f"repayment_share:balance={int(balance)}:rate={rate}"
             f":income={int(income)}:deps={int(deps)}:prior={int(prior_payments)}"
             f":pslf={int(bool(pslf))}:forgivable={int(bool(forgivable))}")
-        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+        components.html(copy_url_to_clipboard_js(), height=0)
         st.success("Link copied to your clipboard.")
         # Said at the moment of sharing, not in a help tooltip nobody opens.
         # These were deliberately kept OUT of share links until now precisely
@@ -21934,7 +21964,7 @@ def _search_actions(results, table, captions, is_graduate: bool,
         st.query_params.from_dict({**session_query_params(),
                                    **build_search_share_params(is_graduate)})
         log_usage_event(f"search_share:{tool}:{stamp}")
-        components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+        components.html(copy_url_to_clipboard_js(), height=0)
         st.success("Link copied. It reopens this search, filters and all.")
 
 
@@ -23791,7 +23821,7 @@ if compare_mode:
                 inflation_rate_b=inflation_rate_b, grants_per_year_b=grants_per_year_b,
                 scenario_b=scenario_b, start_year_a=start_year_a, start_year_b=start_year_b,
             ), **module_context})
-            components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+            components.html(copy_url_to_clipboard_js(), height=0)
             st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact comparison.")
         with compare_card_col:
             # Both scenarios on one card. Rendered here AND in the single
@@ -24243,7 +24273,7 @@ else:
                 roi_horizon_years=roi_horizon_years,
                 start_year_a=start_year_a,
             ), **module_context})
-            components.html(COPY_URL_TO_CLIPBOARD_JS, height=0)
+            components.html(copy_url_to_clipboard_js(), height=0)
             st.success("Shareable link copied to your clipboard! Paste it anywhere to share this exact scenario.")
         with single_card_col:
             render_share_card_button(
