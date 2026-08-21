@@ -1118,7 +1118,8 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
   var key = "liked:" + slug;
   function render(n) {{
     out.textContent = n === null ? "" :
-      (n === 1 ? "1 person found this helpful" : n + " people found this helpful");
+      (n === 0 ? "" :
+       n === 1 ? "1 person found this helpful" : n + " people found this helpful");
   }}
   // The count is a nicety, not the point: if it never arrives the button still
   // works and the article is unaffected.
@@ -1245,7 +1246,16 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
       // failure, and falling back to a copy there would put a link on their
       // clipboard that they just declined to send. Anything else IS a
       // failure, and the copy is the useful answer to it.
-      navigator.share({{title: title, url: url}}).then(record, function (err) {{
+      navigator.share({{title: title, url: url}}).then(function () {{
+        // A SUCCESSFUL SHARE HAS TO SAY SO. This branch recorded the row
+        // and changed nothing on screen, so on every browser that HAS
+        // navigator.share -- all mobile, and desktop Chrome -- the button
+        // looked dead: the sheet opens over the page, the reader completes
+        // or dismisses it, and the page underneath is identical. Reported as
+        // "the share button is not working" while the rows were landing
+        // correctly. The copy path had always confirmed itself.
+        record(); flash("\\u2713 Shared");
+      }}, function (err) {{
         if (err && err.name === "AbortError") return;
         copy();
       }});
@@ -1652,7 +1662,8 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 
     function render(n) {{
       out.textContent = n === null ? "" :
-        (n === 1 ? "1 person found this helpful" : n + " people found this helpful");
+        (n === 0 ? "" :
+         n === 1 ? "1 person found this helpful" : n + " people found this helpful");
     }}
     // The count is a nicety. If it never arrives the buttons still work.
     fetch("/api/likes?slug=" + encodeURIComponent(slug) + "&kind=chart")
@@ -1705,7 +1716,16 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
         // failure. Falling back to a copy would put a link on their clipboard
         // that they just declined to send, and recording it would count a
         // cancellation as a share.
-        navigator.share({{title: title, url: url}}).then(record, function (err) {{
+        navigator.share({{title: title, url: url}}).then(function () {{
+          // A SUCCESSFUL SHARE HAS TO SAY SO. This branch recorded the row
+          // and changed nothing on screen, so on every browser that HAS
+          // navigator.share -- all mobile, and desktop Chrome -- the button
+          // looked dead: the sheet opens over the page, the reader completes
+          // or dismisses it, and the page underneath is identical. Reported as
+          // "the share button is not working" while the rows were landing
+          // correctly. The copy path had always confirmed itself.
+          record(); flash("\\u2713 Shared");
+        }}, function (err) {{
           if (err && err.name === "AbortError") return;
           copy();
         }});
