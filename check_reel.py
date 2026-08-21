@@ -137,6 +137,17 @@ def check_one(path: Path, data_cache: dict) -> list[str]:
     return problems
 
 
+# THE FIXTURE PINS A REAL MODEL NUMBER ON PURPOSE, and that number needs
+# updating whenever the earnings model moves. It was 14 until 2026-08-21, when
+# the year-10 plateau (see CLAUDE.md on career_growth_multiple) took the
+# physician count in the top twenty to 12 and this self-test started failing.
+#
+# Deriving it from the adapter instead would make the clean-fixture assertion
+# tautological -- it would prove the code equals itself, the flaw recorded
+# against the first versions of check_chart_axes and the residency guard. A
+# hardcoded number that occasionally needs a deliberate edit is the price of
+# the assertion being real, and the failure names both figures so the edit
+# takes seconds.
 FIXTURE = """---
 slug: fixture
 template: ranked_bars
@@ -145,8 +156,8 @@ headline: ["A", "B"]
 ---
 
 ## title
-claim: physicians=14
-Fourteen are physicians.
+claim: physicians=12
+Twelve are physicians.
 
 ## middle focus=bachelors
 caption: two of twenty
@@ -160,7 +171,7 @@ That is the end of it.
 
 MUTATIONS = (
     ("a claim that disagrees with the model",
-     lambda s: s.replace("claim: physicians=14", "claim: physicians=11")),
+     lambda s: s.replace("claim: physicians=12", "claim: physicians=11")),
     ("an em dash in a caption",
      lambda s: s.replace("caption: two of twenty", "caption: two — of twenty")),
     ("a focus no adapter offers",
