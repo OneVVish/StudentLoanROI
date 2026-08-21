@@ -105,6 +105,10 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [Two years, about $9,000, and seven beat the median bachelor's](https://worthmydegree.com/charts#community-college-careers):
+  Careers BLS says need an associate's degree, by total pay over ten
+  years of work. Two years of in-district community college runs about
+  $8,978 against about $182,476 for four years.
 - [The degree sets the debt, the specialty sets the pay](https://worthmydegree.com/charts#professional-debt-versus-pay):
   Every professional degree the calculator models, against 30 years of
   pay. Debt runs from $130,000 to $279,900, a spread of 2.2 times. Pay
