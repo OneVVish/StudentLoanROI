@@ -130,10 +130,10 @@ anywhere with attribution. One page, so each is addressed by fragment.
   undergraduate is $27,000 in the student's name and $65,000 in a
   parent's. Parent PLUS sits outside every income-driven plan, so 71%
   of the debt never moves with the repayment choice.
-- [The 20 careers that earn most in 30 years, and 18 are health care](https://worthmydegree.com/charts#top-earning-careers):
+- [The 20 careers that earn most in 30 years, and 16 are health care](https://worthmydegree.com/charts#top-earning-careers):
   Everything earned in the 30 years after a bachelor's degree, capped
-  at each occupation's own published 90th percentile. Fourteen of the
-  twenty are physicians, and only two are reachable on a bachelor's
+  at each occupation's own published 90th percentile. Twelve of the
+  twenty are physicians, and only three are reachable on a bachelor's
   degree alone.
 - [You asked for $20,000. You pay back $31,070](https://worthmydegree.com/charts#what-the-loan-really-costs):
   Every federal loan is billed for more than it hands over, because
