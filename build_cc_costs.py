@@ -76,6 +76,7 @@ ENCODING = "utf-8-sig"
 # IPEDS SECTOR 4 = "Public, 2-year". CONTROL 1 = public, kept as a belt-and-
 # braces filter so a future SECTOR renumbering cannot quietly admit a private.
 PUBLIC_TWO_YEAR_SECTOR = "4"
+PUBLIC_FOUR_YEAR_SECTOR = "1"
 PUBLIC_CONTROL = "1"
 
 # Undergraduate charges, academic year. 1 = in-district, 3 = out-of-state.
@@ -86,6 +87,18 @@ CHARGE_FIELDS = {
     "in_district": ("TUITION1", "FEE1", "XTUIT1"),
     "out_of_state": ("TUITION3", "FEE3", "XTUIT3"),
 }
+
+# The four-year comparison, from the SAME parse of the SAME release. In-state
+# (2) rather than in-district, because a public university charges by state
+# residency and has no district.
+#
+# IT IS TUITION AND FEES, DELIBERATELY, so it is the same quantity as the
+# community-college column beside it. Comparing two years of CC tuition against
+# a four-year COST OF ATTENDANCE is the apples-to-oranges trap this repo already
+# records for graduate tuition, and it inflated the published ratio from about
+# 12 times to 71 -- housing and food were counted on one side of the comparison
+# and not the other.
+FOUR_YEAR_FIELDS = ("TUITION2", "FEE2", "XTUIT2")
 
 # IPEDS reporting flags are LETTERS, not the 1/2/3 digits the CONTROL and
 # SECTOR fields use: "R" is reported and "A" is not applicable. Guessing digits
@@ -114,7 +127,8 @@ def load(ic_path: str, hd_path: str) -> pd.DataFrame:
         if "UNITID" not in frame.columns:
             sys.exit(f"{name}: no UNITID column. This is the BOM trap: read it "
                      f"with encoding='utf-8-sig'.")
-    keep_ic = ["UNITID"] + [c for spec in CHARGE_FIELDS.values() for c in spec]
+    keep_ic = (["UNITID"] + [c for spec in CHARGE_FIELDS.values() for c in spec]
+               + list(FOUR_YEAR_FIELDS))
     missing = [c for c in keep_ic if c not in ic.columns]
     if missing:
         sys.exit(f"{ic_path}: missing {missing}. Is this an IC*_AY release?")
@@ -143,11 +157,18 @@ def build(ic_path: str, hd_path: str, out_path: Path) -> int:
     for label, (tuition, fee, flag) in CHARGE_FIELDS.items():
         cc[label] = charge(cc, tuition, fee, flag)
 
+    # The four-year public median for the same state, same release.
+    uni = merged[(merged["SECTOR"] == PUBLIC_FOUR_YEAR_SECTOR)
+                 & (merged["CONTROL"] == PUBLIC_CONTROL)].copy()
+    uni["public4_in_state"] = charge(uni, *FOUR_YEAR_FIELDS)
+    four = uni.groupby("STABBR")["public4_in_state"].median().round(0)
+
     grouped = cc.groupby("STABBR").agg(
         in_district=("in_district", "median"),
         out_of_state=("out_of_state", "median"),
         schools=("UNITID", "count"),
     ).round(0)
+    grouped = grouped.join(four)
     grouped = grouped.dropna(subset=["in_district", "out_of_state"])
     grouped = grouped[grouped.index.str.len() == 2].sort_index()
 
@@ -169,6 +190,9 @@ def build(ic_path: str, hd_path: str, out_path: Path) -> int:
     print(f"  national median in-district  ${nat_in:>8,.0f}")
     print(f"  national median out-of-state ${nat_out:>8,.0f}"
           f"   ({nat_out / nat_in:.1f}x)")
+    have4 = grouped["public4_in_state"].notna().sum()
+    print(f"  four-year public in-state median ${grouped['public4_in_state'].median():>8,.0f}"
+          f"   ({have4} states)")
     widest = grouped["multiple"].idxmax()
     print(f"  widest gap: {widest} at {grouped.loc[widest, 'multiple']:.1f}x "
           f"(${grouped.loc[widest, 'in_district']:,.0f} -> "

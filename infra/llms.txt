@@ -108,7 +108,8 @@ anywhere with attribution. One page, so each is addressed by fragment.
 - [Two years of California community college costs $2,576](https://worthmydegree.com/charts#community-college-careers):
   Careers BLS says need an associate's degree, at California wages, by
   total pay over ten years. Two years in-district is about $2,576
-  against about $182,476 for four years at a UC campus.
+  against about $29,696 for four years of in-state tuition at a public
+  four-year. Tuition and fees on both sides.
 - [The degree sets the debt, the specialty sets the pay](https://worthmydegree.com/charts#professional-debt-versus-pay):
   Every professional degree the calculator models, against 30 years of
   pay. Debt runs from $130,000 to $279,900, a spread of 2.2 times. Pay
