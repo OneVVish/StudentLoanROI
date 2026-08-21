@@ -100,6 +100,26 @@ CHARGE_FIELDS = {
 # and not the other.
 FOUR_YEAR_FIELDS = ("TUITION2", "FEE2", "XTUIT2")
 
+# AND SECTOR 1 IS NOT ENOUGH ON ITS OWN. A community college that awards a
+# bachelor's degree is filed as a four-year institution, which is the same CCB
+# overlap the app already handles elsewhere -- so 15 of California's 49 "public
+# four-year" rows are community colleges charging about $1,200 a year, and the
+# median of that mixed set puts community colleges on BOTH sides of a
+# community-college comparison. INSTCAT 2 is "degree-granting, primarily
+# baccalaureate or above" and 3 is "not primarily baccalaureate", which is
+# exactly the distinction: nationally 205 of 800 rows are INSTCAT 3, at a $4,580
+# median against $9,703 for the rest. Arizona reads $2,598 unfiltered and
+# $12,144 filtered, a factor of 4.7.
+PRIMARILY_BACCALAUREATE = "2"
+
+# Each state's named public systems, from F1SYSNAM in the same parse, for the
+# states where one median hides two very different prices. California is the
+# case that forced it: CSU is $7,602 a year and UC is $14,560, so a single
+# "public four-year" figure describes neither and the multiple against community
+# college is either 12 times or 23 times depending which system you mean.
+SYSTEMS_OUT_DEFAULT = REPO / "data" / "public4_systems_clean.csv"
+MIN_SYSTEM_CAMPUSES = 3
+
 # IPEDS reporting flags are LETTERS, not the 1/2/3 digits the CONTROL and
 # SECTOR fields use: "R" is reported and "A" is not applicable. Guessing digits
 # here matched nothing, and the failure was silent in the worst way -- every row
@@ -132,7 +152,8 @@ def load(ic_path: str, hd_path: str) -> pd.DataFrame:
     missing = [c for c in keep_ic if c not in ic.columns]
     if missing:
         sys.exit(f"{ic_path}: missing {missing}. Is this an IC*_AY release?")
-    return hd[["UNITID", "INSTNM", "STABBR", "SECTOR", "CONTROL"]].merge(
+    return hd[["UNITID", "INSTNM", "STABBR", "SECTOR", "CONTROL",
+               "INSTCAT", "F1SYSNAM"]].merge(
         ic[keep_ic], on="UNITID", how="inner")
 
 
@@ -159,9 +180,12 @@ def build(ic_path: str, hd_path: str, out_path: Path) -> int:
 
     # The four-year public median for the same state, same release.
     uni = merged[(merged["SECTOR"] == PUBLIC_FOUR_YEAR_SECTOR)
-                 & (merged["CONTROL"] == PUBLIC_CONTROL)].copy()
+                 & (merged["CONTROL"] == PUBLIC_CONTROL)
+                 & (merged["INSTCAT"] == PRIMARILY_BACCALAUREATE)].copy()
     uni["public4_in_state"] = charge(uni, *FOUR_YEAR_FIELDS)
     four = uni.groupby("STABBR")["public4_in_state"].median().round(0)
+
+    write_systems(uni, SYSTEMS_OUT_DEFAULT)
 
     grouped = cc.groupby("STABBR").agg(
         in_district=("in_district", "median"),
@@ -198,6 +222,27 @@ def build(ic_path: str, hd_path: str, out_path: Path) -> int:
           f"(${grouped.loc[widest, 'in_district']:,.0f} -> "
           f"${grouped.loc[widest, 'out_of_state']:,.0f})")
     return len(grouped)
+
+
+def write_systems(uni, path):
+    """Per-state, per-system four-year medians, from the same rows as `four`.
+
+    Only systems with MIN_SYSTEM_CAMPUSES reporting campuses, because a
+    one-campus "system" is a school with a long name rather than a price anyone
+    would generalise from.
+    """
+    rows = uni[uni["public4_in_state"].notna()].copy()
+    rows["system"] = rows["F1SYSNAM"].astype(str).str.strip()
+    rows = rows[~rows["system"].isin({"", "-2", "nan"})]
+    out = (rows.groupby(["STABBR", "system"])
+               .agg(in_state=("public4_in_state", "median"),
+                    campuses=("UNITID", "count"))
+               .round(0))
+    out = out[out["campuses"] >= MIN_SYSTEM_CAMPUSES].sort_index()
+    out.to_csv(path, index_label=["state", "system"])
+    print(f"wrote {path}  ({len(out)} systems across "
+          f"{out.index.get_level_values(0).nunique()} states)")
+    return len(out)
 
 
 def main() -> None:
