@@ -5346,10 +5346,10 @@ def guides_url(slug: str = "") -> str:
 
     Not internal_tool_url: that builds `./?tool=x`, a query on the app's own
     path, and a guide is a different PATH (`/guides`) served by the Worker
-    rather than by Streamlit. An absolute path is therefore required, with the
-    consequence that this link 404s under a bare `streamlit run` -- the guides
-    only exist behind the edge. That is a local-development wart and not a
-    production one.
+    rather than by Streamlit. An absolute URL against APP_URL is therefore
+    required -- not a bare path, which resolves against whatever host is
+    serving the app and so points nowhere on the legacy streamlit.app
+    deployment. See the comment on the return value.
 
     Carries `test` and `src` for the same reason internal_tool_url does, and
     the reason is sharper here because the return leg leaves Streamlit
@@ -5373,7 +5373,26 @@ def guides_url(slug: str = "") -> str:
     src = get_traffic_source()
     if src:
         params["src"] = src
-    path = f"/guides/{slug}" if slug else "/guides"
+    # ABSOLUTE, against the canonical host, NOT a bare "/guides" path.
+    #
+    # The guides exist only behind the Cloudflare Worker, and the app runs on
+    # TWO hosts: Railway serves worthmydegree.com, where the Worker answers
+    # /guides, and Community Cloud serves the legacy
+    # studentloanroi.streamlit.app, where nothing does. A bare path resolves
+    # against whichever host is serving the page, so on the legacy deployment
+    # every guide link pointed at studentloanroi.streamlit.app/guides and went
+    # nowhere.
+    #
+    # This was written up as "404s under a bare `streamlit run` ... a
+    # local-development wart and not a production one". That was true while
+    # Community Cloud was the host behind worthmydegree.com. It stopped being
+    # true when the canonical domain moved to Railway and the streamlit.app
+    # deployment stayed alive as a second front door.
+    #
+    # An absolute URL is right on every host including localhost: the guides
+    # are one published thing with one home, and a reader should reach it from
+    # wherever they started.
+    path = f"{APP_URL}/guides/{slug}" if slug else f"{APP_URL}/guides"
     return f"{path}?{urlencode(params)}" if params else path
 
 
