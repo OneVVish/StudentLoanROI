@@ -112,6 +112,22 @@ FOUR_YEAR_FIELDS = ("TUITION2", "FEE2", "XTUIT2")
 # $12,144 filtered, a factor of 4.7.
 PRIMARILY_BACCALAUREATE = "2"
 
+# ...and INSTCAT 3, "degree-granting, not primarily baccalaureate", is the SAME
+# SET seen from the other side: a community college that happens to award a
+# bachelor's. Four states have no SECTOR 4 sector AT ALL because every one of
+# their community colleges is filed this way -- Alaska, Delaware, Florida and
+# Nevada -- so they fell back to the national figure and the app said so in a
+# caption. Florida is the case that makes it worth fixing: 28 colleges at a real,
+# published $2,916 median, replaced by a national number.
+#
+# THE FALLBACK IS FOR THE GAP ONLY, never a merge into states that already have
+# a two-year sector. Merging everywhere is the tempting version and it moves 24
+# existing medians, Utah by 45% and Indiana by 20% -- INSTCAT 3 also catches
+# universities that award mostly associate's degrees, which are not community
+# colleges and are priced like universities. Restricted to the gap, every figure
+# this file already published is bit-identical.
+NOT_PRIMARILY_BACCALAUREATE = "3"
+
 # Each state's named public systems, from F1SYSNAM in the same parse, for the
 # states where one median hides two very different prices. California is the
 # case that forced it: CSU is $7,602 a year and UC is $14,560, so a single
@@ -192,6 +208,8 @@ def build(ic_path: str, hd_path: str, out_path: Path) -> int:
         out_of_state=("out_of_state", "median"),
         schools=("UNITID", "count"),
     ).round(0)
+    grouped["source"] = "two_year"
+    grouped = add_ccb_states(grouped, merged, charge)
     grouped = grouped.join(four)
     grouped = grouped.dropna(subset=["in_district", "out_of_state"])
     grouped = grouped[grouped.index.str.len() == 2].sort_index()
@@ -222,6 +240,36 @@ def build(ic_path: str, hd_path: str, out_path: Path) -> int:
           f"(${grouped.loc[widest, 'in_district']:,.0f} -> "
           f"${grouped.loc[widest, 'out_of_state']:,.0f})")
     return len(grouped)
+
+
+def add_ccb_states(grouped, merged, charge):
+    """Price the states whose community colleges are all filed as four-year.
+
+    Same charges, same flags, same release: only the sector test differs. A
+    state already present is never touched, so this can only ADD rows.
+
+    n is genuinely 1 for Alaska and Delaware, and that is the answer rather than
+    a small sample -- one institution is the entire public two-year provision in
+    each. The `schools` column carries it, so a consumer can see what a figure
+    rests on.
+    """
+    ccb = merged[(merged["SECTOR"] == PUBLIC_FOUR_YEAR_SECTOR)
+                 & (merged["CONTROL"] == PUBLIC_CONTROL)
+                 & (merged["INSTCAT"] == NOT_PRIMARILY_BACCALAUREATE)].copy()
+    for label, (tuition, fee, flag) in CHARGE_FIELDS.items():
+        ccb[label] = charge(ccb, tuition, fee, flag)
+    add = ccb.groupby("STABBR").agg(
+        in_district=("in_district", "median"),
+        out_of_state=("out_of_state", "median"),
+        schools=("UNITID", "count"),
+    ).round(0).dropna(subset=["in_district", "out_of_state"])
+    add = add[~add.index.isin(grouped.index)]
+    add["source"] = "ccb"
+    if len(add):
+        print(f"  filled {len(add)} state(s) with no two-year sector from "
+              f"bachelor's-awarding community colleges: "
+              f"{', '.join(sorted(add.index))}")
+    return pd.concat([grouped, add]).sort_index()
 
 
 def write_systems(uni, path):
