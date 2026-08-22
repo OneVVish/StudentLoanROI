@@ -151,7 +151,8 @@ anywhere with attribution. One page, so each is addressed by fragment.
   Everything earned in the 30 years after a bachelor's degree, capped
   at each occupation's own published 90th percentile. Twelve of the
   twenty are physicians, and only three are reachable on a bachelor's
-  degree alone.
+  degree alone. Each row also carries how many people BLS counts doing
+  the job, which separates a well-paid career from a large one.
 - [You asked for $20,000. You pay back $31,070](https://worthmydegree.com/charts#what-the-loan-really-costs):
   Every federal loan is billed for more than it hands over, because
   the origination fee comes off at disbursement. On Parent PLUS you

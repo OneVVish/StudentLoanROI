@@ -146,6 +146,25 @@ REQUIRED_COLUMNS = ["occ_code", "occ_title", "o_group", "a_median", "a_pct25"]
 # between consecutive percentiles. See build_wage_distribution in app.py.
 DISTRIBUTION_COLUMNS = ["a_pct10", "a_pct75", "a_pct90"]
 
+# HOW MANY PEOPLE ACTUALLY DO THIS JOB. Display-only, and optional exactly like
+# the distribution columns above: a release without it still produces a usable
+# dataset, because nothing in the model reads it.
+#
+# It answers a question a pay ranking cannot: "Pediatric Surgeons" leads every
+# highest-paying list ever published and OEWS counts about a thousand of them,
+# where "Lawyers" pays a third as much across three quarters of a million. A
+# chart that ranks by pay alone invites a reader to treat those as comparable
+# choices.
+#
+# TWO LIMITS THAT MUST TRAVEL WITH THE NUMBER, both from BLS's own definition:
+# OEWS surveys ESTABLISHMENTS and therefore EXCLUDES THE SELF-EMPLOYED, which
+# for physicians, dentists and lawyers is a large and uneven share of the
+# profession. And the detailed physician specialties were only split out in
+# 2021, so employers still file staff under the catch-all -- "Physicians, All
+# Other" carries 315,000 against 18,000 cardiologists. Treat any single
+# specialty count as a floor, never as the size of the profession.
+EMPLOYMENT_COLUMN = "tot_emp"
+
 # Candidate column names BLS has used to hold the state for each row in the
 # State release, checked in order -- whichever one is actually present in
 # the loaded file is used, so this script isn't locked to one exact release.
@@ -334,6 +353,13 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
     for column in present_distribution:
         detailed[column] = clean_wage_column(detailed[column])
 
+    # Employment shares the wage cleaner: OEWS suppresses it with the same "*"
+    # and "**" markers and writes it with the same thousands separators, so a
+    # second parser here would be a second place for those to be got wrong.
+    has_employment = EMPLOYMENT_COLUMN in detailed.columns
+    if has_employment:
+        detailed[EMPLOYMENT_COLUMN] = clean_wage_column(detailed[EMPLOYMENT_COLUMN])
+
     # No usable median wage at all -- this occupation can't be modeled,
     # drop it (mirrors clean_college_scorecard.py dropping schools with no
     # usable COA figure).
@@ -362,6 +388,7 @@ def _clean_detailed(raw: pd.DataFrame, quiet: bool = False) -> pd.DataFrame:
         + [c for c in ["a_pct10", "a_pct25", "a_median", "a_pct75", "a_pct90"]
            if c == "a_pct25" or c == "a_median" or c in present_distribution]
         + ["annual_growth_rate"]
+        + ([EMPLOYMENT_COLUMN] if has_employment else [])
     )
     result = detailed[final_columns].reset_index(drop=True)
 
