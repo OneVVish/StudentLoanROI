@@ -2309,12 +2309,19 @@ def cc_national_out_of_state() -> int:
 
 
 def cc_state_is_covered(state_key) -> bool:
-    """Whether IPEDS prices this state's public two-year sector at all.
+    """Whether the committed table prices this state's community colleges.
 
-    False for Alaska, Delaware, Florida and Nevada, whose community colleges
-    award bachelor's degrees and are therefore filed as four-year institutions.
-    The caption says so rather than letting a national fallback pass as a state
-    figure.
+    It used to be False for Alaska, Delaware, Florida and Nevada, whose
+    community colleges award bachelor's degrees and are therefore filed by IPEDS
+    as four-year institutions, so those four fell back to the national figure
+    and the caption said so. build_cc_costs.py now reaches them through
+    INSTCAT 3, "degree-granting, not primarily baccalaureate", which is that same
+    set seen from the other side: all four are priced from their own colleges.
+    Florida is the one that mattered, 28 colleges at a published $2,916 median.
+
+    The gate stays, because it is derived from the table rather than from a list
+    of state names: a state IPEDS stops pricing loses its figure and gains the
+    caption with no code change. Do not replace it with a hardcoded set.
     """
     return bool(state_key) and state_key in load_cc_costs()
 

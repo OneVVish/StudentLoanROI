@@ -248,11 +248,48 @@ def check_residency(ns):
     return problems
 
 
+# The four states whose community colleges all award bachelor's degrees, so
+# IPEDS files them as four-year institutions and they had no two-year sector to
+# read. build_cc_costs.py reaches them through INSTCAT 3 instead. Asserted by
+# NAME rather than derived, because the whole failure mode is that they go
+# missing silently and every one of them falls back to the national figure --
+# which is a plausible-looking number, not an error. Florida is the case that
+# makes it matter: 28 colleges with a real published median.
+CCB_ONLY_STATES = ("AK", "DE", "FL", "NV")
+
+
+def check_ccb_states(ns) -> list:
+    """Those four must be priced, and priced from their own colleges."""
+    import csv as _csv
+    problems = []
+    table = ns["load_cc_costs"]()
+    src = {}
+    path = Path(__file__).resolve().parent / "data" / "cc_costs_clean.csv"
+    if path.exists():
+        with path.open(newline="") as fh:
+            for row in _csv.DictReader(fh):
+                src[row["state"]] = row.get("source", "")
+    for st in CCB_ONLY_STATES:
+        if st not in table:
+            problems.append(
+                f"  {st} is absent from the table, so it falls back to the "
+                f"national figure. Its community colleges are filed as "
+                f"four-year institutions; build_cc_costs.py reaches them via "
+                f"INSTCAT 3 and something has stopped it.")
+            continue
+        if src and src.get(st) != "ccb":
+            problems.append(
+                f"  {st} is priced from source={src.get(st)!r}, expected 'ccb'. "
+                f"IPEDS gives it no public two-year sector at all, so a "
+                f"two-year figure there means the sector test has changed.")
+    return problems
+
+
 def main() -> int:
     ns = load_app_namespace()
     problems = (check_coverage(ns) + check_keying(ns)
                 + check_values(ns) + check_fallback(ns)
-                + check_residency(ns))
+                + check_residency(ns) + check_ccb_states(ns))
 
     table = ns["COMMUNITY_COLLEGE_COST_BY_STATE"]
     if problems:
