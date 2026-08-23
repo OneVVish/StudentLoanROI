@@ -74,6 +74,20 @@ COA_NAMES = (
 # recorded three times. Editing the deck sentence means editing this tuple.
 DISCLOSURE_TERMS = ("working years", "finishing sooner")
 
+# EVERY SURFACE THAT MAKES THE COMPARISON, with the arguments to build its prose.
+# The chart's decks have different signatures, so a recipe per builder is the only
+# way to call them all -- and check_every_deck_is_covered asserts this dict names
+# every deck function in the module, so ADDING A SURFACE FAILS THE GUARD rather
+# than being waved through. That gap was real: the poster shipped with its own
+# deck, this file only knew about deck_text, and deleting the disclosure from the
+# poster passed clean.
+SAMPLE_SYSTEMS = [("a CSU campus", 30408, 11.8)]
+DECK_CALLS = {
+    "deck_text": lambda m, tier: m.deck_text(
+        tier, "CA", "California", 2576, 30408, 11.8, SAMPLE_SYSTEMS),
+    "poster_deck": lambda m, tier: m.poster_deck(2576, SAMPLE_SYSTEMS),
+}
+
 
 def load_chart():
     """The chart module, without running main() or importing matplotlib."""
@@ -116,15 +130,13 @@ def check_disclosure(module, ns) -> list:
     for key, tier in sorted(module.TIERS.items()):
         drawn = start_offset(ns, tier["education"])
         unknown = tier["education"] in mismodelled
-        deck = module.deck_text(
-            tier, "CA", "California",
-            two_years=2576, four_years=30408, multiple=11.8,
-            systems=[("a CSU campus", 30408, 11.8)],
-        ).lower()
         if drawn == reference and not unknown:
             continue
-        missing = [t for t in DISCLOSURE_TERMS if t not in deck]
-        if missing:
+        for name, build in sorted(DECK_CALLS.items()):
+            deck = build(module, tier).lower()
+            missing = [t for t in DISCLOSURE_TERMS if t not in deck]
+            if not missing:
+                continue
             why = (f"app.py lists {tier['education']!r} in "
                    f"MISMODELLED_EDUCATION_LEVELS, so its start time is UNKNOWN "
                    f"rather than aligned -- and a certificate is shorter than an "
@@ -135,12 +147,33 @@ def check_disclosure(module, ns) -> list:
                    f"{abs(reference - drawn)}-year head start the arithmetic does "
                    f"not count")
             problems.append(
-                f"  The {key} chart compares populations that do not start at the "
-                f"same moment: {why}. The deck has to say so and does not: missing "
-                f"{missing}. Erring conservatively by accident and erring "
+                f"  {name}() for the {key} chart compares populations that do not "
+                f"start at the same moment: {why}. It has to say so and does not: "
+                f"missing {missing}. Erring conservatively by accident and erring "
                 f"conservatively on purpose look identical on the page, and are "
                 f"not the same thing.")
     return problems
+
+
+def check_every_deck_is_covered(module) -> list:
+    """DECK_CALLS must name every deck the module can produce.
+
+    Without this the guard silently narrows as the chart grows: the poster added
+    a second deck, nothing here knew about it, and the disclosure could be deleted
+    from the surface most likely to be read with no surrounding argument -- pinned
+    to a wall, photographed, passed on.
+    """
+    found = {n for n in dir(module)
+             if "deck" in n.lower() and callable(getattr(module, n, None))
+             and getattr(getattr(module, n), "__module__", "") == module.__name__}
+    missing = sorted(found - set(DECK_CALLS))
+    if not missing:
+        return []
+    return [f"  {missing} produce visitor-facing comparison prose and are not in "
+            f"DECK_CALLS, so nothing checks whether they disclose the offset. Add "
+            f"a recipe for each. A guard that quietly stops covering a surface is "
+            f"worse than one that never covered it, because the green tick now "
+            f"means less than it did."]
 
 
 def check_claim_is_true(module, ns) -> list:
@@ -203,7 +236,8 @@ def main() -> int:
     module = load_chart()
     ns = module.load_app()
 
-    problems = (check_disclosure(module, ns)
+    problems = (check_every_deck_is_covered(module)
+                + check_disclosure(module, ns)
                 + check_claim_is_true(module, ns)
                 + check_tuition_not_coa(module))
 
