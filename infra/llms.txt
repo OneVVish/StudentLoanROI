@@ -105,6 +105,11 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [Transferring to a UC saves about $76,700](https://worthmydegree.com/charts#transfer-path):
+  Two years at a California community college and two at a public
+  university, against four years at the university. At a UC that is
+  about $81,900 against $158,600. At a CSU it is about $45,900 against
+  $86,600. Tuition and housing on both sides, at resident prices.
 - [What the extra year of California community college buys](https://worthmydegree.com/charts#community-college-both-careers):
   The two credentials a California community college awards, side by
   side and to the same scale. Two years and about $2,576 for an
