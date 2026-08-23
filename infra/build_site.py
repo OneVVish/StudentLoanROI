@@ -699,10 +699,10 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 </div>
 
 <div class="stats">
-  <div class="stat"><b>{f['schools']:,}</b><span>real schools, published costs</span></div>
-  <div class="stat"><b>{f['careers']:,}</b><span>careers with federal wage data</span></div>
-  <div class="stat"><b>{f['majors']}</b><span>majors, NY Fed outcomes</span></div>
-  <div class="stat"><b>{f['cities']}</b><span>metro areas, local pay &amp; prices</span></div>
+  <div class="stat"><b>{f['schools']:,}</b><span>US Schools</span></div>
+  <div class="stat"><b>{f['careers']:,}</b><span>Careers</span></div>
+  <div class="stat"><b>{f['majors']}</b><span>College Majors</span></div>
+  <div class="stat"><b>{f['cities']}</b><span>US Metro Areas</span></div>
 </div>
 
 <section>
