@@ -233,6 +233,17 @@ def check_tuition_not_coa(module) -> list:
 
 
 def main() -> int:
+    # marketing/ IS GITIGNORED, so the chart this file checks does not exist in a
+    # clone -- and until now that made this guard the one thing in the suite that
+    # crashed on any machine but the one that wrote it. Skipping is right, because
+    # there is genuinely nothing to check; saying so out loud is the other half,
+    # because a guard reporting OK over zero files is the shape this repo already
+    # records as worse than no check at all. check_chart_prose.py does the same.
+    if not CHART.exists():
+        print(f"chart basis: SKIPPED, {CHART.relative_to(ROOT)} is not present "
+              f"in this checkout")
+        return 0
+
     module = load_chart()
     ns = module.load_app()
 
