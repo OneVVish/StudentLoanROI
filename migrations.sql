@@ -2264,3 +2264,37 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOL
 -- Four states are uncovered by IPEDS -- AK, DE, FL, NV -- because their
 -- community colleges award bachelor's degrees and are filed as four-year
 -- institutions. Those fall back to the national figure and the sidebar says so.
+
+
+-- ===========================================================================
+-- 2026-08-22  Every infographic gets its own ?src= tag. NO DDL; this is a
+--             SEAM IN traffic_source, and the older side of it is not
+--             recoverable.
+-- ===========================================================================
+--
+-- Twelve chart scripts burned "worthmydegree.com/welcome?src=img" into their
+-- pictures, so every click from any infographic arrived under one tag. The
+-- charts are the most reposted surface this project has and the only question
+-- anyone asks of them -- which picture actually brings people here -- was
+-- unanswerable by construction.
+--
+-- Each chart now emits its own stem: community-college-careers-ca,
+-- community-college-poster-ca, top-earning-careers, federal-cap, loan-true-cost,
+-- transfer-path and the rest. The tag is DERIVED from the filename the script
+-- writes rather than typed a twelfth time, because a wrong tag does not error --
+-- it attributes the click to the wrong chart, which looks like an answer. That
+-- nearly happened here: the first pass took the top-earning chart's stem from
+-- its editorial variant and would have filed every click under
+-- "top-earning-careers-editorial".
+--
+-- WHAT THIS COSTS. Rows with traffic_source = 'img' span every chart published
+-- before this date and cannot be split: nothing in the row says which picture
+-- it came from. Do not compare a per-chart count across this date, and do not
+-- read the disappearance of 'img' as traffic falling.
+--
+-- Two tags predate it and keep their meaning: 'poster' was already
+-- chart-specific and is now 'community-college-poster-ca', and 'reddit' is a
+-- channel rather than a picture.
+--
+-- The 'img' rows stay. The anon key cannot UPDATE or DELETE, and rewriting them
+-- would be inventing an attribution the data never had.
