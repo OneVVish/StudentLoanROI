@@ -253,6 +253,27 @@ SCORECARD_MIN_N = 16
 # Above this the column is the admit-rate ordering with extra steps.
 MAX_ADMIT_RATE_CORR = 0.85
 
+# And above THIS the top of the list is a place rather than a set of schools.
+# Measured as the lead state's share of a discipline's top decile minus its
+# share of the whole discipline, so a field that simply has many schools in one
+# state is not punished for it. The observed ordering breaks cleanly:
+#
+#     eng_civil       CA 57% of the top decile vs  9% base   +48%
+#     dentistry       CT 50%                   vs  9%        +41%
+#     ---- threshold ----
+#     eng_mechanical  CA 37%                   vs  9%        +28%
+#     eng_chemical    TX 27%                   vs  5%        +21%
+#     nursing         FL 22%                   vs  6%        +16%
+#     law             MA 19%                   vs  3%        +16%
+#     business        CA 10%                   vs  5%         +5%
+#
+# The two above the line are refused. A visitor sorting civil engineering by
+# outcome got a top ten that was nine-tenths Californian, which is a correct
+# reading of where civil engineers are paid and a useless answer to "which
+# programme should I pick". Note nursing and law sit mid-pack AFTER state
+# normalization, which is the fix working.
+MAX_TOP_DECILE_STATE_EXCESS = 0.35
+
 # THE GEOGRAPHY FIX (T14). Divide a school's graduate earnings by its own
 # STATE's median for the occupation the degree leads to, instead of by the
 # national median for the field. That removes the local wage LEVEL and leaves
@@ -344,6 +365,7 @@ OUTPUT_COLUMNS = [
     "discipline_score", "score_basis",
     "universe_n", "scored_n", "scored_share",
     "admit_rate_corr", "rank_stability", "median_rank_shift",
+    "top_state", "top_state_excess",
     "state_ratio_p10", "state_ratio_p90",
 ]
 
@@ -478,7 +500,8 @@ def honesty_metadata(block, coa):
     says so, rather than emitting a zero that reads as "no relationship".
     """
     meta = {"admit_rate_corr": np.nan, "state_ratio_p10": np.nan,
-            "state_ratio_p90": np.nan}
+            "state_ratio_p90": np.nan, "top_state": None,
+            "top_state_excess": np.nan}
     scored = block[block["discipline_score"].notna()]
 
     # Stability between the two windows the SAME file publishes. Not a
@@ -495,6 +518,20 @@ def honesty_metadata(block, coa):
     else:
         meta["rank_stability"] = np.nan
         meta["median_rank_shift"] = np.nan
+
+    # Concentration of the top decile in one state -- see
+    # MAX_TOP_DECILE_STATE_EXCESS. Computed from benchmark_state, which is
+    # already resolved from two sources, so it does not need --coa.
+    located = scored.dropna(subset=["benchmark_state"])
+    if len(located) >= 10:
+        top = located.nlargest(max(10, int(len(located) * 0.10)),
+                               "discipline_score")
+        counts = top["benchmark_state"].value_counts()
+        lead = counts.index[0]
+        meta["top_state"] = lead
+        meta["top_state_excess"] = round(
+            counts.iloc[0] / len(top)
+            - float((located["benchmark_state"] == lead).mean()), 4)
 
     if coa is None or scored.empty:
         return meta
@@ -517,6 +554,7 @@ def honesty_metadata(block, coa):
 def build(df, coa, benchmarks, school_state, allow_below_floor,
           allow_withheld):
     frames, refused, report, withheld_now = [], [], [], []
+    concentrated = []
 
     for key, (label, cip, expected_desc, credlev, window) in DISCIPLINES.items():
         block = df[(df["CIPCODE"] == cip) & (df["CREDLEV"] == credlev)].copy()
@@ -619,6 +657,11 @@ def build(df, coa, benchmarks, school_state, allow_below_floor,
         if key in WITHHELD and key not in allow_withheld:
             withheld_now.append(key)
             continue
+        excess = block["top_state_excess"].iloc[0]
+        if pd.notna(excess) and excess > MAX_TOP_DECILE_STATE_EXCESS \
+                and key not in allow_below_floor:
+            concentrated.append((key, block["top_state"].iloc[0], excess))
+            continue
         if (share < MIN_SCORED_SHARE or scored < MIN_SCORED_SCHOOLS) \
                 and key not in allow_below_floor:
             refused.append((key, universe, scored, share))
@@ -629,6 +672,13 @@ def build(df, coa, benchmarks, school_state, allow_below_floor,
         print("\nWITHHELD, measured and deliberately not written:")
         for key in withheld_now:
             print(f"  {key}: {WITHHELD[key]}")
+
+    if concentrated:
+        print("\nREFUSED, top decile concentrated in one state "
+              f"(over +{MAX_TOP_DECILE_STATE_EXCESS:.0%} above its base share):")
+        for key, lead, excess in concentrated:
+            print(f"  {key:<16} {lead} is +{excess:.0%} over-represented in the "
+                  f"top 10%  -- the ranking's top is a place, not a set of schools")
 
     if refused:
         print("\nREFUSED, below the coverage floor "

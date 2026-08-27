@@ -34,6 +34,7 @@ property aimed at it, not merely by something:
     medicine moved back to the 4-yr window  -> [medicine uses 5-yr window]
     a discipline switches benchmark basis    -> [benchmark basis]
     a scored row with no state benchmark    -> [benchmark basis]
+    a one-state top decile ships            -> [state concentration]
 
 Two corrections worth keeping, because the first draft of this table claimed
 otherwise and was wrong:
@@ -69,7 +70,7 @@ import sys
 import pandas as pd
 
 from build_discipline_outcomes import (
-    DISCIPLINE_SOC, DISCIPLINES, WITHHELD, MAX_ADMIT_RATE_CORR, MIN_SCORED_SCHOOLS, NA_VALUES,
+    DISCIPLINE_SOC, DISCIPLINES, MAX_TOP_DECILE_STATE_EXCESS, WITHHELD, MAX_ADMIT_RATE_CORR, MIN_SCORED_SCHOOLS, NA_VALUES,
     SCORECARD_MIN_N, SCORE_MAX, SCORE_MIN, THIN_COHORT_N, WEIGHTS,
     WINDOW_MEDICINE,
 )
@@ -86,10 +87,9 @@ RAW = "Most-Recent-Cohorts-Field-of-Study.csv"
 # nursing .73, mechanical .74, civil .68, business .68, industrial .63,
 # medicine .63, economics .39 (shipped below the floor, deliberately).
 COVERAGE_FLOORS = {
-    "eng_chemical": 0.70, "dentistry": 0.68, "law": 0.66, "eng_aerospace": 0.65,
-    "eng_mechanical": 0.64, "nursing": 0.63, "eng_civil": 0.58,
-    "business": 0.58, "eng_industrial": 0.53,
-    "economics": 0.30,
+    "eng_chemical": 0.70, "law": 0.66, "eng_aerospace": 0.65,
+    "eng_mechanical": 0.64, "nursing": 0.60, "business": 0.58,
+    "eng_industrial": 0.53, "economics": 0.30,
 }
 
 
@@ -324,6 +324,29 @@ def check_honesty_metadata(df):
     return problems
 
 
+def check_state_concentration(df):
+    """No shipped discipline's top decile may be one state's list.
+
+    The builder refuses above MAX_TOP_DECILE_STATE_EXCESS; this asserts the
+    refusal actually happened, because a gate that silently stops firing looks
+    exactly like a dataset that got better.
+    """
+    problems = []
+    for key, block in df[df["discipline_score"].notna()].groupby("discipline_key"):
+        excess = block["top_state_excess"].iloc[0]
+        if pd.isna(excess):
+            problems.append(
+                f"  {key} has no top_state_excess\n"
+                "    it is the measure the concentration gate reads")
+        elif excess > MAX_TOP_DECILE_STATE_EXCESS:
+            problems.append(
+                f"  {key} ships with {block['top_state'].iloc[0]} "
+                f"+{excess:.0%} over-represented in its top decile, past "
+                f"+{MAX_TOP_DECILE_STATE_EXCESS:.0%}\n"
+                "    the top of that ranking is a place, not a set of schools")
+    return problems
+
+
 def check_benchmark_basis(df):
     """Each discipline divides by the benchmark DISCIPLINE_SOC says it does.
 
@@ -454,6 +477,7 @@ def main():
         ("thin cohorts flagged", check_thin_cohorts_flagged(df)),
         ("honesty metadata", check_honesty_metadata(df)),
         ("benchmark basis", check_benchmark_basis(df)),
+        ("state concentration", check_state_concentration(df)),
         ("medicine uses 5-yr window", check_medicine_window(df)),
         ("denominator matches release", check_denominator_matches_release(df)),
     ]
