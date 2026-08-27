@@ -2916,6 +2916,15 @@ SEARCH_SORT_DEFAULT = "Cost"
 # The caption clause per mode. One string each, because "cheapest first" is
 # false the moment the list is ordered on anything else and a stale ordering
 # claim is the kind of thing nobody re-reads.
+# What the schools BEYOND the cap have in common, per ordering. The complement
+# of SEARCH_SORT_PHRASES: that one says how the list is ordered, this says what
+# being cut off the end of it means, which is the half a reader cannot infer.
+SEARCH_CAP_PHRASES = {
+    "Cost": "cost more",
+    "Outcomes": "score lower",
+    "Finish rate": "have lower completion rates",
+    "Admit rate": "admit fewer applicants",
+}
 SEARCH_SORT_PHRASES = {
     "Cost": "cheapest first",
     "Outcomes": "highest outcome score first",
@@ -7505,6 +7514,42 @@ def search_schools_by_budget(cip_family: str, credential: str,
     open_now = coa_df["CURROPER"].fillna(1) != 0
 
     matches = coa_df[teaches & affordable & open_now]
+
+    # WHAT AN UNSET HOME STATE IS HIDING, counted rather than implied.
+    #
+    # With no home state every school is priced out-of-state, which is the safe
+    # direction for a PRICE and is already captioned. What was not captioned is
+    # that the same choice removes schools from the list ENTIRELY: Berkeley is
+    # $45,619 in-state and $79,819 out-of-state, so at any budget under about
+    # $80,000 it does not appear at all, and nothing on the page said so.
+    # Reported as "these are missing", which is a different claim from "these
+    # are dear" and is the one a visitor cannot otherwise discover.
+    #
+    # Computed on in_state_coa against the SAME other filters, so it counts only
+    # schools the residency rate alone excluded.
+    hidden_by_oos = []
+    if home_state is None:
+        in_state = coa_df["in_state_coa"]
+        would_afford = (in_state.notna() & (in_state <= max_coa_per_year)
+                        & (in_state >= min_coa_per_year))
+        hidden = coa_df[teaches & open_now & would_afford & ~affordable]
+        if states:
+            hidden = hidden[hidden["STABBR"].isin(states)]
+        if control_types:
+            hidden = hidden[hidden["control_type"].isin(control_types)]
+        if name_query:
+            hidden = hidden[hidden["INSTNM"].str.contains(
+                str(name_query), case=False, regex=False, na=False)]
+        # Ordered by the size of the residency gap, not by price. Cheapest
+        # first named three Ohio State branch campuses, which is accurate and
+        # tells a reader nothing: the schools whose absence matters are the
+        # ones where the two rates diverge most, and those are the flagships a
+        # visitor was most likely looking for. Berkeley is $45,619 against
+        # $79,819, and it is that gap that removed it from the list.
+        hidden = hidden.assign(
+            _gap=hidden["out_of_state_coa"] - hidden["in_state_coa"])
+        hidden_by_oos = list(
+            hidden.sort_values("_gap", ascending=False)["INSTNM"])
     if states:
         matches = matches[matches["STABBR"].isin(states)]
     if control_types:
@@ -7573,7 +7618,14 @@ def search_schools_by_budget(cip_family: str, credential: str,
     # ordered by completion.
     matches = matches.sort_values([sort_column, "coa_per_year"],
                                   ascending=[ascending, True],
-                                  na_position="last").head(limit).copy()
+                                  na_position="last")
+    # WHAT THE CAP CUT, in the order that cut it. "Showing 25 of 60" says the
+    # list is short; it does not say which 35 went, and cheapest-first always
+    # takes the same direction: a Californian searching business saw 25 schools
+    # topping out at $26,488 while Berkeley sat at $45,619, matching the budget
+    # and 26th by price. Naming the first few makes the direction concrete.
+    beyond_cap = list(matches["INSTNM"].iloc[limit:limit + 3])
+    matches = matches.head(limit).copy()
     matches["total_program_cost"] = matches["coa_per_year"] * nominal_years
 
     # What students of THIS field borrowed at each school, attached last and
@@ -7603,6 +7655,8 @@ def search_schools_by_budget(cip_family: str, credential: str,
     # asserts the attribute survives the call.
     out.attrs["total_matches"] = total_matches
     out.attrs["unrated_matches"] = unrated_matches
+    out.attrs["hidden_by_out_of_state"] = hidden_by_oos
+    out.attrs["beyond_cap"] = beyond_cap
     return out
 
 
@@ -7830,7 +7884,8 @@ def resolve_search_sort(mode: str, credential: str,
             else SEARCH_SORT_DEFAULT)
 
 
-def search_result_caption(shown: int, total: int, mode: str) -> str:
+def search_result_caption(shown: int, total: int, mode: str,
+                          beyond_cap: list = None) -> str:
     """The sentence above the results table.
 
     `total` is REQUIRED and is the count BEFORE the cap. The caption this
@@ -7847,7 +7902,16 @@ def search_result_caption(shown: int, total: int, mode: str) -> str:
     """
     phrase = SEARCH_SORT_PHRASES.get(mode, SEARCH_SORT_PHRASES[SEARCH_SORT_DEFAULT])
     if total > shown:
-        return f"Showing {shown:,} of {total:,} matching schools, {phrase}."
+        # Naming the direction, and then naming names. "Showing 25 of 60" is a
+        # true sentence a reader cannot act on: it does not say whether the 35
+        # missing are dearer, worse or simply further down an arbitrary list.
+        cut = SEARCH_CAP_PHRASES.get(
+            mode, SEARCH_CAP_PHRASES[SEARCH_SORT_DEFAULT])
+        tail = f" The {total - shown:,} not shown {cut}"
+        if beyond_cap:
+            tail += f", starting with {', '.join(beyond_cap)}"
+        return (f"Showing {shown:,} of {total:,} matching schools, {phrase}."
+                f"{tail}.")
     return (f"{shown:,} school{'s' if shown != 1 else ''}, {phrase}."
             if shown else "No matching schools.")
 
@@ -22349,13 +22413,13 @@ def render_school_search(always_open: bool = False) -> None:
         # the key is per-tool now, and re-deriving it here is how the two get
         # to disagree about which tool's residency is on screen.
         home_state = controls["home_state"]
-        if not home_state:
-            st.caption(
-                "⚠️ Every school below is priced at its **out-of-state** rate, "
-                "because you haven't said where you live. Public schools in your "
-                "own state will be cheaper than shown, often by several thousand "
-                "a year."
-            )
+        # Reserved here and written after the search, because the warning now
+        # names what the missing home state is HIDING and that count does not
+        # exist until the search has run. The container renders at this
+        # position regardless of when it is filled -- the same mechanism that
+        # keeps the PDF and Share buttons pinned above data resolved further
+        # down the page.
+        no_home_state_slot = st.container() if not home_state else None
 
         # `credential` was read once, above the admit-rate control that gates on
         # it. Deliberately not re-read here: the search, the log and the level
@@ -22369,6 +22433,26 @@ def render_school_search(always_open: bool = False) -> None:
             adm_rate_range=(adm_low / 100, adm_high / 100) if adm_filtered else None,
             sort_mode=sort_mode, name_query=name_query,
             discipline_key=discipline)
+        # ABSENCE IS A DIFFERENT CLAIM FROM EXPENSE, and only the first one a
+        # visitor cannot discover for themselves. Priced out-of-state, Berkeley
+        # is $79,819 against $45,619 in-state, so under any ordinary budget it
+        # is not dear, it is GONE, and the old caption said only that prices
+        # were high. Reported as a count with names, because "10 schools" is
+        # abstract and "including UCLA" is not.
+        if no_home_state_slot is not None:
+            _hidden = results.attrs.get("hidden_by_out_of_state", [])
+            _text = ("⚠️ Every school below is priced at its **out-of-state** "
+                     "rate, because you haven't said where you live. Public "
+                     "schools in your own state will be cheaper than shown, "
+                     "often by several thousand a year.")
+            if _hidden:
+                _names = ", ".join(_hidden[:3])
+                _text += (f" **It is also hiding {len(_hidden)} school"
+                          f"{'s' if len(_hidden) > 1 else ''} that would fit "
+                          f"your budget at the resident rate**, including "
+                          f"{_names}. Set your state to see them.")
+            no_home_state_slot.caption(_text)
+
         # Read once, here. The backend attaches it as the last thing it does,
         # and any later .merge on this frame would drop it silently.
         total_matches = results.attrs.get("total_matches", len(results))
@@ -22427,7 +22511,8 @@ def render_school_search(always_open: bool = False) -> None:
             return
 
         st.caption(
-            search_result_caption(len(results), total_matches, sort_mode)
+            search_result_caption(len(results), total_matches, sort_mode,
+                                   results.attrs.get("beyond_cap"))
             + " These are **sticker prices before aid**, so a pricier school can end up "
             "cheaper once grants are applied, so treat this as a starting list and "
             "run the **Net price** calculator on any school you're serious about."
