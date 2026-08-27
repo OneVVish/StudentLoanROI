@@ -14679,14 +14679,54 @@ def _pdf_table(rows: list, header: bool = True, full_width: bool = False,
         for c in range(num_cols)
     ]
     natural_widths = [max(w, PDF_CELL_MIN_WIDTH) for w in natural_widths]
+    # The widest thing in each column that CANNOT be broken across lines: the
+    # longest single whitespace-delimited word. "$45,619" and "Private" are
+    # atomic; "California Polytechnic State University" is not. Used as the
+    # per-column floor when a table has to be squeezed -- see below.
+    unbreakable_widths = [
+        max(
+            (stringWidth(xml_escape(word),
+                         "Helvetica-Bold" if _is_bold(r, c) else "Helvetica",
+                         PDF_CELL_FONT_SIZE)
+             for r, row in enumerate(rows)
+             for word in str(row[c]).split() or [""]),
+            default=0,
+        ) + PDF_CELL_H_PADDING
+        for c in range(num_cols)
+    ]
     total_natural = sum(natural_widths)
     if col_ratios:
         col_widths = [content_width * r for r in col_ratios]
     elif total_natural > content_width or full_width:
         # Scale to fit exactly: down when the natural width would overflow,
         # up when the caller asked for a full-width table.
-        scale = content_width / total_natural
-        col_widths = [w * scale for w in natural_widths]
+        #
+        # BUT NOT UNIFORMLY, because columns do not shrink alike. A school name
+        # wraps onto a second line and loses nothing; "$45,619" cannot break at
+        # all, so a money column squeezed below its own text overflows the cell
+        # and prints the mid-number split this report went landscape to avoid.
+        # The eleven-column shortlist scaled every column to 0.669 and put nine
+        # of them under the width of their widest token.
+        #
+        # So each column first claims a FLOOR: the widest single unbreakable
+        # word it contains. Whatever is left over is then shared out in
+        # proportion to how much slack each column has above its own floor, so
+        # the wrappable columns absorb the shortfall and the atomic ones are
+        # left legible.
+        floors = [min(w, f) for w, f in zip(natural_widths, unbreakable_widths)]
+        slack = content_width - sum(floors)
+        if slack <= 0:
+            # Even the floors do not fit. Nothing here can rescue that, so fall
+            # back to the old uniform squeeze rather than pretending.
+            scale = content_width / total_natural
+            col_widths = [w * scale for w in natural_widths]
+        else:
+            spare = [max(w - f, 0.0) for w, f in zip(natural_widths, floors)]
+            total_spare = sum(spare)
+            col_widths = [
+                f + (slack * (sp / total_spare) if total_spare else
+                     slack / len(floors))
+                for f, sp in zip(floors, spare)]
     else:
         col_widths = natural_widths
 

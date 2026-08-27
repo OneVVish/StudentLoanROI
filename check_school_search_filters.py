@@ -1521,6 +1521,58 @@ def check_net_price_and_completion(ns, base) -> list:
     return problems
 
 
+def check_pdf_columns_fit_their_content(ns):
+    """No shortlist column may be narrower than its widest unbreakable word.
+
+    _pdf_table scales a wide table down to the page, so it can never overflow
+    horizontally -- which is why this failed silently. What it CAN do is squeeze
+    a column below the width of "$45,619", and money does not wrap: it prints
+    the mid-number split ("$54,30 0") that sending this report landscape was
+    supposed to end. Adding the Outcomes column took the shortlist from ten
+    columns to eleven and put NINE of them under their own text.
+
+    Asserted against the widest whitespace-delimited word rather than the widest
+    cell, because that is the real constraint: a school name wraps and loses
+    nothing, a money figure cannot break at all.
+    """
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    problems = []
+    width = ns["PDF_CONTENT_WIDTH_LANDSCAPE"]
+    size = ns["PDF_CELL_FONT_SIZE"]
+    pad = ns["PDF_CELL_H_PADDING"]
+    results = ns["search_schools_by_budget"](
+        "52", "Bachelor's degree", max_coa_per_year=50_000, limit=25,
+        home_state="CA", states=("CA",), discipline_key="business",
+        sort_mode="Outcomes")
+    if results.empty:
+        return ["  the fixture search returned nothing, so nothing was checked"]
+    money = ns["fmt_money"]
+    rows = [["School", "Where", "Type", "Per year", "Avg net price",
+             "Whole program", "Admits", "Finish", "Parents borrowed",
+             "Grads borrowed", "Outcomes"]]
+    for row in results.itertuples():
+        rows.append([
+            row.INSTNM, f"{row.CITY}, {row.STABBR}", row.control_type,
+            money(row.coa_per_year), money(row.net_price),
+            money(row.total_program_cost), "50%", "50%",
+            money(row.PLUS_DEBT_INST_COMP_MD), money(row.field_debt_median),
+            "100"])
+    table = ns["_pdf_table"](rows, full_width=True, content_width=width)
+    widths = table._colWidths
+    for index, header in enumerate(rows[0]):
+        need = max(
+            stringWidth(word, "Helvetica-Bold" if r == 0 else "Helvetica", size)
+            for r, row in enumerate(rows)
+            for word in (str(row[index]).split() or [""])) + pad
+        if widths[index] + 0.5 < need:
+            problems.append(
+                f"  PDF column {header!r} is {widths[index]:.0f}pt but its "
+                f"widest unbreakable word needs {need:.0f}pt\n"
+                "    money does not wrap, so it prints the mid-number split "
+                "this report went landscape to avoid")
+    return problems
+
+
 def check_pdf_table_repeats_header(ns) -> list:
     """A table that spills onto a second page must reprint its header there.
 
@@ -1714,6 +1766,7 @@ def main() -> int:
         ("program lengths", lambda: check_program_lengths(ns)),
         ("field debt column", lambda: check_field_debt_column(ns, base)),
         ("discipline map keys", lambda: check_discipline_map_keys(ns)),
+        ("pdf columns fit", lambda: check_pdf_columns_fit_their_content(ns)),
         ("pdf header repeats", lambda: check_pdf_table_repeats_header(ns)),
         ("net price and completion",
          lambda: check_net_price_and_completion(ns, base)),
