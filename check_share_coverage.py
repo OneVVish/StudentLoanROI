@@ -70,6 +70,11 @@ SHARE_EXEMPT = {
     # someone else's search on their budget is not what a shared link is for.
     "search_coa_range": "transient school-search input; ?school= carries the result",
     "search_credential": "transient school-search input",
+    "search_discipline": "transient school-search input; narrows the field to "
+                          "one 4-digit programme and adds the Outcomes column. "
+                          "Not shared for the reason the rest of this block "
+                          "gives: ?school= carries the RESULT, and re-running "
+                          "someone else's search is not what a link is for",
     "search_states": "transient school-search input",
     "search_control_types": "transient school-search filter; narrows which "
                             "sectors are listed and the chosen school's own "

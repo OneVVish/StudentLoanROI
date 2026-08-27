@@ -128,14 +128,16 @@ that mode reports what people already doing the job earn.
 eighteen**, using real median pay for that group, currently **$51,688 a year**.
 It is a demanding test rather than a flattering one, which is the point.
 
-**The school affects the cost side only.** No salary anywhere in the tool comes
-from the institution. It will not tell a student that a pricier school pays
-better, because the data underneath it does not say that.
+**The school affects the cost side only.** No salary the tool models comes from
+the institution. It will not tell a student that a pricier school pays better,
+because the data underneath it does not say that. The school search shows one
+school level outcome score per program, from federal data, and it is
+deliberately kept out of the calculation for the same reason.
 
 ## What it will not do
 
-It does not rank schools, it does not recommend, and it is an educational
-estimate rather than financial advice. Every figure is a national median or a
+It does not recommend a school, and it is an educational estimate rather than
+financial advice. Every figure is a national median or a
 published federal number, so it will not match one family exactly. That is the
 argument for the **Get Your Real Numbers** step, which links to the school's own
 net price calculator and the federal Student Aid Estimator and replaces the
