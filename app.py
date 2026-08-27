@@ -1254,9 +1254,12 @@ def ccb_earnings_disclosure(major_name: str = None, for_pdf: bool = False) -> st
     """What is known about CCB earnings -- said in words, never applied to the
     number.
 
-    This app takes every salary from the occupation or major the visitor picked
-    and NEVER from the school; the school-search caption states that as a
-    commitment. Quietly shaving a CCB scenario's earnings would break it, and on
+    This app takes every salary it MODELS from the occupation or major the
+    visitor picked and NEVER from the school; the school-search caption states
+    that as a commitment. Since 2026-08 that search also DISPLAYS a per-school
+    outcome score, which is exactly the distinction this refusal turns on: a
+    federal figure may be shown beside a school and still not move the model.
+    Quietly shaving a CCB scenario's earnings would break it, and on
     weaker ground than that rule already forbids: the published estimates are
     descriptive, with no correction for who chooses a CCB in the first place, so
     treating them as the causal effect of the credential would assert something
@@ -3357,6 +3360,15 @@ MAJOR_TO_CIP_FAMILY = {
 # you control for the *student's own* ability/motivation -- i.e. the kind of
 # student who gets admitted to and attends an Ivy-plus school would likely
 # have earned close to the same wage regardless of where they went. These
+# NOT THE SAME KIND OF THING AS THE SEARCH'S OUTCOMES COLUMN, and a reader who
+# meets both should be told so. This multiplier is a MODELLED CAUSAL CLAIM: it
+# moves the visitor's projected salary, so it asserts that attending a tier
+# changes what they will earn. The Outcomes column is DESCRIPTIVE and display
+# only: it reports what one school's graduates did earn and moves nothing. That
+# is why the column could ship with a measured selectivity correlation printed
+# beside it, and why this multiplier has to be argued for instead.
+#
+# These
 # multipliers are set well below the raw observational gap Chetty et al.
 # report, as a deliberately conservative middle ground between the two
 # findings -- and are always surfaced as a modeled estimate, not a causal
@@ -15178,7 +15190,12 @@ def generate_pdf_search_report(results: pd.DataFrame, table: pd.DataFrame,
             continue
         # Markdown bold and the escaped dollars the on-screen captions carry
         # are meaningless to reportlab, and \$ would print literally.
-        text = caption.replace("\\$", "$").replace("**", "")
+        # \* too, not just \$ and **. The Outcomes caption escapes its
+        # thin-cohort asterisk so Streamlit renders a literal * rather than
+        # opening italics; reportlab has no markdown, so the backslash would
+        # print.
+        text = (caption.replace("\\$", "$").replace("\\*", "*")
+                .replace("**", ""))
         story.append(Paragraph(xml_escape(text), styles["caption"]))
         story.append(Spacer(1, 4))
 
