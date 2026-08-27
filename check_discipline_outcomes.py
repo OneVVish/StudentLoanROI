@@ -35,6 +35,7 @@ property aimed at it, not merely by something:
     a discipline switches benchmark basis    -> [benchmark basis]
     a scored row with no state benchmark    -> [benchmark basis]
     a one-state top decile ships            -> [state concentration]
+    a weight changed in the builder only    -> [app weights match]
 
 Two corrections worth keeping, because the first draft of this table claimed
 otherwise and was wrong:
@@ -53,11 +54,8 @@ otherwise and was wrong:
 
 TWO PROPERTIES ARE NOT HERE YET, AND BOTH ARE NAMED RATHER THAN FAKED:
 
-  * [prose names the weights] -- assert app.py's Methodology quotes the same
-    three integers as WEIGHTS. It lands with the app integration, because
-    nothing in app.py mentions this dataset yet and a check written now would
-    either fail the build or pass vacuously. A guard that cannot fail is worse
-    than no guard, because it reads like coverage.
+ONE PROPERTY IS STILL NOT HERE, AND IT IS NAMED RATHER THAN FAKED:
+
   * [vintage] -- the field-of-study release carries no year column anywhere, and
     the vintage lives only in the filename. clean_college_scorecard.py records
     the same problem and had to recover its data year from the API. Recording a
@@ -65,6 +63,7 @@ TWO PROPERTIES ARE NOT HERE YET, AND BOTH ARE NAMED RATHER THAN FAKED:
 
 Run after touching build_discipline_outcomes.py or the committed CSV.
 """
+import re
 import sys
 
 import pandas as pd
@@ -397,6 +396,35 @@ def check_benchmark_basis(df):
     return problems
 
 
+def check_app_weights_match():
+    """app.py prints the weights; they must be the ones the score was built on.
+
+    A weight changed in the builder and not in the caption is the exact failure
+    this feature exists not to have: the page would publish a method that is not
+    the method, and every number would still look fine.
+    """
+    problems = []
+    try:
+        source = open("app.py", encoding="utf-8").read()
+    except FileNotFoundError:
+        print("SKIPPED [app weights match]: app.py not in this checkout.")
+        return []
+    match = re.search(r"DISCIPLINE_WEIGHTS = \{([^}]*)\}", source)
+    if not match:
+        problems.append(
+            "  app.py has no DISCIPLINE_WEIGHTS\n"
+            "    the captions print the weights, so the app has to hold them")
+        return problems
+    printed = {int(value) for value in re.findall(r":\s*(\d+)", match.group(1))}
+    built = set(WEIGHTS.values())
+    if printed != built:
+        problems.append(
+            f"  app.py prints weights {sorted(printed)} but the score was built "
+            f"from {sorted(built)}\n"
+            "    the page would publish a method that is not the method")
+    return problems
+
+
 def check_medicine_window(df):
     """T8. Deleting the exception moves medicine back onto residency pay.
 
@@ -495,6 +523,7 @@ def main():
         ("honesty metadata", check_honesty_metadata(df)),
         ("benchmark basis", check_benchmark_basis(df)),
         ("state concentration", check_state_concentration(df)),
+        ("app weights match", check_app_weights_match()),
         ("medicine uses 5-yr window", check_medicine_window(df)),
         ("denominator matches release", check_denominator_matches_release(df)),
     ]

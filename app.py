@@ -2844,6 +2844,29 @@ ADM_RATE_CREDENTIALS = ("Bachelor's degree",)
 # rows at all. See field_debt_applies.
 FIELD_DEBT_CREDENTIALS = ("Bachelor's degree",)
 
+# The search's credential label -> the credential column in
+# data/discipline_outcomes_clean.csv. Two levels, because that is what the
+# dataset carries: bachelor's for the engineering branches, economics, business
+# and nursing, and First Professional for law and dentistry. A level absent here
+# gets no score column, which is what discipline_applies returns False for.
+# The published weights, restated here because a caption has to print them and
+# a caption that says "three federal figures" without naming their shares is not
+# a published method. They MUST equal build_discipline_outcomes.WEIGHTS;
+# check_discipline_outcomes asserts it, because a weight changed in the builder
+# and not in the prose is the exact failure this whole feature exists not to
+# have.
+DISCIPLINE_WEIGHTS = {"earn": 55, "debt": 30, "employed": 15}
+
+DISCIPLINE_CREDENTIALS = {
+    "Bachelor's degree": "bachelor",
+    # Not a level a visitor picks in the undergraduate search: the professional
+    # search has no credential control, so it passes this label explicitly to
+    # reach the same gate. Law and dentistry are the two professional rows the
+    # dataset carries.
+    "Professional degree": "professional",
+}
+PROFESSIONAL_CREDENTIAL_LABEL = "Professional degree"
+
 # The ONLY orderings this search will offer: label -> (column, ascending).
 #
 # The exclusions are the point, and each has a reason already written down
@@ -2860,10 +2883,29 @@ FIELD_DEBT_CREDENTIALS = ("Bachelor's degree",)
 # built out of what other people were willing to owe, which is not a fact about
 # the school. They are display-only and must stay that way.
 #
+# AND discipline_score IS DELIBERATELY NOT AMONG THEM, which is a change to this
+# rule rather than an exception squeezed under it. Recorded because the rule as
+# written would have excluded it and the reasoning has to survive:
+#
+#   The three columns above are RAW FIGURES that happen to be about outcomes,
+#   published as-is with no stated method, so any ordering imposed on them is an
+#   editorial claim the page never made. discipline_score is the opposite: it
+#   exists ONLY as a method. Its formula and its three weights are published
+#   beside it, check_discipline_outcomes.py recomputes every stored value from
+#   them, and the fields where the underlying measure ranks the wrong thing were
+#   withheld rather than shipped -- medicine measures residency length, so it is
+#   not in the dataset at all. A number built to be compared, whose construction
+#   is open to inspection, is a different object from a raw column.
+#
+#   What has NOT changed is the default. Cost is still first, and a visitor who
+#   never touches the control still gets the ordering that cannot be mistaken
+#   for a quality judgement.
+#
 # Cost is first because it is the default, and because a cost-ordered list is
 # the one ordering that cannot be mistaken for a quality judgement.
 SEARCH_SORT_MODES = {
     "Cost": ("coa_per_year", True),
+    "Outcomes": ("discipline_score", False),
     "Finish rate": ("completion_rate", False),
     "Admit rate": ("ADM_RATE", False),
 }
@@ -2873,6 +2915,7 @@ SEARCH_SORT_DEFAULT = "Cost"
 # claim is the kind of thing nobody re-reads.
 SEARCH_SORT_PHRASES = {
     "Cost": "cheapest first",
+    "Outcomes": "highest outcome score first",
     "Finish rate": "highest completion rate first",
     "Admit rate": "highest admit rate first",
 }
@@ -3229,6 +3272,45 @@ def is_graduate_credential(credential: str) -> bool:
 # Occupation -> field of study is the SOC-CIP crosswalk whose own documentation
 # calls it conceptual rather than empirical, and which this codebase already
 # declined to rely on for underemployment.
+# NY Fed major -> the 4-digit discipline key in
+# data/discipline_outcomes_clean.csv, for prefilling the search's Programme
+# control in Major mode. Same reasoning as MAJOR_TO_CIP_FAMILY directly below,
+# one level finer: a major and a CIP programme are both fields of STUDY, so
+# this is a correspondence rather than a crosswalk, and there is deliberately
+# no equivalent for Career mode's 836 occupations.
+#
+# None where no single programme is defensible, which the family map's own
+# comment already establishes as the convention: "Miscellaneous Engineering"
+# spans every branch, and the six business majors all land in one 5202
+# programme rather than dividing between them. A key absent here simply gets no
+# prefill, and the visitor picks.
+#
+# THERE IS NO "Biomedical Engineering" MAJOR IN THIS LIST, and an entry for one
+# was written and removed before it shipped. Biomedical students sit under
+# "Miscellaneous Engineering", which spans every branch and maps to none. A key
+# that matches no major is INERT rather than broken -- every lookup against the
+# map keeps succeeding and the prefill silently never happens -- which is the
+# failure this codebase already records for an occupation title that does not
+# exist. check_school_search_filters asserts every key here is a real major.
+#
+# It is also bounded by what the DATASET ships: a major whose programme was
+# refused for thin coverage or a one-state top decile prefills nothing, because
+# disciplines_for_family will not offer it and the reconcile clears it.
+MAJOR_TO_CIP_DISCIPLINE = {
+    "Aerospace Engineering": "eng_aerospace",
+    "Chemical Engineering": "eng_chemical",
+    "Computer Engineering": "eng_computer",
+    "Electrical Engineering": "eng_electrical",
+    "Industrial Engineering": "eng_industrial",
+    "Mechanical Engineering": "eng_mechanical",
+    "Economics": "economics",
+    "Nursing": "nursing",
+    # The six business majors share CIP 5202 and cannot be told apart by it.
+    "Accounting": "business", "Business Analytics": "business",
+    "Business Management": "business", "Finance": "business",
+    "General Business": "business", "Marketing": "business",
+}
+
 MAJOR_TO_CIP_FAMILY = {
     "Accounting": "52", "Advertising and Public Relations": "09",
     "Aerospace Engineering": "14", "Agriculture": "01",
@@ -6771,6 +6853,7 @@ def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
 
 COA_DATASET_PATH = "data/college_coa_clean.csv"
 PROFESSIONAL_DEBT_PATH = "data/graduate_debt_clean.csv"
+DISCIPLINE_OUTCOMES_PATH = "data/discipline_outcomes_clean.csv"
 # Label for the picker's first option -- the national fallback, named rather
 # than left blank so "no school chosen" cannot be mistaken for "no debt".
 PROFESSIONAL_SCHOOL_NATIONAL = "National average (no specific school)"
@@ -6794,6 +6877,38 @@ def load_coa_dataset() -> pd.DataFrame:
             # Read by render_parent_plus_note and by the search's results table.
             "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N",
         ] + [f"programs_{suffix}" for suffix, _ in CREDENTIAL_LEVELS.values()])
+
+
+@st.cache_data(show_spinner=False)
+def load_discipline_outcomes() -> pd.DataFrame:
+    """Per-school outcome scores for one field of study.
+
+    data/discipline_outcomes_clean.csv, from build_discipline_outcomes.py. One
+    row per (school, discipline): what that school's graduates in that exact
+    field earned, what they borrowed, how many were found working, and a 1-100
+    composite of the three.
+
+    THIS IS THE ONE SCHOOL-LEVEL OUTCOME FIGURE IN THE APP AND IT IS DISPLAY
+    ONLY. No salary the calculator MODELS may come from it. That distinction is
+    what the search captions now state, and it is the whole reason this can
+    exist beside a model that still takes every wage from the occupation.
+
+    Empty frame when the file is absent, naming every column any caller reads,
+    so a deploy without it loses a column rather than the page -- the contract
+    load_coa_dataset records the hard way.
+    """
+    try:
+        return pd.read_csv(DISCIPLINE_OUTCOMES_PATH,
+                           dtype={"CIPCODE": str, "cip_family": str,
+                                  "discipline_key": str})
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=[
+            "UNITID", "INSTNM", "discipline_key", "discipline_label",
+            "cip_family", "credential", "discipline_score", "score_basis",
+            "thin_cohort", "earn_median", "earn_benchmark", "benchmark_basis",
+            "debt_median", "scored_n", "universe_n", "scored_share",
+            "admit_rate_corr", "median_rank_shift",
+        ])
 
 
 @st.cache_data(show_spinner=False)
@@ -7287,7 +7402,8 @@ def search_schools_by_budget(cip_family: str, credential: str,
                               min_coa_per_year: float = 0.0,
                               adm_rate_range: tuple = None,
                               sort_mode: str = SEARCH_SORT_DEFAULT,
-                              name_query: str = None) -> pd.DataFrame:
+                              name_query: str = None,
+                              discipline_key: str = None) -> pd.DataFrame:
     """Schools that teach `cip_family` at `credential` for at most
     `max_coa_per_year`, cheapest first. The inverse of the app's normal
     question: not "what does the school I named cost" but "what could I attend
@@ -7426,8 +7542,18 @@ def search_schools_by_budget(cip_family: str, credential: str,
     total_matches = len(matches)
     unrated_matches = int(matches["ADM_RATE"].isna().sum())
 
+    # BEFORE THE SORT AND BEFORE THE CAP, unlike the field-debt merge below.
+    # That one is display-only so it can join the capped 25; this column can BE
+    # the ordering, and sorting on a column that has not been merged yet would
+    # silently order on nothing. Still a LEFT join: a school the dataset does
+    # not score must stay in the list at its own price, or a display column
+    # becomes the narrowest filter in the search.
+    if discipline_applies(credential, discipline_key):
+        matches = matches.merge(discipline_scores(discipline_key),
+                                on="UNITID", how="left")
+
     sort_column, ascending = SEARCH_SORT_MODES[
-        resolve_search_sort(sort_mode, credential)]
+        resolve_search_sort(sort_mode, credential, discipline_key)]
     # coa_per_year second so ties break on price and the order is total; a
     # partial order would let two runs of the same search return different
     # rows once the cap binds. na_position="last" in BOTH directions -- a
@@ -7502,6 +7628,111 @@ def bachelor_field_debt(cip_family: str) -> pd.DataFrame:
             .rename(columns={"debt_median": "field_debt_median"}))
 
 
+@st.cache_data(show_spinner=False)
+def discipline_scores(discipline_key: str) -> pd.DataFrame:
+    """The score column for one discipline, keyed on UNITID.
+
+    Mirrors bachelor_field_debt: cached, deduped on UNITID, and an empty frame
+    with its columns named when the file or the discipline is absent, so a
+    missing dataset costs a column rather than the page.
+    """
+    columns = ["UNITID", "discipline_score", "thin_cohort", "score_basis"]
+    df = load_discipline_outcomes()
+    if df.empty or "discipline_key" not in df.columns or not discipline_key:
+        return pd.DataFrame(columns=columns)
+    rows = df[df["discipline_key"] == str(discipline_key)]
+    if rows.empty:
+        return pd.DataFrame(columns=columns)
+    return (rows[columns].dropna(subset=["UNITID"])
+            .drop_duplicates(subset=["UNITID"]))
+
+
+@st.cache_data(show_spinner=False)
+def disciplines_for_family(cip_family: str, credential: str) -> list:
+    """(key, label) for every discipline inside one CIP family, FROM THE FILE.
+
+    Never a mirrored constant in app.py. A discipline the builder refuses -- for
+    thin coverage, or because its score measures the wrong thing, as medicine's
+    does -- simply stops appearing here, with no second place to update and no
+    way for the two to disagree about what exists. graduate_schools_for already
+    reads its picker options from a dataset for the same reason.
+    """
+    df = load_discipline_outcomes()
+    if df.empty or not cip_family:
+        return []
+    rows = df[(df["cip_family"] == str(cip_family))
+              & (df["credential"] == discipline_credential(credential))]
+    if rows.empty:
+        return []
+    pairs = (rows[["discipline_key", "discipline_label"]]
+             .drop_duplicates().sort_values("discipline_label"))
+    return list(pairs.itertuples(index=False, name=None))
+
+
+def discipline_credential(credential: str) -> str:
+    """The search's credential label -> the dataset's credential column.
+
+    Two vocabularies for one idea: CREDENTIAL_LEVELS speaks in the words a
+    visitor picks ("Bachelor's degree"), the dataset in Scorecard's ("bachelor").
+    """
+    return DISCIPLINE_CREDENTIALS.get(credential, "")
+
+
+@st.cache_data(show_spinner=False)
+def discipline_outcome_meta(discipline_key: str) -> dict:
+    """The per-discipline honesty figures the two captions print.
+
+    Read off the dataset's own metadata columns rather than restated in prose,
+    so a rebuild that moves coverage or concentration moves the sentence too.
+    Every value is optional: a caption drops the clause it cannot fill rather
+    than printing a zero, because "correlation 0.00" is a claim and a missing
+    column is not.
+    """
+    blank = {"label": "this program", "scored_n": 0, "universe_n": 0,
+             "admit_corr": None, "top_state": None, "top_state_excess": None,
+             "rank_shift": None, "waived": False}
+    df = load_discipline_outcomes()
+    if df.empty or not discipline_key:
+        return blank
+    rows = df[df["discipline_key"] == str(discipline_key)]
+    if rows.empty:
+        return blank
+    row = rows.iloc[0]
+
+    def _opt(column):
+        value = row.get(column)
+        return None if pd.isna(value) else value
+
+    return {
+        "label": row.get("discipline_label") or blank["label"],
+        "scored_n": int(row.get("scored_n") or 0),
+        "universe_n": int(row.get("universe_n") or 0),
+        "admit_corr": _opt("admit_rate_corr"),
+        "top_state": _opt("top_state"),
+        "top_state_excess": _opt("top_state_excess"),
+        "rank_shift": _opt("median_rank_shift"),
+        "waived": bool(row.get("concentration_waived") or False),
+    }
+
+
+def discipline_applies(credential: str, discipline_key: str) -> bool:
+    """Whether a score column belongs on this search at all.
+
+    Beside the search it gates, like field_debt_applies and adm_filter_applies,
+    so check_school_search_filters tests the real rule instead of a copy.
+
+    An unknown credential or an unknown discipline returns False, because this
+    only ever ADDS a claim to the page: the safe answer when we do not recognise
+    the question is to make none.
+    """
+    if not discipline_key or credential not in DISCIPLINE_CREDENTIALS:
+        return False
+    df = load_discipline_outcomes()
+    if df.empty or "discipline_key" not in df.columns:
+        return False
+    return bool((df["discipline_key"] == str(discipline_key)).any())
+
+
 def field_debt_applies(credential: str) -> bool:
     """Whether a field-specific borrowing figure exists at this level.
 
@@ -7533,7 +7764,7 @@ def adm_filter_applies(credential: str) -> bool:
     return credential in ADM_RATE_CREDENTIALS
 
 
-def search_sort_modes(credential: str) -> list:
+def search_sort_modes(credential: str, discipline_key: str = None) -> list:
     """Which orderings the school search may offer at this credential level.
 
     In section 2 beside the search, for the reason adm_filter_applies gives:
@@ -7547,6 +7778,11 @@ def search_sort_modes(credential: str) -> list:
       decides which fall off the end of the cap. ADM_RATE is the only such
       column and it reuses adm_filter_applies, because that rule already
       describes this exact coverage cliff.
+    - The frame does not carry the column. Outcomes is only offered once a
+      DISCIPLINE is chosen, because the score column is merged per discipline
+      and there is nothing to order on before that. Offering it over an
+      undisciplined search would be the same "control that lies" this docstring
+      already objects to, one step earlier.
     - The GRADUATE searches do not carry the column at all. Their frames come
       from the tuition and debt files, which have no completion rate and no
       admit rate, so cost is the only thing there is to order on. A control
@@ -7559,11 +7795,15 @@ def search_sort_modes(credential: str) -> list:
     for label, (column, _asc) in SEARCH_SORT_MODES.items():
         if column in SEARCH_SORT_THIN_COLUMNS and not adm_filter_applies(credential):
             continue
+        if column == "discipline_score" and not discipline_applies(credential,
+                                                                   discipline_key):
+            continue
         modes.append(label)
     return modes
 
 
-def resolve_search_sort(mode: str, credential: str) -> str:
+def resolve_search_sort(mode: str, credential: str,
+                        discipline_key: str = None) -> str:
     """The sort mode actually applied, given what this level offers.
 
     A stored mode can outlive the level that offered it -- pick "Admit rate" on
@@ -7574,7 +7814,8 @@ def resolve_search_sort(mode: str, credential: str) -> str:
     backend calls it too so a hand-built call cannot order on a column the level
     does not support.
     """
-    return mode if mode in search_sort_modes(credential) else SEARCH_SORT_DEFAULT
+    return (mode if mode in search_sort_modes(credential, discipline_key)
+            else SEARCH_SORT_DEFAULT)
 
 
 def search_result_caption(shown: int, total: int, mode: str) -> str:
@@ -7828,6 +8069,15 @@ def search_professional_schools_by_budget(program_key: str,
     matches["total_program_cost"] = matches["price_per_year"] * years
     matches["grad_tuition_fees_in"] = matches["prof_tuition_fees_in"]
     matches["grad_tuition_fees_out"] = matches["prof_tuition_fees_out"]
+    # The outcome score, where one exists for this programme. The discipline
+    # keys and the programme keys are the same strings by construction ("law",
+    # "dentistry"), so there is nothing to map -- and nothing that can drift.
+    # Left join, after the cap, display-only: unlike the undergraduate search
+    # this list is never ordered on the score, because a professional list is
+    # ordered by price and search_sort_modes offers nothing else here.
+    if discipline_applies(PROFESSIONAL_CREDENTIAL_LABEL, program_key):
+        matches = matches.merge(discipline_scores(program_key),
+                                on="UNITID", how="left")
     out = matches.reset_index(drop=True)
     # See search_schools_by_budget: last statement, and the reason is measured.
     out.attrs["total_matches"] = total_matches
@@ -14935,10 +15185,11 @@ def generate_pdf_search_report(results: pd.DataFrame, table: pd.DataFrame,
     story.append(Spacer(1, 8))
     story.append(Paragraph(
         xml_escape(
-            "Sorted by price and nothing else. Every salary in this app comes "
-            "from the occupation or major you picked, never from the school, so "
-            "this list cannot tell you which of these leads to higher pay — "
-            "only which teach your field at a price you could cover."),
+            "Every salary this calculator MODELS comes from the occupation or "
+            "major you picked, never from the school: where you study changes "
+            "the cost, never the projected pay. The Outcomes column, where a "
+            "program is chosen, is the one school-level figure here. It is "
+            "shown for information and does not enter the model."),
         styles["caption"]))
 
     buffer = io.BytesIO()
@@ -20975,6 +21226,7 @@ SEARCH_CONTROL_KEYS = ("search_cip_family", "search_credential",
                         "search_coa_range", "search_home_state",
                         "search_states", "search_adm_rate_on",
                         "search_adm_rate_range", "search_control_types",
+                        "search_discipline",
                         # The graduate tool's own copies. EVERY control is
                         # per-tool now, not just the level and the budget:
                         # "More tools" on the calculator renders both searches
@@ -21140,6 +21392,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # MBA supplies its own field like a professional programme but is priced
     # and searched like a master's -- and conflating them renders a field
     # selector whose value the MBA search then ignores.
+    discipline_key_widget = tool_key("search_discipline")
     _selected_level = st.session_state.get(credential_key, default_credential)
     professional = is_professional_credential(_selected_level)
     own_field = level_supplies_its_own_field(_selected_level)
@@ -21183,6 +21436,47 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # Read after its own widget, which has already rendered: the cost slider
     # below needs the level to label itself.
     credential = st.session_state.get(credential_key, default_credential)
+
+    # The DISCIPLINE, a 4-digit programme inside the chosen family. Separate
+    # from the family control because the family is what the school-level
+    # search filters on (2 digits is the only granularity a whole-dataset
+    # filter has) and this is what the outcome column is keyed on.
+    #
+    # Options come from the dataset, never a constant here, so a discipline the
+    # builder refuses -- for thin coverage, or because its score measures the
+    # wrong thing, as medicine's does -- simply stops being offered with no
+    # second place to update.
+    family = st.session_state.get(family_key)
+    discipline_options = ([] if own_field
+                          else disciplines_for_family(family, credential))
+    discipline = None
+    if discipline_options:
+        labels = {key: label for key, label in discipline_options}
+        default_discipline = (MAJOR_TO_CIP_DISCIPLINE.get(major)
+                              if dataset_mode == DATASET_MODE_MAJOR else None)
+        st.session_state.setdefault(
+            discipline_key_widget,
+            default_discipline if default_discipline in labels else None)
+        # A stored discipline can outlive the family that offered it: pick
+        # Mechanical Engineering, switch the field to Business, and the value
+        # is still there while the option is gone. Streamlit raises on a keyed
+        # selectbox whose stored value is absent from its options, so this runs
+        # BEFORE the widget -- the reconcile_cc_mode / reconcile_search_pick
+        # pattern.
+        if st.session_state.get(discipline_key_widget) not in labels:
+            st.session_state[discipline_key_widget] = None
+        st.selectbox(
+            "Program (optional)", list(labels),
+            key=discipline_key_widget,
+            on_change=lambda: mark_interaction(discipline_key_widget),
+            format_func=lambda key: labels[key],
+            placeholder="All programs in this field",
+            help="Narrower than the field above. Picking one adds an Outcomes "
+                 "column built from what that school's graduates in that exact "
+                 "program earned and borrowed, and lets you order the list "
+                 "by it.",
+        )
+        discipline = st.session_state.get(discipline_key_widget)
 
     # A range, not a ceiling. The old control only asked "most I could pay",
     # which cannot express "what does this actually cost" -- and because
@@ -21303,7 +21597,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # bachelor's search that offered it, and Streamlit raises when a keyed
     # selectbox's stored value is absent from its options -- reconcile_cc_mode
     # and reconcile_search_pick are here for the same reason.
-    _sort_options = search_sort_modes(credential)
+    _sort_options = search_sort_modes(credential, discipline)
     if st.session_state.get(sort_key) not in _sort_options:
         st.session_state[sort_key] = SEARCH_SORT_DEFAULT
     # A one-option "Sort by" is a control that cannot be used, and on the
@@ -21444,6 +21738,9 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         "adm_high": adm_high,
         "sort_mode": sort_mode,
         "name_query": name_query,
+        # None means "all programmes in this field", which is the default and
+        # renders no outcome column at all.
+        "discipline": discipline,
     }
 
 
@@ -21745,9 +22042,10 @@ def render_graduate_school_search(always_open: bool = False) -> None:
                 f"[open this as its own page]({internal_tool_url('gradschools')})."
             )
         st.caption(
-            "Sorted by price, and by nothing else. Every salary in this app comes "
-            "from the occupation or major you picked, never from the school, so "
-            "this cannot tell you which of these leads to higher pay."
+            "Every salary this calculator models comes from the occupation or "
+            "major you picked, never from the school, so where you study "
+            "changes the cost and never the projected pay. Sorted by price, "
+            "and by nothing else."
         )
         # coa_df supplies the state and sector option lists on both pages. It
         # is the superset, and suggested_home_state is written against it; a
@@ -22007,11 +22305,14 @@ def render_school_search(always_open: bool = False) -> None:
                 f"[open this as its own page]({internal_tool_url('schools')})."
             )
         st.caption(
-            "Ordered by cost, completion rate or admit rate, and by nothing "
-            "else. Every salary in this app comes "
-            "from the occupation or major you picked, never from the school, so "
-            "this can't tell you which of these leads to higher pay. What it can "
-            "tell you is which ones teach your field at a price you could cover."
+            "Every salary this calculator models comes from the occupation or "
+            "major you picked, never from the school, so where you study "
+            "changes the cost and never the projected pay. Pick a program "
+            "and one more column appears: Outcomes, built from what that "
+            "school's own graduates in that program earned and borrowed. It "
+            "is the one school-level figure here, it is display only, and it "
+            "reflects who a school admits and where its graduates work as much "
+            "as what it teaches."
         )
 
         controls = render_search_controls(coa_df, is_graduate=False)
@@ -22025,6 +22326,7 @@ def render_school_search(always_open: bool = False) -> None:
         adm_filtered = controls["adm_filtered"]
         adm_low, adm_high = controls["adm_low"], controls["adm_high"]
         sort_mode, name_query = controls["sort_mode"], controls["name_query"]
+        discipline = controls["discipline"]
 
         # From the controls' own return value rather than by re-reading a key:
         # the key is per-tool now, and re-deriving it here is how the two get
@@ -22048,7 +22350,8 @@ def render_school_search(always_open: bool = False) -> None:
             control_types=tuple(control_types) or None,
             # Percent on screen, fraction in the data.
             adm_rate_range=(adm_low / 100, adm_high / 100) if adm_filtered else None,
-            sort_mode=sort_mode, name_query=name_query)
+            sort_mode=sort_mode, name_query=name_query,
+            discipline_key=discipline)
         # Read once, here. The backend attaches it as the last thing it does,
         # and any later .merge on this frame would drop it silently.
         total_matches = results.attrs.get("total_matches", len(results))
@@ -22210,6 +22513,26 @@ def render_school_search(always_open: bool = False) -> None:
                 lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0
                 else "—")}
                if "field_debt_median" in results.columns else {}),
+            # The one SCHOOL-LEVEL OUTCOME figure in this app, and the only
+            # column here the list can be ordered by that is not a price.
+            #
+            # Called "Outcomes" rather than "Rank" or "Score": a rank asserts a
+            # position in a field, and this is a measurement of three things
+            # about one programme at one school. Three characters wide, so it
+            # costs the table almost nothing.
+            #
+            # The asterisk is the thin-cohort flag. It rides in the cell for
+            # the same reason the Parent PLUS count does -- a thirteenth column
+            # to carry one character would cost every other column legibility.
+            **({"Outcomes": [
+                ("—" if pd.isna(score)
+                 else f"{int(round(score))}*" if bool(thin)
+                 else f"{int(round(score))}")
+                for score, thin in zip(results["discipline_score"],
+                                        results.get("thin_cohort",
+                                                    pd.Series(False,
+                                                              index=results.index)))]}
+               if "discipline_score" in results.columns else {}),
             # Scorecard publishes a per-school calculator for all but one row,
             # and the caption above has always told visitors to go check one.
             # Until now the only one the page could reach was for the school
@@ -22333,6 +22656,49 @@ def render_school_search(always_open: bool = False) -> None:
                 f"{fmt_money_md(4049)} to {fmt_money_md(45268)} depending on "
                 f"where you study. It is not a cost, so never add it to the "
                 f"prices above. **—** means unreported."
+            )
+
+        # THE OUTCOME COLUMN NEEDS TWO CAPTIONS, and the second is the one
+        # that must never be dropped. Both read their numbers off the dataset's
+        # own metadata columns rather than restating them, so neither can go
+        # stale against a rebuild.
+        if "discipline_score" in results.columns:
+            _meta = discipline_outcome_meta(discipline)
+            _thin_n = int(sum(1 for value in results.get(
+                "thin_cohort", []) if bool(value)))
+            _cap(
+                f"**Outcomes** is a 1 to 100 score this site builds, not a "
+                f"published ranking, from three federal figures about "
+                f"**{_meta['label']}** graduates *of that school*: what they "
+                f"earned four years out against the benchmark for their field "
+                f"({DISCIPLINE_WEIGHTS['earn']}%), what they earned against "
+                f"what they borrowed ({DISCIPLINE_WEIGHTS['debt']}%), and how "
+                f"many were found working ({DISCIPLINE_WEIGHTS['employed']}%). "
+                f"It is scored within {_meta['label']} only, so a 70 here and a "
+                f"70 in another subject are not the same thing. It covers "
+                f"{_meta['scored_n']:,} of the {_meta['universe_n']:,} schools "
+                f"teaching it. **—** means that school's figures are withheld "
+                f"for privacy"
+                + (f", and **\\*** marks the {_thin_n} with fewer than 30 "
+                   f"graduates, which are rough." if _thin_n else ".")
+            )
+            _cap(
+                "**What it cannot tell you.** It is not a measure of teaching. "
+                "It moves with how selective a school is"
+                + (f" (correlation {_meta['admit_corr']:+.2f})"
+                   if _meta["admit_corr"] is not None else "")
+                + ", so it partly ranks who gets in rather than what happens "
+                "next, which is why no salary this calculator models has ever "
+                "come from a school. It moves with where graduates work: "
+                + (f"{_meta['top_state']} supplies "
+                   f"{_meta['top_state_excess']:.0%} more of the top of this "
+                   "list than its share of the field. "
+                   if _meta["top_state"] else "")
+                + "And it is not stable: between the two windows federal data "
+                "publishes, a school's position shifts by a median of "
+                + (f"{_meta['rank_shift']:.0%} " if _meta["rank_shift"]
+                   else "several ")
+                + "of the list. Read it as a band, not a rank."
             )
 
         # One selectbox and one button, not a button per row: 25 widgets would
@@ -25645,9 +26011,25 @@ field, from no gap at all in nursing and criminal justice to roughly $30,000 a
 year in computing. Those figures are measured one year after graduation and
 describe *who chose each path*, not what the choice did to them. This
 calculator states them where you pick the path and deliberately does not apply
-them to your earnings: every salary here comes from the occupation or major you
-chose and never from the school, and a descriptive gap is not a license to
-break that.
+them to your earnings: every salary this calculator models comes from the
+occupation or major you chose and never from the school, and a descriptive gap
+is not a license to break that.
+
+The school search now shows one school-level outcome figure, and the rule above
+is exactly why it stops at the search. Pick a program there and an Outcomes
+column appears, scoring each school on what its own graduates in that program
+earned against the benchmark for their field, what they earned against what
+they borrowed, and how many were found working. It is federal data and it is
+display only: it changes no salary, no loan and no result on this page. The
+reason it may not is the reason stated above, measured rather than assumed.
+Across these programs the score moves with how selective a school is, so it
+partly ranks who gets in; it moves with where graduates work, which is why
+nursing and law are scored against their own state's wage for the occupation
+and the other fields are not; and a school's position shifts by a median of 5
+to 17 percent of the list between the two windows federal data publishes. Some
+fields were built and then withheld for failing those tests, medicine among
+them, because at four and five years out its earnings measure how long a
+graduate's residency is rather than anything about the school.
 
 #### Community college is assumed paid without loans
 

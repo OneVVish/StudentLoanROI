@@ -214,9 +214,18 @@ criminal justice. In Major mode those people are counted in the average. In
 Career mode they are not, because that mode reports what people already doing
 the job earn.
 
-It does not rank schools by outcome, and it does not claim a pricier school
-leads to higher pay. The school affects the cost side only. Every salary comes
-from the occupation or the major, never from the institution.
+It does not claim a pricier school leads to higher pay. Every salary it models
+comes from the occupation or the major, never from the institution, so the
+school you pick changes the cost and never the projected pay.
+
+The school search does show one school level figure. Pick a program within a
+field and an Outcomes column appears, scoring each school out of 100 on what
+its own graduates in that program earned, what they earned against what they
+borrowed, and how many were found working. It is federal data and it changes
+nothing in the calculation. Read it as a band rather than a rank: it moves with
+how selective a school is and with where its graduates end up working, so it
+partly measures who gets in and where they go rather than what the school did
+for them.
 
 And it is an educational estimate rather than financial advice. The figures are
 national medians and published federal data, so they will not match any one

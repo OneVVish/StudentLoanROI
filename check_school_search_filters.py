@@ -1290,6 +1290,37 @@ def check_shared_controls_have_per_tool_keys(_ns) -> list:
     return problems
 
 
+def check_discipline_map_keys(ns):
+    """Every MAJOR_TO_CIP_DISCIPLINE key is a real major, every value a real
+    discipline.
+
+    A key that matches no major is INERT, not broken: the lookup succeeds, the
+    prefill never happens, and nothing anywhere raises. An entry for
+    "Biomedical Engineering" was written and caught by this check before it
+    shipped -- there is no such NY Fed major.
+    """
+    problems = []
+    majors = set(ns["MAJOR_TO_CIP_FAMILY"])
+    for major in ns["MAJOR_TO_CIP_DISCIPLINE"]:
+        if major not in majors:
+            problems.append(
+                f"  MAJOR_TO_CIP_DISCIPLINE key {major!r} is not a major\n"
+                "    a key nothing matches is inert: the prefill silently never "
+                "happens and nothing raises")
+    outcomes = ns["load_discipline_outcomes"]()
+    if not outcomes.empty:
+        shipped = set(outcomes["discipline_key"])
+        for major, key in ns["MAJOR_TO_CIP_DISCIPLINE"].items():
+            if key not in shipped:
+                problems.append(
+                    f"  {major!r} prefills discipline {key!r}, which the dataset "
+                    f"does not ship\n"
+                    "    the reconcile clears it, so the prefill is dead code "
+                    "rather than a wrong answer -- but it should be removed or "
+                    "the discipline shipped")
+    return problems
+
+
 def check_field_debt_column(ns, base) -> list:
     """The per-field borrowing figure must ADD a column and change nothing else.
 
@@ -1682,6 +1713,7 @@ def main() -> int:
         ("residency modelling", lambda: check_residency_modelling(ns)),
         ("program lengths", lambda: check_program_lengths(ns)),
         ("field debt column", lambda: check_field_debt_column(ns, base)),
+        ("discipline map keys", lambda: check_discipline_map_keys(ns)),
         ("pdf header repeats", lambda: check_pdf_table_repeats_header(ns)),
         ("net price and completion",
          lambda: check_net_price_and_completion(ns, base)),

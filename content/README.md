@@ -146,10 +146,14 @@ The temptation is always to answer the question the reader is actually asking.
 Some of those questions this app cannot answer, and a guide that answers them
 anyway spends the credibility the rest of the page depends on.
 
-- **Nothing about outcomes by institution.** `SCOPE.md` names this a real gap:
-  modelled salary does not vary by school except through a thin prestige
-  multiplier. So a guide can compare schools on COST and must not imply the
-  degree is worth more or less for having come from one of them.
+- **Almost nothing about outcomes by institution, and never in the model.**
+  Modelled salary still does not vary by school except through a thin prestige
+  multiplier, so a guide must not imply the degree is worth more for having come
+  from one school rather than another. The ONE exception is the search's
+  Outcomes column, which a guide may describe: it is federal per-program data,
+  it is display only, and any mention of it has to carry the caveats the app
+  itself carries, that it moves with selectivity and with where graduates work.
+  Cost comparisons remain free.
 - **No verdict on a perception, however obvious the verdict feels.** The
   community college guide nearly opened by calling the "that is for people who
   did not make it" idea wrong. That is a claim about outcomes, the repo cannot
