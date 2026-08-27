@@ -79,11 +79,74 @@ def row(rows, needle):
     return None, None, None
 
 
+def check_household(ns):
+    """The poverty guideline, the 150% shelter, and the filing-status asymmetry.
+
+    Anchors are LITERALS from the published 2026 HHS guidelines, never derived
+    from the constants under test -- the flaw this repo already records against
+    an early check_chart_axes and the residency guard. HHS states both of these
+    outright: a family of four is $33,000 in the contiguous states and $41,250
+    in Alaska.
+    """
+    problems = []
+    pg = ns["poverty_guideline"]
+    for size, region, expected in ((1, "contiguous", 15_960),
+                                    (4, "contiguous", 33_000),
+                                    (4, "alaska", 41_250),
+                                    (1, "hawaii", 18_360)):
+        got = pg(size, region)
+        if abs(got - expected) > 0.5:
+            problems.append(
+                f"  poverty_guideline({size}, {region!r}) is ${got:,.0f}, "
+                f"published is ${expected:,.0f}\n"
+                "    this is a federal table, so a mismatch is a wrong payment "
+                "for every household of that size")
+
+    allowance = ns["idr_income_allowance"]
+    # 150% of the guideline, and the fallback must be EXACTLY the old flat
+    # figure: a visitor who never answers the household question has to see
+    # what they saw before this feature existed.
+    if abs(allowance(4) - 49_500) > 0.5:
+        problems.append(f"  a household of four shelters ${allowance(4):,.0f}, "
+                        f"not 150% of $33,000\n    IBR shelters 150%")
+    if allowance(None) != float(ns["IDR_LIVING_ADJUSTMENT"]):
+        problems.append(
+            f"  with no household size the allowance is ${allowance(None):,.0f}, "
+            f"not the flat ${ns['IDR_LIVING_ADJUSTMENT']:,}\n"
+            "    unanswered must mean unchanged, or this feature silently "
+            "moves every existing scenario")
+
+    countable = ns["idr_countable_income"]
+    joint = countable(65_000, 60_000, ns["FILING_JOINT"])
+    separate = countable(65_000, 60_000, ns["FILING_SEPARATE"])
+    if joint != 125_000:
+        problems.append(f"  filing jointly counts ${joint:,.0f}, not both incomes")
+    if separate != 65_000:
+        problems.append(
+            f"  filing separately counts ${separate:,.0f}, not the borrower's "
+            "alone\n    that exclusion is the whole reason the control exists")
+
+    # THE ASYMMETRY, which is the finding this feature exists to surface: a
+    # spouse raises family size even when their income is excluded, so filing
+    # separately after marrying shelters MORE than being single did.
+    if not allowance(2) > allowance(1):
+        problems.append(
+            "  a two-person household does not shelter more than a one-person "
+            "one\n    filing separately would then be strictly worse than "
+            "staying single, which is the opposite of the rule")
+    return problems
+
+
 def main() -> int:
     ns = load()
     compare = ns["compare_existing_loan_plans"]
     counting = ns["rap_months_counting_back"]
     problems, checked = [], 0
+
+    # Household and filing status, checked against the published HHS table.
+    household = check_household(ns)
+    problems.extend(household)
+    checked += 9
 
     BAL, RATE = 60_000.0, 6.5
 

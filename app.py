@@ -1523,17 +1523,102 @@ SUB_BACHELORS_EDUCATION_LEVELS = {
 # REPAYE/SAVE-style plans: 10% of discretionary income, where discretionary
 # income is pay above a flat living allowance, with unpaid balances forgiven
 # after a fixed number of years if never fully repaid.
+# The flat figure, kept as the fallback when nobody has said how big their
+# household is. It is roughly 150% of the one-person poverty guideline plus a
+# little, and it was the ONLY allowance this app had until 2026-08. Every
+# caption that used to apologise for it now has a real answer to give instead.
 IDR_LIVING_ADJUSTMENT = 22000
+
+# HHS POVERTY GUIDELINES, 2026. Published 2026-01-15, effective 2026-01-13
+# (91 FR, "Annual Update of the HHS Poverty Guidelines", aspe.hhs.gov).
+#
+# This is what real IBR subtracts, at 150%, and getting it right is the whole
+# point of asking for a household size: a family of four in the contiguous
+# states shelters $49,500 of income where the flat $22,000 sheltered less than
+# half that. On a $75,000 balance the difference is most of the payment.
+#
+# Structure, not a typed-out grid: HHS publishes a base for one person and a
+# flat increment per additional person, so a table would be a derived thing
+# with more places to go wrong. Verified against the published examples --
+# 15,960 + 3 x 5,680 = 33,000 for a family of four in the contiguous states,
+# and 19,950 + 3 x 7,100 = 41,250 in Alaska, both of which HHS states.
+#
+# Alaska and Hawaii are separate guidelines in the statute, not a cost-of-living
+# adjustment we are applying: leaving them out would overstate the payment for
+# every borrower in those two states. The tool asks, defaulting to contiguous.
+POVERTY_GUIDELINES_2026 = {
+    "contiguous": {"base": 15_960, "per_person": 5_680},
+    "alaska": {"base": 19_950, "per_person": 7_100},
+    "hawaii": {"base": 18_360, "per_person": 6_530},
+}
+POVERTY_GUIDELINE_YEAR = 2026
+# IBR and the other income-driven plans shelter 150% of the guideline.
+IDR_POVERTY_MULTIPLE = 1.5
+# Somebody has to be in the household, and the guideline is undefined at zero.
+MIN_FAMILY_SIZE = 1
+MAX_FAMILY_SIZE = 15
+
+
+def poverty_guideline(family_size: int, region: str = "contiguous") -> float:
+    """The annual HHS poverty guideline for a household of this size."""
+    table = POVERTY_GUIDELINES_2026.get(
+        str(region or "contiguous").lower(), POVERTY_GUIDELINES_2026["contiguous"])
+    size = max(MIN_FAMILY_SIZE, min(int(family_size or MIN_FAMILY_SIZE),
+                                    MAX_FAMILY_SIZE))
+    return float(table["base"] + table["per_person"] * (size - 1))
+
+
+def idr_income_allowance(family_size: int = None,
+                          region: str = "contiguous") -> float:
+    """What an income-driven plan shelters before charging a percentage.
+
+    150% of the household's poverty guideline, which is what IBR actually
+    subtracts. Falls back to the flat IDR_LIVING_ADJUSTMENT when no household
+    size is given, so every existing caller and every already-shared link keeps
+    the number it had -- this is additive, and a visitor who never answers the
+    new question sees exactly what they saw before.
+    """
+    if not family_size:
+        return float(IDR_LIVING_ADJUSTMENT)
+    return IDR_POVERTY_MULTIPLE * poverty_guideline(family_size, region)
+
+
+# Whose income an income-driven payment is figured on. The distinction that
+# matters to anyone getting married, and the reason this feature exists:
+#
+#   single / MFJ  the household's whole income counts
+#   MFS           only the borrower's, though the spouse still counts toward
+#                 FAMILY SIZE and so still raises the sheltered amount
+#
+# That asymmetry is the actual planning lever. It is also why filing status
+# cannot be inferred from "are you married": both answers are available to the
+# same person and they give different payments.
+FILING_SINGLE = "Single or head of household"
+FILING_JOINT = "Married, filing jointly"
+FILING_SEPARATE = "Married, filing separately"
+FILING_STATUSES = (FILING_SINGLE, FILING_JOINT, FILING_SEPARATE)
+
+
+def idr_countable_income(borrower_income: float, spouse_income: float = 0.0,
+                          filing_status: str = FILING_SINGLE) -> float:
+    """The income an income-driven payment is actually figured on."""
+    if filing_status == FILING_JOINT:
+        return float(borrower_income or 0.0) + float(spouse_income or 0.0)
+    return float(borrower_income or 0.0)
 IDR_PAYMENT_RATE = 0.10
 IDR_MAX_TERM_YEARS = 20
 # Old IBR, for borrowers whose first federal loan predates July 1, 2014: the
 # same shape at 15% of discretionary income with forgiveness at 25 years.
 # The repayment tool's `existing_old_ibr` toggle swaps the IBR row onto these
-# two numbers -- everything else (the flat living allowance, the simulator)
-# is shared. That flat allowance is the one simplification worth restating
-# wherever this variant is shown: real IBR subtracts 150% of the poverty
-# line FOR THE FAMILY SIZE, so a bigger household pays less than the flat
-# figure suggests, on either variant.
+# two numbers -- everything else (the allowance, the simulator) is shared.
+#
+# THE FLAT ALLOWANCE WAS THE ONE SIMPLIFICATION THIS MODEL APOLOGISED FOR, and
+# since 2026-08 it is gone from the repayment tool: that tool asks for a
+# household size and shelters 150% of the HHS poverty guideline for it, which
+# is what the statute does. IDR_LIVING_ADJUSTMENT survives as the fallback for
+# a caller that has not asked -- the CALCULATOR still has not, because it
+# models a prospective student with no household to speak of, and giving it the
+# question would be asking a seventeen-year-old to predict one.
 OLD_IBR_PAYMENT_RATE = 0.15
 OLD_IBR_MAX_TERM_YEARS = 25
 
@@ -18991,6 +19076,9 @@ def rap_months_counting_back(rap_result: dict, standard_monthly: float) -> dict:
 REPAYMENT_SHARE_FIELDS = (
     ("existing_income", "ri", int),
     ("existing_dependents", "rd", int),
+    ("existing_family_size", "rfs", int),
+    ("existing_spouse_income", "rsi", int),
+    ("existing_filing_status", "rfst", str),
     ("existing_accrued_interest", "rui", int),
     ("existing_prior_payments", "rp", int),
     ("existing_forgivable", "rf", int),
@@ -19068,6 +19156,15 @@ def seed_repayment_from_share() -> None:
             continue
         if cast is int:
             st.session_state.setdefault(key, get_shared_int(param, 0))
+        elif cast is str:
+            # A KEYED SELECTBOX RAISES on a stored value absent from its
+            # options, so a hand-edited ?rfst=whatever would break the page for
+            # whoever opened the link rather than for whoever built it. Only a
+            # value the control actually offers is seeded; anything else falls
+            # through to the widget's own default.
+            if key == "existing_filing_status" and raw not in FILING_STATUSES:
+                continue
+            st.session_state.setdefault(key, raw)
         else:
             st.session_state.setdefault(key, get_shared_float(param, 0.0))
     # The loan grids: one comma list per column, index-aligned. The balance
@@ -19159,7 +19256,20 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                                  private_actual_payment: float = 0.0,
                                  federal_loans: list = None,
                                  private_loans: list = None,
-                                 old_ibr: bool = False) -> list:
+                                 old_ibr: bool = False,
+                                 # APPENDED, NOT INSERTED. Several callers pass
+                                 # positionally past `forgivable`, so adding
+                                 # these in the middle silently shifted
+                                 # starting_interest into family_size, pslf
+                                 # into spouse_income and prior_payments into
+                                 # filing_status. check_plan_switching caught
+                                 # it as twelve wrong term lengths and an
+                                 # ignored private tranche, which is what a
+                                 # shifted signature looks like from outside.
+                                 family_size: int = None,
+                                 spouse_income: float = 0.0,
+                                 filing_status: str = FILING_SINGLE,
+                                 poverty_region: str = "contiguous") -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -19320,9 +19430,32 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     rows.append((f"2026 Tiered Standard ({tiered_term}-year)", with_private(tiered),
                  "Does NOT qualify for PSLF, or even for TEPSLF." if pslf else
                  "Fixed payment over a term set by your balance."))
+    # HOUSEHOLD, resolved once for both income-driven plans so they cannot
+    # disagree about who is in it. Two separate things come out of it:
+    #
+    #   countable_income  whose pay the percentage is taken of. Filing jointly
+    #                     counts both; filing separately counts only the
+    #                     borrower's, which is the lever anyone marrying
+    #                     someone with no loans is asking about.
+    #   allowance         what is sheltered first, 150% of the household's
+    #                     poverty guideline. The SPOUSE RAISES THIS EVEN WHEN
+    #                     FILING SEPARATELY, because family size counts people,
+    #                     not incomes. That asymmetry is the whole finding.
+    countable_income = idr_countable_income(annual_income, spouse_income,
+                                            filing_status)
+    allowance = idr_income_allowance(family_size, poverty_region)
+    # RAP reduces by $50/month per DEPENDENT, and a spouse is not one. Derived
+    # rather than asked twice: everyone in the household who is neither the
+    # borrower nor a spouse. An explicit `dependents` argument still wins, so
+    # every existing caller is untouched.
+    rap_dependents = dependents
+    if not dependents and family_size:
+        rap_dependents = max(0, int(family_size) - 1
+                             - (1 if filing_status in (FILING_JOINT,
+                                                       FILING_SEPARATE) else 0))
     if forgivable:
-        rap = simulate_rap_schedule(total_fed, fed_rate, None, dependents,
-                                     annual_income=annual_income,
+        rap = simulate_rap_schedule(total_fed, fed_rate, None, rap_dependents,
+                                     annual_income=countable_income,
                                      max_term_years=rap_term,
                                      max_months=rap_months)
         # The count-back finding is deliberately NOT put in this cell. The
@@ -19349,9 +19482,11 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                      f"{PSLF_QUALIFYING_PAYMENTS} payments." if pslf else
                      f"1-10% of total income, minimum ${RAP_MIN_PAYMENT}/month. "
                      "Unpaid interest waived. Remainder forgiven at 30 years."))
-        idr = calculate_idr_repayment(total_fed, fed_rate, None, annual_income=annual_income,
+        idr = calculate_idr_repayment(total_fed, fed_rate, None,
+                                       annual_income=countable_income,
                                        starting_interest=starting_interest,
                                        payment_rate=ibr_rate,
+                                       living_adjustment=allowance,
                                        max_term_years=idr_term,
                                        max_months=idr_months)
         _ibr_label = ("IBR-style income-driven (old IBR)" if old_ibr
@@ -19860,6 +19995,38 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             help="Only used to say how old you'd be when each plan ends. "
                  "Leave at 0 to skip.")
 
+        # HOUSEHOLD. Until 2026-08 the income-driven plans sheltered a flat
+        # $22,000 and every caption had to apologise for it. Real IBR shelters
+        # 150% of the HHS poverty guideline for the household, which is
+        # $23,940 for one person and $49,500 for four, so the flat figure
+        # overstated the payment for anyone with a family.
+        h1, h2, h3 = st.columns(3)
+        family_size = h1.number_input(
+            "People in your household", min_value=MIN_FAMILY_SIZE,
+            max_value=MAX_FAMILY_SIZE, step=1, key="existing_family_size",
+            help="You, your spouse if you have one, and anyone you claim. "
+                 f"Income-driven plans shelter 150% of the {POVERTY_GUIDELINE_YEAR} "
+                 "poverty guideline for this many people before charging a "
+                 "percentage of the rest.")
+        filing_status = h2.selectbox(
+            "Tax filing status", FILING_STATUSES, key="existing_filing_status",
+            help="Filing jointly counts your spouse's income in the payment. "
+                 "Filing separately does not, though your spouse still counts "
+                 "toward household size.")
+        spouse_income = h3.number_input(
+            "Spouse's annual income ($)", min_value=0, max_value=2_000_000,
+            step=1_000, key="existing_spouse_income",
+            disabled=st.session_state.get("existing_filing_status") != FILING_JOINT,
+            help="Only used when you file jointly. Greyed out otherwise, "
+                 "because filing separately leaves it out of the payment by "
+                 "law rather than by choice.")
+        # Disabling a widget does NOT clear what it holds, so a stored spouse
+        # income would keep moving the payment from behind a greyed control --
+        # the private-loan opt-in records the same trap. Read the status, not
+        # the box.
+        if st.session_state.get("existing_filing_status") != FILING_JOINT:
+            spouse_income = 0
+
         st.markdown("**Federal loans**")
         # One row per loan, add/delete built in. The data is OWNED by our own
         # session key (a list of row dicts): st.data_editor's widget key
@@ -19935,9 +20102,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "have the original IBR: 15% of discretionary income with "
                  "forgiveness at 25 years, instead of the 10%/20-year version. "
                  "Ticking this puts the IBR row on those terms. Both versions "
-                 "use this app's flat $22,000 allowance; the real formula "
-                 "subtracts 150% of the poverty line for your family size, so "
-                 "a bigger household pays less than shown.")
+                 "shelter 150% of the poverty guideline for your household "
+                 "size, which is what the real formula does.")
 
         pslf = st.checkbox(
             "I work full-time for a government or 501(c)(3) employer (PSLF)",
@@ -20073,6 +20239,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # that would make the figure meaningless.
         mark_interaction("module_repayment_comparison")
         rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable,
+                                            family_size=family_size,
+                                            spouse_income=spouse_income,
+                                            filing_status=filing_status,
                                             starting_interest=accrued,
                                             pslf=pslf and forgivable,
                                             prior_payments=prior_payments,
