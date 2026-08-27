@@ -89,7 +89,12 @@ RAW = "Most-Recent-Cohorts-Field-of-Study.csv"
 COVERAGE_FLOORS = {
     "eng_chemical": 0.70, "law": 0.66, "eng_aerospace": 0.65,
     "eng_mechanical": 0.64, "nursing": 0.60, "business": 0.58,
-    "eng_industrial": 0.53, "economics": 0.30,
+    "eng_industrial": 0.53, "dentistry": 0.68,
+    # Shipped below the 60% build floor by explicit decision, so their guard
+    # floors sit below their own observed coverage rather than below the floor
+    # they failed: electrical .57, biomedical .51, computer .41, economics .39.
+    "eng_electrical": 0.50, "eng_biomedical": 0.45, "eng_computer": 0.35,
+    "economics": 0.30,
 }
 
 
@@ -339,11 +344,23 @@ def check_state_concentration(df):
                 f"  {key} has no top_state_excess\n"
                 "    it is the measure the concentration gate reads")
         elif excess > MAX_TOP_DECILE_STATE_EXCESS:
+            # A waiver is a decision someone made and the data records; a
+            # missing waiver is the gate having quietly stopped firing, which
+            # looks exactly like a dataset that got better.
+            if not bool(block["concentration_waived"].iloc[0]):
+                problems.append(
+                    f"  {key} ships with {block['top_state'].iloc[0]} "
+                    f"+{excess:.0%} over-represented in its top decile, past "
+                    f"+{MAX_TOP_DECILE_STATE_EXCESS:.0%}, with no waiver "
+                    f"recorded\n"
+                    "    the top of that ranking is a place, not a set of "
+                    "schools; ship it with --allow-concentrated or not at all")
+        elif bool(block["concentration_waived"].iloc[0]):
             problems.append(
-                f"  {key} ships with {block['top_state'].iloc[0]} "
-                f"+{excess:.0%} over-represented in its top decile, past "
-                f"+{MAX_TOP_DECILE_STATE_EXCESS:.0%}\n"
-                "    the top of that ranking is a place, not a set of schools")
+                f"  {key} records a concentration waiver it does not need "
+                f"(excess +{excess:.0%})\n"
+                "    a stale waiver would hide a real concentration if the "
+                "data later drifted past the threshold")
     return problems
 
 

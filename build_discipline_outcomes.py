@@ -259,7 +259,7 @@ MAX_ADMIT_RATE_CORR = 0.85
 # state is not punished for it. The observed ordering breaks cleanly:
 #
 #     eng_civil       CA 57% of the top decile vs  9% base   +48%
-#     dentistry       CT 50%                   vs  9%        +41%
+#     dentistry       CT 50%                   vs  9%        +41%  (WAIVED)
 #     ---- threshold ----
 #     eng_mechanical  CA 37%                   vs  9%        +28%
 #     eng_chemical    TX 27%                   vs  5%        +21%
@@ -365,7 +365,7 @@ OUTPUT_COLUMNS = [
     "discipline_score", "score_basis",
     "universe_n", "scored_n", "scored_share",
     "admit_rate_corr", "rank_stability", "median_rank_shift",
-    "top_state", "top_state_excess",
+    "top_state", "top_state_excess", "concentration_waived",
     "state_ratio_p10", "state_ratio_p90",
 ]
 
@@ -552,7 +552,7 @@ def honesty_metadata(block, coa):
 
 
 def build(df, coa, benchmarks, school_state, allow_below_floor,
-          allow_withheld):
+          allow_withheld, allow_concentrated):
     frames, refused, report, withheld_now = [], [], [], []
     concentrated = []
 
@@ -658,8 +658,12 @@ def build(df, coa, benchmarks, school_state, allow_below_floor,
             withheld_now.append(key)
             continue
         excess = block["top_state_excess"].iloc[0]
-        if pd.notna(excess) and excess > MAX_TOP_DECILE_STATE_EXCESS \
-                and key not in allow_below_floor:
+        over = pd.notna(excess) and excess > MAX_TOP_DECILE_STATE_EXCESS
+        # Waived, not ignored. The dataset records the waiver so a consumer can
+        # say so, and so the guard can tell a deliberate exception from a gate
+        # that quietly stopped firing.
+        block["concentration_waived"] = bool(over and key in allow_concentrated)
+        if over and key not in allow_concentrated:
             concentrated.append((key, block["top_state"].iloc[0], excess))
             continue
         if (share < MIN_SCORED_SHARE or scored < MIN_SCORED_SCHOOLS) \
@@ -760,6 +764,11 @@ def main():
     parser.add_argument("--allow-withheld", default="",
                         help="comma-separated discipline keys to write despite "
                              "being in WITHHELD. Read that entry's reason first.")
+    parser.add_argument("--allow-concentrated", default="",
+                        help="comma-separated discipline keys to ship despite a "
+                             "top decile concentrated in one state. Separate "
+                             "from --allow-below-floor on purpose: the two are "
+                             "different defects and the record should say which.")
     parser.add_argument("--allow-below-floor", default="",
                         help="comma-separated discipline keys to ship despite "
                              "failing the coverage floor. No global --force: "
@@ -789,7 +798,10 @@ def main():
     allow_withheld = {k.strip() for k in args.allow_withheld.split(",") if k.strip()}
     benchmarks, school_state = load_state_benchmarks(
         args.state_careers, args.coa, args.professional_tuition)
-    out, report = build(df, coa, benchmarks, school_state, allow, allow_withheld)
+    allow_concentrated = {k.strip()
+                          for k in args.allow_concentrated.split(",") if k.strip()}
+    out, report = build(df, coa, benchmarks, school_state, allow, allow_withheld,
+                        allow_concentrated)
     summarise(out, report, dropped_foreign)
     out.to_csv(args.output, index=False)
     print(f"\nWrote {len(out):,} rows to {args.output}")
