@@ -97,21 +97,23 @@ T12 DEBT_ALL_STGP_EVAL_MDN IS CONDITIONAL ON HAVING BORROWED. A school where few
     students borrow publishes no median, so it is UNSCORED rather than penalised.
     score_basis says which.
 
-T14 GEOGRAPHY DOMINATES THE TOP OF THE LIST, WORST WHERE THE SCORE LOOKS
-    CLEANEST. Nursing has the best selectivity profile of any discipline here
-    (r = +0.07 with admit rate), and California is 4% of its scored schools and
-    44% OF ITS TOP FIFTY -- an eleven-fold over-representation, because RN pay
-    is set by regional hospital wage scales. Civil engineering runs 9% -> 36%
-    and mechanical 9% -> 32%. State median earn_ratio spans 0.38 (PR) to 1.32
-    (CA) in nursing. The state_ratio_p10 / state_ratio_p90 columns carry this
-    per discipline so a caption can state it, but STATING IT IS NOT FIXING IT:
-    the fix is to divide each school's earnings by its own state's median for
-    the matching occupation, from data/state_careers_clean.csv, which needs a
-    hand-curated discipline->SOC map of about ten entries. That map is far
-    narrower than the general SOC-CIP crosswalk this repo declines to build, and
-    build_professional_debt.py's PROGRAMS already maps three CIPs to three
-    occupations by hand for the same reason. Until then, read the top of any
-    list here as partly a map of where graduates work.
+T14 GEOGRAPHY IS FIXED FOR TWO DISCIPLINES AND STILL PRESENT IN THE REST.
+    Dividing by the school's own state median for the occupation removes the
+    local wage level, and it was applied only where measurement showed it helps
+    -- see DISCIPLINE_SOC for the full comparison. Nursing went from state
+    explaining 76.6% of the ratio's between-school variance to 41.5%, and the
+    artifact that started this is gone: the best Alabama nursing programme used
+    to score 46.7 against a California MEDIAN of 84.0, and Alabama's median is
+    now 58.6 against California's 36.2. Law went to 10.6% and California is now
+    slightly UNDER-represented in its top fifty.
+
+    IT IS NOT FIXED ANYWHERE ELSE, and that must be captioned rather than
+    implied away. Engineering still runs 38% to 58%, with California 32% of
+    mechanical's top fifty against a 9% base and 36% of civil's; dentistry is
+    81.5%. The state benchmark made every one of them WORSE, because their
+    graduates are nationally mobile and no federal source publishes where a
+    given school's graduates went. There is no fix here with this data: read the
+    top of those lists as partly a map of where graduates work.
 
 T13 BUSINESS IS 5202, NOT THE "52" FAMILY. The family medians accounting,
     marketing, finance and hospitality into one number, which is the right
@@ -251,6 +253,67 @@ SCORECARD_MIN_N = 16
 # Above this the column is the admit-rate ordering with extra steps.
 MAX_ADMIT_RATE_CORR = 0.85
 
+# THE GEOGRAPHY FIX (T14). Divide a school's graduate earnings by its own
+# STATE's median for the occupation the degree leads to, instead of by the
+# national median for the field. That removes the local wage LEVEL and leaves
+# the residual: how a school's graduates do against the market they work in.
+#
+# Measured need, on the national-ratio version: state explained 76.6% of
+# between-school earnings variance in nursing (62.3% excluding Puerto Rico,
+# 52.2% excluding Puerto Rico and California), 50.7% in industrial engineering
+# and 50.3% in civil. Within any one state, schools sat within 1.07x to 1.37x of
+# each other -- so between-state spread was three to ten times the within-state
+# spread, and the top of every list was mostly a map of where graduates work.
+#
+# None WHERE NO SINGLE OCCUPATION IS DEFENSIBLE, following MAJOR_TO_CIP_FAMILY's
+# convention in app.py. Business (5202) graduates scatter across hundreds of
+# occupations and "General and Operations Managers" would be a guess; economics
+# graduates overwhelmingly do not become Economists (19-3011 is a small,
+# PhD-heavy occupation whose median would badly misdescribe a BA). Those two
+# keep the national-field benchmark, and benchmark_basis records it per row.
+#
+# This map is ten entries about degrees that lead to ONE named, mostly licensed
+# occupation. It is far narrower than the general SOC-CIP crosswalk this repo
+# declines to build, whose own documentation calls itself conceptual rather than
+# empirical -- and build_professional_debt.py's PROGRAMS already hand-maps three
+# CIPs to three occupations on the same reasoning.
+# MEASURED, NOT ASSUMED. Both benchmarks were built and compared on the same
+# metric -- the share of between-school variance in the earnings ratio that
+# state explains, where lower is better because it means less of the ranking is
+# a map of where graduates work:
+#
+#     discipline        R2 national   R2 state    better
+#     nursing                 63.2%      38.2%    STATE
+#     law                     21.4%      10.0%    STATE
+#     eng_mechanical          29.7%      56.9%    national
+#     eng_industrial          41.5%      53.8%    national
+#     eng_civil               48.3%      52.7%    national
+#     eng_chemical            46.9%      79.3%    national
+#     eng_aerospace           57.7%      76.6%    national
+#     dentistry               79.4%      88.9%    national
+#
+# So the state benchmark is applied to NURSING AND LAW ONLY, and the reason it
+# fails elsewhere is not noise. Nursing and law are licensed state by state and
+# their graduates overwhelmingly practise where they qualified, so the local
+# wage is the market they actually face. ENGINEERS ARE NATIONALLY MOBILE: a
+# Purdue mechanical engineering graduate may work anywhere, so dividing by
+# INDIANA's mechanical engineer wage benchmarks them against a market they may
+# never enter, and adds variance rather than removing it. Dentistry fails for a
+# second reason on top -- 54 schools across some thirty states is a handful
+# each, and OEWS dentist medians exclude much practice income.
+#
+# None WHERE NO SINGLE OCCUPATION IS DEFENSIBLE, following MAJOR_TO_CIP_FAMILY's
+# convention in app.py: business (5202) graduates scatter across hundreds of
+# occupations, and economics graduates overwhelmingly do not become Economists
+# (19-3011 is a small, PhD-heavy occupation whose median would misdescribe a BA).
+#
+# Adding an entry here is a claim that a degree leads to one named occupation
+# AND that its graduates stay put. Re-run the comparison above before making it.
+DISCIPLINE_SOC = {
+    "nursing": "29-1141",
+    "law": "23-1011",
+}
+
 # Built, measured, and NOT WRITTEN. A discipline whose score is a correct
 # measurement of the wrong thing gets withheld rather than footnoted -- the
 # standard marketing/rejected-charts/README.md already applies to content, for
@@ -272,7 +335,8 @@ OUTPUT_COLUMNS = [
     "UNITID", "INSTNM", "CONTROL", "control_type",
     "discipline_key", "discipline_label", "CIPCODE", "CREDLEV",
     "cip_family", "credential", "earn_window", "national_basis",
-    "earn_median", "earn_national", "earn_ratio",
+    "earn_median", "earn_national", "earn_benchmark", "benchmark_basis",
+    "benchmark_state", "benchmark_soc", "earn_ratio",
     "debt_median", "earn_to_debt",
     "cohort_n", "cohort_nwne", "employed_share", "thin_cohort",
     "repayment_band_makeprog", "repayment_band_paidinfull",
@@ -310,6 +374,36 @@ def load_raw(path):
     return df, dropped
 
 
+def load_state_benchmarks(state_careers_path, coa_path, professional_path):
+    """(state, occ_code) -> median wage, and UNITID -> state.
+
+    TWO SOURCES FOR THE STATE, because neither covers everything.
+    college_coa_clean.csv drops any institution with no undergraduate cost of
+    attendance, which is every graduate-only school -- that alone left 27% of
+    dental schools and 15% of law schools without a state, and therefore
+    unscorable. professional_tuition_clean.csv carries exactly those. Together
+    they reach 98% of dentistry and 99% of law.
+    """
+    wages = pd.read_csv(state_careers_path, dtype={"occ_code": str},
+                        usecols=["state", "occ_code", "a_median"])
+    wages = wages.dropna(subset=["a_median"])
+    benchmarks = {(row.state, row.occ_code): row.a_median
+                  for row in wages.itertuples()}
+
+    frames = []
+    for path in (coa_path, professional_path):
+        try:
+            frames.append(pd.read_csv(path, usecols=["UNITID", "STABBR"]))
+        except (FileNotFoundError, ValueError):
+            continue
+    if not frames:
+        return benchmarks, {}
+    located = pd.concat(frames).dropna(subset=["UNITID", "STABBR"])
+    located = located.drop_duplicates(subset=["UNITID"])
+    return benchmarks, dict(zip(located["UNITID"].astype("int64"),
+                                located["STABBR"]))
+
+
 def winsorized_unit_scale(series):
     """Winsorize at WINSOR_PCTILES, then min-max onto [0, 1].
 
@@ -341,6 +435,15 @@ def score_block(block):
               & block["debt_median"].isna(), "score_basis"] = "no_debt"
     block.loc[block["score_basis"].eq("complete")
               & block["employed_share"].isna(), "score_basis"] = "no_employment"
+    # MIXING BENCHMARKS INSIDE ONE DISCIPLINE WOULD PUT TWO SCALES IN ONE
+    # COLUMN. A school whose state publishes no median for the occupation is
+    # unscored rather than silently normalized against the national figure --
+    # the same rule as never reweighting a missing component. It costs Puerto
+    # Rico and the Virgin Islands, which OEWS does not cover at state level, and
+    # those are exactly the jurisdictions whose national ratio was the artifact.
+    block.loc[block["score_basis"].eq("complete")
+              & block["earn_benchmark"].isna(),
+              "score_basis"] = "no_state_benchmark"
 
     scorable = block["score_basis"].eq("complete")
     for column in WEIGHTS:
@@ -411,7 +514,8 @@ def honesty_metadata(block, coa):
     return meta
 
 
-def build(df, coa, allow_below_floor, allow_withheld):
+def build(df, coa, benchmarks, school_state, allow_below_floor,
+          allow_withheld):
     frames, refused, report, withheld_now = [], [], [], []
 
     for key, (label, cip, expected_desc, credlev, window) in DISCIPLINES.items():
@@ -465,7 +569,22 @@ def build(df, coa, allow_below_floor, allow_withheld):
             block["earn_national"] = round(float(derived), 2)
             block["national_basis"] = "derived"
 
-        block["earn_ratio"] = block["earn_median"] / block["earn_national"]
+        # The benchmark the ratio actually divides by. State-first where the
+        # degree leads to one named occupation; national field median otherwise.
+        soc = DISCIPLINE_SOC.get(key)
+        block["benchmark_soc"] = soc
+        block["benchmark_state"] = block["UNITID"].map(school_state)
+        if soc is None:
+            block["earn_benchmark"] = block["earn_national"]
+            block["benchmark_basis"] = "national_field"
+        else:
+            block["earn_benchmark"] = [
+                benchmarks.get((state, soc)) if pd.notna(state) else None
+                for state in block["benchmark_state"]]
+            block["earn_benchmark"] = pd.to_numeric(block["earn_benchmark"],
+                                                    errors="coerce")
+            block["benchmark_basis"] = "state_occupation"
+        block["earn_ratio"] = block["earn_median"] / block["earn_benchmark"]
         block["earn_to_debt"] = block["earn_median"] / block["debt_median"]
         found = block["cohort_n"] + block["cohort_nwne"]
         block["employed_share"] = (block["cohort_n"] / found).where(found > 0)
@@ -582,6 +701,12 @@ def main():
                         help="college_coa_clean.csv, for the selectivity and "
                              "geography metadata. Without it those columns are "
                              "NaN rather than zero.")
+    parser.add_argument("--state-careers", default="data/state_careers_clean.csv",
+                        help="state OEWS medians, for the geography benchmark")
+    parser.add_argument("--professional-tuition",
+                        default="data/professional_tuition_clean.csv",
+                        help="second source of a school's state; covers the "
+                             "graduate-only schools the COA file drops")
     parser.add_argument("--allow-withheld", default="",
                         help="comma-separated discipline keys to write despite "
                              "being in WITHHELD. Read that entry's reason first.")
@@ -612,7 +737,9 @@ def main():
         coa = None
 
     allow_withheld = {k.strip() for k in args.allow_withheld.split(",") if k.strip()}
-    out, report = build(df, coa, allow, allow_withheld)
+    benchmarks, school_state = load_state_benchmarks(
+        args.state_careers, args.coa, args.professional_tuition)
+    out, report = build(df, coa, benchmarks, school_state, allow, allow_withheld)
     summarise(out, report, dropped_foreign)
     out.to_csv(args.output, index=False)
     print(f"\nWrote {len(out):,} rows to {args.output}")

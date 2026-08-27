@@ -32,6 +32,8 @@ property aimed at it, not merely by something:
     a CREDLEV 3 national median for medicine-> [denominator matches release]
     a discipline's coverage collapses       -> [coverage floors]
     medicine moved back to the 4-yr window  -> [medicine uses 5-yr window]
+    a discipline switches benchmark basis    -> [benchmark basis]
+    a scored row with no state benchmark    -> [benchmark basis]
 
 Two corrections worth keeping, because the first draft of this table claimed
 otherwise and was wrong:
@@ -67,7 +69,7 @@ import sys
 import pandas as pd
 
 from build_discipline_outcomes import (
-    DISCIPLINES, WITHHELD, MAX_ADMIT_RATE_CORR, MIN_SCORED_SCHOOLS, NA_VALUES,
+    DISCIPLINE_SOC, DISCIPLINES, WITHHELD, MAX_ADMIT_RATE_CORR, MIN_SCORED_SCHOOLS, NA_VALUES,
     SCORECARD_MIN_N, SCORE_MAX, SCORE_MIN, THIN_COHORT_N, WEIGHTS,
     WINDOW_MEDICINE,
 )
@@ -322,6 +324,39 @@ def check_honesty_metadata(df):
     return problems
 
 
+def check_benchmark_basis(df):
+    """Each discipline divides by the benchmark DISCIPLINE_SOC says it does.
+
+    The map is the measured result of comparing both benchmarks, so a
+    discipline quietly switching basis is a discipline whose whole ranking
+    changed. It is also the one thing a reader cannot see: both bases produce a
+    ratio near 1 and a score out of 100.
+    """
+    problems = []
+    for key, block in df.groupby("discipline_key"):
+        expected = ("state_occupation" if DISCIPLINE_SOC.get(key)
+                    else "national_field")
+        seen = set(block["benchmark_basis"].dropna().unique())
+        if seen != {expected}:
+            problems.append(
+                f"  {key} uses benchmark(s) {sorted(seen)}, not {expected!r}\n"
+                "    DISCIPLINE_SOC records which benchmark measurement chose "
+                "for this field; switching it silently rewrites every score")
+        if expected == "state_occupation":
+            socs = set(block["benchmark_soc"].dropna().unique())
+            if socs != {DISCIPLINE_SOC[key]}:
+                problems.append(
+                    f"  {key} is benchmarked against SOC {sorted(socs)}, not "
+                    f"{DISCIPLINE_SOC[key]}")
+            scored = block[block["discipline_score"].notna()]
+            if scored["earn_benchmark"].isna().any():
+                problems.append(
+                    f"  {key} has scored rows with no state benchmark\n"
+                    "    mixing a state and a national benchmark inside one "
+                    "discipline puts two scales in one column")
+    return problems
+
+
 def check_medicine_window(df):
     """T8. Deleting the exception moves medicine back onto residency pay.
 
@@ -418,6 +453,7 @@ def main():
         ("numeric columns are numeric", check_numeric_columns_are_numeric(df)),
         ("thin cohorts flagged", check_thin_cohorts_flagged(df)),
         ("honesty metadata", check_honesty_metadata(df)),
+        ("benchmark basis", check_benchmark_basis(df)),
         ("medicine uses 5-yr window", check_medicine_window(df)),
         ("denominator matches release", check_denominator_matches_release(df)),
     ]
