@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470"
+     role="img" aria-labelledby="wmd-title wmd-desc">
+  <title id="wmd-title">When a payment does not cover the month&#8217;s interest</title>
+  <desc id="wmd-desc">A month's interest is drawn as one bar, split into the part a payment covers
+  and the part it does not. Under the plans before July 2026 the uncovered part was added to what
+  you owe, so the amount owed rises each month. Under RAP it is waived, and a government match of up
+  to fifty dollars a month comes off the principal, so the amount owed falls.</desc>
+
+  <!-- THE CANVAS IS 900 UNITS BECAUSE OF THE PHONE, NOT THE DESKTOP.
+       ARTICLE_CSS sets `article { max-width: 68ch }` with `article img { width: 100% }`, so this
+       figure is displayed at about 610px on a desktop and about 342px on a 390px phone (viewport
+       minus .wrap's 48px of padding). What matters is the RATIO of type size to canvas width, not
+       the canvas size: at 1600 units a 30-unit label arrived at 6px on a phone, which is not
+       readable. At 900 units the same label is 11px on a phone and 20px on a desktop.
+
+       So: nothing here may be smaller than 26 units, and the copy is cut to fit rather than the
+       type shrunk to fit. The sentences that explain the mechanism are a caption paragraph in the
+       guide, where they are real text that scales. There is no title inside the figure either: the
+       guide's own H2 sits directly above it.
+
+       CHECK ANY EDIT AT 342px WIDE. Chrome headless clamps its window to a 500px minimum, so a
+       window-size of 390 silently renders at 500 and crops; load the page in a 390px
+       iframe instead. -->
+
+  <style>
+    .f { font-family: "Avenir Next", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+    .deck { font-size: 28px; font-weight: 500; fill: #5c636d; }
+    .bar-label { font-size: 30px; font-weight: 600; fill: #ffffff; }
+    .panel-h { font-size: 30px; font-weight: 700; fill: #12335c; }
+    .chip { font-size: 28px; font-weight: 500; fill: #14161a; }
+    .small { font-size: 26px; font-weight: 500; fill: #5c636d; }
+    .out-cost { font-size: 28px; font-weight: 700; fill: #eb6834; }
+    .out-gain { font-size: 28px; font-weight: 700; fill: #2a78d6; }
+    .mark-word { font-size: 19px; font-weight: 700; fill: #14161a; }
+    .mark-tld { font-size: 19px; font-weight: 500; fill: #5c636d; }
+  </style>
+
+  <defs>
+    <marker id="arrow-cost" viewBox="0 0 10 10" refX="8" refY="5"
+            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#eb6834"/>
+    </marker>
+    <marker id="arrow-gain" viewBox="0 0 10 10" refX="8" refY="5"
+            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2a78d6"/>
+    </marker>
+  </defs>
+
+  <rect width="900" height="470" fill="#ffffff"/>
+
+  <!-- Wordmark, so a forwarded screenshot still says where it came from. Two strokes from
+       brand/palette.json's geometry, in a 64-unit box. -->
+  <g transform="translate(40 22) scale(0.3)">
+    <path d="M 8 38 L 24 54 L 35.826 38" fill="none" stroke="#eb6834"
+          stroke-width="9.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 35.826 38 L 58 8" fill="none" stroke="#2a78d6"
+          stroke-width="9.5" stroke-linecap="round"/>
+  </g>
+  <text class="f" x="66" y="39"><tspan class="mark-word">worthmydegree</tspan><tspan
+        class="mark-tld">.com</tspan></text>
+
+  <!-- One month's interest, split by whether the payment reaches it -->
+  <text class="f deck" x="40" y="86">One month&#8217;s interest on the balance</text>
+
+  <rect x="40" y="102" width="820" height="68" rx="12" fill="#eb6834"/>
+  <path d="M 532 102 L 52 102 A 12 12 0 0 0 40 114 L 40 158 A 12 12 0 0 0 52 170 L 532 170 Z"
+        fill="#2a78d6"/>
+  <text class="f bar-label" x="286" y="145" text-anchor="middle">Your payment covers</text>
+  <text class="f bar-label" x="696" y="145" text-anchor="middle">It does not</text>
+
+  <!-- The uncovered part goes two different ways -->
+  <path d="M 696 170 L 696 190" fill="none" stroke="#eb6834" stroke-width="3"/>
+  <path d="M 696 190 L 248 190 L 248 208" fill="none" stroke="#eb6834" stroke-width="3"
+        marker-end="url(#arrow-cost)"/>
+  <path d="M 696 190 L 660 190 L 660 208" fill="none" stroke="#eb6834" stroke-width="3"
+        marker-end="url(#arrow-cost)"/>
+
+  <!-- LEFT: the plans RAP replaced -->
+  <rect x="40" y="216" width="400" height="230" rx="14" fill="#f7f8fa"
+        stroke="#dfe3e8" stroke-width="1.5"/>
+  <text class="f panel-h" x="64" y="256">Plans before July 2026</text>
+
+  <rect x="64" y="272" width="352" height="76" rx="10" fill="#fdf2ec"
+        stroke="#eb6834" stroke-width="2"/>
+  <text class="f chip" x="82" y="318">Added to what you owe</text>
+
+  <text class="f small" x="64" y="372">What you owe</text>
+  <path d="M 64 390 L 416 390" fill="none" stroke="#dfe3e8" stroke-width="1.5"
+        stroke-dasharray="4 6"/>
+  <path d="M 236 390 L 316 384 L 392 376" fill="none" stroke="#eb6834"
+        stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"
+        marker-end="url(#arrow-cost)"/>
+
+  <text class="f out-cost" x="64" y="432">You owe more next month</text>
+
+  <!-- RIGHT: RAP -->
+  <rect x="460" y="216" width="400" height="230" rx="14" fill="#f7f8fa"
+        stroke="#dfe3e8" stroke-width="1.5"/>
+  <text class="f panel-h" x="484" y="256">RAP, from July 2026</text>
+
+  <rect x="484" y="272" width="352" height="76" rx="10" fill="#eef4fc"
+        stroke="#2a78d6" stroke-width="2"/>
+  <text class="f chip" x="508" y="304">Waived, not added</text>
+  <text class="f chip" x="508" y="336">$50 a month comes off</text>
+
+  <text class="f small" x="484" y="372">What you owe</text>
+  <path d="M 484 390 L 836 390" fill="none" stroke="#dfe3e8" stroke-width="1.5"
+        stroke-dasharray="4 6"/>
+  <path d="M 640 390 L 720 394 L 800 398" fill="none" stroke="#2a78d6"
+        stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"
+        marker-end="url(#arrow-gain)"/>
+
+  <text class="f out-gain" x="484" y="432">You owe less next month</text>
+</svg>

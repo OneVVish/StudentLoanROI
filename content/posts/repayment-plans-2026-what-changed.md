@@ -56,6 +56,10 @@ The comparison is the same one the older plans always invited, and the answer ha
 
 The older income-driven plans had a failure mode that borrowers found bewildering. When the payment was smaller than the month's interest, the shortfall was added to the balance, so someone paying every month on time watched what they owed climb. RAP does not do that. Interest a payment fails to cover is waived rather than capitalized, and the government adds a match of up to $50 a month against principal.
 
+![One month's interest drawn as a single bar, split into the part a payment covers and the part it does not. Under the plans before July 2026 the uncovered part was added to what you owe, so the amount owed rises each month. Under RAP it is waived, and a government match of up to $50 a month comes off the principal, so the amount owed falls](guide-interest-waiver-900x470.svg)
+
+This only happens when the payment is smaller than the month's interest, which takes a low income against a large balance. On most federal undergraduate loans the payment covers the interest from the first month and none of it applies.
+
 The effect is easiest to see at low income, where the waiver actually bites. On that same $27,000 balance at an income of $30,000, RAP waives roughly $5,600 of interest across the life of the loan and the balance is repaid in about 25 years with nothing forgiven. The IBR row on the same numbers reaches its 20-year mark still owing, and roughly $25,400 is written off.
 
 Two plans, two ways of arriving at a finish line, and the totals land closer together than the mechanisms suggest: about $43,800 handed over on RAP against about $36,600 on IBR, before any tax. Which is the better outcome depends on something outside the loan, and that something is the next section.
