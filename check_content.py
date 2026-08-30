@@ -204,6 +204,25 @@ def main() -> int:
             fail(f"infra/sitemap.xml lost {required!r} -- the guide "
                  f"regeneration has over-reached and deleted a static URL")
 
+    # The renderer's own escaping, exercised on inputs that must NOT come out
+    # as markup. These are negative controls on build_site.py rather than on
+    # any post: the content is ours today, but _inline's docstring promises
+    # that post text can never inject markup, and for a while it could -- a
+    # double quote in a link target closed the href attribute, and a
+    # javascript: target rendered as a live link.
+    for label, rendered, must_not, must in (
+            ("javascript: link", builder._inline("[x](javascript:alert(1))"),
+             'href="javascript:', "javascript:alert(1)"),
+            ("quote in an image alt", builder._inline('![a" onerror=x](b.png)'),
+             'alt="a" onerror', "&quot;"),
+            ("quote in a link target", builder._inline('[y](https://ok/" onmouseenter="x)'),
+             '" onmouseenter="', "&quot;"),
+            ("front matter in the head",
+             builder._page_head('a"<b', 'c"<d', "https://worthmydegree.com/x", "i.png", ""),
+             '<title>a"<b', "&quot;&lt;")):
+        if must_not in rendered or must not in rendered:
+            fail(f"build_site.py escaping: {label} rendered as markup: {rendered[:120]!r}")
+
     if problems:
         print(f"content: {len(problems)} problem(s) across {len(posts)} "
               f"guide(s)\n")
