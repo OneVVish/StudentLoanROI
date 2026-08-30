@@ -5408,6 +5408,24 @@ def render_presurvey() -> None:
             st.rerun()
 
 
+# What a ?src= tag may look like. Every tag ever issued is a short token of
+# letters, digits, underscores and hyphens (see marketing/README.md's
+# taxonomy; the per-chart tags are filename stems), and the column it lands in
+# is unbounded text on every row of every table, written from the app AND from
+# the edge Worker by anyone who cares to type a URL. Anything else is not a
+# channel, so it is stored as None: an untagged visit, which is what a visit
+# with a garbage tag always was. The Worker carries the same pattern as
+# SRC_TAG_RE; check_internal_links.py asserts the two are identical.
+TRAFFIC_SOURCE_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def normalize_traffic_source(raw):
+    """The tag as it will be stored, or None."""
+    if not isinstance(raw, str) or not TRAFFIC_SOURCE_RE.match(raw):
+        return None
+    return raw
+
+
 def get_traffic_source() -> str:
     """Where this visit came from, read from a ?src= tag on the URL and
     stamped on every row -- e.g. studentloanroi.streamlit.app/?src=jefferson_econ.
@@ -5442,7 +5460,8 @@ def get_traffic_source() -> str:
         # Seeded here rather than only in section 3 so the value cannot depend
         # on which caller runs first -- log_usage_event("pageview") fires early
         # and must latch the same tag the later writers see.
-        st.session_state["traffic_source"] = get_shared_default("src", None)
+        st.session_state["traffic_source"] = normalize_traffic_source(
+            get_shared_default("src", None))
     return st.session_state["traffic_source"]
 
 

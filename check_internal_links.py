@@ -41,7 +41,10 @@ Run after touching `internal_tool_url`, `session_query_params`,
 import ast
 import re
 import sys
+from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+
+ROOT = Path(__file__).resolve().parent
 
 APP = "app.py"
 
@@ -168,6 +171,7 @@ def main() -> int:
         return ns["internal_tool_url"](tool)
 
     problems, checked = [], 0
+    worker = (ROOT / "infra" / "worker.js").read_text()
 
     def check(label, url, must_have, must_not):
         nonlocal checked
@@ -218,10 +222,13 @@ def main() -> int:
               url_for({"admin": "1", "research": "1", "src": "x"}, tool),
               ["src", "tool"], ["admin", "research"])
 
-    # 6. The VALUE must survive, not merely the key -- including one that needs
-    #    URL escaping. A tag mangled in transit is as useless as one dropped,
-    #    and far more confusing in the data.
-    for raw in ("jefferson_econ", "hs counselor/spring 2026", "a&b=c"):
+    # 6. The VALUE must survive, not merely the key. A tag mangled in transit
+    #    is as useless as one dropped, and far more confusing in the data.
+    #    These are real tag shapes: a word, an all-caps college abbreviation,
+    #    a hyphenated chart stem. (Two earlier fixtures, "hs counselor/spring
+    #    2026" and "a&b=c", tested URL escaping with values that are no longer
+    #    tags at all; they moved to 6b, where they must come back as None.)
+    for raw in ("jefferson_econ", "LACC", "transfer-path", "bak16"):
         checked += 1
         url = url_for({"src": raw}, tools[0] if tools else "")
         got = parse_qs(urlparse(url).query).get("src", [None])[0]
@@ -229,6 +236,85 @@ def main() -> int:
             problems.append(
                 f"  src value mangled in transit\n      sent {raw!r}, "
                 f"link carries {got!r}\n      {url}")
+
+    # 6b. A value that is not a tag must latch as None and ride no link.
+    #     traffic_source is unbounded text on every row of every table, and
+    #     both the app and the edge Worker wrote whatever the URL carried: a
+    #     GET on a guide with a 20 KB ?src= stored the 20 KB. None is what an
+    #     untagged visit always was, so nothing downstream changes meaning.
+    normalize = ns["normalize_traffic_source"]
+    for raw in ("hs counselor/spring 2026", "a&b=c", "x" * 41, "x" * 20_000,
+                "<script>alert(1)</script>", "", "tag.with.dots", "ünïcode"):
+        checked += 1
+        if normalize(raw) is not None:
+            problems.append(f"  normalize_traffic_source accepted {raw[:40]!r}")
+        url = url_for({"src": raw}, tools[0] if tools else "")
+        if "src" in parse_qs(urlparse(url).query):
+            problems.append(f"  a non-tag src {raw[:40]!r} rode an internal link")
+        if st.session_state.get("traffic_source") is not None:
+            problems.append(f"  a non-tag src {raw[:40]!r} latched as "
+                            f"{st.session_state.get('traffic_source')!r}, not None")
+
+    # 6c. Every tag actually in use must pass. The taxonomy lives in
+    #     marketing/README.md (gitignored, so SKIPPED LOUDLY on a clone), the
+    #     per-chart tags are the manifests' filename stems, and four are
+    #     constants the code itself compares against.
+    tags = {"selftest", "img", "poster", "reddit", "jefferson_econ"}
+    tags |= {p.stem for p in (ROOT / "content" / "charts").glob("*.md")
+             if not p.name.startswith("_")}
+    taxonomy = ROOT / "marketing" / "README.md"
+    if taxonomy.exists():
+        for line in taxonomy.read_text().splitlines():
+            if line.startswith("| `") or line.startswith("| ~~`"):
+                cell = line.split("|")[1]
+                tags |= set(re.findall(r"`([^`]+)`", cell))
+    else:
+        print("  NOTE: marketing/README.md is absent (gitignored); the src "
+              "taxonomy was not checked against the tag rule")
+    js_re = re.search(r"^const SRC_TAG_RE = /(.*)/;$", worker, re.M)
+    for tag in sorted(tags):
+        checked += 1
+        if normalize(tag) != tag:
+            problems.append(f"  tag {tag!r} is in use and normalize_traffic_source "
+                            f"rejects it; every visit so tagged would log as untagged")
+        if js_re and not re.match(js_re.group(1), tag):
+            problems.append(f"  tag {tag!r} is in use and the Worker's SRC_TAG_RE "
+                            f"rejects it")
+
+    # 6d. The Worker's pattern must be the app's pattern, character for
+    #     character: two rules is how a tag gets stored from one door and
+    #     dropped at the other.
+    checked += 1
+    py_re = ns["TRAFFIC_SOURCE_RE"].pattern
+    if not js_re:
+        problems.append("  infra/worker.js has no SRC_TAG_RE; edge rows take any ?src=")
+    elif js_re.group(1) != py_re:
+        problems.append(f"  SRC_TAG_RE {js_re.group(1)!r} differs from "
+                        f"TRAFFIC_SOURCE_RE {py_re!r}")
+
+    # 6e. Every edge row's traffic_source goes through srcTag(). Checked as
+    #     text, since the Worker is JavaScript: each `traffic_source:` in the
+    #     file must be `traffic_source: srcTag(url)`.
+    def edge_sites_guarded(text):
+        sites = re.findall(r"traffic_source:\s*([^,\n]+)", text)
+        return bool(sites) and all(v.strip() == "srcTag(url)" for v in sites)
+    checked += 1
+    if not edge_sites_guarded(worker):
+        problems.append("  infra/worker.js writes traffic_source from somewhere "
+                        "other than srcTag(url)")
+    # Negative controls: one site reverted to the raw param must fail 6e, and
+    # a loosened Worker pattern must fail 6d.
+    checked += 2
+    reverted = worker.replace("traffic_source: srcTag(url)",
+                              'traffic_source: url.searchParams.get("src") || null', 1)
+    if reverted == worker or edge_sites_guarded(reverted):
+        problems.append("  NEGATIVE CONTROL PASSED: an unguarded traffic_source "
+                        "site in worker.js was not caught")
+    loosened = re.search(r"^const SRC_TAG_RE = /(.*)/;$",
+                         worker.replace("{1,40}", "{1,}", 1), re.M)
+    if loosened and loosened.group(1) == py_re:
+        problems.append("  NEGATIVE CONTROL PASSED: a loosened SRC_TAG_RE still "
+                        "matched TRAFFIC_SOURCE_RE")
 
     # 7. Every link must say where it was clicked FROM, and that origin must be
     #    a member of NAV_ORIGINS -- the landing validates against that set

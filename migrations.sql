@@ -2298,3 +2298,26 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOL
 --
 -- The 'img' rows stay. The anon key cannot UPDATE or DELETE, and rewriting them
 -- would be inventing an attribution the data never had.
+
+
+-- ===========================================================================
+-- 2026-08-30  traffic_source takes only a tag-shaped value. NO DDL; a small
+--             seam, and the older side of it is readable.
+-- ===========================================================================
+--
+-- Both writers -- app.py's get_traffic_source and the edge Worker's srcTag --
+-- now store ?src= only when it matches ^[A-Za-z0-9_-]{1,40}$, and NULL
+-- otherwise. Every tag ever issued matches (marketing/README.md's taxonomy,
+-- the per-chart filename stems, selftest, img, poster, reddit);
+-- check_internal_links.py asserts that and that the two patterns are equal.
+--
+-- WHY. The column was unbounded text written from public routes for anyone
+-- who cared to type a URL: a GET on a guide with a 20 KB ?src= stored the
+-- 20 KB, on every row of every table the visit touched. It was the one value
+-- in the row that came from the visitor with no shape check at all, where
+-- action has had NAV_ORIGINS and knownSlug for a month.
+--
+-- WHAT THIS COSTS. Nothing recoverable is lost: a value that fails the rule
+-- was never a channel, and NULL is what an untagged visit always was. Rows
+-- before this date MAY hold a non-conforming string; treat those as untagged
+-- when reading, which is what every row after this date already is.
