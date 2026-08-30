@@ -48,6 +48,16 @@ OUT = REPO / "static" / "guide-plan-by-agi-900x1902.svg"
 AGI_MAX = 150_000
 SIZES = [1, 2, 3, 4, 5]          # people in the household, borrower included
 
+# THE CHART NEEDS A BALANCE, AND IT IS THE GUIDE'S OWN. Both IBR variants pay
+# "the lesser of" the percentage or the 10-year Standard payment (34 CFR
+# 685.209(f)(2) for the 10% variant, (f)(3) for the 15%), and that ceiling is a
+# function of the BALANCE. Drawn without one the IBR lines climb forever, which
+# overstates IBR at every income above the cap and so understates how much more
+# RAP asks at the top of the range. $27,000 at 6.5% is the borrower the guide
+# already uses two sections later, so the figure and the prose agree.
+BALANCE = 27_000
+RATE_PCT = 6.5
+
 W = 900
 PAD_L, PAD_R = 128, 62           # left pad carries the money axis labels,
                                  # right pad keeps the $150k label off the edge
@@ -86,13 +96,23 @@ def rap_points(ns, dependents):
     return pts
 
 
-def ibr_points(allowance, rate):
-    return [(0, 0.0), (allowance, 0.0),
-            (AGI_MAX, max(AGI_MAX - allowance, 0) / 12.0 * rate)]
+def ibr_points(allowance, rate, cap):
+    """Flat at zero to the allowance, then the percentage, then flat at the
+    10-year Standard payment. RAP has no equivalent ceiling, which is the
+    contrast the chart exists to show."""
+    pts = [(0, 0.0), (allowance, 0.0)]
+    agi_at_cap = allowance + cap * 12.0 / rate
+    if agi_at_cap < AGI_MAX:
+        pts.append((agi_at_cap, cap))
+        pts.append((AGI_MAX, cap))
+    else:
+        pts.append((AGI_MAX, max(AGI_MAX - allowance, 0) / 12.0 * rate))
+    return pts
 
 
 def main():
     ns = load_app()
+    cap = ns["calculate_standard_repayment"](BALANCE, RATE_PCT)["monthly_payment"]
     panels = []
     for size in SIZES:
         allowance = ns["idr_income_allowance"](size)
@@ -100,8 +120,8 @@ def main():
             "size": size,
             "dependents": size - 1,
             "allowance": allowance,
-            "new": ibr_points(allowance, ns["IDR_PAYMENT_RATE"]),
-            "old": ibr_points(allowance, ns["OLD_IBR_PAYMENT_RATE"]),
+            "new": ibr_points(allowance, ns["IDR_PAYMENT_RATE"], cap),
+            "old": ibr_points(allowance, ns["OLD_IBR_PAYMENT_RATE"], cap),
             "rap": rap_points(ns, size - 1),
         })
 
@@ -124,8 +144,9 @@ def main():
       'plots the monthly payment against adjusted gross income for IBR at 10 percent, IBR at 15 '
       'percent and RAP. RAP rises in steps because it charges a fixed percentage within each '
       'ten thousand dollar band. Both IBR lines stay at zero until income passes the amount the '
-      'household shelters, which grows with each person, while RAP subtracts a flat fifty '
-      'dollars per dependent and never falls below ten dollars.</desc>')
+      'household shelters, which grows with each person, and then stop again at the 10-year '
+      'Standard payment on the balance. RAP has no such ceiling: it keeps rising with income, so '
+      'at the top of the range it asks several times what either IBR line does.</desc>')
     a('  <style>')
     a('    .f { font-family: "Avenir Next", -apple-system, "Segoe UI", Roboto, '
       '"Helvetica Neue", sans-serif; }')
@@ -149,8 +170,7 @@ def main():
       '<tspan class="mark-tld">.com</tspan></text>')
     a(f'  <text class="f deck" x="40" y="84">What each plan asks for, by household size</text>')
 
-    a('  <text class="f axis" x="40" y="124">Monthly payment against adjusted gross '
-      'income</text>')
+    a('  <text class="f axis" x="40" y="124">On a $27,000 balance at 6.5 percent</text>')
     key = [(OLD_C, "IBR, older loans", 40), (NEW_C, "IBR, newer loans", 340), (RAP_C, "RAP", 640)]
     for colour, label, x in key:
         a(f'  <line x1="{x}" y1="166" x2="{x + 36}" y2="166" stroke="{colour}" '
@@ -193,8 +213,8 @@ def main():
 
     # Shortened after the first render ran it off the right edge. Text width
     # depends on the string, so a line that fits is not a rule that fits.
-    a(f'  <text class="f axis" x="40" y="{height - 44}">Adjusted gross income. The dotted '
-      'line is the sheltered amount</text>')
+    a(f'  <text class="f axis" x="40" y="{height - 44}">Adjusted gross income. IBR '
+      'stops at the Standard payment</text>')
     a('</svg>')
 
     svg = "\n".join(out) + "\n"
@@ -213,6 +233,8 @@ def main():
         print(f"  household {p['size']}: shelters ${p['allowance']:>8,.0f} | "
               f"at $150k  RAP ${r:>7.2f}  new ${p['new'][-1][1]:>7.2f}  "
               f"old ${p['old'][-1][1]:>7.2f}")
+    print(f"  IBR ceiling (10-year Standard on ${BALANCE:,} at {RATE_PCT}%): "
+          f"${cap:,.2f}")
 
 
 if __name__ == "__main__":
