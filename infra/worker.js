@@ -615,6 +615,18 @@ async function likeCount(env, slug, action) {
 // The reads are deliberately NOT excluded. A count is a read, it writes
 // nothing, and blanking it in test mode would hide the very thing being
 // verified.
+// What a ?src= tag may look like: the same pattern as app.py's
+// TRAFFIC_SOURCE_RE, and check_internal_links.py asserts the two are equal.
+// traffic_source is unbounded text on every row of usage_logs, and these
+// routes write it for anyone who cares to type a URL -- a GET on a guide with
+// a 20 KB ?src= used to store the 20 KB. A value that is not a short token is
+// not a channel and is stored as null, which is what an untagged visit is.
+const SRC_TAG_RE = /^[A-Za-z0-9_-]{1,40}$/;
+function srcTag(url) {
+  const raw = url.searchParams.get("src");
+  return raw !== null && SRC_TAG_RE.test(raw) ? raw : null;
+}
+
 function excludedFromLogging(request, url) {
   const src = url.searchParams.get("src");
   if (url.searchParams.get("test") === "1" || src === "selftest") return true;
@@ -637,7 +649,7 @@ async function insertReaction(env, url, action, slug) {
     body: JSON.stringify({
       timestamp: new Date().toISOString(),
       session_id: null,
-      traffic_source: url.searchParams.get("src") || null,
+      traffic_source: srcTag(url),
       action: `${action}:slug=${slug}`,
     }),
     signal: AbortSignal.timeout(LANDING_LOG_TIMEOUT_MS),
@@ -721,7 +733,6 @@ async function handleLike(request, env, url) {
 async function logEdgeView(request, env, url, action) {
   if (!env || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return;
 
-  const src = url.searchParams.get("src");
   if (excludedFromLogging(request, url)) return;
 
   // The event:k=v shape analyze_survey.py already parses. path= separates a
@@ -743,7 +754,7 @@ async function logEdgeView(request, env, url, action) {
   const row = {
     timestamp: new Date().toISOString(),
     session_id: null,
-    traffic_source: src || null,
+    traffic_source: srcTag(url),
     action,
   };
 
