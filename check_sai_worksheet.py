@@ -298,6 +298,66 @@ def check_css_profile(ns, src):
     return out
 
 
+# Anything that would reintroduce a per-state allowance. The names are the old
+# EFC's own, which is what someone restoring it would reach for.
+STATE_PARAMS = ("state", "state_of_residence", "home_state", "stabbr",
+                "state_tax", "state_tax_allowance", "state_and_other")
+
+
+def check_no_state_in_formula(ns, src):
+    """State of residence is not an input to Formula A, and must not become one.
+
+    It appears nowhere in lines 1 to 37 of the published worksheet. The only
+    place the guide uses it is Step 1, the MAXIMUM PELL determination, where
+    the 175% and 225% tests are against the poverty guideline for a family
+    size and state. Pell is not implemented here, so no part of this tool has
+    any business asking.
+
+    THE OLD EFC DID HAVE A STATE AND OTHER TAX ALLOWANCE, varying by state of
+    residence, and FAFSA Simplification replaced it with the payroll tax
+    allowance. So the missing field looks like an omission to anyone reasoning
+    from pre-2024 knowledge, and the obvious "fix" is to add a state input and
+    an allowance to go with it. That would silently LOWER the SAI for families
+    in high-tax states -- a bigger allowance, less available income -- and it
+    would look like an improvement while making the figure wrong.
+
+    Line 4 is federal and territory income tax only, which the guide states
+    outright: "if the parent filed both a U.S. federal income tax return and
+    an income tax return from Puerto Rico or another U.S. territory".
+    """
+    out = []
+    signature = ns["compute_student_aid_index"].__code__.co_varnames[
+        :ns["compute_student_aid_index"].__code__.co_argcount
+        + ns["compute_student_aid_index"].__code__.co_kwonlyargcount]
+    for name in signature:
+        if name.lower() in STATE_PARAMS:
+            out.append(f"  STATE   compute_student_aid_index takes {name!r}. State of "
+                       f"residence is not an input to Formula A; the old EFC's "
+                       f"state tax allowance was removed by FAFSA Simplification.")
+    for constant in ("SAI_STATE_TAX_ALLOWANCE", "SAI_STATE_TAX_RATES",
+                     "SAI_STATE_AND_OTHER_TAX"):
+        if constant in ns:
+            out.append(f"  STATE   {constant} exists. There is no per-state allowance "
+                       f"in the 2027-28 formula.")
+    tree = ast.parse(src)
+    renderer = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                     and n.name == "render_sai_worksheet"), None)
+    if renderer is not None:
+        for call in ast.walk(renderer):
+            if (isinstance(call, ast.Call)
+                    and getattr(call.func, "id", "") == "compute_student_aid_index"):
+                for kw in call.keywords:
+                    if kw.arg and kw.arg.lower() in STATE_PARAMS:
+                        out.append(f"  STATE   the renderer passes {kw.arg} into the "
+                                   f"formula.")
+    # And the tool has to SAY so, because the absence is the surprising part.
+    if "state income tax gets no allowance" not in src.lower():
+        out.append("  STATE   the tool no longer tells anyone that state income tax "
+                   "gets no allowance. The absence of the field is exactly what a "
+                   "family from a high-tax state will assume was counted.")
+    return out
+
+
 def negative_controls(ns):
     """Break it deliberately. A guard that has never failed is not evidence."""
     out = []
@@ -348,6 +408,15 @@ def negative_controls(ns):
     if not any("states an amount" in f for f in check_css_profile(leaky, src_text())):
         out.append("  CONTROL a dollar figure in the CSS Profile note was NOT caught.")
 
+    # 5. A state input reintroduced on the formula -- the "fix" someone
+    #    reasoning from the old EFC would reach for.
+    stateful = dict(ns)
+    def _with_state(parent_agi, family_size, *, state=None, **kw):   # noqa: ANN001
+        return ns["compute_student_aid_index"](parent_agi, family_size, **kw)
+    stateful["compute_student_aid_index"] = _with_state
+    if not any("STATE" in f for f in check_no_state_in_formula(stateful, src_text())):
+        out.append("  CONTROL a state input on the SAI formula was NOT caught.")
+
     return out
 
 
@@ -359,7 +428,8 @@ def main():
     ns, src = load_app_namespace()
     failures = (check_published_tables(ns) + check_structure(ns)
                 + check_zero_is_a_real_answer(ns, src)
-                + check_css_profile(ns, src) + negative_controls(ns))
+                + check_css_profile(ns, src)
+                + check_no_state_in_formula(ns, src) + negative_controls(ns))
     if failures:
         print("SAI worksheet: %d problem(s)\n" % len(failures))
         print("\n".join(failures))
@@ -367,7 +437,8 @@ def main():
     print("SAI worksheet OK -- %d published figures, Table A5 and A3 continuous, "
           "SAI monotone in income and household size, an explicit $0 override "
           "honored at the call site, the CSS Profile note states direction and "
-          "never an amount, 4 negative controls all caught."
+          "never an amount, state of residence never enters Formula A, "
+          "5 negative controls all caught."
           % (len(PUBLISHED_IPA) + len(PUBLISHED_A5_EDGES) + len(PUBLISHED_A3_EDGES) + 18))
     return 0
 
