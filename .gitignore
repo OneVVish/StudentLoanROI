@@ -1,5 +1,19 @@
-# Secrets -- never commit real Supabase credentials
-.streamlit/secrets.toml
+# Secrets -- never commit real credentials. Patterns, not one path: the
+# original rule named exactly .streamlit/secrets.toml, so a secrets.toml.bak,
+# a copy in another directory, or a .env would have been swept in by the
+# `git add -A` workflow this file already warns about twice. The example file
+# is re-included because it is documentation and holds only placeholders.
+**/secrets.toml
+**/secrets.*.toml
+!.streamlit/secrets.toml.example
+.env
+.env.*
+*.pem
+*.key
+
+# The security review's findings report. Local, like CLAUDE.md: the repo is
+# public and the report names what is still open.
+SECURITY_REVIEW.md
 
 # Legacy local CSV logs (superseded by Supabase; harmless to ignore either way)
 usage_logs.csv
