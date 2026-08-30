@@ -5052,6 +5052,49 @@ def get_supabase_connection():
     return conn
 
 
+def supabase_read_key():
+    """SUPABASE_READ_KEY from [connections.supabase_connection], or None.
+
+    A JWT for the `reporter` Postgres role, which can SELECT and nothing
+    else. It exists because the anon key the app writes with used to be able
+    to read every research table too -- including the survey's free text --
+    and that key is in every edge Worker and every deploy's environment.
+    Row level security (migrations.sql, 2026-08-30) took SELECT away from
+    anon; everything that reads now comes through here. Absent means the
+    dashboard says so rather than rendering empty panels.
+    """
+    try:
+        return st.secrets["connections"]["supabase_connection"].get(
+            "SUPABASE_READ_KEY") or None
+    except Exception:
+        return None
+
+
+@st.cache_resource
+def get_supabase_read_client():
+    """The read-only client, or None when SUPABASE_READ_KEY is not set.
+
+    Deliberately a SEPARATE client from get_supabase_connection: the writers
+    must never hold a credential that can read, and the readers must never
+    hold the one that writes. check_supabase_resilience.py asserts that
+    load_table_safe uses this and that nothing calling .insert( does.
+    """
+    key = supabase_read_key()
+    if not key:
+        return None
+    from supabase import create_client
+    url = st.secrets["connections"]["supabase_connection"]["SUPABASE_URL"]
+    client = create_client(url, key)
+    # The same timeout the writer gets, for the same reason: the admin page
+    # reads five tables in a row and a 120-second default on each is a page
+    # that never renders. Guarded like the writer's.
+    try:
+        client.postgrest.session.timeout = httpx.Timeout(SUPABASE_TIMEOUT_SECONDS)
+    except Exception as error:                                # pragma: no cover
+        report_write_failure("postgrest read timeout not applied", error)
+    return client
+
+
 def get_session_id() -> str:
     """A random id for this browser session, stamped on every row this file
     writes (usage_logs, survey_responses, pdf_downloads, scenario_shares).
@@ -7080,13 +7123,15 @@ def load_table_safe(table_name: str, columns: list) -> pd.DataFrame:
     Streamlit rerun stops being sensible well before that point.
     """
     try:
-        conn = get_supabase_connection()
+        client = get_supabase_read_client()
+        if client is None:
+            return pd.DataFrame(columns=columns)
         rows, start = [], 0
         while start < 200_000:
-            result = execute_query(
-                conn.table(table_name).select("*")
-                    .range(start, start + SUPABASE_PAGE_SIZE - 1),
-                ttl=0)
+            # .execute() directly: this is a plain supabase client, not the
+            # st.connection wrapper execute_query() is for.
+            result = (client.table(table_name).select("*")
+                      .range(start, start + SUPABASE_PAGE_SIZE - 1).execute())
             batch = result.data or []
             rows.extend(batch)
             if len(batch) < SUPABASE_PAGE_SIZE:
@@ -21444,6 +21489,11 @@ def render_admin_dashboard() -> None:
     is what makes it safe to define here above the dispatch (a def below
     its caller is a runtime NameError that py_compile cannot see -- the
     render_school_search lesson)."""
+    if get_supabase_read_client() is None:
+        st.error("Reads are not configured: SUPABASE_READ_KEY is absent from "
+                 "[connections.supabase_connection] in secrets. Every panel "
+                 "below is empty for that reason and not because there was no "
+                 "traffic. See migrations.sql, 2026-08-30.")
     # load_table_safe does select("*"); the columns= list is only the fallback
     # frame's shape when a table can't be read, so it names what each panel needs.
     usage_df = load_table_safe(

@@ -501,23 +501,26 @@ function knownSlug(slug, kind) {
 const CHART_LIKE_ACTION = "chart_like";
 const CHART_SHARE_ACTION = "chart_share";
 
+// The count comes from reaction_count(), a SECURITY DEFINER function
+// (migrations.sql, 2026-08-30), not from a SELECT on usage_logs. The anon
+// role cannot read that table any more -- row level security took SELECT
+// away from it, because the same key sits in every deploy and could read the
+// survey's free text -- and a function that returns one integer for one
+// exact action string is the only read the edge needs. PostgREST answers a
+// scalar function with the bare JSON number.
 async function likeCount(env, slug, action) {
-  const query = `${env.SUPABASE_URL}/rest/v1/usage_logs` +
-    `?action=eq.${encodeURIComponent(`${action}:slug=${slug}`)}` +
-    `&select=action`;
-  const resp = await fetch(query, {
+  const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/reaction_count`, {
+    method: "POST",
     headers: {
+      "content-type": "application/json",
       apikey: env.SUPABASE_ANON_KEY,
       authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
-      // The count in a header rather than the rows themselves -- a body that
-      // grew with every like would eventually be the slowest thing on the page.
-      prefer: "count=exact",
-      range: "0-0",
     },
+    body: JSON.stringify({ p_action: `${action}:slug=${slug}` }),
     signal: AbortSignal.timeout(LANDING_LOG_TIMEOUT_MS),
   });
-  const range = resp.headers.get("content-range") || "";
-  const total = parseInt(range.split("/")[1], 10);
+  if (!resp.ok) return null;
+  const total = Number(await resp.json());
   return Number.isFinite(total) ? total : null;
 }
 

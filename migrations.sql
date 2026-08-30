@@ -2298,3 +2298,75 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOL
 --
 -- The 'img' rows stay. The anon key cannot UPDATE or DELETE, and rewriting them
 -- would be inventing an attribution the data never had.
+
+
+-- ===========================================================================
+-- 2026-08-30  Row level security. The anon key can INSERT and nothing else;
+--             reads come through a `reporter` role that can SELECT and
+--             nothing else; the edge counts likes through a function.
+-- ===========================================================================
+--
+-- WHY. Until this date the repository held no RLS or policy SQL at all, and
+-- the one privilege statement it did hold (the scenario_events grant above)
+-- gave anon SELECT. A read-only probe on 2026-08-30 returned rows from all
+-- five tables with the anon key, survey_responses.feedback_text included.
+-- That key is in every edge Worker instance and in the Railway environment,
+-- so the ?admin= gate protected the dashboard and not the data. Three
+-- comments in this file said the anon key "cannot UPDATE or DELETE", which
+-- is a claim about dashboard state no versioned SQL ever made true.
+--
+-- ORDER MATTERS, and each step is additive until the last:
+--
+--   0. The app must already send Prefer: return=minimal on every insert
+--      (PR #176). postgrest's default makes every INSERT also a SELECT of the
+--      written row, so an INSERT-only policy would fail every write silently
+--      through the queue. The Worker already sends it. Confirm both hosts
+--      have redeployed before pasting anything below.
+--
+--   1. The count function the Worker calls instead of reading usage_logs.
+
+create or replace function reaction_count(p_action text)
+returns bigint
+language sql stable security definer
+set search_path = public
+as $$ select count(*) from usage_logs where action = p_action $$;
+revoke all on function reaction_count(text) from public;
+grant execute on function reaction_count(text) to anon;
+
+--   2. The reporter role. NOLOGIN: it is reached only through a JWT whose
+--      role claim names it, which PostgREST honours because authenticator
+--      may SET ROLE to it. Mint the JWT with infra/mint_reporter_jwt.py and
+--      store it as SUPABASE_READ_KEY; then deploy the code that reads with
+--      it (the admin dashboard, analyze_survey.py, analyze_traffic.py,
+--      infra/rank_charts.py) and the Worker that calls reaction_count.
+
+create role reporter nologin;
+grant reporter to authenticator;
+grant usage on schema public to reporter;
+grant select on all tables in schema public to reporter;
+alter default privileges in schema public grant select on tables to reporter;
+
+--   3. ONLY AFTER 2 IS LIVE: enable RLS, allow anon to insert, allow reporter
+--      to select, and take SELECT away from anon. Per table, all five.
+
+do $$
+declare t text;
+begin
+  foreach t in array array['usage_logs', 'scenario_events', 'pdf_downloads',
+                           'scenario_shares', 'survey_responses']
+  loop
+    execute format('alter table %I enable row level security', t);
+    execute format('create policy anon_insert on %I for insert to anon with check (true)', t);
+    execute format('create policy reporter_select on %I for select to reporter using (true)', t);
+    execute format('revoke select on %I from anon', t);
+  end loop;
+end $$;
+
+--   4. Verify: with the anon key, GET /rest/v1/<table>?select=*&limit=1
+--      returns 200 [] on every table; the Helpful count still renders; the
+--      admin dashboard populates; analyze_traffic.py runs.
+--
+--   Rollback, per table: alter table T disable row level security;
+--
+-- NOT A SEAM in the data: no row changes meaning. What changes is who can
+-- read them, which is the point.

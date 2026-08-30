@@ -42,7 +42,14 @@ def like_counts() -> Counter:
     from supabase import create_client
     secrets = tomllib.load(open(ROOT / ".streamlit/secrets.toml", "rb"))
     cfg = secrets["connections"]["supabase_connection"]
-    client = create_client(cfg["SUPABASE_URL"], cfg["SUPABASE_KEY"])
+    # The read-only reporter key; the anon key cannot SELECT since row level
+    # security (migrations.sql, 2026-08-30).
+    key = cfg.get("SUPABASE_READ_KEY")
+    if not key:
+        print("  NOTE: SUPABASE_READ_KEY is not set; falling back to the anon "
+              "key, which can no longer read usage_logs")
+        key = cfg["SUPABASE_KEY"]
+    client = create_client(cfg["SUPABASE_URL"], key)
     rows, start = [], 0
     while True:
         page = (client.table("usage_logs").select("action")
