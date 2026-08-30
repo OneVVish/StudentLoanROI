@@ -94,12 +94,14 @@ class _Recorder:
         self.on_execute = on_execute
         self.seen = seen if seen is not None else []
         self._rows = []
+        self.insert_kwargs = []
 
     def table(self, name):
         return self
 
-    def insert(self, rows, count=None):
+    def insert(self, rows, **kwargs):
         self._rows = rows
+        self.insert_kwargs.append(kwargs)
         return self
 
     def execute(self):
@@ -316,6 +318,55 @@ def check_writers_are_queued(ns) -> list:
     return problems
 
 
+def check_inserts_return_minimal(ns) -> list:
+    """Every insert asks PostgREST for nothing back.
+
+    postgrest's insert() defaults to returning=representation, which makes the
+    INSERT also a SELECT of the row it just wrote. That is invisible while the
+    anon role can read the tables, and it is the reason enabling row level
+    security with an INSERT-only policy for anon would make every write in
+    this app fail -- silently, through the queue, as a permission error on a
+    SELECT nobody asked for. The Worker already sends Prefer: return=minimal;
+    this makes the app match, so the policy can go in afterwards. Checked on
+    the wire for the queued writer (the kwarg the stub receives) and by AST
+    for all four call sites, since three of them write synchronously and
+    never touch the queue. One negative control.
+    """
+    problems = []
+    q = ns["SupabaseWriteQueue"]()
+    rec = _Recorder()
+    ns["get_supabase_connection"] = lambda: rec
+    q.submit("usage_logs", {"action": "pageview"})
+    drain(q)
+    if not rec.insert_kwargs or rec.insert_kwargs[0].get("returning") != "minimal":
+        problems.append(f"  the queued writer's insert() does not pass "
+                        f"returning='minimal': {rec.insert_kwargs}")
+
+    import ast
+    src = open(APP).read()
+
+    def unminimal(source):
+        bad = []
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                    and node.func.attr == "insert":
+                kw = {k.arg: k.value for k in node.keywords}
+                v = kw.get("returning")
+                if not (isinstance(v, ast.Constant) and v.value == "minimal"):
+                    bad.append(node.lineno)
+        return bad
+
+    sites = unminimal(src)
+    if sites:
+        problems.append(f"  .insert( without returning='minimal' at app.py lines "
+                        f"{sites}; under an INSERT-only policy these writes fail")
+    mutated = src.replace(', returning="minimal")', ")", 1)
+    if mutated == src or not unminimal(mutated):
+        problems.append("  NEGATIVE CONTROL PASSED: an insert stripped of "
+                        "returning='minimal' was not caught")
+    return problems
+
+
 def main() -> int:
     ns = load_app_namespace()
     problems, checks = [], []
@@ -326,6 +377,7 @@ def main() -> int:
         ("full queue drops", check_full_queue_drops),
         ("FIFO order", check_fifo_order),
         ("writers are queued", check_writers_are_queued),
+        ("inserts return minimal", check_inserts_return_minimal),
     ]:
         # A fresh namespace per check: each one monkeypatches the transport,
         # and a leaked stub would make the next check pass for the wrong reason.
@@ -340,8 +392,9 @@ def main() -> int:
     print(f"supabase resilience OK -- {len(checks)} properties: writes time out "
           f"at {ns['SUPABASE_TIMEOUT_SECONDS']}s not 120, failures stay off the "
           f"page, the breaker opens after {ns['SUPABASE_BREAKER_THRESHOLD']} and "
-          f"sheds, a full queue drops rather than blocks, order survives, and "
-          f"both high-frequency writers are queued.")
+          f"sheds, a full queue drops rather than blocks, order survives, "
+          f"both high-frequency writers are queued, and every insert asks "
+          f"for nothing back.")
     return 0
 
 
