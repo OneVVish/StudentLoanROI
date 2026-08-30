@@ -417,15 +417,51 @@ def parse_post(path: Path) -> dict:
     return meta
 
 
+def _attr(value) -> str:
+    """A front-matter value on its way into an attribute or a text node.
+
+    The four characters that end an attribute or open a tag. The apostrophe is
+    deliberately left alone: every attribute this generator writes is
+    double-quoted, and escaping it would rewrite every title with one in it
+    for no gain. A title, description or summary is ours, but it reaches
+    <title>, content=, alt=, aria-label= and data-title=, and a renderer that
+    trusts its input is one copy-paste away from being a hole.
+    """
+    return (str(value).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+# What a Markdown link or image may point at. Anything else -- javascript:,
+# data:, vbscript:, a bare word -- is left as the literal text it was typed as,
+# which is visible on the page and therefore gets fixed, where a rendered
+# javascript: link is invisible until clicked.
+SAFE_LINK_TARGET = re.compile(r"^(https?://|/|#|mailto:)", re.I)
+
+
 def _inline(text: str) -> str:
     """Inline markdown -> HTML. Escapes first, so post text can never inject
     markup -- these files are ours, but a renderer that trusts its input is one
-    copy-paste away from being a hole."""
-    out = (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-    out = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)",
-                 lambda m: f'<img src="/app/static/{m.group(2)}" alt="{m.group(1)}" loading="lazy">',
-                 out)
-    out = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', out)
+    copy-paste away from being a hole. The escape covers the double quote as
+    well as & < >, because two of the rules below put captured text inside a
+    double-quoted attribute; and a link target outside SAFE_LINK_TARGET is
+    rendered as text rather than as a link."""
+    out = _attr(text)
+
+    def image(m):
+        alt, src = m.group(1), m.group(2)
+        # Image sources are static/ filenames, so a scheme is never right.
+        if ":" in src:
+            return m.group(0)
+        return f'<img src="/app/static/{src}" alt="{alt}" loading="lazy">'
+
+    def link(m):
+        label, href = m.group(1), m.group(2)
+        if not SAFE_LINK_TARGET.match(href):
+            return m.group(0)
+        return f'<a href="{href}">{label}</a>'
+
+    out = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", image, out)
+    out = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", link, out)
     out = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", out)
     out = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", out)
     out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
@@ -590,7 +626,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     if posts:
         cards = "\n".join(
             f'''    <a class="guide-card" href="/guides/{p["slug"]}">
-      <b>{p["title"]}</b><span>{p["summary"]}</span>
+      <b>{_attr(p["title"])}</b><span>{_attr(p["summary"])}</span>
       <time datetime="{p["date"]}">{p["date"]}</time></a>''' for p in posts[:4])
         guides_section = f'''<section>
   <h2>Guides</h2>
@@ -620,9 +656,9 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     if eligible:
         chart_cards = "\n".join(
             f'''    <a class="info-card" href="/charts#{c["slug"]}">
-      <img src="/app/static/{c["land_url"]}" alt="{c["description"]}"
+      <img src="/app/static/{c["land_url"]}" alt="{_attr(c["description"])}"
            loading="lazy" width="640" height="640">
-      <b>{c["title"]}</b><span>{c["summary"]}</span></a>'''
+      <b>{_attr(c["title"])}</b><span>{_attr(c["summary"])}</span></a>'''
             for c in eligible[:2])
         charts_section = f'''<section>
   <h2>Infographics</h2>
@@ -998,16 +1034,16 @@ def _page_head(title, description, canonical, image, favicon, jsonld=""):
     carry the same card, the same icon and the same theme handling."""
     return f'''<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-<meta name="description" content="{description}">
-<link rel="canonical" href="{canonical}">
+<title>{_attr(title)}</title>
+<meta name="description" content="{_attr(description)}">
+<link rel="canonical" href="{_attr(canonical)}">
 <meta property="og:type" content="article">
-<meta property="og:title" content="{title}">
-<meta property="og:description" content="{description}">
-<meta property="og:url" content="{canonical}">
-<meta property="og:image" content="https://worthmydegree.com/app/static/{image}">
+<meta property="og:title" content="{_attr(title)}">
+<meta property="og:description" content="{_attr(description)}">
+<meta property="og:url" content="{_attr(canonical)}">
+<meta property="og:image" content="https://worthmydegree.com/app/static/{_attr(image)}">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://worthmydegree.com/app/static/{image}">
+<meta name="twitter:image" content="https://worthmydegree.com/app/static/{_attr(image)}">
 <link rel="icon" href="data:image/svg+xml;base64,{favicon}">
 {jsonld}
 <style>
@@ -1594,13 +1630,13 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
             continue
         cards.append(f'''  <div class="chart-card" id="{c["slug"]}">
     <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"
-       aria-label="Open the full-size infographic: {c["title"]}">
-      <img src="/app/static/{c["card_url"]}" alt="{c["description"]}"
+       aria-label="Open the full-size infographic: {_attr(c["title"])}">
+      <img src="/app/static/{c["card_url"]}" alt="{_attr(c["description"])}"
            loading="lazy" width="720" height="405"></a>
-    <b>{c["title"]}</b>
-    <span class="sum">{c["summary"]}</span>
-    <p class="src">{c.get("source", "")}</p>
-    <div class="reactions" data-slug="{c["slug"]}" data-title="{c["title"]}">
+    <b>{_attr(c["title"])}</b>
+    <span class="sum">{_attr(c["summary"])}</span>
+    <p class="src">{_attr(c.get("source", ""))}</p>
+    <div class="reactions" data-slug="{c["slug"]}" data-title="{_attr(c["title"])}">
       <button class="like" type="button">&#9829; Helpful</button>
       <span class="count">&nbsp;</span>
       <button class="share" type="button">&#128279; Share</button>
@@ -1764,8 +1800,8 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
             f'''  <a class="post-card" href="/guides/{p["slug"]}">
 {figure}    <p class="meta"><time datetime="{p["date"]}">{card_date(p["date"])}</time>
       · {read_minutes(p)} min read</p>
-    <b>{p["title"]}</b>
-    <span class="sum">{p["summary"]}</span>
+    <b>{_attr(p["title"])}</b>
+    <span class="sum">{_attr(p["summary"])}</span>
     <p class="more">Read the guide</p></a>''')
     cards = "\n".join(cards)
     return f'''<!doctype html>
