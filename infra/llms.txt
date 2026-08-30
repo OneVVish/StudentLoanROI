@@ -28,6 +28,12 @@
   priced from IPEDS published tuition, each shown beside what graduates
   in that field actually borrowed. Tuition and fees only — no federal
   source publishes graduate living costs.
+- [Student Aid Index worksheet](https://worthmydegree.com/?tool=sai):
+  household size + income + assets → the 2027-28 federal SAI, shown as the
+  federal worksheet line by line rather than as a single number, so every
+  allowance is traceable to the published tables. Also says which colleges
+  additionally require the CSS Profile, without estimating an institutional
+  figure, because no institutional formula is published.
 - [Infographics](https://worthmydegree.com/charts): single-picture
   charts built from the same federal data as the calculator, free to
   reuse anywhere. One page, each chart addressable by #slug fragment.
