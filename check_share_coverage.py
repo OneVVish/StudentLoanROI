@@ -130,6 +130,27 @@ SHARE_EXEMPT = {
                               "as comma lists via REPAYMENT_LOAN_LIST_PARAMS",
     "existing_chart_plan": "which plan's chart to view; a view control, not an "
                            "input, so it is genuinely not shared",
+    # The Student Aid Index worksheet. Exempt from the CALCULATOR's share for
+    # the same reason the repayment tool is: a shared scenario is about a major
+    # and a school, and must never pick up the household income and savings
+    # someone typed into a different tool. They DO round-trip, through
+    # build_sai_share_params, checked below against SAI_SHARE_FIELDS -- that
+    # emitter loops over the table, so every param name reaches get_shared_* as
+    # a variable and the constant-only scan above cannot see any of them.
+    "sai_two_parents": "SAI tool; rides ?sap=",
+    "sai_family_size": "SAI tool; rides ?sas=",
+    "sai_parent_agi": "SAI tool; rides ?saa=",
+    "sai_parent_assets": "SAI tool; rides ?sav=",
+    "sai_business": "SAI tool; rides ?sab=",
+    "sai_child_support": "SAI tool; rides ?sac=",
+    "sai_student_income": "SAI tool; rides ?sasi=",
+    "sai_student_assets": "SAI tool; rides ?sasa=",
+    "sai_earned_income": "SAI tool; rides ?sae=",
+    "sai_tax_paid": "SAI tool; rides ?sat=",
+    "sai_use_earned": "SAI tool; rides ?sauw=",
+    "sai_use_tax_paid": "SAI tool; rides ?saut=",
+    "sai_parent_agi_slider": "SAI slider mirror of sai_parent_agi, which rides "
+                             "?saa=; kept in step by callbacks, never read",
     # Display-only / derived.
     "loan_mode_unavailable_display": "read-only display of a forced value",
 }
@@ -414,6 +435,48 @@ def main() -> int:
             failures.append(
                 f"  REPAYMENT   {sorted(clash)} collide with calculator share params.\n"
                 f"              A repayment link would be read as a scenario field.")
+
+    # The SAI worksheet's own share pipeline. Same shape as the repayment
+    # tool's above and checked the same way, because it fails the same way: the
+    # emitter and the seeder both loop over SAI_SHARE_FIELDS, so no param name
+    # in it is a literal the scan above could find.
+    sai_fields = next((n for n in ast.walk(tree)
+                       if isinstance(n, ast.Assign)
+                       and any(getattr(t, "id", "") == "SAI_SHARE_FIELDS"
+                               for t in n.targets)), None)
+    if sai_fields is None:
+        failures.append("  SAI_SHARE_FIELDS is gone; the SAI tool's share "
+                        "pipeline is unchecked.")
+    else:
+        sai_pairs = [(e.elts[0].value, e.elts[1].value) for e in sai_fields.value.elts]
+        shared_sai = {k for k, _ in sai_pairs}
+        params_sai = [p for _, p in sai_pairs]
+        # Membership comes from SHARE_EXEMPT's own reason, not a name prefix --
+        # the lesson the repayment block records one screen up.
+        sai_widgets = {k for k, why in SHARE_EXEMPT.items()
+                       if why.startswith("SAI tool")}
+        for key in sorted(sai_widgets - shared_sai):
+            failures.append(
+                f"  SAI         {key!r} is an SAI-tool input but is not in\n"
+                f"              SAI_SHARE_FIELDS, so its Share button silently\n"
+                f"              drops it.")
+        for key in sorted(shared_sai - sai_widgets):
+            failures.append(
+                f"  SAI         SAI_SHARE_FIELDS names {key!r}, which is not an\n"
+                f"              SAI widget key. A typo here fails silently.")
+        if len(set(params_sai)) != len(params_sai):
+            failures.append("  SAI         duplicate query param in "
+                            "SAI_SHARE_FIELDS; one field would overwrite another.")
+        sai_clash = set(params_sai) & emitted
+        if sai_clash:
+            failures.append(
+                f"  SAI         {sorted(sai_clash)} collide with calculator share\n"
+                f"              params. An SAI link would be read as a scenario field.")
+        if fields is not None:
+            both = set(params_sai) & set(params_repayment)
+            if both:
+                failures.append(
+                    f"  SAI         {sorted(both)} collide with repayment params.")
 
     # The two SEARCH tools' share pipeline. Unlike the calculator's (walked
     # statically above) and the repayment tool's (a table, read as data), this
