@@ -5092,8 +5092,15 @@ def get_supabase_read_client():
     if not key:
         return None
     from supabase import create_client
-    url = st.secrets["connections"]["supabase_connection"]["SUPABASE_URL"]
-    client = create_client(url, key)
+    conn = st.secrets["connections"]["supabase_connection"]
+    # The ANON key rides as apikey and the reporter JWT as the bearer only.
+    # Supabase's gateway validates the apikey header against the project's
+    # issued keys and answers 401 "Invalid API key" to anything else -- the
+    # reporter token is not an issued key, it is a role claim for PostgREST,
+    # which reads it from Authorization. Sending it as both died at the
+    # gateway before PostgREST ever saw it (observed 2026-08-30).
+    client = create_client(conn["SUPABASE_URL"], conn["SUPABASE_KEY"])
+    client.postgrest.auth(key)
     # The same timeout the writer gets, for the same reason: the admin page
     # reads five tables in a row and a 120-second default on each is a page
     # that never renders. Guarded like the writer's.

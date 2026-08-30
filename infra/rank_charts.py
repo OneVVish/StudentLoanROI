@@ -45,11 +45,13 @@ def like_counts() -> Counter:
     # The read-only reporter key; the anon key cannot SELECT since row level
     # security (migrations.sql, 2026-08-30).
     key = cfg.get("SUPABASE_READ_KEY")
-    if not key:
-        print("  NOTE: SUPABASE_READ_KEY is not set; falling back to the anon "
-              "key, which can no longer read usage_logs")
-        key = cfg["SUPABASE_KEY"]
-    client = create_client(cfg["SUPABASE_URL"], key)
+    client = create_client(cfg["SUPABASE_URL"], cfg["SUPABASE_KEY"])
+    if key:
+        # anon as apikey (the gateway insists), reporter as the bearer.
+        client.postgrest.auth(key)
+    else:
+        print("  NOTE: SUPABASE_READ_KEY is not set; reading with the anon "
+              "key, which cannot SELECT once row level security is on")
     rows, start = [], 0
     while True:
         page = (client.table("usage_logs").select("action")
