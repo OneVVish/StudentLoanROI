@@ -22,7 +22,7 @@ Charging the percentage on AGI rather than on discretionary income raises the pa
 
 Here is the same borrower at seven incomes, comparing what each formula asks for in the first month:
 
-| Income | RAP | IBR at 10 percent |
+| Income | RAP | IBR, newer loans |
 |---|---|---|
 | $20,000 | $17 | $0 |
 | $25,000 | $42 | $25 |
@@ -47,7 +47,7 @@ Take a borrower who left with $27,000, which is the aggregate federal limit for 
 | Plan | First payment | Years | Handed over |
 |---|---|---|---|
 | Standard, 10-year | $307 | 10 | $36,800 |
-| IBR-style income-driven | $192 | 13 | $42,000 |
+| IBR, newer loans | $192 | 13 | $42,000 |
 | 2026 Tiered Standard, 15-year | $235 | 15 | $42,300 |
 | 2026 RAP | $150 | 15 | $43,300 |
 | Extended Standard, 25-year | $182 | 25 | $54,700 |
@@ -95,6 +95,8 @@ Three things sit outside it deliberately.
 Moving between plans is governed by rules that do not point in the same direction, and the asymmetry is sharp enough to deserve its own treatment. Payments already made under an older income-driven plan carry into RAP. RAP payments mostly do not carry back out. [Switching into RAP is close to a one-way door](/guides/switching-repayment-plans-2026), and the lower the income relative to the balance, the more firmly it closes.
 
 Consolidation is a separate decision with a permanent effect on which plans remain available, including for loans that predate all of this. [What consolidating does to the plans you have left](/guides/consolidating-student-loans-2026) covers it.
+
+Every IBR figure in this article is the newer version, which is 10 percent of discretionary income with forgiveness at 20 years, and it applies to a first loan disbursed on or after July 1, 2014. A first loan before that date is on the older version, at 15 percent and 25 years, so every payment shown here would be half as large again.
 
 The IBR figures here use a flat living allowance of $22,000. Real IBR subtracts 150 percent of the federal poverty guideline for your family size, so a larger household is protected more than this model shows and would pay less than the IBR column suggests. The RAP figures carry no such simplification: that schedule is a published table, and the dependent reduction is applied as published.
 
