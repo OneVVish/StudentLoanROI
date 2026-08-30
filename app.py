@@ -3857,6 +3857,140 @@ RETURNING_KEEP_WORKING = "Yes, evenings, online or part-time"
 RETURNING_ENROLLMENT_OPTIONS = [RETURNING_KEEP_WORKING, RETURNING_STOP_WORK]
 
 
+
+# ---------------------------------------------------------------------------
+# STUDENT AID INDEX (SAI), AWARD YEAR 2027-28. Formula A, the DEPENDENT student.
+#
+# Every value in this block is quoted from ONE federal source and they must be
+# refreshed together: "2027-28 Student Aid Index (SAI) and Pell Grant
+# Eligibility Guide, Version 1", Federal Student Aid, published 2026-06-12,
+# which carries the same tables as Federal Register notice 2026-10986
+# (2026-06-02).
+#
+# THESE EXPIRE EVERY YEAR, exactly like POVERTY_GUIDELINES_2026 and for exactly
+# the same reason: ED reissues the whole set each spring for the next award
+# year, and a stale table does not raise, does not look wrong and does not fail
+# a guard. It quietly reports a different family's number. SAI_AWARD_YEAR is
+# the one thing that says which year is loaded, and it is on screen.
+#
+# The award year is two years ahead of the tax year it reads, because the FAFSA
+# is prior-prior: 2027-28 asks for the 2025 return. Refreshing the SAI tables
+# without moving SAI_TAX_YEAR and its brackets leaves the two halves a year
+# apart, which is the vintage mismatch this repo already records for the OEWS
+# files.
+SAI_AWARD_YEAR = "2027-28"
+SAI_TAX_YEAR = 2025
+
+# Table A2. Family size INCLUDES the student.
+SAI_INCOME_PROTECTION_ALLOWANCE = {2: 30300, 3: 37720, 4: 46590, 5: 54970, 6: 64290}
+SAI_IPA_PER_EXTRA_MEMBER = 7260
+
+SAI_EEA_RATE = 0.35            # line 7, employment expense allowance
+SAI_EEA_CAP = 5200
+
+# Table A4. $0 at EVERY parent age, one parent or two -- not a simplification
+# here, that is what the published table says for this award year. It is why a
+# family's savings now matter from the first dollar, and it is the most common
+# reason a real household lands above any income-only chart.
+SAI_ASSET_PROTECTION_ALLOWANCE = 0
+SAI_PARENT_ASSET_RATE = 0.12   # line 16
+SAI_STUDENT_IPA = 12220        # line 25
+SAI_STUDENT_INCOME_RATE = 0.50 # line 29
+SAI_STUDENT_ASSET_RATE = 0.20  # line 35
+SAI_FLOOR = -1500              # line 37
+
+# Table A1. Keyed on the parents' FILING STATUS, which is the whole reason the
+# tool has to ask whether there are one or two parents: it is not a cosmetic
+# question, it moves both the tax estimate and the payroll wage base.
+SAI_PAYROLL_THRESHOLDS = {          # status -> (HI threshold, OASDI wage base)
+    "mfj": (250000, 352200),
+    "hoh": (200000, 176100),        # Single, HoH or Qualifying Surviving Spouse
+}
+SAI_HI_RATE = 0.0145
+SAI_HI_RATE_HIGH = 0.0235
+SAI_OASDI_RATE = 0.062
+
+# Table A5, parents' contribution from adjusted available income.
+# (lower bound, upper bound, base contribution, marginal rate)
+SAI_A5_MIN_AAI = -8900
+SAI_A5_MIN_CONTRIBUTION = -1958
+SAI_A5_SCHEDULE = (
+    (None,  22600,      0, 0.22),
+    (22600, 28300,   4972, 0.25),
+    (28300, 34000,   6397, 0.29),
+    (34000, 39900,   8050, 0.34),
+    (39900, 45600,  10056, 0.40),
+    (45600,  None,  12336, 0.47),
+)
+
+# Table A3, businesses and farms. (upper bound, base, marginal rate, floor)
+SAI_A3_SCHEDULE = (
+    (180000,      0, 0.40,      0),
+    (540000,  72000, 0.50, 180000),
+    (905000, 252000, 0.60, 540000),
+    (None,   471000, 1.00, 905000),
+)
+
+# Tax year 2025, for line 4. THIS IS THE ONE ESTIMATED INPUT in the whole
+# formula: the FAFSA asks for income tax actually paid, which only a return can
+# supply, so the tool computes a plausible one and lets the visitor override it.
+# Everything else above is a table lookup.
+# status -> (standard deduction, brackets, child-tax-credit phaseout start)
+SAI_TAX_TABLES = {
+    "mfj": (31500,
+            ((23850, 0.10), (96950, 0.12), (206700, 0.22), (394600, 0.24),
+             (501050, 0.32), (751600, 0.35), (float("inf"), 0.37)),
+            400000),
+    "hoh": (23625,
+            ((17000, 0.10), (64850, 0.12), (103350, 0.22), (197300, 0.24),
+             (250500, 0.32), (626350, 0.35), (float("inf"), 0.37)),
+            200000),
+}
+SAI_CHILD_TAX_CREDIT = 2200
+
+# ---------------------------------------------------------------------------
+# THE CSS PROFILE, and the one thing this app must never do about it.
+#
+# About 250 to 300 mostly private colleges collect the College Board's CSS
+# Profile in addition to the FAFSA, and award their own money using
+# "Institutional Methodology" rather than the federal formula above.
+#
+# THERE IS NO PUBLISHED IM FORMULA, AND SO THERE IS NO NUMBER TO COMPUTE HERE.
+# The federal SAI can be modelled because ED publishes every table in the
+# Federal Register; IM is proprietary, and each institution varies it at will
+# because nothing in law binds its assessment of need. Two colleges reading the
+# identical Profile routinely reach different figures.
+#
+# The temptation is to estimate one anyway from the parameters that circulate
+# in college-planning blogs. DO NOT. Those same sources report the FAFSA's
+# parent asset rate as 5.64%, which is the pre-2024 EFC figure, so they are
+# demonstrably repeating a formula that no longer exists -- and a fabricated
+# institutional number would be indistinguishable on screen from the federal
+# one beside it, which is traceable to a citation line by line.
+#
+# What IS sayable is DIRECTION: which of a family's circumstances the federal
+# formula ignores and a Profile school generally does not. Direction needs no
+# proprietary table, and it is the part a family cannot work out alone.
+# css_profile_divergences returns exactly that and no dollar figure;
+# check_sai_worksheet.py asserts it never grows one.
+CSS_PROFILE_AID_CLAIM = "more than $14 billion in nonfederal aid"
+CSS_PROFILE_FEE_WAIVER_INCOME = 100000     # College Board: free up to this income
+CSS_PROFILE_URL = "https://cssprofile.collegeboard.org/"
+# Which colleges also collect it, keyed by UNITID. build_css_profile_schools.py,
+# from the College Board's own participating-institutions list.
+#
+# ABSENCE MEANS UNKNOWN, NEVER "NO". The join is by name and state -- College
+# Board publishes no UNITID and there is no crosswalk -- so a school could in
+# principle be missing because a string did not match rather than because it
+# does not participate. The builder asserts the property that makes silence
+# safe here: every participant it could NOT match is absent from the cost file
+# altogether, so no school this app can display is wrongly blank. Grove City,
+# Hillsdale and Patrick Henry take no federal money, so no federal dataset
+# prices them and no search can return them.
+CSS_PROFILE_PATH = "data/css_profile_schools_clean.csv"
+
+
+
 # ============================================================
 # 2. HELPER FUNCTIONS
 # ============================================================
@@ -5357,6 +5491,21 @@ STANDALONE_TOOLS = {
                    "actually borrowed. Tuition and fees only: no federal "
                    "source publishes graduate living costs.",
         "label": "Find graduate schools",
+    },
+    "sai": {
+        # The aid side of the same decision. Every other page here prices what
+        # a degree COSTS; this one estimates what the federal formula will say
+        # the family can pay, which is the number that decides how much of that
+        # cost is actually theirs. Its own page for the reach reason the
+        # gradschools entry sets out: "what will my SAI be" is a search intent
+        # of its own and a dropdown option has no URL.
+        "action": "pageview_sai",
+        "title": "\U0001F9EE Estimate Your Student Aid Index",
+        "caption": "**Free \u00b7 anonymous \u00b7 no sign-up.** The "
+                   f"{SAI_AWARD_YEAR} federal formula, worked line by line "
+                   "from the published tables. An estimate of what colleges "
+                   "will think you can pay, not an aid offer.",
+        "label": "Estimate your Student Aid Index",
     },
 }
 
@@ -12449,6 +12598,11 @@ NET_POSITION_OVERLAY_KEY = "net_position_overlay"
 NET_POSITION_CARD_KEY = "net_position_card"
 VERDICT_CARD_KEY = "verdict_card"
 LOAN_CARD_KEY = "loan_card"
+# The SAI worksheet's headline figure. Its own key rather than the verdict
+# card's because it frames ONE number rather than a block, and the extra
+# rule below enlarges that number -- applied to the verdict card it would
+# also hit every metric inside it.
+SAI_CARD_KEY = "sai_card"
 TAKEHOME_CARD_KEY = "takehome_card"
 # Compare Mode's A/B block. Its own key rather than VERDICT_CARD_KEY because
 # only one branch runs per rerun, so the two never collide, and a distinct
@@ -16031,6 +16185,352 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     return buffer.getvalue()
 
 
+
+# --- 2s. Student Aid Index (SAI), Formula A ---------------------------------
+
+def sai_income_protection_allowance(family_size: int) -> int:
+    """Table A2, extended by SAI_IPA_PER_EXTRA_MEMBER above size 6."""
+    if family_size <= 6:
+        return SAI_INCOME_PROTECTION_ALLOWANCE[max(2, family_size)]
+    return (SAI_INCOME_PROTECTION_ALLOWANCE[6]
+            + SAI_IPA_PER_EXTRA_MEMBER * (family_size - 6))
+
+
+def sai_business_net_worth_adjustment(net_worth: float) -> float:
+    """Table A3. A business is discounted on a sliding scale before it counts."""
+    if net_worth < 1:
+        return 0.0
+    for cap, base, rate, floor in SAI_A3_SCHEDULE:
+        if cap is None or net_worth <= cap:
+            return base + rate * (net_worth - floor)
+    raise AssertionError("SAI_A3_SCHEDULE must end with an open bracket")
+
+
+def sai_federal_income_tax(agi: float, status: str, children: int) -> float:
+    """Line 4. AN ESTIMATE, and the only one in this formula.
+
+    Returned rather than looked up because the FAFSA asks for tax actually
+    paid. The tool takes an override for exactly that reason.
+    """
+    standard_deduction, brackets, phaseout = SAI_TAX_TABLES[status]
+    taxable = max(0.0, agi - standard_deduction)
+    tax, last = 0.0, 0.0
+    for cap, rate in brackets:
+        if taxable <= last:
+            break
+        tax += (min(taxable, cap) - last) * rate
+        last = cap
+    credit = SAI_CHILD_TAX_CREDIT * children
+    if agi > phaseout:
+        credit = max(0.0, credit - 50 * ((agi - phaseout) // 1000))
+    return max(0.0, tax - credit)      # tax PAID can never be negative
+
+
+def sai_payroll_tax_allowance(earned: float, status: str) -> int:
+    """Table A1. Each half is rounded before they are added, per Appendix K."""
+    hi_threshold, oasdi_base = SAI_PAYROLL_THRESHOLDS[status]
+    hi = (SAI_HI_RATE * min(earned, hi_threshold)
+          + SAI_HI_RATE_HIGH * max(0.0, earned - hi_threshold))
+    return round(hi) + round(SAI_OASDI_RATE * min(earned, oasdi_base))
+
+
+def sai_parents_contribution(aai: float) -> float:
+    """Table A5. Below SAI_A5_MIN_AAI the contribution is a flat floor."""
+    if aai < SAI_A5_MIN_AAI:
+        return float(SAI_A5_MIN_CONTRIBUTION)
+    for floor, cap, base, rate in SAI_A5_SCHEDULE:
+        if cap is None or aai <= cap:
+            return base + rate * (aai - (floor if floor is not None else 0))
+    raise AssertionError("SAI_A5_SCHEDULE must end with an open bracket")
+
+
+def compute_student_aid_index(parent_agi: float, family_size: int, *,
+                              two_parents: bool = True,
+                              earned_income=None,
+                              parent_assets: float = 0.0,
+                              business_net_worth: float = 0.0,
+                              child_support: float = 0.0,
+                              student_income: float = 0.0,
+                              student_assets: float = 0.0,
+                              income_tax_paid=None) -> dict:
+    """Formula A, the dependent student. Returns the SAI and every worksheet line.
+
+    The lines are returned rather than only the total because this tool's whole
+    claim is that a family can trace the figure back to the federal form. A
+    single number would be the black box every other calculator already is.
+
+    `earned_income` and `income_tax_paid` are None-means-derive, not
+    None-means-zero: a family that has not looked up its return should get a
+    plausible answer rather than a zero allowance, which would overstate the
+    SAI badly.
+    """
+    status = "mfj" if two_parents else "hoh"
+    earned = parent_agi if earned_income is None else earned_income
+    # Siblings only. The student is 17 or older by definition on this form, so
+    # counting them would hand most families a credit they cannot claim.
+    children = max(0, family_size - (3 if two_parents else 2))
+
+    tax = (sai_federal_income_tax(parent_agi, status, children)
+           if income_tax_paid is None else float(income_tax_paid))
+    payroll = sai_payroll_tax_allowance(earned, status)
+    protection = sai_income_protection_allowance(family_size)
+    employment = min(SAI_EEA_RATE * earned, SAI_EEA_CAP)
+    available_income = parent_agi - (tax + payroll + protection + employment)
+
+    net_worth = (child_support + parent_assets
+                 + sai_business_net_worth_adjustment(business_net_worth))
+    from_assets = max(0.0, (net_worth - SAI_ASSET_PROTECTION_ALLOWANCE)
+                      * SAI_PARENT_ASSET_RATE)
+    aai = available_income + from_assets
+    parents = sai_parents_contribution(aai)
+
+    # Line 26: a negative parent AAI is added back to the student's own
+    # allowance rather than being allowed to reduce the parents' contribution
+    # twice.
+    student_allowance = SAI_STUDENT_IPA + (abs(aai) if aai < 0 else 0.0)
+    student_from_income = max(0.0, (student_income - student_allowance)
+                              * SAI_STUDENT_INCOME_RATE)
+    student_from_assets = max(0.0, student_assets * SAI_STUDENT_ASSET_RATE)
+
+    raw = parents + student_from_income + student_from_assets
+    return {
+        "sai": max(SAI_FLOOR, round(raw)),
+        "at_floor": round(raw) < SAI_FLOOR,
+        "income_tax_paid": round(tax),
+        "tax_estimated": income_tax_paid is None,
+        "payroll_allowance": payroll,
+        "income_protection_allowance": protection,
+        "employment_expense_allowance": round(employment),
+        "available_income": round(available_income),
+        "reportable_net_worth": round(net_worth),
+        "parent_contribution_from_assets": round(from_assets),
+        "adjusted_available_income": round(aai),
+        "parents_contribution": round(parents),
+        "student_from_income": round(student_from_income),
+        "student_from_assets": round(student_from_assets),
+    }
+
+
+# The worksheet, in the FEDERAL form's own line numbers. They are the real ones
+# from the guide, not decoration: a reader who wants to check line 19 can open
+# the guide at line 19. Shared by the on-screen table and anything printed.
+def sai_money(value) -> str:
+    """fmt_money with the sign OUTSIDE the dollar sign.
+
+    The worksheet's allowance lines are negative, and fmt_money renders those
+    as "$-7,743" -- the sign in the one place no reader expects it. Nothing
+    else in the app displays a negative in a table cell, which is why this
+    surfaced here and only when the table was actually rendered.
+    """
+    return ("-" if value < 0 else "") + fmt_money(abs(value))
+
+
+@st.cache_data
+def load_css_profile_schools() -> pd.DataFrame:
+    """The CSS Profile participants, or an empty frame if the file is absent.
+
+    Absent is survivable on purpose: a deploy without it loses one caption
+    rather than the page, the same contract hs_young_wage_disclosure has.
+    """
+    try:
+        frame = pd.read_csv(CSS_PROFILE_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=["UNITID", "requires_profile",
+                                     "requires_noncustodial", "requires_idoc"])
+    frame["UNITID"] = pd.to_numeric(frame["UNITID"], errors="coerce")
+    return frame.dropna(subset=["UNITID"])
+
+
+def css_profile_requirement(unitid) -> dict:
+    """What a named school requires, or {} when it is not on the list.
+
+    Keyed on UNITID rather than name, because 33 name-and-state keys in the
+    cost file already map to more than one school and a Profile flag on the
+    wrong one is worse than no flag. Returns {} rather than a False-filled
+    dict so a caller cannot accidentally render "does not require it" out of a
+    lookup that simply found nothing.
+    """
+    if unitid in (None, "") or pd.isna(unitid):
+        return {}
+    frame = load_css_profile_schools()
+    if frame.empty:
+        return {}
+    hit = frame[frame.UNITID == float(unitid)]
+    if hit.empty:
+        return {}
+    row = hit.iloc[0]
+    return {"noncustodial": bool(row.requires_noncustodial),
+            "idoc": bool(row.requires_idoc),
+            "name": str(row.get("INSTNM", ""))}
+
+
+def css_profile_school_caption(unitid) -> str:
+    """One sentence for a named school, or "" when it is not on the list.
+
+    Never says a school does NOT require the Profile: see CSS_PROFILE_PATH for
+    why absence cannot carry that meaning.
+    """
+    requirement = css_profile_requirement(unitid)
+    if not requirement:
+        return ""
+    text = ("📋 **This school also requires the CSS Profile.** It awards its "
+            "own money using a formula that is not published, so the federal "
+            "figures here are a floor at this school rather than an estimate.")
+    if requirement["noncustodial"]:
+        text += (" It also asks for the other parent's finances if the "
+                 "student's parents live apart.")
+    return text
+
+
+def css_profile_divergences(*, home_equity: float = 0.0,
+                            noncustodial_parent: bool = False,
+                            business_net_worth: float = 0.0,
+                            student_assets: float = 0.0) -> list:
+    """Where a CSS Profile school will read this family differently, in words.
+
+    Returns (heading, explanation) pairs and NEVER a dollar figure. That is the
+    whole contract: Institutional Methodology is unpublished and per-school, so
+    any amount this returned would be invented, and it would sit on screen next
+    to a federal figure that is traceable line by line. Direction is sayable;
+    magnitude is not.
+
+    In section 2 rather than inline in the renderer so a guard can reach it --
+    the reconcile_search_pick and graduate_apply_target reasoning. The rule it
+    enforces is one whose violation would be silent.
+    """
+    out = []
+    if home_equity > 0:
+        out.append((
+            "Your home",
+            "The FAFSA does not ask what your house is worth, so none of it is "
+            "in the figure above. The CSS Profile does ask, and most schools "
+            "that collect it count some of your equity. Many cap what they "
+            "count at a multiple of your income, and a few ignore it "
+            "altogether, so how much this matters is a question about the "
+            "particular school and not about you."))
+    if noncustodial_parent:
+        out.append((
+            "The other parent",
+            "The FAFSA asks only about the parent who provided the most "
+            "support, so a second household is invisible to the figure above. "
+            "Many Profile schools require the other parent to file too and "
+            "count that income and those assets. Where they do, this is "
+            "usually the largest single difference between the two answers."))
+    if business_net_worth > 0:
+        out.append((
+            "Your business or farm",
+            "The federal formula discounts a business steeply before counting "
+            "it, on the published sliding scale in the worksheet above. A "
+            "Profile school may count more of it, and may also count assets "
+            "the federal form leaves out."))
+    if student_assets > 0:
+        out.append((
+            "The student's own savings",
+            "The federal formula assesses a student's savings harder than a "
+            "parent's, and Profile schools generally assess them harder still. "
+            "Many also expect a minimum contribution from summer work whatever "
+            "the formula says, so a student with no savings is not always "
+            "assessed nothing."))
+    return out
+
+
+# Which lines open a section, which are subtotals, and which is the answer.
+# Kept beside the rows rather than inferred in the renderer: the grouping is a
+# fact about the federal form, not a display choice, and anything else that
+# ever prints this worksheet needs the same grouping to stay readable.
+SAI_WORKSHEET_SECTIONS = {
+    "3":  "Allowances against parents' income",
+    "14": "Contribution from assets",
+    "19": "Contributions",
+}
+SAI_WORKSHEET_SUBTOTALS = ("9", "18")
+SAI_WORKSHEET_TOTAL = "37"
+
+SAI_WORKSHEET_ROWS = (
+    ("3",  "Total parent income",                    "agi",                            False),
+    ("4",  "Income tax paid",                        "income_tax_paid",                True),
+    ("5",  "Payroll tax allowance",                  "payroll_allowance",              True),
+    ("6",  "Income protection allowance",            "income_protection_allowance",    True),
+    ("7",  "Employment expense allowance",           "employment_expense_allowance",   True),
+    ("9",  "Parents' available income",              "available_income",               False),
+    ("14", "Reportable net worth",                   "reportable_net_worth",           False),
+    ("17", "Assessed at 12 percent",                 "parent_contribution_from_assets", False),
+    ("18", "Adjusted available income",              "adjusted_available_income",      False),
+    ("19", "Parents' contribution (Table A5)",       "parents_contribution",           False),
+    ("30", "Student, from income",                   "student_from_income",            False),
+    ("36", "Student, from assets",                   "student_from_assets",            False),
+    ("37", "Student Aid Index",                      "sai",                            False),
+)
+
+
+# Its own namespace, deliberately separate from build_share_params. A
+# calculator share must never pick up a household income someone typed into a
+# different tool, and the reverse. Prefix `sa`; check_share_coverage asserts
+# these cannot collide with a calculator param.
+SAI_SHARE_FIELDS = (
+    ("sai_two_parents",    "sap",  int),
+    ("sai_family_size",    "sas",  int),
+    ("sai_parent_agi",     "saa",  int),
+    ("sai_parent_assets",  "sav",  int),
+    ("sai_business",       "sab",  int),
+    ("sai_child_support",  "sac",  int),
+    ("sai_student_income", "sasi", int),
+    ("sai_student_assets", "sasa", int),
+    ("sai_earned_income",  "sae",  int),
+    ("sai_tax_paid",       "sat",  int),
+    # The two overrides are OPT-IN, and the flag has to ride the link too. An
+    # override is only meaningful beside the answer to "am I overriding", and
+    # an explicit $0 is a real answer -- see the checkbox comment in the
+    # renderer for what collapsing the two costs.
+    ("sai_use_earned",     "sauw", int),
+    ("sai_use_tax_paid",   "saut", int),
+    # CSS Profile inputs. They ride the link like any other, even though
+    # neither reaches the federal arithmetic: a shared link that dropped them
+    # would rebuild the scenario without the note that was the reason to share.
+    ("sai_home_equity",    "sahe", int),
+    ("sai_noncustodial",   "sanc", int),
+)
+
+
+def build_sai_share_params() -> dict:
+    """Every SAI input as query params, for the tool's own Share button.
+
+    Emits only what has been set, so a link from a half-filled form does not
+    pin the rest to zero for the recipient. The two override fields are
+    deliberately skipped when empty: zero and "derive it" are different
+    answers, and seeding a zero payroll allowance would overstate the SAI.
+    """
+    params = {"tool": "sai"}
+    for key, param, _cast in SAI_SHARE_FIELDS:
+        value = st.session_state.get(key)
+        if value is None or value == "":
+            continue
+        params[param] = "1" if value is True else (
+            "0" if value is False else str(int(value)))
+    return params
+
+
+def seed_sai_from_share() -> None:
+    """URL to session_state for the SAI inputs, before their widgets exist.
+
+    ONCE PER SESSION, not once per rerun: the same trap seed_repayment_from_share
+    records. A per-rerun seed makes a field the visitor clears refill itself
+    from the link on the very next interaction.
+    """
+    if st.session_state.get("_sai_seeded"):
+        return
+    st.session_state["_sai_seeded"] = True
+    for key, param, _cast in SAI_SHARE_FIELDS:
+        raw = get_shared_default(param, "")
+        if raw == "":
+            continue
+        if key in ("sai_two_parents", "sai_use_earned", "sai_use_tax_paid",
+                   "sai_noncustodial"):
+            st.session_state.setdefault(key, get_shared_int(param, 0) == 1)
+        else:
+            st.session_state.setdefault(key, get_shared_int(param, 0))
+
+
 # ============================================================
 # 3. PAGE CONFIG & SESSION STATE
 # ============================================================
@@ -16183,6 +16683,9 @@ RESULT_CARD_TINTS = {
     # Compare Mode draws the chart without a section card around it, so it
     # keeps a card of its own. Same tint as the verdict card it stands in for.
     NET_POSITION_CARD_KEY: ("#e8eef7", "#c6d4e6", "#161b23", "#2b323c"),
+    # The SAI figure. Same blue family as the verdict card, because it is the
+    # same kind of thing: the one number the page exists to produce.
+    SAI_CARD_KEY:          ("#e8eef7", "#c6d4e6", "#161b23", "#2b323c"),
 }
 
 st.markdown(
@@ -16200,7 +16703,28 @@ st.markdown(
         f" background-color: {dark_bg};"
         f" border-color: {dark_border}; }}"
         for key, (_, _, dark_bg, dark_border) in RESULT_CARD_TINTS.items())
-    + "}</style>",
+    + "}"
+    # The SAI figure itself: bold, larger, and in the brand's own accent rather
+    # than Streamlit's default ink. Colours are brand/palette.json's `gain`
+    # pair (#2a78d6 light, #3987e5 dark), which is the accent this app already
+    # uses for the side of a comparison that is not a cost -- an SAI is neither
+    # good nor bad news, so the cost orange would editorialise a number that
+    # only describes.
+    #
+    # VERSION-SPECIFIC (Streamlit 1.58, pinned). stMetricValue is an internal
+    # testid: a bump that renames it loses the emphasis and keeps the number,
+    # which is the right way round to fail, but re-verify it like the other
+    # pinned selectors in this file.
+    + f".st-key-{SAI_CARD_KEY} [data-testid='stMetricValue'] {{"
+      " font-weight: 800;"
+      " font-size: 2.6rem;"
+      " color: #2a78d6; }}"
+    + f".st-key-{SAI_CARD_KEY} [data-testid='stMetricLabel'] {{"
+      " font-weight: 700; letter-spacing: 0.02em; }}"
+    + "@media (prefers-color-scheme: dark) {"
+    + f".st-key-{SAI_CARD_KEY} [data-testid='stMetricValue'] {{ color: #3987e5; }}"
+    + "}"
+    + "</style>",
     unsafe_allow_html=True,
 )
 
@@ -16807,6 +17331,14 @@ else:
     coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
     if coa_caption_a:
         _sb_where.caption(coa_caption_a)
+    # Whether this school wants the CSS Profile too. Rendered here rather than
+    # as a column in the search results because that table is at its width
+    # limit -- its own comments record that a twelfth column would cost every
+    # other one legibility -- and because "does THIS school want it" is only a
+    # well-posed question once exactly one school is named.
+    _css_profile_note_a = css_profile_school_caption(school_unitid_a)
+    if _css_profile_note_a:
+        _sb_where.caption(_css_profile_note_a)
 
     shared_coa_a = get_shared_default("coa", None)
     default_coa_per_year_a = None
@@ -23172,6 +23704,374 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
 
 
 
+
+# The AGI slider is a SECOND VIEW of sai_parent_agi, not a second input. Two
+# Streamlit widgets cannot share one key, so the pair is kept in step by
+# callbacks and only sai_parent_agi is ever read, shared or logged.
+#
+# The slider stops well below the number input's ceiling on purpose. A slider
+# spanning a million dollars puts every income a real family has in its first
+# fifth, so the control that is meant to make the common case easy would make
+# it harder. Above the cap the slider pins and the number input is the honest
+# control, which is what the caption says.
+# The worksheet is rendered as an HTML table rather than st.dataframe, and the
+# reason is that it is a FORM, not data. Nobody sorts a worksheet or exports it
+# to CSV, which is all a dataframe buys here; what a worksheet needs is for the
+# allowances to read as subtractions, the two subtotals to read as rests, and
+# the answer to read as the answer. A dataframe can express none of that, and
+# it clips a long cell rather than wrapping it -- the failure this file already
+# records for the count-back finding and the six-column results table.
+SAI_WORKSHEET_CSS = """<style>
+.sai-worksheet { width: 100%; border-collapse: collapse; margin: 0.25rem 0 0.5rem; }
+.sai-worksheet td { padding: 0.34rem 0.2rem; vertical-align: baseline; }
+.sai-worksheet .ln {
+    width: 2.6rem; text-align: right; padding-right: 0.9rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; opacity: 0.55;
+}
+.sai-worksheet .amt {
+    text-align: right; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+}
+/* An allowance is money coming OFF the income. Muted, so the eye runs down
+   the subtotals and skips the arithmetic unless it is looking for it. */
+.sai-worksheet tr.allowance .lbl, .sai-worksheet tr.allowance .amt { opacity: 0.72; }
+.sai-worksheet tr.section td {
+    padding-top: 1rem; font-size: 0.72rem; letter-spacing: 0.09em;
+    text-transform: uppercase; font-weight: 700; opacity: 0.55;
+}
+.sai-worksheet tr.subtotal td {
+    border-top: 1px solid rgba(128,140,155,0.45); font-weight: 600;
+}
+.sai-worksheet tr.total td {
+    border-top: 2px solid rgba(128,140,155,0.8); padding-top: 0.6rem;
+    font-weight: 800; font-size: 1.05rem; color: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+    .sai-worksheet tr.total td { color: #3987e5; }
+}
+</style>"""
+
+
+def sai_worksheet_html(result: dict, parent_agi: float) -> str:
+    """The worksheet as one HTML table. Shared shape with SAI_WORKSHEET_ROWS.
+
+    Money goes through sai_money, never fmt_money_md: this is raw HTML, not a
+    markdown string, so the LaTeX trap does not apply and an escaped dollar
+    sign would print its own backslash.
+    """
+    values = dict(result, agi=parent_agi)
+    parts = [SAI_WORKSHEET_CSS, "<table class='sai-worksheet'>"]
+    for line, label, key, subtract in SAI_WORKSHEET_ROWS:
+        if line in SAI_WORKSHEET_SECTIONS:
+            parts.append("<tr class='section'><td></td><td colspan='2'>"
+                         f"{html.escape(SAI_WORKSHEET_SECTIONS[line])}</td></tr>")
+        if key == "income_tax_paid" and result["tax_estimated"]:
+            label += " (estimated)"
+        kind = ("total" if line == SAI_WORKSHEET_TOTAL
+                else "subtotal" if line in SAI_WORKSHEET_SUBTOTALS
+                else "allowance" if subtract else "")
+        amount = sai_money(-values[key] if subtract else values[key])
+        parts.append(
+            f"<tr class='{kind}'><td class='ln'>{line}</td>"
+            f"<td class='lbl'>{html.escape(label)}</td>"
+            f"<td class='amt'>{amount}</td></tr>")
+    parts.append("</table>")
+    return "".join(parts)
+
+
+SAI_AGI_SLIDER_MAX = 300000
+SAI_AGI_SLIDER_STEP = 2500
+SAI_AGI_SLIDER_KEY = "sai_parent_agi_slider"
+
+
+def _sai_agi_slider_to_number() -> None:
+    st.session_state["sai_parent_agi"] = st.session_state[SAI_AGI_SLIDER_KEY]
+
+
+def _sai_agi_number_to_slider() -> None:
+    """Round onto the slider's step and clamp to its range.
+
+    Assigning an out-of-range or off-step value to a slider's key raises, and
+    it would raise on the NEXT run rather than this one -- so a visitor typing
+    $103,450 would see the page break one interaction later, with nothing
+    connecting the two events.
+    """
+    value = st.session_state.get("sai_parent_agi", 0) or 0
+    snapped = round(value / SAI_AGI_SLIDER_STEP) * SAI_AGI_SLIDER_STEP
+    st.session_state[SAI_AGI_SLIDER_KEY] = max(0, min(SAI_AGI_SLIDER_MAX, int(snapped)))
+
+
+def render_sai_worksheet(always_open: bool = False) -> None:
+    """The Student Aid Index worksheet, award year 2027-28.
+
+    Standalone only. It shares none of the calculator's scenario machinery and
+    answers a different question, so unlike the repayment and school tools it
+    is not also an expander inside the calculator flow.
+
+    The worksheet is shown in full rather than just the total. Every other
+    calculator of this kind returns one number, and a family that cannot see
+    which allowance produced it has no way to tell a typo from a finding.
+    """
+    seed_sai_from_share()
+
+    st.markdown(f"#### Your household, as the {SAI_AWARD_YEAR} FAFSA will ask")
+    st.caption(
+        f"The {SAI_AWARD_YEAR} FAFSA reads your {SAI_TAX_YEAR} tax return. "
+        "Nothing here is stored or sent anywhere."
+    )
+
+    left, right = st.columns(2)
+    st.session_state.setdefault("sai_two_parents", True)
+    two_parents = left.radio(
+        "Parents in the household",
+        [True, False],
+        format_func=lambda v: "Two parents" if v else "One parent",
+        key="sai_two_parents", horizontal=True,
+        help="This sets the tax brackets and the payroll wage base, so it "
+             "changes the answer. It is not a cosmetic question.",
+    )
+    # Seed BEFORE the clamp, not after. The other way round, the clamp reads a
+    # missing key as 0, sets it to the minimum, and the setdefault below is
+    # then a no-op -- so every first-time visitor got a household of 3 while
+    # the code plainly said 4. Found by rendering the page, not by reading it.
+    min_size = 3 if two_parents else 2
+    st.session_state.setdefault("sai_family_size", 4)
+    if st.session_state["sai_family_size"] < min_size:
+        st.session_state["sai_family_size"] = min_size
+    family_size = right.number_input(
+        "Household size, including the student",
+        min_value=min_size, max_value=12, step=1, key="sai_family_size",
+    )
+
+    st.session_state.setdefault("sai_parent_agi", 100000)
+    # Seeded from sai_parent_agi, so a shared link's income reaches the slider
+    # too. seed_sai_from_share has already run by this point.
+    if SAI_AGI_SLIDER_KEY not in st.session_state:
+        _sai_agi_number_to_slider()
+    parent_agi = left.number_input(
+        f"Parents' adjusted gross income ({SAI_TAX_YEAR})",
+        min_value=0, max_value=1000000, step=1000, key="sai_parent_agi",
+        on_change=_sai_agi_number_to_slider,
+    )
+    left.slider(
+        "Drag to explore", min_value=0, max_value=SAI_AGI_SLIDER_MAX,
+        step=SAI_AGI_SLIDER_STEP, key=SAI_AGI_SLIDER_KEY,
+        on_change=_sai_agi_slider_to_number, format="$%d",
+        label_visibility="collapsed",
+    )
+    if parent_agi > SAI_AGI_SLIDER_MAX:
+        left.caption(
+            f"Above {fmt_money(SAI_AGI_SLIDER_MAX)} the slider stops. The box "
+            "above is the live figure."
+        )
+    st.session_state.setdefault("sai_parent_assets", 0)
+    parent_assets = right.number_input(
+        "Parents' cash, savings and investments",
+        min_value=0, max_value=10000000, step=1000, key="sai_parent_assets",
+        help="Not your home and not retirement accounts.",
+    )
+    st.caption(
+        f"The asset protection allowance is {fmt_money_md(0)} for "
+        f"{SAI_AWARD_YEAR}, so savings count from the first dollar at "
+        f"{int(SAI_PARENT_ASSET_RATE * 100)} cents each."
+    )
+
+    with st.expander("More detail"):
+        c1, c2 = st.columns(2)
+        # OPT-IN, not a zero sentinel. Reading "0" as "not set" would hand a
+        # family whose income is entirely from investments a payroll allowance
+        # on wages they never earned, which is a LARGER allowance and so a
+        # LOWER SAI. Erring in the flattering direction is the one direction
+        # this app must not err in, and nothing on screen would have said so.
+        # Same reasoning as professional_debt_autofill's `entered or default`.
+        st.session_state.setdefault("sai_use_earned", False)
+        use_earned = c1.checkbox(
+            "Some parent income was not from wages", key="sai_use_earned",
+            help="Tick this to enter wages separately from AGI. Left unticked, "
+                 "the AGI above is treated as wages.",
+        )
+        st.session_state.setdefault("sai_earned_income", 0)
+        earned_raw = c1.number_input(
+            "Parents' income earned from work", min_value=0, max_value=1000000,
+            step=1000, key="sai_earned_income", disabled=not use_earned,
+        )
+        st.session_state.setdefault("sai_business", 0)
+        business = c2.number_input(
+            "Net worth of a business or farm", min_value=0, max_value=20000000,
+            step=5000, key="sai_business",
+        )
+        st.session_state.setdefault("sai_child_support", 0)
+        child_support = c1.number_input(
+            "Child support received last year", min_value=0, max_value=500000,
+            step=500, key="sai_child_support",
+        )
+        st.session_state.setdefault("sai_student_income", 0)
+        student_income = c2.number_input(
+            "Student's own income", min_value=0, max_value=500000, step=500,
+            key="sai_student_income",
+            help=f"The first {fmt_money(SAI_STUDENT_IPA)} is protected.",
+        )
+        st.session_state.setdefault("sai_student_assets", 0)
+        student_assets = c1.number_input(
+            "Student's own savings", min_value=0, max_value=5000000, step=500,
+            key="sai_student_assets",
+            help="Counted at 20 cents on the dollar, against the parents' 12.",
+        )
+        # Neither of these two touches the federal figure, and they must not.
+        # The FAFSA does not ask what a house is worth and does not ask about a
+        # second household, so feeding either into compute_student_aid_index
+        # would make the worksheet stop matching the form it prints the line
+        # numbers of. They exist only for the CSS Profile note below.
+        st.session_state.setdefault("sai_home_equity", 0)
+        home_equity = c2.number_input(
+            "Equity in your home", min_value=0, max_value=20000000, step=5000,
+            key="sai_home_equity",
+            help="What the house is worth, less what is owed on it. The FAFSA "
+                 "never asks. The CSS Profile does.",
+        )
+        st.session_state.setdefault("sai_noncustodial", False)
+        noncustodial = c1.checkbox(
+            "The student's parents live apart", key="sai_noncustodial",
+            help="The FAFSA asks only about the parent who provided the most "
+                 "support. Many CSS Profile schools ask about both.",
+        )
+        st.session_state.setdefault("sai_use_tax_paid", False)
+        use_tax = c2.checkbox(
+            "I know what we paid in federal income tax", key="sai_use_tax_paid",
+            help="Tick this to use your return's own figure. A household that "
+                 "owed nothing should tick it and enter 0.",
+        )
+        st.session_state.setdefault("sai_tax_paid", 0)
+        tax_raw = c2.number_input(
+            "Federal income tax actually paid", min_value=0, max_value=500000,
+            step=500, key="sai_tax_paid", disabled=not use_tax,
+        )
+
+    result = compute_student_aid_index(
+        parent_agi, int(family_size), two_parents=bool(two_parents),
+        earned_income=(earned_raw if use_earned else None),
+        parent_assets=parent_assets, business_net_worth=business,
+        child_support=child_support, student_income=student_income,
+        student_assets=student_assets,
+        income_tax_paid=(tax_raw if use_tax else None),
+    )
+
+    st.markdown("#### Your estimated Student Aid Index")
+    metric_col, note_col = st.columns([1, 2])
+    with metric_col.container(border=True, key=SAI_CARD_KEY):
+        st.metric(f"SAI, {SAI_AWARD_YEAR}", sai_money(result["sai"]))
+    if result["at_floor"]:
+        note_col.success(
+            f"At the {fmt_money_md(SAI_FLOOR)} floor. The formula stops there. "
+            "It is not a cap on aid and it is not money paid to you: it "
+            "signals need beyond what the formula measures, and it is one of "
+            "the routes to a maximum Pell Grant."
+        )
+    elif result["sai"] <= 0:
+        note_col.success(
+            "Zero or below. An SAI at or under zero is one of the routes to a "
+            "maximum Pell Grant."
+        )
+    else:
+        note_col.info(
+            "This is what the federal formula thinks your family can "
+            "contribute. It is not a bill, and it is not what any college "
+            "will actually charge you."
+        )
+
+    st.markdown(sai_worksheet_html(result, parent_agi), unsafe_allow_html=True)
+    st.caption(
+        "Line numbers are the federal worksheet's own, so any figure here can "
+        "be checked against the published guide. Negative amounts are "
+        "allowances subtracted from income."
+    )
+
+    divergences = css_profile_divergences(
+        home_equity=home_equity, noncustodial_parent=noncustodial,
+        business_net_worth=business, student_assets=student_assets)
+    with st.expander(
+            "Does a CSS Profile school see a different number? "
+            + ("Yes, and here is why." if divergences else "Probably not much."),
+            expanded=bool(divergences)):
+        st.markdown(
+            "About 250 to 300 colleges, mostly private, also collect the "
+            "College Board's **CSS Profile** and award their own money using "
+            "something called Institutional Methodology. It unlocks "
+            f"{CSS_PROFILE_AID_CLAIM} a year, and it is free for families "
+            f"earning up to {fmt_money_md(CSS_PROFILE_FEE_WAIVER_INCOME)}."
+        )
+        st.markdown(
+            "**This tool cannot compute that number, and nothing that claims "
+            "to should be trusted very far.** The federal formula above can be "
+            "modelled because the Department of Education publishes every "
+            "table in it. Institutional Methodology is not published, and each "
+            "college is free to vary it, so two schools reading the same "
+            "Profile routinely reach different figures. What can be said is "
+            "which direction they will differ from the figure above."
+        )
+        if divergences:
+            for heading, explanation in divergences:
+                st.markdown(f"**{heading}.** {explanation}")
+            st.info(
+                "Every one of these points the same way. A CSS Profile school "
+                "will generally expect **more** from your family than the "
+                "federal figure above, not less. Treat that figure as the "
+                "floor at those schools."
+            )
+        else:
+            st.caption(
+                "Nothing you have entered is treated differently by the two "
+                "forms. Fill in home equity, a second parent household, a "
+                "business or student savings above and this will say what "
+                "changes."
+            )
+        st.caption(
+            "The one number that reflects a particular school's own "
+            "methodology is that school's net price calculator, which every "
+            "college is required to publish. "
+            f"[What the CSS Profile is]({CSS_PROFILE_URL})."
+        )
+
+    st.warning(
+        "**Two children in college no longer helps.** The old EFC divided the "
+        "parents' contribution by the number in college. The SAI formula does "
+        "not divide, so each sibling is assessed the same parents' "
+        "contribution. Any chart inherited from the EFC era reads low."
+    )
+    st.caption(
+        "The SAI is one input a college uses. What you actually pay also "
+        "depends on that college's own aid, on state grants such as Cal "
+        "Grant, and on its price. This tool estimates none of those: for a "
+        "real estimate at one school, use that school's own net price "
+        "calculator."
+    )
+    st.caption(
+        f"**Source.** Every allowance, rate and bracket above is from the "
+        f"{SAI_AWARD_YEAR} Student Aid Index (SAI) and Pell Grant Eligibility "
+        "Guide, Version 1, Federal Student Aid, June 12, 2026, which carries "
+        "the same figures as Federal Register notice 2026-10986 of June 2, "
+        f"2026. Formula A, the dependent student. Line 4 is estimated from "
+        f"{SAI_TAX_YEAR} federal brackets and is the only figure here that is "
+        "not a table lookup."
+    )
+
+    if always_open:
+        if st.button("🔗 Share This Estimate", use_container_width=True,
+                     key="sai_share"):
+            st.query_params.from_dict({**session_query_params(),
+                                       **build_sai_share_params()})
+            log_usage_event(
+                f"sai_share:agi={int(parent_agi)}:size={int(family_size)}"
+                f":two={int(bool(two_parents))}:sai={int(result['sai'])}")
+            st.success("Link updated. Copy this page's URL to share it.")
+            st.caption(
+                "The link carries the household income and savings you "
+                "entered. Send it only to someone you would tell those to."
+            )
+
+
 # Everything below this point is the college calculator. On a ?tool= page we
 # render that tool instead and stop -- the sidebar is already hidden above, so
 # the page is that tool and nothing else.
@@ -23184,6 +24084,8 @@ elif active_tool == "schools":
     render_school_search(always_open=True)
 elif active_tool == "gradschools":
     render_graduate_school_search(always_open=True)
+elif active_tool == "sai":
+    render_sai_worksheet(always_open=True)
 if active_tool:
     st.caption(
         "Looking at whether a degree is worth borrowing for instead? "

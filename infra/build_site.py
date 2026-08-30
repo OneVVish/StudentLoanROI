@@ -772,7 +772,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
      every section above and below it. See the tools-band note in SITE_CSS. -->
 <section class="tools">
   <div class="wrap">
-  <h2>Four tools, one dataset</h2>
+  <h2>Five tools, one dataset</h2>
   <div class="grid">
     <div class="tile"><b>🎓 The calculator</b>
       <p>School + major + loan → the 10-year verdict.
@@ -785,6 +785,10 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
       school's published tuition and fees beside what its graduates in that
       field borrowed.
       <a href="/?tool=gradschools&amp;from=welcome">Find&nbsp;→</a></p></div>
+    <div class="tile"><b>🧮 What will colleges expect you to pay?</b>
+      <p>The 2027-28 federal aid formula, worked line by line, plus which
+      colleges also want the CSS Profile.
+      <a href="/?tool=sai&amp;from=welcome">Estimate&nbsp;→</a></p></div>
     <div class="tile"><b>💸 Already have loans?</b>
       <p>Compare the 2026 repayment plans on the balance you already owe.
       <a href="/?tool=repayment&amp;from=welcome">Compare&nbsp;→</a></p></div>

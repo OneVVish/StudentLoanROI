@@ -1,0 +1,138 @@
+UNITID,INSTNM,STABBR,css_code,css_name,requires_profile,requires_noncustodial,requires_idoc
+131159,American University,DC,5007,American University,True,True,False
+164465,Amherst College,MA,3003,Amherst College,True,True,True
+104151,Arizona State University Campus Immersion,AZ,4007,Arizona State University,True,False,False
+164580,Babson College,MA,3075,Babson College,True,True,True
+189088,Bard College,NY,2037,Bard College,True,True,False
+189097,Barnard College,NY,2038,Barnard College,True,True,False
+160977,Bates College,ME,3076,Bates College,True,True,True
+223232,Baylor University,TX,6032,Baylor University,True,True,False
+238333,Beloit College,WI,1059,Beloit College,True,True,False
+230816,Bennington College,VT,3080,Bennington College,True,True,False
+164739,Bentley University,MA,3096,Bentley University,True,True,False
+164748,Berklee College of Music,MA,3107,Berklee College of Music,True,True,False
+164924,Boston College,MA,3083,Boston College,True,True,True
+164988,Boston University,MA,3087,Boston University,True,True,False
+161004,Bowdoin College,ME,3089,Bowdoin College,True,True,True
+165015,Brandeis University,MA,3092,Brandeis University,True,True,True
+217156,Brown University,RI,3189,Brown University,True,True,True
+211273,Bryn Mawr College,PA,2049,Bryn Mawr College,True,True,True
+211291,Bucknell University,PA,2050,Bucknell University,True,True,True
+110404,California Institute of Technology,CA,4034,California Institute of Tech,True,True,True
+173258,Carleton College,MN,6081,Carleton College,True,True,False
+211440,Carnegie Mellon University,PA,2074,Carnegie Mellon University,True,True,True
+201645,Case Western Reserve University,OH,1105,Case Western Reserve University,True,True,False
+156408,Centre College,KY,1109,Centre College,True,False,False
+112260,Claremont McKenna College,CA,4054,Claremont McKenna College,True,True,True
+161086,Colby College,ME,3280,Colby College,True,True,True
+190099,Colgate University,NY,2086,Colgate University,True,True,True
+166124,College of the Holy Cross,MA,3282,College of the Holy Cross,True,True,True
+126678,Colorado College,CO,4072,Colorado College,True,True,False
+128902,Connecticut College,CT,3284,Connecticut College,True,True,False
+190415,Cornell University,NY,2098,Cornell University,True,True,True
+182670,Dartmouth College,NH,3351,Dartmouth College,True,True,True
+198385,Davidson College,NC,5150,Davidson College,True,True,True
+202523,Denison University,OH,1164,Denison University,True,True,True
+212009,Dickinson College,PA,2186,Dickinson College,True,True,True
+212054,Drexel University,PA,2194,Drexel University,True,False,False
+198419,Duke University,NC,5156,Duke University,True,True,False
+212106,Duquesne University,PA,2196,Duquesne University,True,True,False
+198516,Elon University,NC,5183,Elon University,True,False,False
+139658,Emory University,GA,5187,Emory University,True,True,True
+129242,Fairfield University,CT,3390,Fairfield University,True,True,True
+191241,Fordham University,NY,2259,Fordham University,True,True,False
+212577,Franklin and Marshall College,PA,2261,Franklin and Marshall College,True,True,True
+218070,Furman University,SC,5222,Furman University,True,False,False
+131469,George Washington University,DC,5246,George Washington University,True,True,True
+131496,Georgetown University,DC,5244,Georgetown University,True,True,True
+139755,Georgia Institute of Technology-Main Campus,GA,5248,Georgia Institute of Technology,True,False,False
+212674,Gettysburg College,PA,2275,Gettysburg College,True,False,False
+182306,Great Basin College,NV,4293,Great Basin College,True,False,False
+153384,Grinnell College,IA,6252,Grinnell College,True,True,True
+191515,Hamilton College,NY,2286,Hamilton College (NY),True,True,True
+166027,Harvard University,MA,3434,Harvard College,True,True,True
+115409,Harvey Mudd College,CA,4341,Harvey Mudd College,True,True,True
+212911,Haverford College,PA,2289,Haverford College,True,True,True
+191630,Hobart William Smith Colleges,NY,2294,Hobart and William Smith Coll,True,True,False
+145646,Illinois Wesleyan University,IL,1320,Illinois Wesleyan University,True,False,False
+162928,Johns Hopkins University,MD,5332,Johns Hopkins University,True,True,True
+203535,Kenyon College,OH,1370,Kenyon College,True,True,True
+213385,Lafayette College,PA,2361,Lafayette College,True,True,True
+146481,Lake Forest College,IL,1392,Lake Forest College,True,False,False
+239017,Lawrence University,WI,1398,Lawrence University,True,True,False
+213543,Lehigh University,PA,2365,Lehigh University,True,True,False
+163046,Loyola University Maryland,MD,5370,Loyola University Maryland,True,False,False
+173902,Macalester College,MN,6390,Macalester College,True,True,True
+192712,Manhattan School of Music,NY,2396,Manhattan School of Music,True,True,False
+192819,Marist University,NY,2400,Marist University,True,True,False
+192864,Marymount Manhattan College,NY,2405,Marymount Manhattan College,True,True,False
+166683,Massachusetts Institute of Technology,MA,3514,Massachusetts Inst of Tech,True,True,True
+230959,Middlebury College,VT,3526,Middlebury College,True,True,True
+166939,Mount Holyoke College,MA,3529,Mount Holyoke College,True,True,True
+214175,Muhlenberg College,PA,2424,Muhlenberg College,True,False,False
+441900,Nevada State University,NV,4572,Nevada State University,True,False,False
+193900,New York University,NY,2785,New York University,True,True,False
+167358,Northeastern University,MA,3667,Northeastern University,True,True,True
+105330,Northern Arizona University,AZ,4006,Northern Arizona University,True,False,False
+147767,Northwestern University,IL,1565,Northwestern University,True,True,True
+204501,Oberlin College,OH,1587,Oberlin College,True,False,False
+120254,Occidental College,CA,4581,Occidental College,True,True,True
+121257,Pitzer College,CA,4619,Pitzer College,True,True,True
+121345,Pomona College,CA,4607,Pomona College,True,True,True
+217402,Providence College,RI,3693,Providence College,True,False,False
+497480,Reach University,CA,9236,Reach University,True,True,False
+209922,Reed College,OR,4654,Reed College,True,True,True
+194824,Rensselaer Polytechnic Institute,NY,2757,Rensselaer Polytechnic Inst,True,False,False
+221351,Rhodes College,TN,1730,Rhodes College,True,False,False
+227757,Rice University,TX,6609,Rice University,True,True,True
+130253,Sacred Heart University,CT,3780,Sacred Heart University,True,True,False
+102049,Samford University,AL,1302,Samford University,True,True,False
+122506,San Francisco Conservatory of Music,CA,4744,San Francisco Conservatory of Music,True,True,False
+122931,Santa Clara University,CA,4851,Santa Clara University,True,False,False
+123165,Scripps College,CA,4693,Scripps College,True,True,True
+167792,Simon's Rock at Bard College,NY,3795,Bard College at Simons Rock,True,True,False
+195526,Skidmore College,NY,2815,Skidmore College,True,True,False
+167835,Smith College,MA,3762,Smith College,True,True,True
+228246,Southern Methodist University,TX,6660,Southern Methodist University,True,True,False
+195216,St Lawrence University,NY,2805,St. Lawrence University,True,False,False
+174844,St Olaf College,MN,6638,St. Olaf College,True,True,True
+163976,St. John's College,MD,5598,St. Johns College (MD),True,True,False
+245652,St. John's College,NM,4737,St. Johns College (NM),True,True,False
+243744,Stanford University,CA,4704,Stanford University,True,True,True
+186867,Stevens Institute of Technology,NJ,2819,Stevens Institute Technology,True,False,True
+216287,Swarthmore College,PA,2821,Swarthmore College,True,True,True
+196413,Syracuse University,NY,2823,Syracuse University,True,True,False
+228875,Texas Christian University,TX,6820,Texas Christian University,True,True,False
+206589,The College of Wooster,OH,1134,College of Wooster,True,False,False
+192110,The Juilliard School,NY,2340,"Juilliard School, The",True,False,False
+130590,Trinity College,CT,3899,Trinity College (CT),True,True,False
+229267,Trinity University,TX,6831,Trinity University,True,False,True
+131876,Trinity Washington University,DC,5796,Trinity Washington University,True,False,False
+168148,Tufts University,MA,3901,Tufts University,True,True,True
+160755,Tulane University of Louisiana,LA,6832,Tulane University,True,True,False
+196866,Union College,NY,2920,Union College (NY),True,True,False
+127060,University of Denver,CO,4842,Univ of Denver,True,True,False
+135726,University of Miami,FL,5815,Univ of Miami,True,True,True
+170976,University of Michigan-Ann Arbor,MI,1839,Univ of Michigan,True,True,False
+199120,University of North Carolina at Chapel Hill,NC,5816,Univ of North Carolina Chapel,True,False,False
+152080,University of Notre Dame,IN,1841,Univ of Notre Dame,True,True,True
+215062,University of Pennsylvania,PA,2933,Univ of Pennsylvania,True,True,False
+233374,University of Richmond,VA,5569,Univ of Richmond,True,True,True
+195030,University of Rochester,NY,2928,Univ of Rochester,True,True,True
+215929,University of Scranton,PA,2929,University of Scranton,True,False,False
+123961,University of Southern California,CA,4852,Univ of Southern California (USC),True,True,False
+240444,University of Wisconsin-Madison,WI,1846,University of Wisconsin-Madison,True,True,False
+221999,Vanderbilt University,TN,1871,Vanderbilt University,True,False,False
+197133,Vassar College,NY,2956,Vassar College,True,True,True
+216597,Villanova University,PA,2959,Villanova University,True,True,True
+199847,Wake Forest University,NC,5885,Wake Forest University,True,True,True
+236896,Walla Walla University,WA,4940,Walla Walla University,True,False,False
+234207,Washington and Lee University,VA,5887,Washington and Lee University,True,True,False
+168218,Wellesley College,MA,3957,Wellesley College,True,True,True
+130697,Wesleyan University,CT,3959,Wesleyan University,True,True,True
+237057,Whitman College,WA,4951,Whitman College,True,True,True
+231624,William & Mary,VA,5115,College of William and Mary,True,False,False
+179955,William Jewell College,MO,6941,William Jewell College,True,False,False
+168342,Williams College,MA,3965,Williams College,True,True,True
+168421,Worcester Polytechnic Institute,MA,3969,Worcester Polytechnic Institute,True,True,False
+130794,Yale University,CT,3987,Yale College,True,True,True
