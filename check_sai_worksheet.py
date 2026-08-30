@@ -35,6 +35,7 @@ the renderer lives in section 5 where the exec below cannot reach.
 Run it:  python3 check_sai_worksheet.py     (exit 1 on any failure)
 """
 import ast
+import re
 import sys
 
 APP = "app.py"
@@ -238,6 +239,65 @@ def check_zero_is_a_real_answer(ns, src):
     return out
 
 
+MONEY = re.compile(r"\$\s?\d|\d[\d,]*\s*(?:dollars|percent of your)")
+
+
+def check_css_profile(ns, src):
+    """The CSS Profile note may say DIRECTION and must never say an amount.
+
+    Institutional Methodology is unpublished and varies by school, so any
+    dollar figure here would be invented -- and it would sit on screen beside a
+    federal figure that is traceable line by line, wearing the same authority.
+    A reader cannot tell those apart, which is why this is a guard and not a
+    comment.
+    """
+    out = []
+    divergences = ns["css_profile_divergences"]
+
+    # Each input must produce exactly one note, so none can be dropped silently.
+    for kwarg in ("home_equity", "business_net_worth", "student_assets"):
+        got = divergences(**{kwarg: 50000})
+        if len(got) != 1:
+            out.append(f"  PROFILE {kwarg}=50000 produced {len(got)} note(s), not 1.")
+    if len(divergences(noncustodial_parent=True)) != 1:
+        out.append("  PROFILE a second parent household produced no note.")
+    if divergences():
+        out.append("  PROFILE a family with none of the four circumstances still "
+                   "gets a divergence note, so the section fires on everyone.")
+
+    # NO MONEY. Not in any heading, not in any explanation.
+    everything = divergences(home_equity=50000, noncustodial_parent=True,
+                             business_net_worth=50000, student_assets=50000)
+    for heading, explanation in everything:
+        for text in (heading, explanation):
+            if MONEY.search(text):
+                out.append(
+                    f"  PROFILE the CSS Profile note states an amount: {text[:70]!r}. "
+                    f"Institutional Methodology is unpublished and per-school, so "
+                    f"any figure here is invented.")
+
+    # The two Profile-only inputs must never reach the FEDERAL arithmetic. The
+    # FAFSA does not ask either question, so feeding them in would make the
+    # worksheet stop matching the form whose line numbers it prints.
+    signature = ns["compute_student_aid_index"].__code__.co_varnames
+    for forbidden in ("home_equity", "noncustodial_parent", "noncustodial"):
+        if forbidden in signature:
+            out.append(f"  PROFILE compute_student_aid_index takes {forbidden!r}. "
+                       f"The federal formula does not ask that question.")
+    tree = ast.parse(src)
+    renderer = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+                     and n.name == "render_sai_worksheet"), None)
+    if renderer is not None:
+        for call in ast.walk(renderer):
+            if (isinstance(call, ast.Call)
+                    and getattr(call.func, "id", "") == "compute_student_aid_index"):
+                for kw in call.keywords:
+                    if kw.arg in ("home_equity", "noncustodial_parent"):
+                        out.append(f"  PROFILE the renderer passes {kw.arg} into the "
+                                   f"federal formula.")
+    return out
+
+
 def negative_controls(ns):
     """Break it deliberately. A guard that has never failed is not evidence."""
     out = []
@@ -280,20 +340,34 @@ def negative_controls(ns):
     if not any("asset protection allowance" in f for f in check_structure(with_apa)):
         out.append("  CONTROL a reinstated asset protection allowance was NOT caught.")
 
+    # 4. A dollar figure smuggled into the CSS Profile note -- the one thing
+    #    that section must never do, since nothing published supports it.
+    leaky = dict(ns)
+    leaky["css_profile_divergences"] = lambda **kw: [
+        ("Your home", "A Profile school will expect about $4,200 more a year.")]
+    if not any("states an amount" in f for f in check_css_profile(leaky, src_text())):
+        out.append("  CONTROL a dollar figure in the CSS Profile note was NOT caught.")
+
     return out
+
+
+def src_text():
+    return open(APP, encoding="utf-8").read()
 
 
 def main():
     ns, src = load_app_namespace()
     failures = (check_published_tables(ns) + check_structure(ns)
-                + check_zero_is_a_real_answer(ns, src) + negative_controls(ns))
+                + check_zero_is_a_real_answer(ns, src)
+                + check_css_profile(ns, src) + negative_controls(ns))
     if failures:
         print("SAI worksheet: %d problem(s)\n" % len(failures))
         print("\n".join(failures))
         return 1
     print("SAI worksheet OK -- %d published figures, Table A5 and A3 continuous, "
           "SAI monotone in income and household size, an explicit $0 override "
-          "honored at the call site, 3 negative controls all caught."
+          "honored at the call site, the CSS Profile note states direction and "
+          "never an amount, 4 negative controls all caught."
           % (len(PUBLISHED_IPA) + len(PUBLISHED_A5_EDGES) + len(PUBLISHED_A3_EDGES) + 18))
     return 0
 

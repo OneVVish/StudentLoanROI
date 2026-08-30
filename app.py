@@ -3948,6 +3948,48 @@ SAI_TAX_TABLES = {
 }
 SAI_CHILD_TAX_CREDIT = 2200
 
+# ---------------------------------------------------------------------------
+# THE CSS PROFILE, and the one thing this app must never do about it.
+#
+# About 250 to 300 mostly private colleges collect the College Board's CSS
+# Profile in addition to the FAFSA, and award their own money using
+# "Institutional Methodology" rather than the federal formula above.
+#
+# THERE IS NO PUBLISHED IM FORMULA, AND SO THERE IS NO NUMBER TO COMPUTE HERE.
+# The federal SAI can be modelled because ED publishes every table in the
+# Federal Register; IM is proprietary, and each institution varies it at will
+# because nothing in law binds its assessment of need. Two colleges reading the
+# identical Profile routinely reach different figures.
+#
+# The temptation is to estimate one anyway from the parameters that circulate
+# in college-planning blogs. DO NOT. Those same sources report the FAFSA's
+# parent asset rate as 5.64%, which is the pre-2024 EFC figure, so they are
+# demonstrably repeating a formula that no longer exists -- and a fabricated
+# institutional number would be indistinguishable on screen from the federal
+# one beside it, which is traceable to a citation line by line.
+#
+# What IS sayable is DIRECTION: which of a family's circumstances the federal
+# formula ignores and a Profile school generally does not. Direction needs no
+# proprietary table, and it is the part a family cannot work out alone.
+# css_profile_divergences returns exactly that and no dollar figure;
+# check_sai_worksheet.py asserts it never grows one.
+CSS_PROFILE_AID_CLAIM = "more than $14 billion in nonfederal aid"
+CSS_PROFILE_FEE_WAIVER_INCOME = 100000     # College Board: free up to this income
+CSS_PROFILE_URL = "https://cssprofile.collegeboard.org/"
+# Which colleges also collect it, keyed by UNITID. build_css_profile_schools.py,
+# from the College Board's own participating-institutions list.
+#
+# ABSENCE MEANS UNKNOWN, NEVER "NO". The join is by name and state -- College
+# Board publishes no UNITID and there is no crosswalk -- so a school could in
+# principle be missing because a string did not match rather than because it
+# does not participate. The builder asserts the property that makes silence
+# safe here: every participant it could NOT match is absent from the cost file
+# altogether, so no school this app can display is wrongly blank. Grove City,
+# Hillsdale and Patrick Henry take no federal money, so no federal dataset
+# prices them and no search can return them.
+CSS_PROFILE_PATH = "data/css_profile_schools_clean.csv"
+
+
 
 # ============================================================
 # 2. HELPER FUNCTIONS
@@ -16283,6 +16325,115 @@ def sai_money(value) -> str:
     return ("-" if value < 0 else "") + fmt_money(abs(value))
 
 
+@st.cache_data
+def load_css_profile_schools() -> pd.DataFrame:
+    """The CSS Profile participants, or an empty frame if the file is absent.
+
+    Absent is survivable on purpose: a deploy without it loses one caption
+    rather than the page, the same contract hs_young_wage_disclosure has.
+    """
+    try:
+        frame = pd.read_csv(CSS_PROFILE_PATH)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return pd.DataFrame(columns=["UNITID", "requires_profile",
+                                     "requires_noncustodial", "requires_idoc"])
+    frame["UNITID"] = pd.to_numeric(frame["UNITID"], errors="coerce")
+    return frame.dropna(subset=["UNITID"])
+
+
+def css_profile_requirement(unitid) -> dict:
+    """What a named school requires, or {} when it is not on the list.
+
+    Keyed on UNITID rather than name, because 33 name-and-state keys in the
+    cost file already map to more than one school and a Profile flag on the
+    wrong one is worse than no flag. Returns {} rather than a False-filled
+    dict so a caller cannot accidentally render "does not require it" out of a
+    lookup that simply found nothing.
+    """
+    if unitid in (None, "") or pd.isna(unitid):
+        return {}
+    frame = load_css_profile_schools()
+    if frame.empty:
+        return {}
+    hit = frame[frame.UNITID == float(unitid)]
+    if hit.empty:
+        return {}
+    row = hit.iloc[0]
+    return {"noncustodial": bool(row.requires_noncustodial),
+            "idoc": bool(row.requires_idoc),
+            "name": str(row.get("INSTNM", ""))}
+
+
+def css_profile_school_caption(unitid) -> str:
+    """One sentence for a named school, or "" when it is not on the list.
+
+    Never says a school does NOT require the Profile: see CSS_PROFILE_PATH for
+    why absence cannot carry that meaning.
+    """
+    requirement = css_profile_requirement(unitid)
+    if not requirement:
+        return ""
+    text = ("📋 **This school also requires the CSS Profile.** It awards its "
+            "own money using a formula that is not published, so the federal "
+            "figures here are a floor at this school rather than an estimate.")
+    if requirement["noncustodial"]:
+        text += (" It also asks for the other parent's finances if the "
+                 "student's parents live apart.")
+    return text
+
+
+def css_profile_divergences(*, home_equity: float = 0.0,
+                            noncustodial_parent: bool = False,
+                            business_net_worth: float = 0.0,
+                            student_assets: float = 0.0) -> list:
+    """Where a CSS Profile school will read this family differently, in words.
+
+    Returns (heading, explanation) pairs and NEVER a dollar figure. That is the
+    whole contract: Institutional Methodology is unpublished and per-school, so
+    any amount this returned would be invented, and it would sit on screen next
+    to a federal figure that is traceable line by line. Direction is sayable;
+    magnitude is not.
+
+    In section 2 rather than inline in the renderer so a guard can reach it --
+    the reconcile_search_pick and graduate_apply_target reasoning. The rule it
+    enforces is one whose violation would be silent.
+    """
+    out = []
+    if home_equity > 0:
+        out.append((
+            "Your home",
+            "The FAFSA does not ask what your house is worth, so none of it is "
+            "in the figure above. The CSS Profile does ask, and most schools "
+            "that collect it count some of your equity. Many cap what they "
+            "count at a multiple of your income, and a few ignore it "
+            "altogether, so how much this matters is a question about the "
+            "particular school and not about you."))
+    if noncustodial_parent:
+        out.append((
+            "The other parent",
+            "The FAFSA asks only about the parent who provided the most "
+            "support, so a second household is invisible to the figure above. "
+            "Many Profile schools require the other parent to file too and "
+            "count that income and those assets. Where they do, this is "
+            "usually the largest single difference between the two answers."))
+    if business_net_worth > 0:
+        out.append((
+            "Your business or farm",
+            "The federal formula discounts a business steeply before counting "
+            "it, on the published sliding scale in the worksheet above. A "
+            "Profile school may count more of it, and may also count assets "
+            "the federal form leaves out."))
+    if student_assets > 0:
+        out.append((
+            "The student's own savings",
+            "The federal formula assesses a student's savings harder than a "
+            "parent's, and Profile schools generally assess them harder still. "
+            "Many also expect a minimum contribution from summer work whatever "
+            "the formula says, so a student with no savings is not always "
+            "assessed nothing."))
+    return out
+
+
 # Which lines open a section, which are subtotals, and which is the answer.
 # Kept beside the rows rather than inferred in the renderer: the grouping is a
 # fact about the federal form, not a display choice, and anything else that
@@ -16333,6 +16484,11 @@ SAI_SHARE_FIELDS = (
     # renderer for what collapsing the two costs.
     ("sai_use_earned",     "sauw", int),
     ("sai_use_tax_paid",   "saut", int),
+    # CSS Profile inputs. They ride the link like any other, even though
+    # neither reaches the federal arithmetic: a shared link that dropped them
+    # would rebuild the scenario without the note that was the reason to share.
+    ("sai_home_equity",    "sahe", int),
+    ("sai_noncustodial",   "sanc", int),
 )
 
 
@@ -16368,7 +16524,8 @@ def seed_sai_from_share() -> None:
         raw = get_shared_default(param, "")
         if raw == "":
             continue
-        if key in ("sai_two_parents", "sai_use_earned", "sai_use_tax_paid"):
+        if key in ("sai_two_parents", "sai_use_earned", "sai_use_tax_paid",
+                   "sai_noncustodial"):
             st.session_state.setdefault(key, get_shared_int(param, 0) == 1)
         else:
             st.session_state.setdefault(key, get_shared_int(param, 0))
@@ -17174,6 +17331,14 @@ else:
     coa_caption_a = get_coa_confirmation_caption(school_name_a, coa_match_a, in_state_a)
     if coa_caption_a:
         _sb_where.caption(coa_caption_a)
+    # Whether this school wants the CSS Profile too. Rendered here rather than
+    # as a column in the search results because that table is at its width
+    # limit -- its own comments record that a twelfth column would cost every
+    # other one legibility -- and because "does THIS school want it" is only a
+    # well-posed question once exactly one school is named.
+    _css_profile_note_a = css_profile_school_caption(school_unitid_a)
+    if _css_profile_note_a:
+        _sb_where.caption(_css_profile_note_a)
 
     shared_coa_a = get_shared_default("coa", None)
     default_coa_per_year_a = None
@@ -23754,6 +23919,24 @@ def render_sai_worksheet(always_open: bool = False) -> None:
             key="sai_student_assets",
             help="Counted at 20 cents on the dollar, against the parents' 12.",
         )
+        # Neither of these two touches the federal figure, and they must not.
+        # The FAFSA does not ask what a house is worth and does not ask about a
+        # second household, so feeding either into compute_student_aid_index
+        # would make the worksheet stop matching the form it prints the line
+        # numbers of. They exist only for the CSS Profile note below.
+        st.session_state.setdefault("sai_home_equity", 0)
+        home_equity = c2.number_input(
+            "Equity in your home", min_value=0, max_value=20000000, step=5000,
+            key="sai_home_equity",
+            help="What the house is worth, less what is owed on it. The FAFSA "
+                 "never asks. The CSS Profile does.",
+        )
+        st.session_state.setdefault("sai_noncustodial", False)
+        noncustodial = c1.checkbox(
+            "The student's parents live apart", key="sai_noncustodial",
+            help="The FAFSA asks only about the parent who provided the most "
+                 "support. Many CSS Profile schools ask about both.",
+        )
         st.session_state.setdefault("sai_use_tax_paid", False)
         use_tax = c2.checkbox(
             "I know what we paid in federal income tax", key="sai_use_tax_paid",
@@ -23804,6 +23987,52 @@ def render_sai_worksheet(always_open: bool = False) -> None:
         "be checked against the published guide. Negative amounts are "
         "allowances subtracted from income."
     )
+
+    divergences = css_profile_divergences(
+        home_equity=home_equity, noncustodial_parent=noncustodial,
+        business_net_worth=business, student_assets=student_assets)
+    with st.expander(
+            "Does a CSS Profile school see a different number? "
+            + ("Yes, and here is why." if divergences else "Probably not much."),
+            expanded=bool(divergences)):
+        st.markdown(
+            "About 250 to 300 colleges, mostly private, also collect the "
+            "College Board's **CSS Profile** and award their own money using "
+            "something called Institutional Methodology. It unlocks "
+            f"{CSS_PROFILE_AID_CLAIM} a year, and it is free for families "
+            f"earning up to {fmt_money_md(CSS_PROFILE_FEE_WAIVER_INCOME)}."
+        )
+        st.markdown(
+            "**This tool cannot compute that number, and nothing that claims "
+            "to should be trusted very far.** The federal formula above can be "
+            "modelled because the Department of Education publishes every "
+            "table in it. Institutional Methodology is not published, and each "
+            "college is free to vary it, so two schools reading the same "
+            "Profile routinely reach different figures. What can be said is "
+            "which direction they will differ from the figure above."
+        )
+        if divergences:
+            for heading, explanation in divergences:
+                st.markdown(f"**{heading}.** {explanation}")
+            st.info(
+                "Every one of these points the same way. A CSS Profile school "
+                "will generally expect **more** from your family than the "
+                "federal figure above, not less. Treat that figure as the "
+                "floor at those schools."
+            )
+        else:
+            st.caption(
+                "Nothing you have entered is treated differently by the two "
+                "forms. Fill in home equity, a second parent household, a "
+                "business or student savings above and this will say what "
+                "changes."
+            )
+        st.caption(
+            "The one number that reflects a particular school's own "
+            "methodology is that school's net price calculator, which every "
+            "college is required to publish. "
+            f"[What the CSS Profile is]({CSS_PROFILE_URL})."
+        )
 
     st.warning(
         "**Two children in college no longer helps.** The old EFC divided the "

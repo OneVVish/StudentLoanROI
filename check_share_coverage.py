@@ -149,6 +149,8 @@ SHARE_EXEMPT = {
     "sai_tax_paid": "SAI tool; rides ?sat=",
     "sai_use_earned": "SAI tool; rides ?sauw=",
     "sai_use_tax_paid": "SAI tool; rides ?saut=",
+    "sai_home_equity": "SAI tool; rides ?sahe=",
+    "sai_noncustodial": "SAI tool; rides ?sanc=",
     "sai_parent_agi_slider": "SAI slider mirror of sai_parent_agi, which rides "
                              "?saa=; kept in step by callbacks, never read",
     # Display-only / derived.
