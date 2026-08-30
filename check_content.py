@@ -27,6 +27,7 @@ that followed it and deleted them, leaving a shorter, perfectly valid sitemap.
 Paired markers fixed it; this asserts the result rather than the mechanism.
 """
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -203,6 +204,44 @@ def main() -> int:
         if required not in sitemap:
             fail(f"infra/sitemap.xml lost {required!r} -- the guide "
                  f"regeneration has over-reached and deleted a static URL")
+
+    # The Content-Security-Policy hashes. The Worker names each page's inline
+    # scripts by hash; the hashes are generated at build time from the built
+    # pages. Recomputed here from the SAME built pages and compared against
+    # what worker.js carries: a script edited without a rebuild is blocked by
+    # the browser with nothing on the build failing, and the Helpful button
+    # simply stops. Landing keyed "/", every other page by its path.
+    m = re.search(r"^const CSP_SCRIPT_HASHES = (.*?);$", worker, re.M)
+    if not m:
+        fail("infra/worker.js has no CSP_SCRIPT_HASHES; every edge page's "
+             "Content-Security-Policy would name no script and block them all")
+    else:
+        carried = json.loads(m.group(1))
+        landing = (ROOT / "infra" / "landing.html").read_text()
+        built = {"/": landing}
+        for path in (ROOT / "infra" / "guides").glob("*.html"):
+            name = path.stem
+            built["/guides" if name == "guides" else
+                  "/charts" if name == "charts" else f"/guides/{name}"] = path.read_text()
+        for path, page in sorted(built.items()):
+            want = builder.script_hashes(page)
+            if carried.get(path) != want:
+                fail(f"{path}: the inline-script hashes in worker.js do not match "
+                     f"the built page ({len(want)} script(s)); rebuild with "
+                     f"python3 infra/build_site.py, or the browser blocks them")
+        # Negative control on the comparison itself: one byte changed in a
+        # script must change its hash, or the check above compares nothing.
+        tampered = landing.replace("var qs = location.search", "var qs = location.search ", 1)
+        if tampered == landing or builder.script_hashes(tampered) == builder.script_hashes(landing):
+            fail("CSP hash check is disarmed: a one-byte script edit did not "
+                 "change the computed hash")
+        for required in ("content-security-policy", "x-content-type-options",
+                         "strict-transport-security", "referrer-policy"):
+            if required not in worker:
+                fail(f"infra/worker.js no longer sets {required}")
+        if worker.count("edgeHeaders(") < 6:
+            fail("infra/worker.js: fewer than six responses go through "
+                 "edgeHeaders(); a page has lost its security headers")
 
     # The renderer's own escaping, exercised on inputs that must NOT come out
     # as markup. These are negative controls on build_site.py rather than on
