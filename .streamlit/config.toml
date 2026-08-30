@@ -6,6 +6,13 @@
 # injected by the Community Cloud platform itself and can't be hidden
 # from app-level config while the repo is public.
 toolbarMode = "minimal"
+# What an uncaught exception shows the VISITOR. Streamlit's default is "full":
+# the exception type, its message and the whole traceback, with file paths and
+# a summary of the frame, rendered in the browser of whoever hit it. "type"
+# shows the exception class and nothing else; the full traceback still goes to
+# the server log where it belongs. check_deploy_parity.py requires this key to
+# be set, in both files, to "type" or "none".
+showErrorDetails = "type"
 
 [server]
 # Serve ./static at /app/static/* -- the marketing images live there so posts,
