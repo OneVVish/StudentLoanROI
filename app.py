@@ -19489,8 +19489,14 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                                        living_adjustment=allowance,
                                        max_term_years=idr_term,
                                        max_months=idr_months)
+        # BOTH variants are marked, not just the old one. The unmarked label
+        # read as "IBR generally" while being specifically the 10%/20-year
+        # version, and the rate and term that would have disambiguated it live
+        # in the "What it is" column, which is the last of six and clips. Both
+        # matchers on this label use startswith("IBR"), so the prefix is
+        # load-bearing and the marker goes at the end.
         _ibr_label = ("IBR-style income-driven (old IBR)" if old_ibr
-                      else "IBR-style income-driven")
+                      else "IBR-style income-driven (new IBR)")
         rows.append((_ibr_label, with_private(idr),
                      f"Qualifies. Remainder forgiven at {PSLF_QUALIFYING_PAYMENTS} "
                      "payments." if pslf else

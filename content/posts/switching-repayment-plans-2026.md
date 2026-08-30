@@ -25,12 +25,14 @@ Five plans, same balance, same person:
 | Standard, 10-year | $900 | 10 | $108,000 |
 | 2026 Tiered Standard, 20-year | $590 | 20 | $142,000 |
 | Extended Standard, 25-year | $535 | 25 | $160,000 |
-| IBR-style income-driven | $210 | 20 | $83,000, plus $23,000 tax |
+| IBR, newer loans | $210 | 20 | $83,000, plus $23,000 tax |
 | 2026 RAP | $160 | 30 | $164,000 |
 
 Read the payment column and the total column together, because they run in opposite directions. RAP has the smallest payment on the page and the largest total on the page. The balance clears a couple of months before the thirty-year mark, so the forgiveness that makes RAP sound generous never arrives for this borrower. They simply pay, for thirty years. That is about **$56,000 more than the ten-year plan** and about **$58,000 more than the IBR row**, tax included.
 
 The tax is the newest part of this. Since January 1, 2026 a discharged federal balance is ordinary income in the year it is written off, so the roughly $99,000 forgiven on the IBR row lands on a tax return. The estimate here is federal only, single filer, standard deduction, which means the real bill can only be higher. Public Service Loan Forgiveness is the exception, and that discharge is not taxed.
+
+The IBR row is the newer version of that plan, 10 percent of discretionary income with forgiveness at 20 years, which is what a first loan disbursed on or after July 1, 2014 gets. It also uses a flat living allowance of $22,000, where real IBR subtracts 150 percent of the poverty guideline for your family size, so a larger household would pay less than this row shows.
 
 None of which makes the ten-year plan affordable. About $900 a month on a $47,000 income is not a plan, it is a wish. The point is narrower and it matters more: the plan with the lowest payment is not the cheapest plan, and on this balance it is the most expensive one on offer.
 
