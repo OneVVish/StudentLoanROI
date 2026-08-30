@@ -32,6 +32,19 @@ container concern. Those live in CONTAINER_ONLY below. Anything else appearing
 in start.sh and not in config.toml is still reported, because it means the
 legacy host is running without a setting the container has.
 
+TWO SETTINGS ARE REQUIRED OUTRIGHT, not merely kept in step (REQUIRED below).
+`client.showErrorDetails` must be set, to "type" or "none", because Streamlit's
+default is "full": an uncaught exception renders its type, message and whole
+traceback -- file paths included -- in the browser of whichever visitor hit
+it. Both files were silent on it until 2026-08-30, which parity alone reads as
+agreement. And the Dockerfile must switch to a non-root USER before its CMD,
+because start.sh writes every credential into the working directory at boot
+and the process handles untrusted input.
+
+Four negative controls run on every invocation, each against a mutated copy of
+the files: showErrorDetails deleted from config.toml, set to "full" in both,
+the USER line removed, and start.sh missing a flag config.toml has.
+
 WHAT THIS CANNOT CHECK: whether either host is actually running the committed
 code. Railway redeploys on a merge to main and Community Cloud on its own
 schedule, so a green check here says the two files agree, not that the two
@@ -46,6 +59,7 @@ ROOT = Path(__file__).resolve().parent
 CONFIG = ROOT / ".streamlit" / "config.toml"
 START = ROOT / "start.sh"
 DOCKERIGNORE = ROOT / ".dockerignore"
+DOCKERFILE = ROOT / "Dockerfile"
 
 # Flags that belong to the container and have no config.toml counterpart.
 # Each is here because the OTHER host either sets it itself or cannot use it.
@@ -56,10 +70,17 @@ CONTAINER_ONLY = {
     "browser.gatherUsageStats": "set once per platform, not per app",
 }
 
+# Settings that must be PRESENT, with a value from the allowed set. Absence is
+# not neutral here: it selects a Streamlit default that is wrong for a public
+# deployment, and parity alone cannot see a key both files leave out.
+REQUIRED = {
+    "client.showErrorDetails": ({"type", "none"},
+                                "the default 'full' renders tracebacks to visitors"),
+}
 
-def parse_start_flags() -> dict:
+
+def parse_start_flags(text: str) -> dict:
     """The --section.key value pairs start.sh passes to `streamlit run`."""
-    text = START.read_text()
     flags = {}
     # --server.enableStaticServing true   /   --client.toolbarMode minimal
     for key, value in re.findall(r'--([a-zA-Z]+\.[a-zA-Z]+)\s+"?([^"\s\\]+)"?', text):
@@ -67,9 +88,9 @@ def parse_start_flags() -> dict:
     return flags
 
 
-def parse_config_settings() -> dict:
+def parse_config_settings(text: str) -> dict:
     """The section.key values in .streamlit/config.toml, flattened."""
-    data = tomllib.loads(CONFIG.read_text())
+    data = tomllib.loads(text)
     out = {}
     for section, body in data.items():
         if isinstance(body, dict):
@@ -85,21 +106,19 @@ def normalize(value) -> str:
     return str(value).strip().strip('"').lower()
 
 
-def main() -> int:
+def _uncommented(text: str) -> list:
+    return [ln.strip() for ln in text.splitlines()
+            if ln.strip() and not ln.strip().startswith("#")]
+
+
+def find_problems(config_text: str, start_text: str,
+                  dockerignore_text, dockerfile_text) -> list:
+    """Every disagreement between the two hosts' config, plus the required
+    settings. Pure over the four file texts so the negative controls can hand
+    it mutated copies."""
     problems = []
-
-    if not CONFIG.exists():
-        problems.append("  .streamlit/config.toml is missing.")
-    if not START.exists():
-        problems.append("  start.sh is missing, so the container has no config"
-                        " at all.")
-    if problems:
-        print("deploy parity: cannot check\n")
-        print("\n".join(problems))
-        return 1
-
-    config = parse_config_settings()
-    flags = parse_start_flags()
+    config = parse_config_settings(config_text)
+    flags = parse_start_flags(start_text)
 
     # THE LOAD-BEARING DIRECTION. A setting here and not there is a setting the
     # legacy host honours and the LIVE host silently ignores.
@@ -126,6 +145,20 @@ def main() -> int:
             f"it is genuinely container-only, list it in CONTAINER_ONLY with a "
             f"reason.")
 
+    # Required in BOTH files, with an allowed value. Checked against each file
+    # separately: parity would pass two files that agree on the wrong value,
+    # or on leaving it out.
+    for key, (allowed, why) in REQUIRED.items():
+        for label, table in (("config.toml", config), ("start.sh", flags)):
+            if key not in table:
+                problems.append(
+                    f"  {key} is not set in {label}; {why}. Set it to one of "
+                    f"{sorted(allowed)} in both files.")
+            elif normalize(table[key]) not in allowed:
+                problems.append(
+                    f"  {key} is {normalize(table[key])!r} in {label}; {why}. "
+                    f"Allowed: {sorted(allowed)}.")
+
     # The premise the whole guard rests on. If .streamlit/ ever stops being
     # excluded, config.toml reaches the container and start.sh's flags become
     # the redundant half instead -- worth knowing before debugging either.
@@ -134,14 +167,79 @@ def main() -> int:
     # the exclusion passed -- the guard read its own documentation as
     # compliance, the flaw this repo already records against check_share_
     # coverage's loan-amount search.
-    ignored = [ln.strip() for ln in DOCKERIGNORE.read_text().splitlines()
-               if ln.strip() and not ln.strip().startswith("#")] \
-        if DOCKERIGNORE.exists() else []
-    if DOCKERIGNORE.exists() and ".streamlit/" not in ignored:
+    if dockerignore_text is not None and ".streamlit/" not in _uncommented(dockerignore_text):
         problems.append(
             "  .dockerignore no longer excludes .streamlit/, so the container "
             "may now read config.toml directly. That is not necessarily wrong, "
             "but start.sh's flags and this guard both assume the opposite.")
+
+    # The container must not run the app as root. The LAST USER before CMD is
+    # what the process runs as; an earlier USER app followed by USER root
+    # would pass a naive "is there a USER line" check.
+    if dockerfile_text is not None:
+        lines = _uncommented(dockerfile_text)
+        cmd_index = next((i for i, ln in enumerate(lines)
+                          if ln.upper().startswith(("CMD ", "ENTRYPOINT "))), len(lines))
+        users_before_cmd = [ln.split(None, 1)[1].strip() for ln in lines[:cmd_index]
+                            if ln.upper().startswith("USER ")]
+        effective = users_before_cmd[-1] if users_before_cmd else "root"
+        if effective in ("root", "0") or effective.startswith(("root:", "0:")):
+            problems.append(
+                f"  Dockerfile runs the app as {effective!r}: no non-root USER "
+                f"before CMD. start.sh writes every credential into the working "
+                f"directory at boot, and the process handles untrusted input.")
+    return problems
+
+
+def negative_controls(config_text, start_text, dockerignore_text, dockerfile_text) -> list:
+    """Each mutation must FAIL. Returns the names of any that passed."""
+    cfg_line = 'showErrorDetails = "type"'
+    sh_flag = "--client.showErrorDetails type"
+    assert cfg_line in config_text and sh_flag in start_text, \
+        "showErrorDetails moved; update the controls"
+    assert "USER app" in dockerfile_text, "the USER line moved; update the control"
+    cases = {
+        "showErrorDetails deleted from config.toml":
+            (config_text.replace(cfg_line, ""), start_text, dockerignore_text, dockerfile_text),
+        "showErrorDetails set to full in both":
+            (config_text.replace(cfg_line, 'showErrorDetails = "full"'),
+             start_text.replace(sh_flag, "--client.showErrorDetails full"),
+             dockerignore_text, dockerfile_text),
+        "USER line removed from the Dockerfile":
+            (config_text, start_text, dockerignore_text,
+             dockerfile_text.replace("USER app", "")),
+        "start.sh missing a flag config.toml has":
+            (config_text, start_text.replace(sh_flag + " \\", ""),
+             dockerignore_text, dockerfile_text),
+    }
+    passed = []
+    for label, texts in cases.items():
+        assert texts != (config_text, start_text, dockerignore_text, dockerfile_text), label
+        if not find_problems(*texts):
+            passed.append(label)
+    return passed
+
+
+def main() -> int:
+    problems = []
+    if not CONFIG.exists():
+        problems.append("  .streamlit/config.toml is missing.")
+    if not START.exists():
+        problems.append("  start.sh is missing, so the container has no config"
+                        " at all.")
+    if not DOCKERFILE.exists():
+        problems.append("  Dockerfile is missing; worthmydegree.com has nothing to build.")
+    if problems:
+        print("deploy parity: cannot check\n")
+        print("\n".join(problems))
+        return 1
+
+    texts = (CONFIG.read_text(), START.read_text(),
+             DOCKERIGNORE.read_text() if DOCKERIGNORE.exists() else None,
+             DOCKERFILE.read_text())
+    problems = find_problems(*texts)
+    for label in negative_controls(*texts):
+        problems.append(f"  NEGATIVE CONTROL PASSED: {label} -- the guard is disarmed")
 
     if problems:
         print(f"deploy parity: {len(problems)} problem(s)\n")
@@ -152,10 +250,13 @@ def main() -> int:
               "  Community Cloud reads config.toml and never runs start.sh.")
         return 1
 
+    config, flags = parse_config_settings(texts[0]), parse_start_flags(texts[1])
     shared = sorted(set(config) & set(flags))
     print(f"deploy parity OK: {len(shared)} shared setting(s) agree "
-          f"({', '.join(shared)}), "
-          f"{len(CONTAINER_ONLY)} container-only flag(s) exempt")
+          f"({', '.join(shared)}), {len(REQUIRED)} required setting(s) present, "
+          f"container runs as a non-root user, "
+          f"{len(CONTAINER_ONLY)} container-only flag(s) exempt, "
+          f"4 negative controls fail as they should")
     return 0
 
 

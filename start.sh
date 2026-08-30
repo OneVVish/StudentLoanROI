@@ -30,4 +30,5 @@ exec streamlit run app.py \
     --server.headless true \
     --server.enableStaticServing true \
     --client.toolbarMode minimal \
+    --client.showErrorDetails type \
     --browser.gatherUsageStats false
