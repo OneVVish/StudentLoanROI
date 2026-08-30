@@ -18,6 +18,7 @@ Architecture:
 
 import contextlib
 import hashlib
+import hmac
 import html
 import io
 import math
@@ -5027,6 +5028,14 @@ def get_lower_risk_alternative_major(major_name: str) -> str:
 # margin and shorter than a visitor's patience. Anything that cannot answer in
 # three seconds is not going to answer usefully.
 SUPABASE_TIMEOUT_SECONDS = 3.0
+
+# Length caps on the free-text inputs. Streamlit enforces max_chars in the
+# browser, so these bound what a single form can hand the app and, through
+# feedback_text, the one free-text column in the research tables. 120 covers
+# the longest institution name in the Scorecard file with room to spare;
+# 2,000 is several paragraphs of feedback.
+SCHOOL_NAME_MAX_CHARS = 120
+FEEDBACK_MAX_CHARS = 2000
 
 # After this many consecutive failures, stop trying for SUPABASE_BREAKER_COOLDOWN
 # seconds. Without it a throttling database costs every visitor the timeout on
@@ -16803,8 +16812,11 @@ if "admin_revealed" not in st.session_state:
         _admin_key = str(st.secrets.get("admin_key", "") or "")
     except Exception:  # no secrets file at all (bare local checkout)
         _admin_key = ""
-    st.session_state.admin_revealed = bool(_admin_key) and (
-        get_shared_default("admin", "") == _admin_key
+    # compare_digest, not ==: a plain string compare returns at the first
+    # differing byte, which is a timing side channel on the one secret this
+    # page checks. Cheap to do right, and it is the correct primitive here.
+    st.session_state.admin_revealed = bool(_admin_key) and hmac.compare_digest(
+        str(get_shared_default("admin", "")).encode(), _admin_key.encode()
     )
 
 # The pre/post research instrument renders for everyone. It was held behind a
@@ -16996,7 +17008,10 @@ st.markdown(
 # shared across every app that uses it, not just this one, so a personal
 # key (free, from https://api.data.gov/signup/) avoids that app's traffic
 # silently degrading this one's COA-inflation estimates under load.
-scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
+try:
+    scorecard_api_key = st.secrets.get("COLLEGE_SCORECARD_API_KEY", "DEMO_KEY")
+except Exception:  # no secrets file at all, the same case the admin key handles
+    scorecard_api_key = "DEMO_KEY"
 
 # Three independent, optional modules -- each defaults off, and the app
 # behaves exactly as it did before any of them existed when left off. Their
@@ -17280,10 +17295,10 @@ else:
     # describes, and the reason coa_per_year_a already works this way.
     _apply_pending_school()
     st.session_state.setdefault("school_search_a",
-                                 get_shared_default("school", "UC Berkeley"))
+                                 get_shared_default("school", "UC Berkeley")[:SCHOOL_NAME_MAX_CHARS])
     school_search_a = _sb_where.text_input(
         "Your college (type to search)", placeholder="e.g. University of Michigan",
-        key="school_search_a",
+        key="school_search_a", max_chars=SCHOOL_NAME_MAX_CHARS,
         on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
         help="Type a school name to auto-fill Cost of Attendance below from "
@@ -19136,7 +19151,9 @@ if compare_mode:
         else:
             school_search_b = st.text_input(
                 "Your college (type to search)", placeholder="e.g. Ohio State University",
-                value=get_shared_default("school_b", "UC Berkeley"), key="school_search_b",
+                value=get_shared_default("school_b", "UC Berkeley")[:SCHOOL_NAME_MAX_CHARS],
+                key="school_search_b",
+                max_chars=SCHOOL_NAME_MAX_CHARS,
                 on_change=lambda: (mark_interaction("school_b"),
                                     _autofill_coa("school_search_b", "school_pick_b", "in_state_b", "coa_per_year_b")),
                 help="Type a school name to auto-fill Cost of Attendance below "
@@ -22448,7 +22465,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         sort_mode = SEARCH_SORT_DEFAULT
         (name_col,) = st.columns(1)
     name_query = name_col.text_input(
-        "School name contains (optional)", key=name_key,
+        "School name contains (optional)", key=name_key, max_chars=SCHOOL_NAME_MAX_CHARS,
         on_change=lambda: mark_interaction(name_key),
         placeholder="e.g. State, Tech, Community",
         help="Narrows the matches by name before the list is cut to 25, so "
@@ -26076,7 +26093,12 @@ Questions about the research? Contact **research@worthmydegree.com**.
                 "Did this tool change how you view your target major or university choice?",
                 ["Yes - significantly", "Yes - slightly", "No - it confirmed my choice", "No - no impact"],
             )
-            feedback_text = st.text_area("How did this data influence your thinking? (optional)")
+            # The one free-text column in the research tables. Capped so a
+            # single submission cannot be arbitrarily large; 2,000 characters
+            # is several paragraphs, far past what anyone has written.
+            feedback_text = st.text_area(
+                "How did this data influence your thinking? (optional)",
+                max_chars=FEEDBACK_MAX_CHARS)
             submitted = st.form_submit_button("Submit Feedback")
 
             # Enforced at submit because a form cannot react before it. Checked
