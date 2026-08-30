@@ -6117,7 +6117,7 @@ class SupabaseWriteQueue:
                 # ttl=0 it caches nothing anyway -- it is a wrapper around
                 # exactly this call. Keeping Streamlit out of the worker means
                 # the only thing running here is an HTTP POST.
-                self._conn.table(table).insert([row], count="None").execute()
+                self._conn.table(table).insert([row], count="None", returning="minimal").execute()
                 with self._lock:
                     self.written += 1
                     self._consecutive_failures = 0
@@ -6262,7 +6262,7 @@ def save_survey_response(respondent_role: str, hs_graduation_year: str,
             **(instrument or {}),
         }
         execute_query(
-            conn.table("survey_responses").insert([json_safe_row(row)], count="None"),
+            conn.table("survey_responses").insert([json_safe_row(row)], count="None", returning="minimal"),
             ttl=0,
         )
         return True
@@ -6826,7 +6826,7 @@ def save_pdf_download(context: dict) -> bool:
                "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
-            conn.table("pdf_downloads").insert([json_safe_row(row)], count="None"),
+            conn.table("pdf_downloads").insert([json_safe_row(row)], count="None", returning="minimal"),
             ttl=0,
         )
         return True
@@ -6850,7 +6850,7 @@ def save_scenario_share(context: dict) -> bool:
                "experiment_arm": get_experiment_arm(),
                "major_explicitly_selected": get_major_explicitly_selected(), **context}
         execute_query(
-            conn.table("scenario_shares").insert([json_safe_row(row)], count="None"),
+            conn.table("scenario_shares").insert([json_safe_row(row)], count="None", returning="minimal"),
             ttl=0,
         )
         return True
