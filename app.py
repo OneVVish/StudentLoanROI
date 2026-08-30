@@ -16283,6 +16283,18 @@ def sai_money(value) -> str:
     return ("-" if value < 0 else "") + fmt_money(abs(value))
 
 
+# Which lines open a section, which are subtotals, and which is the answer.
+# Kept beside the rows rather than inferred in the renderer: the grouping is a
+# fact about the federal form, not a display choice, and anything else that
+# ever prints this worksheet needs the same grouping to stay readable.
+SAI_WORKSHEET_SECTIONS = {
+    "3":  "Allowances against parents' income",
+    "14": "Contribution from assets",
+    "19": "Contributions",
+}
+SAI_WORKSHEET_SUBTOTALS = ("9", "18")
+SAI_WORKSHEET_TOTAL = "37"
+
 SAI_WORKSHEET_ROWS = (
     ("3",  "Total parent income",                    "agi",                            False),
     ("4",  "Income tax paid",                        "income_tax_paid",                True),
@@ -23537,6 +23549,73 @@ def _log_school_search(family: str, budget: int, states: list, hit_count: int,
 # fifth, so the control that is meant to make the common case easy would make
 # it harder. Above the cap the slider pins and the number input is the honest
 # control, which is what the caption says.
+# The worksheet is rendered as an HTML table rather than st.dataframe, and the
+# reason is that it is a FORM, not data. Nobody sorts a worksheet or exports it
+# to CSV, which is all a dataframe buys here; what a worksheet needs is for the
+# allowances to read as subtractions, the two subtotals to read as rests, and
+# the answer to read as the answer. A dataframe can express none of that, and
+# it clips a long cell rather than wrapping it -- the failure this file already
+# records for the count-back finding and the six-column results table.
+SAI_WORKSHEET_CSS = """<style>
+.sai-worksheet { width: 100%; border-collapse: collapse; margin: 0.25rem 0 0.5rem; }
+.sai-worksheet td { padding: 0.34rem 0.2rem; vertical-align: baseline; }
+.sai-worksheet .ln {
+    width: 2.6rem; text-align: right; padding-right: 0.9rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; opacity: 0.55;
+}
+.sai-worksheet .amt {
+    text-align: right; white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+}
+/* An allowance is money coming OFF the income. Muted, so the eye runs down
+   the subtotals and skips the arithmetic unless it is looking for it. */
+.sai-worksheet tr.allowance .lbl, .sai-worksheet tr.allowance .amt { opacity: 0.72; }
+.sai-worksheet tr.section td {
+    padding-top: 1rem; font-size: 0.72rem; letter-spacing: 0.09em;
+    text-transform: uppercase; font-weight: 700; opacity: 0.55;
+}
+.sai-worksheet tr.subtotal td {
+    border-top: 1px solid rgba(128,140,155,0.45); font-weight: 600;
+}
+.sai-worksheet tr.total td {
+    border-top: 2px solid rgba(128,140,155,0.8); padding-top: 0.6rem;
+    font-weight: 800; font-size: 1.05rem; color: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+    .sai-worksheet tr.total td { color: #3987e5; }
+}
+</style>"""
+
+
+def sai_worksheet_html(result: dict, parent_agi: float) -> str:
+    """The worksheet as one HTML table. Shared shape with SAI_WORKSHEET_ROWS.
+
+    Money goes through sai_money, never fmt_money_md: this is raw HTML, not a
+    markdown string, so the LaTeX trap does not apply and an escaped dollar
+    sign would print its own backslash.
+    """
+    values = dict(result, agi=parent_agi)
+    parts = [SAI_WORKSHEET_CSS, "<table class='sai-worksheet'>"]
+    for line, label, key, subtract in SAI_WORKSHEET_ROWS:
+        if line in SAI_WORKSHEET_SECTIONS:
+            parts.append("<tr class='section'><td></td><td colspan='2'>"
+                         f"{html.escape(SAI_WORKSHEET_SECTIONS[line])}</td></tr>")
+        if key == "income_tax_paid" and result["tax_estimated"]:
+            label += " (estimated)"
+        kind = ("total" if line == SAI_WORKSHEET_TOTAL
+                else "subtotal" if line in SAI_WORKSHEET_SUBTOTALS
+                else "allowance" if subtract else "")
+        amount = sai_money(-values[key] if subtract else values[key])
+        parts.append(
+            f"<tr class='{kind}'><td class='ln'>{line}</td>"
+            f"<td class='lbl'>{html.escape(label)}</td>"
+            f"<td class='amt'>{amount}</td></tr>")
+    parts.append("</table>")
+    return "".join(parts)
+
+
 SAI_AGI_SLIDER_MAX = 300000
 SAI_AGI_SLIDER_STEP = 2500
 SAI_AGI_SLIDER_KEY = "sai_parent_agi_slider"
@@ -23719,18 +23798,7 @@ def render_sai_worksheet(always_open: bool = False) -> None:
             "will actually charge you."
         )
 
-    values = dict(result, agi=parent_agi)
-    st.dataframe(
-        pd.DataFrame([
-            {"Line": line,
-             "What it is": label + (" (estimated)"
-                                    if key == "income_tax_paid"
-                                    and result["tax_estimated"] else ""),
-             "Amount": sai_money(-values[key] if subtract else values[key])}
-            for line, label, key, subtract in SAI_WORKSHEET_ROWS
-        ]),
-        hide_index=True, use_container_width=True,
-    )
+    st.markdown(sai_worksheet_html(result, parent_agi), unsafe_allow_html=True)
     st.caption(
         "Line numbers are the federal worksheet's own, so any figure here can "
         "be checked against the published guide. Negative amounts are "
