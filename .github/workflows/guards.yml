@@ -1,0 +1,82 @@
+# The guards, on every PR and every push to main.
+#
+# This repo has no test suite; it has guards -- one check_*.py per shipped
+# bug, each with negative controls (see ARCHITECTURE.md). Until 2026-08-30
+# they ran only when a human remembered to type the command, which is how a
+# green guard on one machine coexisted with a regression on a branch. This
+# runs every guard a fresh clone can run.
+#
+# Discovery is dynamic (check_*.py), so a new guard joins CI the day it is
+# committed, with one exclusion:
+#   - check_reel.py imports marketing/reel.py, and marketing/ is gitignored;
+#     it can only ever run on the machine that owns that folder. Its own
+#     .gitignore entry records the same reasoning.
+# Three guards (check_chart_basis, check_chart_palette, check_chart_prose)
+# skip LOUDLY on a clone that lacks marketing/ or the palette validator, and
+# exit 0 when they do -- that is their documented contract, not a CI gap.
+#
+# Guards keep running after one fails so a PR sees every failure at once;
+# the job then fails if any did.
+
+name: guards
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # runtime.txt pins 3.13 because production once drifted onto 3.14
+          # and segfaulted; CI runs what production runs.
+          python-version: "3.13"
+          cache: pip
+      - name: Install the pinned dependencies
+        run: pip install -r requirements.txt
+      - name: Run every guard
+        run: |
+          set -u
+          failed=""
+          for guard in check_*.py; do
+            if [ "$guard" = "check_reel.py" ]; then
+              echo "SKIP $guard -- imports the gitignored marketing/ folder"
+              continue
+            fi
+            echo "::group::$guard"
+            if ! python3 "$guard"; then
+              failed="$failed $guard"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "FAILED:$failed"
+            exit 1
+          fi
+
+  audit:
+    # Separate job so a freshly published advisory reads as its own red X
+    # rather than burying a guard failure (and the reverse). It resolves the
+    # full dependency tree from requirements.txt, which is the visibility the
+    # unpinned transitive packages (supabase, httpx, Pillow, urllib3) never
+    # had -- the review's M6 finding.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Audit the resolved dependency tree
+        run: pip-audit -r requirements.txt --progress-spinner off
