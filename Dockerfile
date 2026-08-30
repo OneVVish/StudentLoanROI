@@ -21,7 +21,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Streamlit's ~/.streamlit and matplotlib's cache resolve under HOME=/app, and
 # $PORT on Railway is unprivileged. Created after the pip install, which still
 # runs as root.
-RUN useradd --system --uid 1000 --home-dir /app --shell /usr/sbin/nologin app
+# AND the working directory itself must belong to it. COPY --chown only
+# chowns what it copies; /app was created by WORKDIR above, as root, before
+# the user existed, so without this line start.sh's `mkdir .streamlit` fails
+# with "Permission denied" and the container boots with no secrets. Shipped
+# that way once (2026-08-30, #172) and was caught by the Railway deploy log.
+RUN useradd --system --uid 1000 --home-dir /app --shell /usr/sbin/nologin app \
+    && chown app:app /app
 ENV HOME=/app
 
 COPY --chown=app:app . .

@@ -41,9 +41,10 @@ agreement. And the Dockerfile must switch to a non-root USER before its CMD,
 because start.sh writes every credential into the working directory at boot
 and the process handles untrusted input.
 
-Four negative controls run on every invocation, each against a mutated copy of
+Five negative controls run on every invocation, each against a mutated copy of
 the files: showErrorDetails deleted from config.toml, set to "full" in both,
-the USER line removed, and start.sh missing a flag config.toml has.
+the USER line removed, start.sh missing a flag config.toml has, and USER set
+without the working directory chowned to it.
 
 WHAT THIS CANNOT CHECK: whether either host is actually running the committed
 code. Railway redeploys on a merge to main and Community Cloud on its own
@@ -177,7 +178,9 @@ def find_problems(config_text: str, start_text: str,
     # what the process runs as; an earlier USER app followed by USER root
     # would pass a naive "is there a USER line" check.
     if dockerfile_text is not None:
-        lines = _uncommented(dockerfile_text)
+        # Backslash continuations joined first, so a `RUN useradd ... \\`
+        # followed by `&& chown ...` reads as the one instruction it is.
+        lines = _uncommented(dockerfile_text.replace("\\\n", " "))
         cmd_index = next((i for i, ln in enumerate(lines)
                           if ln.upper().startswith(("CMD ", "ENTRYPOINT "))), len(lines))
         users_before_cmd = [ln.split(None, 1)[1].strip() for ln in lines[:cmd_index]
@@ -188,6 +191,22 @@ def find_problems(config_text: str, start_text: str,
                 f"  Dockerfile runs the app as {effective!r}: no non-root USER "
                 f"before CMD. start.sh writes every credential into the working "
                 f"directory at boot, and the process handles untrusted input.")
+        else:
+            # The user must OWN the working directory, not just the files copied
+            # into it. WORKDIR creates the directory as root before the user
+            # exists and COPY --chown does not touch it, so start.sh's
+            # `mkdir .streamlit` fails and the container boots with no secrets.
+            # That shipped in #172 and the Railway deploy log caught it.
+            workdir = next((ln.split(None, 1)[1].strip() for ln in lines
+                            if ln.upper().startswith("WORKDIR ")), None)
+            user = effective.split(":")[0]
+            chowned = any(ln.upper().startswith("RUN ") and "chown" in ln
+                          and user in ln and (workdir or "") in ln for ln in lines)
+            if workdir and not chowned:
+                problems.append(
+                    f"  Dockerfile switches to USER {user!r} but never chowns "
+                    f"{workdir} to it; start.sh cannot create .streamlit there "
+                    f"and the container starts without secrets.")
     return problems
 
 
@@ -211,6 +230,9 @@ def negative_controls(config_text, start_text, dockerignore_text, dockerfile_tex
         "start.sh missing a flag config.toml has":
             (config_text, start_text.replace(sh_flag + " \\", ""),
              dockerignore_text, dockerfile_text),
+        "USER set but the working directory not chowned":
+            (config_text, start_text, dockerignore_text,
+             dockerfile_text.replace("&& chown app:app /app", "")),
     }
     passed = []
     for label, texts in cases.items():
@@ -256,7 +278,7 @@ def main() -> int:
           f"({', '.join(shared)}), {len(REQUIRED)} required setting(s) present, "
           f"container runs as a non-root user, "
           f"{len(CONTAINER_ONLY)} container-only flag(s) exempt, "
-          f"4 negative controls fail as they should")
+          f"5 negative controls fail as they should")
     return 0
 
 
