@@ -6954,23 +6954,51 @@ def get_shared_default(param_name: str, fallback: str) -> str:
     return st.query_params.get(param_name, fallback)
 
 
-def get_shared_int(param_name: str, fallback: int) -> int:
+def _clamp_shared(value, lo, hi):
+    """Pin a parsed share value to the widget it is about to seed.
+
+    Streamlit does not raise when session_state holds a value outside a
+    number_input's min/max; it quietly discards it and renders the widget's
+    DEFAULT, which for a keyed input with no value= is the MINIMUM. So a
+    hand-edited ?age=99999 opened as a returning student aged 18, and ?age=85
+    did too -- the nearest legal value was 80 and the page said 18, with
+    nothing on screen to say the link had been overruled. Clamping to the
+    bound keeps the recipient's scenario as close to the sharer's as the widget
+    allows. Verified 2026-08-30 under AppTest on the pinned 1.58.0.
+    """
+    if lo is not None and value < lo:
+        return lo
+    if hi is not None and value > hi:
+        return hi
+    return value
+
+
+def get_shared_int(param_name: str, fallback: int, lo=None, hi=None) -> int:
     """Like get_shared_default, but safely cast to int -- a hand-edited,
     stale, or otherwise malformed shared link (e.g. ?pc=abc) falls back to
     `fallback` instead of raising an uncaught ValueError that would crash
-    the page for every visitor on that URL."""
+    the page for every visitor on that URL.
+
+    `lo`/`hi` are the seeded widget's own min_value/max_value; a parsed value
+    outside them is clamped (see _clamp_shared). The FALLBACK is returned as
+    given, never clamped: ?pdebt= uses -1 to mean "absent", which is below its
+    widget's floor on purpose. check_share_bounds.py asserts every seed of a
+    bounded widget passes both.
+    """
     try:
-        return int(get_shared_default(param_name, str(fallback)))
+        value = int(get_shared_default(param_name, str(fallback)))
     except (ValueError, TypeError):
         return fallback
+    return _clamp_shared(value, lo, hi)
 
 
-def get_shared_float(param_name: str, fallback: float) -> float:
+def get_shared_float(param_name: str, fallback: float, lo=None, hi=None) -> float:
     """Like get_shared_int, but for float-valued params (e.g. ?rate=abc)."""
     try:
-        return float(get_shared_default(param_name, str(fallback)))
+        value = float(get_shared_default(param_name, str(fallback)))
     except (ValueError, TypeError):
         return fallback
+    return _clamp_shared(value, lo, hi)
 
 
 def apply_shared_flag(param_name: str, state_key: str) -> None:
@@ -16467,28 +16495,34 @@ SAI_WORKSHEET_ROWS = (
 # calculator share must never pick up a household income someone typed into a
 # different tool, and the reverse. Prefix `sa`; check_share_coverage asserts
 # these cannot collide with a calculator param.
+#
+# The fourth element is the widget's own (min_value, max_value), which the
+# seeder passes to get_shared_int so an out-of-range link value lands on the
+# bound rather than silently resetting the field (see _clamp_shared). None for
+# the checkboxes, and for the family size whose floor follows the parents
+# radio; check_share_bounds.py compares the rest against the widgets.
 SAI_SHARE_FIELDS = (
-    ("sai_two_parents",    "sap",  int),
-    ("sai_family_size",    "sas",  int),
-    ("sai_parent_agi",     "saa",  int),
-    ("sai_parent_assets",  "sav",  int),
-    ("sai_business",       "sab",  int),
-    ("sai_child_support",  "sac",  int),
-    ("sai_student_income", "sasi", int),
-    ("sai_student_assets", "sasa", int),
-    ("sai_earned_income",  "sae",  int),
-    ("sai_tax_paid",       "sat",  int),
+    ("sai_two_parents",    "sap",  int, None),
+    ("sai_family_size",    "sas",  int, (1, 12)),
+    ("sai_parent_agi",     "saa",  int, (0, 1000000)),
+    ("sai_parent_assets",  "sav",  int, (0, 10000000)),
+    ("sai_business",       "sab",  int, (0, 20000000)),
+    ("sai_child_support",  "sac",  int, (0, 500000)),
+    ("sai_student_income", "sasi", int, (0, 500000)),
+    ("sai_student_assets", "sasa", int, (0, 5000000)),
+    ("sai_earned_income",  "sae",  int, (0, 1000000)),
+    ("sai_tax_paid",       "sat",  int, (0, 500000)),
     # The two overrides are OPT-IN, and the flag has to ride the link too. An
     # override is only meaningful beside the answer to "am I overriding", and
     # an explicit $0 is a real answer -- see the checkbox comment in the
     # renderer for what collapsing the two costs.
-    ("sai_use_earned",     "sauw", int),
-    ("sai_use_tax_paid",   "saut", int),
+    ("sai_use_earned",     "sauw", int, None),
+    ("sai_use_tax_paid",   "saut", int, None),
     # CSS Profile inputs. They ride the link like any other, even though
     # neither reaches the federal arithmetic: a shared link that dropped them
     # would rebuild the scenario without the note that was the reason to share.
-    ("sai_home_equity",    "sahe", int),
-    ("sai_noncustodial",   "sanc", int),
+    ("sai_home_equity",    "sahe", int, (0, 20000000)),
+    ("sai_noncustodial",   "sanc", int, None),
 )
 
 
@@ -16501,7 +16535,7 @@ def build_sai_share_params() -> dict:
     answers, and seeding a zero payroll allowance would overstate the SAI.
     """
     params = {"tool": "sai"}
-    for key, param, _cast in SAI_SHARE_FIELDS:
+    for key, param, _cast, _bounds in SAI_SHARE_FIELDS:
         value = st.session_state.get(key)
         if value is None or value == "":
             continue
@@ -16520,7 +16554,7 @@ def seed_sai_from_share() -> None:
     if st.session_state.get("_sai_seeded"):
         return
     st.session_state["_sai_seeded"] = True
-    for key, param, _cast in SAI_SHARE_FIELDS:
+    for key, param, _cast, bounds in SAI_SHARE_FIELDS:
         raw = get_shared_default(param, "")
         if raw == "":
             continue
@@ -16528,7 +16562,8 @@ def seed_sai_from_share() -> None:
                    "sai_noncustodial"):
             st.session_state.setdefault(key, get_shared_int(param, 0) == 1)
         else:
-            st.session_state.setdefault(key, get_shared_int(param, 0))
+            lo, hi = bounds
+            st.session_state.setdefault(key, get_shared_int(param, 0, lo=lo, hi=hi))
 
 
 # ============================================================
@@ -16931,16 +16966,17 @@ st.session_state.setdefault(
     else STUDENT_MODE_FIRST)
 student_mode = st.session_state["student_mode_radio"]
 is_returning = student_mode == STUDENT_MODE_RETURNING
-st.session_state.setdefault("current_age", get_shared_int("age", 30))
+st.session_state.setdefault("current_age", get_shared_int("age", 30, lo=18, hi=80))
 # Seeded to 0, NOT to a plausible-looking salary. A seeded $50k produced a
 # 4,950% ROI on the default San Francisco scenario, because $50k is below what
 # a high school graduate earns there -- so the app invented a spectacular
 # return for someone who had entered nothing. An unanswered question must look
 # unanswered.
-st.session_state.setdefault("current_salary", get_shared_int("cur_sal", 0))
-st.session_state.setdefault("salary_no_degree_10y", get_shared_int("sal10", 0))
-st.session_state.setdefault("existing_debt", get_shared_int("debt", 0))
-st.session_state.setdefault("existing_debt_rate", get_shared_float("debt_rate", DEFAULT_FEDERAL_RATE))
+st.session_state.setdefault("current_salary", get_shared_int("cur_sal", 0, lo=0, hi=1_000_000))
+st.session_state.setdefault("salary_no_degree_10y", get_shared_int("sal10", 0, lo=0, hi=1_000_000))
+st.session_state.setdefault("existing_debt", get_shared_int("debt", 0, lo=0, hi=1_000_000))
+st.session_state.setdefault("existing_debt_rate",
+                            get_shared_float("debt_rate", DEFAULT_FEDERAL_RATE, lo=0.0, hi=20.0))
 st.session_state.setdefault(
     "returning_enrollment",
     RETURNING_STOP_WORK if get_shared_default("enroll", "working") == "fulltime"
@@ -17340,18 +17376,12 @@ else:
     if _css_profile_note_a:
         _sb_where.caption(_css_profile_note_a)
 
-    shared_coa_a = get_shared_default("coa", None)
-    default_coa_per_year_a = None
-    if shared_coa_a is not None:
-        # A shared link's explicit COA wins over auto-fill -- it may reflect a
-        # manual override the original sharer typed in, not just whatever the
-        # school+in-state lookup would recompute. A malformed value (e.g. a
-        # hand-edited link) falls through to auto-fill below instead of
-        # crashing the page.
-        try:
-            default_coa_per_year_a = float(shared_coa_a)
-        except (ValueError, TypeError):
-            pass
+    # A shared link's explicit COA wins over auto-fill -- it may reflect a
+    # manual override the original sharer typed in, not just whatever the
+    # school+in-state lookup would recompute. A malformed value (e.g. a
+    # hand-edited link) falls through to auto-fill below instead of crashing
+    # the page, and one outside the widget's range is clamped to it.
+    default_coa_per_year_a = get_shared_float("coa", None, lo=0, hi=100000)
     if default_coa_per_year_a is None:
         default_coa_per_year_a = get_suggested_coa_per_year(school_name_a, in_state_a)
         if default_coa_per_year_a is None:
@@ -17452,9 +17482,11 @@ _start_year_opts_a = list(range(now_local().year, now_local().year + 8))
 st.session_state.setdefault("start_year_a", get_shared_int("start_year", now_local().year))
 if st.session_state["start_year_a"] not in _start_year_opts_a:
     st.session_state["start_year_a"] = now_local().year
-st.session_state.setdefault("personal_contribution_per_year_a", get_shared_int("pc", 0))
-st.session_state.setdefault("grants_per_year_a", get_shared_int("grants", 0))
-st.session_state.setdefault("gap_rate_a", get_shared_float("gap_rate", DEFAULT_GAP_RATE))
+st.session_state.setdefault("personal_contribution_per_year_a",
+                            get_shared_int("pc", 0, lo=0, hi=100000))
+st.session_state.setdefault("grants_per_year_a", get_shared_int("grants", 0, lo=0, hi=100000))
+st.session_state.setdefault("gap_rate_a",
+                            get_shared_float("gap_rate", DEFAULT_GAP_RATE, lo=0.0, hi=25.0))
 # Streamlit drops a widget's value from session_state the moment the widget
 # stops rendering, so toggling to Simplified (which hides these inputs) would
 # reset Cost of Attendance to 0 the next time Detailed re-creates the box.
@@ -17671,7 +17703,8 @@ if cc_transfer_a:
     # Cost auto-fills from the state, but a manual (or shared-link) override
     # survives until the state itself changes -- same pattern as the COA/loan
     # auto-fill below.
-    st.session_state.setdefault("cc_coa_per_year_a", get_shared_int("cc_coa_a", int(_state_cost_a)))
+    st.session_state.setdefault("cc_coa_per_year_a",
+                                get_shared_int("cc_coa_a", int(_state_cost_a), lo=0, hi=100000))
     st.session_state.setdefault("cc_state_cost_seen_a", _state_cost_a)
     if st.session_state["cc_state_cost_seen_a"] != _state_cost_a:
         st.session_state["cc_state_cost_seen_a"] = _state_cost_a
@@ -18028,7 +18061,7 @@ repayment_strategy = _sb_pay.selectbox(
 # Scenario B's strategy is read from session_state before its own widget
 # renders (the established before-the-widget pattern), so a comparison where
 # only B is on RAP still gets the control.
-st.session_state.setdefault("rap_dependents", get_shared_int("deps", 0))
+st.session_state.setdefault("rap_dependents", get_shared_int("deps", 0, lo=0, hi=10))
 _rap_in_use = (repayment_strategy == RAP_STRATEGY_LABEL
                or (st.session_state.get("compare_mode")
                    and st.session_state.get("repayment_strategy_b") == RAP_STRATEGY_LABEL))
@@ -18570,7 +18603,7 @@ if _program_key_a:
     # -1 as the absent sentinel, because 0 is a real shared value here.
     if not st.session_state.get("_prof_debt_seeded_a"):
         st.session_state["_prof_debt_seeded_a"] = True
-        _shared_prof_debt_a = get_shared_int("pdebt", -1)
+        _shared_prof_debt_a = get_shared_int("pdebt", -1, lo=0, hi=1_000_000)
         if _shared_prof_debt_a >= 0:
             st.session_state["prof_debt_a"] = _shared_prof_debt_a
     st.session_state.setdefault("prof_debt_a", int(round(_prof_default_a)))
@@ -18678,7 +18711,8 @@ if _funded_doctorate_a:
 # through get_annual_salary_for_year.
 if is_returning and major in MAJOR_DATA:
     _bls_start = MAJOR_DATA[major].get("starting_salary", 0)
-    st.session_state.setdefault("starting_salary_override", get_shared_int("sso", int(_bls_start)))
+    st.session_state.setdefault("starting_salary_override",
+                                get_shared_int("sso", int(_bls_start), lo=0, hi=1_000_000))
     # A shared link's ?sso= must survive the visit that opens it: seed the
     # re-pin's memory with the link's own major so the first render counts as
     # "no change". Without this the setdefault above stores the shared figure
@@ -19038,7 +19072,7 @@ if compare_mode:
             # Once per session, for the reason Scenario A's does.
             if not st.session_state.get("_prof_debt_seeded_b"):
                 st.session_state["_prof_debt_seeded_b"] = True
-                _shared_prof_debt_b = get_shared_int("pdebt_b", -1)
+                _shared_prof_debt_b = get_shared_int("pdebt_b", -1, lo=0, hi=1_000_000)
                 if _shared_prof_debt_b >= 0:
                     st.session_state["prof_debt_b"] = _shared_prof_debt_b
             st.session_state.setdefault("prof_debt_b", int(round(_prof_default_b)))
@@ -19199,9 +19233,12 @@ if compare_mode:
         st.session_state.setdefault("start_year_b", get_shared_int("start_year_b", now_local().year))
         if st.session_state["start_year_b"] not in _start_year_opts_b:
             st.session_state["start_year_b"] = now_local().year
-        st.session_state.setdefault("personal_contribution_per_year_b", get_shared_int("pc_b", 0))
-        st.session_state.setdefault("grants_per_year_b", get_shared_int("grants_b", 0))
-        st.session_state.setdefault("gap_rate_b", get_shared_float("gap_rate_b", DEFAULT_GAP_RATE))
+        st.session_state.setdefault("personal_contribution_per_year_b",
+                                    get_shared_int("pc_b", 0, lo=0, hi=100000))
+        st.session_state.setdefault("grants_per_year_b",
+                                    get_shared_int("grants_b", 0, lo=0, hi=100000))
+        st.session_state.setdefault("gap_rate_b",
+                                    get_shared_float("gap_rate_b", DEFAULT_GAP_RATE, lo=0.0, hi=25.0))
         # See Scenario A: re-affirm so hiding these inputs (Simplified) doesn't
         # let Streamlit garbage-collect the values and reset COA to 0 on the
         # next Detailed render.
@@ -19331,7 +19368,8 @@ if compare_mode:
             )
             _state_cost_b = community_college_cost_for_state(
                 None if cc_state_key_b == "__national__" else cc_state_key_b)
-            st.session_state.setdefault("cc_coa_per_year_b", get_shared_int("cc_coa_b", int(_state_cost_b)))
+            st.session_state.setdefault("cc_coa_per_year_b",
+                                        get_shared_int("cc_coa_b", int(_state_cost_b), lo=0, hi=100000))
             st.session_state.setdefault("cc_state_cost_seen_b", _state_cost_b)
             if st.session_state["cc_state_cost_seen_b"] != _state_cost_b:
                 st.session_state["cc_state_cost_seen_b"] = _state_cost_b
@@ -19605,21 +19643,34 @@ def rap_months_counting_back(rap_result: dict, standard_monthly: float) -> dict:
 # of pressing it. They are still NOT in build_share_params: a calculator share
 # must never pick these up, or someone sharing a major would silently publish a
 # balance they typed into a different tool.
+#
+# The fourth element is the widget's own (min_value, max_value), passed to the
+# getter so a link value outside it lands on the bound instead of silently
+# resetting the field (see _clamp_shared). None for the checkboxes and the
+# selectbox. check_share_bounds.py compares the rest against the widgets.
 REPAYMENT_SHARE_FIELDS = (
-    ("existing_income", "ri", int),
-    ("existing_dependents", "rd", int),
-    ("existing_family_size", "rfs", int),
-    ("existing_spouse_income", "rsi", int),
-    ("existing_filing_status", "rfst", str),
-    ("existing_accrued_interest", "rui", int),
-    ("existing_prior_payments", "rp", int),
-    ("existing_forgivable", "rf", int),
-    ("existing_pslf", "rpslf", int),
-    ("existing_has_private", "rhp", int),
-    ("existing_age", "rage", int),
-    ("existing_extra_monthly", "rx", int),
-    ("existing_old_ibr", "rob", int),
+    ("existing_income", "ri", int, (0, 2_000_000)),
+    ("existing_dependents", "rd", int, (0, 10)),
+    ("existing_family_size", "rfs", int, (MIN_FAMILY_SIZE, MAX_FAMILY_SIZE)),
+    ("existing_spouse_income", "rsi", int, (0, 2_000_000)),
+    ("existing_filing_status", "rfst", str, None),
+    ("existing_accrued_interest", "rui", int, (0, 2_000_000)),
+    ("existing_prior_payments", "rp", int, (0, 480)),
+    ("existing_forgivable", "rf", int, None),
+    ("existing_pslf", "rpslf", int, None),
+    ("existing_has_private", "rhp", int, None),
+    ("existing_age", "rage", int, (0, 80)),
+    ("existing_extra_monthly", "rx", int, (0, 50_000)),
+    ("existing_old_ibr", "rob", int, None),
 )
+
+# How many loans a link may carry per grid. The seeder builds one data_editor
+# row and one amortization per comma-separated balance, so an unbounded list
+# is a URL that costs the server as much work as its author cares to type:
+# measured 2026-08-30, 3,000 balances in an 18 KB link took 15 seconds of
+# server time on one request. Nobody has fifty student loans; the cap is far
+# above any real portfolio and far below what a hostile link can ask for.
+MAX_SHARED_LOANS = 50
 
 # The two loan GRIDS. One session key (a list of row dicts backing a
 # st.data_editor) feeds several params -- a column each -- so the 1:1 table
@@ -19627,12 +19678,15 @@ REPAYMENT_SHARE_FIELDS = (
 # comma-joined, index-aligned lists: `rb=46300,22600&rr=6.05,3.4` is two
 # federal loans. An old link's single value parses as a one-loan list, so
 # every link minted before the grids existed still reproduces its comparison.
+#
+# Each column's fourth element is the grid column's own (min_value, max_value)
+# from its NumberColumn config, applied when the link is read.
 REPAYMENT_LOAN_LIST_PARAMS = (
     ("existing_federal_loans",
-     (("balance", "rb", int), ("rate", "rr", float))),
+     (("balance", "rb", int, (0, 2_000_000)), ("rate", "rr", float, (0.0, 20.0)))),
     ("existing_private_loans",
-     (("balance", "rpb", int), ("rate", "rpr", float),
-      ("term", "rpt", int), ("actual", "rpa", int))),
+     (("balance", "rpb", int, (0, 2_000_000)), ("rate", "rpr", float, (0.0, 30.0)),
+      ("term", "rpt", int, (1, 30)), ("actual", "rpa", int, (0, 50_000)))),
 )
 
 
@@ -19646,7 +19700,7 @@ def build_repayment_share_params() -> dict:
     phantom loan in the recipient's grid.
     """
     params = {"tool": "repayment"}
-    for key, param, cast in REPAYMENT_SHARE_FIELDS:
+    for key, param, cast, _bounds in REPAYMENT_SHARE_FIELDS:
         value = st.session_state.get(key)
         if value in (None, "", False, 0):
             continue
@@ -19656,7 +19710,7 @@ def build_repayment_share_params() -> dict:
                                    private=(key == "existing_private_loans"))
         if not loans:
             continue
-        for column, param, cast in columns:
+        for column, param, cast, _bounds in columns:
             values = [(loan.get(column) or 0) for loan in loans]
             params[param] = ",".join(
                 str(int(v)) if cast is int else f"{float(v):g}" for v in values)
@@ -19682,12 +19736,13 @@ def seed_repayment_from_share() -> None:
         return
     st.session_state["_repayment_seeded"] = True
 
-    for key, param, cast in REPAYMENT_SHARE_FIELDS:
+    for key, param, cast, bounds in REPAYMENT_SHARE_FIELDS:
         raw = get_shared_default(param, "")
         if raw == "":
             continue
+        lo, hi = bounds or (None, None)
         if cast is int:
-            st.session_state.setdefault(key, get_shared_int(param, 0))
+            st.session_state.setdefault(key, get_shared_int(param, 0, lo=lo, hi=hi))
         elif cast is str:
             # A KEYED SELECTBOX RAISES on a stored value absent from its
             # options, so a hand-edited ?rfst=whatever would break the page for
@@ -19698,30 +19753,36 @@ def seed_repayment_from_share() -> None:
                 continue
             st.session_state.setdefault(key, raw)
         else:
-            st.session_state.setdefault(key, get_shared_float(param, 0.0))
+            st.session_state.setdefault(key, get_shared_float(param, 0.0, lo=lo, hi=hi))
     # The loan grids: one comma list per column, index-aligned. The balance
     # column decides how many loans the link carries; a ragged shorter column
     # (a hand-edited link) pads with the default rather than crashing the page
     # for everyone who opens it. A single-value old-style link parses as a
-    # one-loan list through exactly the same path.
+    # one-loan list through exactly the same path. The list is cut at
+    # MAX_SHARED_LOANS before anything is built from it.
     for key, columns in REPAYMENT_LOAN_LIST_PARAMS:
         primary = get_shared_default(columns[0][1], "")
         if primary == "":
             continue
         parts_by_column = {
-            column: get_shared_default(param, "").split(",")
-            for column, param, _ in columns
+            column: get_shared_default(param, "").split(",")[:MAX_SHARED_LOANS]
+            for column, param, _, _ in columns
         }
         rows = []
         for i in range(len(parts_by_column["balance"])):
             row = {}
-            for column, param, cast in columns:
+            for column, param, cast, bounds in columns:
                 parts = parts_by_column[column]
                 raw = parts[i].strip() if i < len(parts) else ""
+                # Clamp only what parsed. An absent or malformed cell stays 0
+                # so the private-term default below still recognises it: a
+                # clamped 0 would read as a one-year term, not as "not shared".
                 try:
-                    row[column] = int(float(raw)) if cast is int else float(raw)
+                    value = _clamp_shared(
+                        int(float(raw)) if cast is int else float(raw), *bounds)
                 except ValueError:
-                    row[column] = 0
+                    value = 0
+                row[column] = value
             # A term of 0 is below the grid's minimum, and an absent ?rpt=
             # means "not shared", not "zero years".
             if key == "existing_private_loans" and not row.get("term"):
