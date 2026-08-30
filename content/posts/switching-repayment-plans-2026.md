@@ -57,6 +57,21 @@ Payments do grow, because incomes grow, so a borrower who stays long enough will
 
 So the honest summary is that switching into RAP is close to a one-way door, and the lower your income relative to your balance, the more firmly it closes. Which is the opposite of how an exception clause reads.
 
+## The route matters, not only the destination
+
+There is a second asymmetry, and this one is about interest rather than payments. It decides what a detour costs, and it is written into the regulation rather than into anybody's guidance.
+
+Under 34 CFR 685.209(j), RAP, REPAYE, PAYE and ICR all capitalize unpaid interest only under the general rule at 685.202(b). IBR carries an extra trigger the others do not have: the Secretary capitalizes unpaid accrued interest "when a borrower leaves the IBR plan." Leaving IBR is itself the event.
+
+The general rule those other plans point at is now two sentences long, and its only mandatory trigger is the expiration of a deferment. A forbearance is not in it. So leaving SAVE does not capitalize anything, and leaving IBR does.
+
+That matters right now because of what has been accruing. Interest has been charged on SAVE balances since August 1, 2025 while no payment was required, so by the time RAP opened on July 1, 2026 there were eleven months of it sitting unpaid. At the 6.5 percent rate used throughout this article, that is about $1,400 on a $23,000 bachelor's balance, about $2,300 on a $38,000 master's, and about $4,700 on a $79,000 doctoral one.
+
+Capitalizing means that figure stops being interest and becomes principal, and then earns interest itself for the rest of the term. Move from SAVE to RAP directly and it does not happen. Park in IBR first and move to RAP later and it does, once, on the way out.
+
+None of which says IBR is the wrong plan. The table above is the place to settle that, and for some balances IBR is plainly the cheaper answer. This is narrower and it is only about sequence: if RAP is where you are going, going there through IBR costs you the capitalization, and going straight there does not. RAP is open now, so the stop no longer buys anything.
+
+
 ## What the children do to the arithmetic
 
 RAP subtracts $50 a month from the payment for each dependent you claim on your federal tax return, and no payment can fall below $10. Those two figures are statutory, so they are exact rather than estimated.
