@@ -367,6 +367,58 @@ def check_inserts_return_minimal(ns) -> list:
     return problems
 
 
+def check_reads_use_reporter(ns) -> list:
+    """Readers hold the read-only credential; writers never do.
+
+    Row level security (migrations.sql, 2026-08-30) took SELECT away from
+    the anon key the app writes with, so every read has to come through
+    get_supabase_read_client and its reporter JWT. The two clients must stay
+    separate in both directions: load_table_safe using the writer's
+    connection is a dashboard that silently empties the day the policy goes
+    in, and a writer using the read client is a credential that can read
+    sitting where only inserts should happen. Checked by AST over app.py, plus
+    the read client must apply the same timeout the writer does. One negative
+    control.
+    """
+    import ast
+    src = open(APP).read()
+
+    def violations(source):
+        tree = ast.parse(source)
+        bad = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            calls = {n.func.id for n in ast.walk(fn)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+            inserts = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                          and n.func.attr == "insert" for n in ast.walk(fn))
+            if fn.name == "load_table_safe":
+                if "get_supabase_read_client" not in calls:
+                    bad.append("load_table_safe does not read through "
+                               "get_supabase_read_client")
+                if "get_supabase_connection" in calls:
+                    bad.append("load_table_safe still uses the WRITER's connection, "
+                               "which cannot SELECT under the policy")
+            elif inserts and "get_supabase_read_client" in calls:
+                bad.append(f"{fn.name} inserts with the read-only client in scope")
+        return bad
+
+    problems = [f"  {b}" for b in violations(src)]
+    read_fn = src[src.index("def get_supabase_read_client"):]
+    read_fn = read_fn[:read_fn.index("\ndef ")]
+    if "postgrest.session.timeout" not in read_fn:
+        problems.append("  get_supabase_read_client does not apply "
+                        "SUPABASE_TIMEOUT_SECONDS; five admin reads at 120s each "
+                        "is a page that never renders")
+    mutated = src.replace("        client = get_supabase_read_client()\n        if client is None:",
+                          "        client = get_supabase_connection()\n        if client is None:", 1)
+    if mutated == src or not violations(mutated):
+        problems.append("  NEGATIVE CONTROL PASSED: load_table_safe reverted to the "
+                        "writer's connection was not caught")
+    return problems
+
+
 def main() -> int:
     ns = load_app_namespace()
     problems, checks = [], []
@@ -378,6 +430,7 @@ def main() -> int:
         ("FIFO order", check_fifo_order),
         ("writers are queued", check_writers_are_queued),
         ("inserts return minimal", check_inserts_return_minimal),
+        ("reads use the reporter key", check_reads_use_reporter),
     ]:
         # A fresh namespace per check: each one monkeypatches the transport,
         # and a leaked stub would make the next check pass for the wrong reason.
@@ -393,8 +446,8 @@ def main() -> int:
           f"at {ns['SUPABASE_TIMEOUT_SECONDS']}s not 120, failures stay off the "
           f"page, the breaker opens after {ns['SUPABASE_BREAKER_THRESHOLD']} and "
           f"sheds, a full queue drops rather than blocks, order survives, "
-          f"both high-frequency writers are queued, and every insert asks "
-          f"for nothing back.")
+          f"both high-frequency writers are queued, every insert asks "
+          f"for nothing back, and reads go through the read-only client.")
     return 0
 
 
