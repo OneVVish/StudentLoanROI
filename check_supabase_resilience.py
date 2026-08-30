@@ -411,6 +411,17 @@ def check_reads_use_reporter(ns) -> list:
         problems.append("  get_supabase_read_client does not apply "
                         "SUPABASE_TIMEOUT_SECONDS; five admin reads at 120s each "
                         "is a page that never renders")
+    # The gateway validates the apikey header against the project's ISSUED
+    # keys and answers 401 "Invalid API key" to anything else, so the client
+    # must be built on the ANON key with the reporter JWT attached as the
+    # bearer via postgrest.auth(). Built on the read key directly, every read
+    # dies at the gateway and load_table_safe renders zeros that look like a
+    # quiet day (observed 2026-08-30).
+    if 'create_client(conn["SUPABASE_URL"], conn["SUPABASE_KEY"])' not in read_fn \
+            or "postgrest.auth(key)" not in read_fn:
+        problems.append("  get_supabase_read_client must build on the anon key "
+                        "and attach the reporter JWT with postgrest.auth(); "
+                        "any other shape 401s at the Supabase gateway")
     mutated = src.replace("        client = get_supabase_read_client()\n        if client is None:",
                           "        client = get_supabase_connection()\n        if client is None:", 1)
     if mutated == src or not violations(mutated):

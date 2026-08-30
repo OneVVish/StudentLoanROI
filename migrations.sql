@@ -2326,10 +2326,12 @@ ALTER TABLE scenario_events  ADD COLUMN IF NOT EXISTS career_curve_plateaus BOOL
 --             nothing else; the edge counts likes through a function.
 -- ===========================================================================
 --
--- WHY. Until this date the repository held no RLS or policy SQL at all, and
--- the one privilege statement it did hold (the scenario_events grant above)
--- gave anon SELECT. A read-only probe on 2026-08-30 returned rows from all
--- five tables with the anon key, survey_responses.feedback_text included.
+-- WHY. Until this date the repository held no RLS or policy SQL at all. The
+-- DATABASE, it turned out, did: all five tables already ran RLS with
+-- hand-made permissive anon_select and anon_insert policies, created in the
+-- dashboard and recorded nowhere. A read-only probe on 2026-08-30 returned
+-- rows from all five tables with the anon key, survey_responses.feedback_text
+-- included -- through that anon_select policy.
 -- That key is in every edge Worker instance and in the Railway environment,
 -- so the ?admin= gate protected the dashboard and not the data. Three
 -- comments in this file said the anon key "cannot UPDATE or DELETE", which
@@ -2366,8 +2368,20 @@ grant usage on schema public to reporter;
 grant select on all tables in schema public to reporter;
 alter default privileges in schema public grant select on tables to reporter;
 
---   3. ONLY AFTER 2 IS LIVE: enable RLS, allow anon to insert, allow reporter
---      to select, and take SELECT away from anon. Per table, all five.
+--   3. ONLY AFTER 2 IS LIVE: allow reporter to select, and take SELECT away
+--      from anon. Per table, all five.
+--
+--      CORRECTED 2026-08-30, after the catalog was actually read. The first
+--      draft of this step enabled RLS and created an anon_insert policy --
+--      but every one of the five tables ALREADY had row level security
+--      enabled, with hand-made anon_select and anon_insert policies that
+--      exist in no migration file. That is what made the anon key readable
+--      all along: a policy, not missing RLS. The original block would have
+--      collided with the existing anon_insert name and rolled back whole
+--      (a DO block is one transaction). So: keep anon_insert exactly as it
+--      is, add reporter_select, drop anon_select, and revoke the privilege
+--      underneath it for good measure. The idempotent enable stays in case
+--      any table ever arrives without it.
 
 do $$
 declare t text;
@@ -2376,8 +2390,8 @@ begin
                            'scenario_shares', 'survey_responses']
   loop
     execute format('alter table %I enable row level security', t);
-    execute format('create policy anon_insert on %I for insert to anon with check (true)', t);
     execute format('create policy reporter_select on %I for select to reporter using (true)', t);
+    execute format('drop policy anon_select on %I', t);
     execute format('revoke select on %I from anon', t);
   end loop;
 end $$;
