@@ -24034,11 +24034,22 @@ def render_sai_worksheet(always_open: bool = False) -> None:
             f"[What the CSS Profile is]({CSS_PROFILE_URL})."
         )
 
+    # Both of these are things the formula does that a family reasoning from
+    # pre-2024 knowledge gets wrong, and both have the same cause, so they are
+    # one warning rather than two stacked ones.
     st.warning(
         "**Two children in college no longer helps.** The old EFC divided the "
         "parents' contribution by the number in college. The SAI formula does "
         "not divide, so each sibling is assessed the same parents' "
-        "contribution. Any chart inherited from the EFC era reads low."
+        "contribution.\n\n"
+        "**State income tax gets no allowance.** The old formula had one that "
+        "varied by where you live. This one does not, so a family in a high "
+        "tax state is assessed exactly as an identical family in a state with "
+        "no income tax at all. Only federal and territory income tax counts, "
+        "on line 4 above, which is why this page never asks where you "
+        "live.\n\n"
+        "Any chart or calculator inherited from the EFC era is wrong on both "
+        "counts."
     )
     st.caption(
         "The SAI is one input a college uses. What you actually pay also "
