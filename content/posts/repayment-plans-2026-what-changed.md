@@ -36,6 +36,10 @@ The crossings sit at roughly $30,000 and roughly $80,000. Neither is a clean lin
 
 One consequence deserves saying plainly rather than leaving in the table. Under IBR an income at or below the living allowance produces a payment of zero. Under RAP there is no zero. The floor is $10, and the floor is also what bounds the dependent reduction, so a borrower with children and very little income lands on $10 rather than on nothing.
 
+![Five stacked panels, one per household size from one to five, plotting the monthly payment against adjusted gross income for IBR at 10 percent, IBR at 15 percent and RAP. RAP rises in steps because it charges a fixed percentage inside each $10,000 band, and both IBR lines stay at zero until income passes the amount that household shelters](guide-plan-by-agi-900x1902.svg)
+
+The crossings move right as the household grows, because IBR shelters 150 percent of the household's poverty guideline and that figure rises with every person. RAP subtracts a flat $50 a dependent instead, so its line barely moves down the page: at $150,000 of income it falls from $1,250 to $1,050 across those five households, where the 10 percent IBR payment falls from $1,051 to $767.
+
 ## A smaller payment is not a smaller debt
 
 Take a borrower who left with $27,000, which is the aggregate federal limit for a dependent undergraduate, on an income of $45,000. Five plans, one balance, one person:
