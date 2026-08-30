@@ -36,9 +36,9 @@ The crossings sit at roughly $30,000 and roughly $80,000. Neither is a clean lin
 
 One consequence deserves saying plainly rather than leaving in the table. Under IBR an income at or below the living allowance produces a payment of zero. Under RAP there is no zero. The floor is $10, and the floor is also what bounds the dependent reduction, so a borrower with children and very little income lands on $10 rather than on nothing.
 
-![Five stacked panels, one per household size from one to five, plotting the monthly payment against adjusted gross income for IBR at 10 percent, IBR at 15 percent and RAP. RAP rises in steps because it charges a fixed percentage inside each $10,000 band, and both IBR lines stay at zero until income passes the amount that household shelters](guide-plan-by-agi-900x1902.svg)
+![Five stacked panels, one per household size from one to five, plotting the monthly payment against adjusted gross income on a $27,000 balance for IBR at 10 percent, IBR at 15 percent and RAP. RAP rises in steps and keeps rising. Both IBR lines start at zero, climb once income passes what the household shelters, then flatten at the 10-year Standard payment](guide-plan-by-agi-900x1902.svg)
 
-The crossings move right as the household grows, because IBR shelters 150 percent of the household's poverty guideline and that figure rises with every person. RAP subtracts a flat $50 a dependent instead, so its line barely moves down the page: at $150,000 of income it falls from $1,250 to $1,050 across those five households, where the 10 percent IBR payment falls from $1,051 to $767.
+Two things move as the household grows. The point where a payment starts moves right, because IBR shelters 150 percent of the household's poverty guideline and that figure rises with every person, where RAP subtracts a flat $50 a dependent. And both IBR lines stop climbing once they reach what the loan would cost on the 10-year Standard plan, about $307 on this balance, because IBR charges the lesser of the two. RAP has no such ceiling, so at $150,000 of income it asks about $1,250 a month on the same $27,000 debt.
 
 ## A smaller payment is not a smaller debt
 
