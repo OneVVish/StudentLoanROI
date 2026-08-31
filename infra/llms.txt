@@ -119,6 +119,10 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [Too rich for aid, by the government's own math](https://worthmydegree.com/charts#what-the-aid-formula-expects):
+  The Student Aid Index for a two-parent family of four at $150,000 to
+  $300,000 of income, against the median public and private nonprofit
+  cost of attendance.
 - [Transferring to a UC saves about $76,700](https://worthmydegree.com/charts#transfer-path):
   Two years at a California community college and two at a public
   university, against four years at the university. At a UC that is
