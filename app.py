@@ -26361,13 +26361,18 @@ st.divider()
 
 # ---- 5f. Methodology & Sources Footer -------------------------------------
 
-with st.expander("📚 Methodology & Sources"):
+with st.container():
     # st.markdown renders LaTeX math between paired "$" within a paragraph --
     # this text uses "$" only for literal dollar amounts, so every "$" is
     # escaped below to stop Streamlit from swallowing text between an
     # accidental pair of them into a garbled math span.
     methodology_text = """
-### Where the salary numbers come from
+The questions families and counselors actually ask, answered the way the
+model actually works. Every number this app shows should be traceable to a
+source named somewhere below; if you find one that is not, that is a bug and
+we would like to hear about it.
+
+### 1. Where do the salary numbers come from?
 
 #### Major salary data
 
@@ -26488,7 +26493,7 @@ disagree with itself. Picking California while living in New York showed
 California wages for the jobs New York doesn't report, while the page called
 them national figures.
 
-### How long school takes, and what that changes
+### 2. How long does school take, and what does that change?
 
 #### How long a degree beyond a bachelor's is charged for
 
@@ -26603,7 +26608,7 @@ you've taken out is still quietly racking up interest the whole time,
 since you're not making payments yet. That's on purpose, not a bug. A
 first-year med student really does earn $0, not a doctor's salary.
 
-### What the salary figures assume
+### 3. What do the salary figures assume?
 
 #### The biggest assumption here: that you work in your field
 
@@ -26640,7 +26645,7 @@ typically lead to (those BLS marks as needing less than a bachelor's) are
 filtered out. This is our own summary of public BLS data. It is not drawn
 from any subscription careers guide.
 
-### Program length, and what it costs
+### 4. How long do we assume you are enrolled, and what does it cost?
 
 #### How long we assume you're enrolled
 
@@ -26697,7 +26702,7 @@ too few borrowers finished that exact program. At the community colleges where
 this matters most, that's often every program. An estimate we can explain beats
 a real number we mostly can't get.
 
-### Where the pay lands, and what you're compared against
+### 5. Where does the pay land, and what are you compared against?
 
 #### Where the pay actually lands (Target Profession mode)
 
@@ -26816,7 +26821,7 @@ this comparison as "a degree versus a typical working adult without one,"
 rather than "versus your classmate who skipped college." It's the more
 demanding of the two tests.
 
-### How repayment is modeled
+### 6. How is repayment modeled?
 
 #### How your loan payment is calculated
 
@@ -26925,7 +26930,7 @@ six-figure event. Read every forgiveness number on this page with that in mind.
 [Source: TICAS, "Comparing Income-Driven Repayment Plans", September 16,
 2025](https://ticas.org/wp-content/uploads/2025/09/IDR-Plan-Chart-9.16.25.pdf).
 
-### Earnings, ROI and the net-position chart
+### 7. How are earnings, ROI and the net-position chart calculated?
 
 #### Cumulative Median Gross Pay minus loan payments
 
@@ -26971,7 +26976,7 @@ Contributions, will see different ROI% numbers, on purpose. ROI here
 means "return on everything you actually put in," not just "return on
 your loan."
 
-### Cost of living, taxes and take-home pay
+### 8. How are cost of living, taxes and take-home pay handled?
 
 #### Why we adjust for cost of living
 
@@ -27066,7 +27071,7 @@ sidebar inputs; turning on Compare Mode adds Scenario B next to it rather
 than replacing anything, so turning it back off never loses what you've
 entered.
 
-### School cost and how your loan is built
+### 9. How is your loan built from your school's cost?
 
 #### Where school cost and debt numbers come from
 
@@ -27163,7 +27168,7 @@ apply to someone deciding where to enrol now.
 [Source: studentaid.gov, OBBBA "Important Definitions", "PLUS loans for parents"
 annual and aggregate tables](https://studentaid.gov/announcements-events/big-updates/definitions).
 
-### Graduate and professional school
+### 10. How are graduate and professional school priced?
 
 #### Professional school: no more Grad PLUS (OBBBA, July 1, 2026)
 
@@ -27329,7 +27334,7 @@ larger than it used to be, so this would only have got worse.
 Simplified mode's median debt is **federal loans only** and excludes
 PLUS/private entirely, so no split applies there.
 
-### Getting numbers specific to you
+### 11. How do I get numbers specific to me?
 
 #### Getting your own numbers instead of school averages
 
@@ -27348,7 +27353,7 @@ Student Aid Index (SAI), which you enter as Personal Contribution. These
 compose correctly: net price removes grants but not the family contribution,
 so subtracting the SAI on top of it is not double-counting.
 
-### The community-college paths
+### 12. What if community college is part of the plan?
 
 #### The "2+2" transfer path
 
@@ -27462,7 +27467,7 @@ The resulting degree is treated as identical to one earned by starting at the
 compare paths directly, set a different path in each scenario in Compare
 Mode.
 
-### Timing, overrides and inflation
+### 13. How are timing, overrides and inflation handled?
 
 #### Accounting for a delayed start
 
@@ -27525,7 +27530,7 @@ estimate based on general inflation trends. This one is a judgment call,
 not a number we found in a report. If we don't even know what type of
 school it is, we default to the public-school rate.
 
-### What this app records
+### 14. What does this app record about you?
 
 #### The two questions at the top of the page
 
@@ -27571,7 +27576,7 @@ no email, no IP address and no account. Each visit gets a random ID that is
 thrown away when you close the tab, so two visits can't be linked to each
 other or to you.
 
-### Advanced Analysis Settings
+### 15. What do the Advanced Analysis Settings do?
 
 Four extra modules live in a sidebar expander. Three are off by default and
 opt-in. *Count foregone earnings during enrollment* is the exception: it is
@@ -27668,4 +27673,24 @@ reflect any individual's actual salary, cost of living, or loan terms.*
 a tax status: this site solicits no donations, and nothing paid to it would be
 tax-deductible.*
         """
-    st.markdown(methodology_text.replace("$", r"\$"))
+    # Rendered as a numbered FAQ: a heading, then one expander per question,
+    # split at render time on the "### " headings so the audited prose above
+    # stays one literal. Streamlit cannot nest expanders, which is why the
+    # old single wrapper became a container. The closing disclaimers (the
+    # educational-estimates note and the organization status line) are peeled
+    # off the last section and rendered at page level: a status line buried
+    # inside a collapsed question is a status line nobody sees.
+    st.subheader("📚 Methodology & Sources")
+    _meth_intro, *_meth_sections = re.split(r"^### ", methodology_text, flags=re.M)
+    st.markdown(_meth_intro.replace("$", r"\$"))
+    _meth_marker = "*This tool produces educational estimates"
+    _meth_tail = ""
+    if _meth_sections and _meth_marker in _meth_sections[-1]:
+        _meth_sections[-1], _, _meth_rest = _meth_sections[-1].partition(_meth_marker)
+        _meth_tail = _meth_marker + _meth_rest
+    for _meth_section in _meth_sections:
+        _meth_title, _, _meth_body = _meth_section.partition("\n")
+        with st.expander(_meth_title.strip()):
+            st.markdown(_meth_body.replace("$", r"\$"))
+    if _meth_tail:
+        st.markdown(_meth_tail.replace("$", r"\$"))
