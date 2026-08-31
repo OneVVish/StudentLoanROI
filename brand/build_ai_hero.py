@@ -91,6 +91,13 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "after-the-interest-profiler": (
+        "A teenager at a plain desk by a window in soft morning light, seen "
+        "from behind and to one side so no face is visible, a few printed "
+        "pages spread out and one held mid-read, a yellow highlighter resting "
+        "on the stack. Documentary photography, shallow depth of field, muted "
+        "natural colour, unposed. No text legible, no charts, no screens.",
+        20260831, 4),
     "for-parents-run-the-numbers": (
         "A parent and a teenager sitting together at a kitchen table in warm "
         "late afternoon light, papers and a laptop between them, seen from "
