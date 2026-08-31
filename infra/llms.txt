@@ -76,6 +76,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [What a college ROI ranking cannot tell you](https://worthmydegree.com/guides/college-roi-rankings):
+  College ROI rankings pool every major, skip the debt, and ignore
+  where you will live. Here is what the number actually measures, and
+  how to price your own plan instead.
 - [You took the Interest Profiler. Now price the list.](https://worthmydegree.com/guides/after-the-interest-profiler):
   Your O*NET Interest Profiler results are a list of careers that fit
   you. Here is what each one pays, what the training costs to reach,
