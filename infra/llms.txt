@@ -77,9 +77,9 @@ degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
 - [What a college ROI ranking cannot tell you](https://worthmydegree.com/guides/college-roi-rankings):
-  College ROI rankings pool every major, skip the debt, and ignore
-  where you will live. Here is what the number actually measures, and
-  how to price your own plan instead.
+  From U.S. News to the WSJ to the ROI lists, college rankings pool
+  every major and cannot see your loan or your city. What each number
+  measures, and how to price your own plan.
 - [You took the Interest Profiler. Now price the list.](https://worthmydegree.com/guides/after-the-interest-profiler):
   Your O*NET Interest Profiler results are a list of careers that fit
   you. Here is what each one pays, what the training costs to reach,

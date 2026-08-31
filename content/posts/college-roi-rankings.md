@@ -1,6 +1,6 @@
 ---
 title: What a college ROI ranking cannot tell you
-description: College ROI rankings pool every major, skip the debt, and ignore where you will live. Here is what the number actually measures, and how to price your own plan instead.
+description: From U.S. News to the WSJ to the ROI lists, college rankings pool every major and cannot see your loan or your city. What each number measures, and how to price your own plan.
 summary: The famous rankings answer which schools' students earned the most. They cannot answer whether your degree, at your school, on your loan, is worth it.
 date: 2026-08-31
 hero: guide-hero-college-roi-rankings-klein4b.png
@@ -8,7 +8,9 @@ hero: guide-hero-college-roi-rankings-klein4b.png
 
 Every year a new ranking says which colleges are the best investment. The [San Francisco Chronicle's interactive](https://www.sfchronicle.com/projects/2025/best-california-colleges-return-on-investment/) is a good one, built on [Georgetown University's ROI analysis](https://cew.georgetown.edu/cew-reports/roi2025/) of the federal College Scorecard: it reports, for each school, the median earnings of students ten years after they enrolled, minus the average net price they paid. By that measure Caltech leads California at $627,000 and a typical UC or CSU returns about $247,000 over ten years.
 
-Those are real numbers, honestly computed, and worth a look. They are also answering a different question than the one you are asking. A ranking asks which schools' past students earned the most. You are asking whether one specific plan, your major at your school on your loan in your city, will be worth it. Here are five things the ranking's number cannot see, and where each one gets answered instead.
+Those are real numbers, honestly computed, and worth a look. They are also answering a different question than the one you are asking. A ranking asks which schools' past students earned the most. You are asking whether one specific plan, your major at your school on your loan in your city, will be worth it.
+
+The bigger names measure even less of that question, just in different ways. [U.S. News](https://www.usnews.com/education/best-colleges/articles/ranking-criteria-and-weights) weighs earnings five years after graduation at 5% of its score, with another 5% for debt, and [says a new earnings metric arrives in its 2027 edition](https://www.usnews.com/education/behind-the-numbers/articles/2026-08-25/coming-soon-2027-best-colleges-with-new-earnings-metric). The [Wall Street Journal's ranking](https://cdn.statista-rankings.com/education/rankings/colleges-us-2026/methodology-the-wall-street-journal-best-colleges-america-2026.pdf) went the other way, putting 70% of its score on student outcomes, led by salary impact and the years needed to pay off the net price. [Times Higher Education](https://www.timeshighereducation.com/world-university-rankings) and QS rank reputation and research and measure earnings hardly at all. Wherever a ranking sits on that spectrum, the same five gaps apply, because each gap is a fact about you rather than about a school. Here they are, and where each one gets answered instead.
 
 Money figures below from this site's own federal wage file, the May 2025 release, are rounded to the nearest thousand dollars; figures from the Chronicle and Georgetown are quoted as published.
 
