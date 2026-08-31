@@ -26361,7 +26361,7 @@ st.divider()
 
 # ---- 5f. Methodology & Sources Footer -------------------------------------
 
-with st.expander("📚 Methodology & Sources"):
+with st.container():
     # st.markdown renders LaTeX math between paired "$" within a paragraph --
     # this text uses "$" only for literal dollar amounts, so every "$" is
     # escaped below to stop Streamlit from swallowing text between an
@@ -27673,4 +27673,24 @@ reflect any individual's actual salary, cost of living, or loan terms.*
 a tax status: this site solicits no donations, and nothing paid to it would be
 tax-deductible.*
         """
-    st.markdown(methodology_text.replace("$", r"\$"))
+    # Rendered as a numbered FAQ: a heading, then one expander per question,
+    # split at render time on the "### " headings so the audited prose above
+    # stays one literal. Streamlit cannot nest expanders, which is why the
+    # old single wrapper became a container. The closing disclaimers (the
+    # educational-estimates note and the organization status line) are peeled
+    # off the last section and rendered at page level: a status line buried
+    # inside a collapsed question is a status line nobody sees.
+    st.subheader("📚 Methodology & Sources")
+    _meth_intro, *_meth_sections = re.split(r"^### ", methodology_text, flags=re.M)
+    st.markdown(_meth_intro.replace("$", r"\$"))
+    _meth_marker = "*This tool produces educational estimates"
+    _meth_tail = ""
+    if _meth_sections and _meth_marker in _meth_sections[-1]:
+        _meth_sections[-1], _, _meth_rest = _meth_sections[-1].partition(_meth_marker)
+        _meth_tail = _meth_marker + _meth_rest
+    for _meth_section in _meth_sections:
+        _meth_title, _, _meth_body = _meth_section.partition("\n")
+        with st.expander(_meth_title.strip()):
+            st.markdown(_meth_body.replace("$", r"\$"))
+    if _meth_tail:
+        st.markdown(_meth_tail.replace("$", r"\$"))
