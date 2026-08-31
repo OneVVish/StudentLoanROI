@@ -91,6 +91,17 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "upper-middle-class-financial-aid": (
+        # Reprompted from the kitchen-counter scene: seven heroes in, the set
+        # had converged on warm interiors with papers, and this one is about
+        # the gate rather than the table. New seed with the new prompt, per
+        # the rule above.
+        "A tall wrought iron university gate between weathered stone pillars, "
+        "closed, seen straight on in cool early morning fog, a long lawn and "
+        "collegiate gothic buildings soft in the distance, nobody in frame. "
+        "Documentary photography, muted cool colour, quiet and still. No "
+        "text, no legible signs, no people.",
+        20260834, 4),
     "college-roi-rankings": (
         "A kitchen counter in soft evening light, a folded newspaper lying "
         "beside a mug and a pair of reading glasses, a laptop closed nearby, "

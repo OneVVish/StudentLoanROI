@@ -76,6 +76,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [Too rich for aid, too poor for sticker](https://worthmydegree.com/guides/upper-middle-class-financial-aid):
+  What the aid formula actually expects a $150,000 to $300,000 family
+  to pay, per child, where the famous schools break the pattern, and
+  where the federal money runs out.
 - [What a college ROI ranking cannot tell you](https://worthmydegree.com/guides/college-roi-rankings):
   From U.S. News to the WSJ to the ROI lists, college rankings pool
   every major and cannot see your loan or your city. What each number
