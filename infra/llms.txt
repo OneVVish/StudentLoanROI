@@ -76,6 +76,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [You took the Interest Profiler. Now price the list.](https://worthmydegree.com/guides/after-the-interest-profiler):
+  Your O*NET Interest Profiler results are a list of careers that fit
+  you. Here is what each one pays, what the training costs to reach,
+  and how to check whether it pays off.
 - [The 2026 repayment plans, and what they replaced](https://worthmydegree.com/guides/repayment-plans-2026-what-changed):
   RAP charges a percentage of everything you earn. The plans it
   replaced charged only on what was left after a living allowance.
