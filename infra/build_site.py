@@ -636,6 +636,11 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
   <p class="deck" style="margin-top:14px"><a href="/guides"
     style="color:var(--blue);font-weight:600;text-decoration:none">All
     guides&nbsp;→</a></p>
+  <p class="deck" style="margin-top:6px">Still deciding what you want to be?
+  Start with the <a href="https://onetinterestprofiler.org/"
+    style="color:var(--blue)">O*NET Interest Profiler</a>, the federal
+  government's free interest assessment. It tells you which careers fit you.
+  This site tells you what each one costs to reach, and when it pays off.</p>
 </section>'''
 
     # Two infographics, with their pictures, below the guides band. The guides

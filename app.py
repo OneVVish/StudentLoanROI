@@ -18559,6 +18559,18 @@ major = _sb_study.selectbox(
          "used everywhere else in the app. Instead of scrolling, click the "
          "box and type part of the name to jump straight to it.",
 )
+# Career mode only: the visitor scrolling 836 occupations may not have one in
+# mind at all, and that question is upstream of this tool. The Interest
+# Profiler's careers and this list are the same federal SOC universe, which is
+# what makes the handoff work by name. States the division of labor, not a
+# recommendation; the link is a government tool, so pointing at it implies no
+# endorsement problem in that direction.
+if dataset_mode == DATASET_MODE_CAREER:
+    _sb_study.caption(
+        "No career in mind yet? The Department of Labor's free "
+        "[O*NET Interest Profiler](https://onetinterestprofiler.org/) matches "
+        "your interests to occupations from this same federal list. Take it "
+        "there, then come back and price the one it suggests.")
 # Which medical/dental/law school, for the paths that attend one. Placed here
 # for the same reason as the salary override below -- it needs the chosen
 # occupation -- and it must resolve BEFORE

@@ -112,6 +112,17 @@ Everything below needs no account, no email and no setup.
 - **A share link** reopens the exact scenario, so a student can send you what
   they were looking at rather than describing it.
 
+## Pair it with the Interest Profiler
+
+This calculator pairs naturally with the [O*NET Interest
+Profiler](https://onetinterestprofiler.org/), the Department of Labor's free
+assessment that many of you already use. The Profiler answers which careers fit
+a student's interests. This tool answers what each of those careers costs to
+reach, on a real loan, at a real school. The two questions come in that order,
+and the Profiler's career list and this calculator's Career mode draw on the
+same federal occupation data, so a career found there can be priced here by
+name.
+
 ## What to say about the numbers
 
 Three caveats worth repeating to a student, because the tool states them and a
