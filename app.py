@@ -3479,8 +3479,24 @@ COLLEGE_PRESTIGE_TIERS = {
 # A per-major "AI Exposure Score" is only as credible as its source -- so
 # rather than inventing a unique 0-100 number per major, this is modeled at
 # the SOC "major group" level (the first 2 digits of a 6-digit BLS SOC code,
-# e.g. 15-xxxx = Computer & Mathematical), the level real published AI
-# task-exposure research actually operates at: Felten, Raj & Seamans, "AI
+# e.g. 15-xxxx = Computer & Mathematical).
+#
+# THAT AGGREGATION IS OURS, NOT THE RESEARCH'S, and this comment used to claim
+# the opposite -- "the level real published AI task-exposure research actually
+# operates at". It is not: Eloundou et al.'s original estimates are at 8-digit
+# O*NET, and Brynjolfsson, Chandar and Chen (Canaries in the Coal Mine, 2026)
+# crosswalk every exposure measure to 6-digit SOC before using it. Both run
+# well below these 22 groups. The real reason to aggregate is the one the rest
+# of this comment already gives better: a unique number per occupation title
+# would imply a precision these estimates do not carry. Corrected 2026-09-01,
+# after the same false sentence was found in the Methodology and in a guide.
+#
+# The measure has since been checked twice against observed usage, from two
+# directions and neither of them ours: Tomlinson et al. (2025) find the
+# Eloundou measures track Microsoft Copilot usage closely, and Canaries reports
+# that ordering employment by Claude usage matches ordering it by Eloundou.
+#
+# Sources: Felten, Raj & Seamans, "AI
 # Occupational Exposure" (AIOE) index (nber.org/papers/w28959), and Eloundou,
 # Manning, Mishkin & Rock, "GPTs are GPTs" (arXiv:2303.10130, 2023), both of
 # which consistently find office/administrative-support and business/
@@ -27671,9 +27687,15 @@ real cost of a degree and leaving them out flatters every path.
   salary bump.
 - **AI Employability Risk Analysis.** Rather than inventing a precise
   0-100 score for your specific major (which no one could actually back up),
-  this models AI "task exposure" at the SOC *occupation group* level, the
-  same real classification level published research on this topic actually
-  uses. Sources: Felten, Raj & Seamans, "AI Occupational Exposure" ([NBER
+  this models AI "task exposure" at the SOC *occupation group* level. The
+  research itself runs finer than that, down to individual O*NET tasks, and we
+  deliberately do not: a unique score for one job title would imply a precision
+  the underlying estimates do not carry. Those estimates have been checked
+  against what people actually do with AI, from two directions and neither of
+  them ours. Tomlinson et al. (2025) find the measures below track Microsoft
+  Copilot usage closely, and the Stanford payroll study reports that ordering
+  employment by Claude usage matches ordering it by the same measures.
+  Sources: Felten, Raj & Seamans, "AI Occupational Exposure" ([NBER
   Working Paper 28959](https://www.nber.org/papers/w28959)), and Eloundou,
   Manning, Mishkin & Rock, "GPTs are GPTs" ([arXiv:2303.10130](https://arxiv.org/abs/2303.10130),
   2023). Both consistently find office/administrative-support and
