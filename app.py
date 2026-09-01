@@ -3777,8 +3777,9 @@ RAP_FIRST_ORIGINATION_YEAR = 2026
 # from -- the chart-twin drift running backwards. A shared constant is what
 # makes that unrepeatable; check_plan_switching asserts all three read it.
 COUNTBACK_PLAN_AVAILABILITY = (
-    "ICR and PAYE terminate on July 1, 2028, and IBR is closed to loans "
-    "originated on or after July 1, 2026.")
+    "ICR and PAYE terminate on July 1, 2028, leaving IBR as the only plan RAP "
+    "credit could return to, and IBR is itself shut to loans originated on or "
+    "after July 1, 2026.")
 # The pre-OBBBA pair. Reachable only via the Advanced Analysis toggle, or on a
 # start year before the cutoff -- which the start-year list no longer offers.
 LEGACY_STRATEGY_LABELS = [STANDARD_STRATEGY_LABEL, IDR_STRATEGY_LABEL]
@@ -21113,8 +21114,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     f"when the RAP payment is at least the 10-year Standard payment "
                     f"of {fmt_money_md(_back['threshold'])}, and at this income "
                     f"RAP never reaches it. The lower your payment, the more you "
-                    f"give up by switching. And there may be nothing to switch "
-                    f"back to: " + COUNTBACK_PLAN_AVAILABILITY
+                    f"give up by switching, if there is anything left to "
+                    f"switch back to at all."
                 )
             elif _back["total"] and _back["share"] < 1:
                 # WHERE those months sit, not only how many there are. A bare
@@ -21140,14 +21141,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            else "")
                         + ", because the RAP payment only reaches that bar "
                         "once your income has grown into it. Switch back "
-                        "before then and you keep none of it.")
-                # AND WHETHER THERE IS A PLAN TO SWITCH BACK TO. The sentence
-                # above now names a month two decades out, which reads as an
-                # assurance that the option is waiting there. For two of the
-                # three plans named it will not be, and that is not something
-                # the count-back arithmetic can see.
-                _when += (" Whether you can switch back at all is a separate "
-                          "question: " + COUNTBACK_PLAN_AVAILABILITY)
+                        "before then, and by then IBR may be the only plan "
+                        "left to switch back to.")
                 st.info(
                     f"**Switching back would cost you some credit.** "
                     f"{_back['counting']} of {_back['total']} RAP payments "
@@ -21282,10 +21277,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "IBR/ICR/PAYE only in months where the RAP payment was at least "
                 "the 10-year Standard payment, which for most income-driven "
                 "borrowers is never.  \n"
-                "**And the way back is closing.** ICR and PAYE terminate on "
-                "July 1, 2028, leaving IBR as the only plan RAP credit could "
-                "return to, and IBR is itself shut to loans originated on or "
-                "after July 1, 2026. Sources: studentaid.gov OBBBA "
+                "**And the way back is closing.** "
+                + COUNTBACK_PLAN_AVAILABILITY
+                + " Sources: studentaid.gov OBBBA "
                 "definitions, *Repayment Assistance Plan*; TICAS, *Upcoming "
                 "Changes to Income-Driven Repayment Plans*."
             )
