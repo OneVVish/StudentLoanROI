@@ -15263,8 +15263,8 @@ def _pdf_resources_section(styles: dict, schools: list) -> list:
         PageBreak(),
         Paragraph(_strip_emoji("🎯 Get Your Real Numbers"), styles["section"]),
         Paragraph(
-            "The cost and aid figures above are school-wide averages. Two free, official "
-            "tools give you your own personalized numbers instead:",
+            "The cost and aid figures above are school-wide averages. These tools give "
+            "you your own personalized numbers instead:",
             styles["body"]),
     ]
     for label, name in schools:
@@ -15277,12 +15277,18 @@ def _pdf_resources_section(styles: dict, schools: list) -> list:
             "net price — the cost after grants &amp; scholarships. Enter that as Cost of Attendance, "
             "and set Grants &amp; Scholarships to $0 (the net price already removed them).",
             styles["body"]))
+    # Both SAI routes, in the order the on-screen panel uses them. Absolute URL
+    # rather than internal_tool_url: a report is read off the page it was
+    # printed from, where a relative "./?tool=sai" resolves against nothing.
+    sai_tool_href = xml_escape(APP_URL + "/?tool=sai")
     sai_href = xml_escape(SAI_ESTIMATOR_URL)
     parts.append(Paragraph(
         "<b>Your family contribution (SAI):</b> "
-        f'<a href="{sai_href}" color="blue">open the Federal Student Aid Estimator</a> to estimate '
-        "your Student Aid Index, and enter it as Personal Contribution (per year). It lowers the "
-        "loan on top of the net price above — that is correct, not double-counting.",
+        f'<a href="{sai_tool_href}" color="blue">this site\'s SAI estimator</a> runs the federal '
+        "worksheet line by line for a dependent student, and the "
+        f'<a href="{sai_href}" color="blue">Federal Student Aid Estimator</a> is the authority and '
+        "covers every household. Enter the result as Personal Contribution (per year). It lowers "
+        "the loan on top of the net price above, and that is correct, not double-counting.",
         styles["body"]))
     return parts
 
@@ -24514,9 +24520,9 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
     st.subheader("🎯 Get Your Real Numbers")
     st.caption(
         "The cost and aid figures here are school-wide averages. For a decision this "
-        "big, it's worth five minutes replacing them with your own. Both tools below "
-        "are free, official, and only need a few inputs. They're separate government "
-        "sites, not part of this app."
+        "big, it's worth five minutes replacing them with your own. Every tool below "
+        "is free and needs only a few inputs. The net price calculator and the federal "
+        "estimator are separate government sites, not part of this app."
     )
     col_cost, col_sai = st.columns(2)
 
@@ -24543,13 +24549,22 @@ def render_get_accurate_inputs(school_name_a, school_name_b, compare_mode, prest
 
     with col_sai:
         st.markdown("**🎓 Your family contribution (SAI)**")
+        # Ours first, the federal one second, and both rather than either. This
+        # site's estimator shows the worksheet a visitor is being asked to trust
+        # and is the surface the guides and the aid-formula charts already point
+        # at; the federal estimator is the authority and is the ONLY one of the
+        # two that answers for an independent student, since compute_student_aid_index
+        # implements Formula A alone. Dropping it to promote our own would hand
+        # those households a number that does not describe them.
+        st.markdown(f"[Estimate it on this site →]({internal_tool_url('sai')})")
         st.markdown(f"[Open the Federal Student Aid Estimator →]({SAI_ESTIMATOR_URL})")
         st.caption(
-            "Estimates your **Student Aid Index (SAI)**, what your family is expected to "
-            "put toward each year. Enter it as **Personal Contribution (per year)** in the "
-            "sidebar. This lowers your loan on top of the net price above, and that's "
-            "correct: net price doesn't remove the family contribution, so it's not "
-            "double-counting."
+            "Both estimate your **Student Aid Index (SAI)**, what your family is expected "
+            "to put toward each year. Enter it as **Personal Contribution (per year)** in "
+            "the sidebar. Ours shows the federal worksheet line by line for a dependent "
+            "student; the federal one is the authority and covers every household. Either "
+            "way the SAI lowers your loan on top of the net price above, and that's "
+            "correct: net price doesn't remove the family contribution."
         )
 
     st.divider()
@@ -27340,18 +27355,24 @@ PLUS/private entirely, so no split applies there.
 
 The Cost of
 Attendance we auto-fill is a school-wide *average sticker price*, meaning what
-a typical student is charged before aid. Two free, official tools give you
-your own figures, and the **🎯 Get Your Real Numbers** section near the top
-links to both. Your school's **Net Price Calculator** (each U.S. college is
+a typical student is charged before aid. Three tools give you your own
+figures, and the **🎯 Get Your Real Numbers** section near the top links to
+all of them. Your school's **Net Price Calculator** (each U.S. college is
 federally required to host one; find yours through the Department of
 Education's directory at
 [collegecost.ed.gov/net-price](https://collegecost.ed.gov/net-price)) returns
 your *net price*, meaning cost after grants and scholarships, which you enter
-as Cost of Attendance while setting Grants & Scholarships to $0. The federal
-[Student Aid Estimator](https://studentaid.gov/aid-estimator/) estimates your
-Student Aid Index (SAI), which you enter as Personal Contribution. These
-compose correctly: net price removes grants but not the family contribution,
-so subtracting the SAI on top of it is not double-counting.
+as Cost of Attendance while setting Grants & Scholarships to $0. Your
+**Student Aid Index (SAI)**, what the federal formula says your family can pay
+each year, goes in as Personal Contribution. [This site's own SAI
+estimator](""" + internal_tool_url("sai") + """) runs the published 2027-28
+worksheet line by line, so you can see how that number is built and what a
+savings balance or a second child in college does to it; it covers dependent
+students. The federal [Student Aid
+Estimator](https://studentaid.gov/aid-estimator/) is the authority and covers
+every household, including independent students. These compose correctly: net
+price removes grants but not the family contribution, so subtracting the SAI on
+top of it is not double-counting.
 
 ### 12. What if community college is part of the plan?
 
