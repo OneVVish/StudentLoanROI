@@ -19739,14 +19739,30 @@ def rap_months_counting_back(rap_result: dict, standard_monthly: float) -> dict:
 
     Returns counts rather than a verdict: "0 of 360" is the finding, and it is
     a much sharper statement than "switching may be irreversible".
+
+    AND WHERE THEY SIT, because the count alone reads as credit accruing along
+    the way. It does not. The RAP payment is a step function of an income that
+    only grows, so the qualifying months are one contiguous block at the END:
+    on a $60,000 balance at $45,000 with 40 prior payments, 32 of 320 months
+    count and they are months 289 to 320. A borrower who reads "32 of 320" and
+    switches back at year five keeps nothing, which is the opposite of what the
+    bare fraction suggests. `first_month` is 1-based, and 0 when none count.
+
+    The block runs to the last month except where the final payment is capped
+    at the remaining balance and so falls under the bar. That is a payoff
+    artifact rather than a rule about counting, which is why this names where
+    the credit STARTS rather than describing the tail.
     """
     schedule = rap_result.get("schedule")
     if schedule is None or schedule.empty or "payment" not in schedule.columns:
-        return {"counting": 0, "total": 0, "share": 0.0}
+        return {"counting": 0, "total": 0, "share": 0.0, "first_month": 0}
     total = int(len(schedule))
-    counting = int((schedule["payment"] >= standard_monthly - 0.005).sum())
+    qualifies = schedule["payment"] >= standard_monthly - 0.005
+    counting = int(qualifies.sum())
+    first_month = int(qualifies.values.argmax()) + 1 if counting else 0
     return {"counting": counting, "total": total,
             "share": counting / total if total else 0.0,
+            "first_month": first_month,
             # Carried so the on-screen warning can name the number the test was
             # actually run against, which is the FEDERAL 10-year Standard
             # payment -- not whatever the visitor's combined bill comes to.
@@ -21047,13 +21063,37 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     f"give up by switching."
                 )
             elif _back["total"] and _back["share"] < 1:
+                # WHERE those months sit, not only how many there are. A bare
+                # "32 of 320" reads as credit building up as you go, and it is
+                # the opposite: the RAP payment is a step function of an income
+                # that only grows, so the qualifying months are one contiguous
+                # block at the END. On the example in
+                # rap_months_counting_back's docstring they are months 289 to
+                # 320, so a borrower who reads the fraction and switches back
+                # at year five keeps nothing at all. Naming the first
+                # qualifying month answers the question the fraction raises,
+                # which is when they could leave and still have something.
+                _first = _back.get("first_month", 0)
+                _years = _first / 12
+                if _first <= 1:
+                    _when = " Those months run from your very first payment."
+                else:
+                    _when = (
+                        " Those are not spread across the plan. They are the "
+                        f"last of it: the first month that counts is month "
+                        f"{_first}"
+                        + (f", about {_years:.0f} years in" if _years >= 1.5
+                           else "")
+                        + ", because the RAP payment only reaches that bar "
+                        "once your income has grown into it. Switch back "
+                        "before then and you keep none of it.")
                 st.info(
                     f"**Switching back would cost you some credit.** "
                     f"{_back['counting']} of {_back['total']} RAP payments "
                     f"({_back['share']:.0%}) would count toward IBR/ICR/PAYE if you "
                     f"returned, because only months where the RAP payment reaches the "
                     f"10-year Standard payment of {fmt_money_md(_back['threshold'])} "
-                    f"count."
+                    f"count." + _when
                 )
 
         # The SAVE wind-down, stated WITHOUT a date on purpose. TICAS describes
