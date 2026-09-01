@@ -250,12 +250,27 @@ def check_plan_availability_note(ns):
     it unrepeatable, so what is asserted here is that all three surfaces read
     the constant rather than that they each contain the right words.
 
-    DATES NOT RE-VERIFIED IN THIS SESSION. They are anchored as literals below
-    rather than read off the constant under test, per this file's own rule, but
-    they were carried over from app.py's existing PDF caption rather than
-    checked against the source: studentaid.gov is a JavaScript shell that
-    serves the same content-free skeleton to a script for every route, so it
-    cannot be read without a browser. Confirm both before relying on them.
+    BOTH DATES VERIFIED against the regulation on 2026-09-01, and anchored as
+    literals below rather than read off the constant under test, per this
+    file's own rule. eCFR title 34 part 685, issue date 2026-08-31:
+
+      685.209(d)(5): "Notwithstanding the conditions under paragraphs (d)(1)
+      through (3) of this section, only Direct Loans made before July 1, 2026,
+      may be repaid under the PAYE, IBR, and ICR plans."
+
+      685.209(c)(7): before July 1, 2028 a borrower on PAYE or ICR must elect
+      another plan, begins repaying under it on July 1, 2028, and is
+      reassigned if they do not choose. (c)(4), (c)(5), (d)(1) and (d)(3)
+      bound those plans at June 30, 2028 to match.
+
+    The closure is a LOAN-level rule, not a borrower-level one: 685.209(c)(3)
+    lets any borrower elect IBR, and it is (d)(5) that decides which of their
+    loans can go there. A borrower can hold loans on both sides of the date,
+    which is why the wording states the rule rather than deriving a verdict.
+
+    Read the eCFR versioner API, not studentaid.gov, which serves a
+    content-free JavaScript shell to a script for every route. The API needs
+    --compressed or it answers 406 with a body saying exactly that.
     """
     problems = []
     src = open("app.py").read()
