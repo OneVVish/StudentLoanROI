@@ -234,6 +234,70 @@ def check_countback_position(ns):
     return problems
 
 
+def check_plan_availability_note(ns):
+    """Whether there is anything to switch back TO, said on every surface that
+    talks about switching back.
+
+    The count-back arithmetic assumes a destination and cannot see one. Under
+    OBBBA there is effectively one live destination for a borrower today: IBR,
+    and only on loans originated before the 2026 cutoff. A warning that names
+    a qualifying month two decades out reads as an assurance that the option
+    is waiting there, which for two of the three plans it names it will not be.
+
+    This lived in the PDF caption ALONE until 2026-09-01, so the downloadable
+    report was more accurate than the page it was printed from. That is the
+    chart-twin drift running backwards, and one shared constant is what makes
+    it unrepeatable, so what is asserted here is that all three surfaces read
+    the constant rather than that they each contain the right words.
+
+    DATES NOT RE-VERIFIED IN THIS SESSION. They are anchored as literals below
+    rather than read off the constant under test, per this file's own rule, but
+    they were carried over from app.py's existing PDF caption rather than
+    checked against the source: studentaid.gov is a JavaScript shell that
+    serves the same content-free skeleton to a script for every route, so it
+    cannot be read without a browser. Confirm both before relying on them.
+    """
+    problems = []
+    src = open("app.py").read()
+    tree = ast.parse(src)
+
+    note = ns.get("COUNTBACK_PLAN_AVAILABILITY")
+    if not note:
+        problems.append(
+            "  COUNTBACK_PLAN_AVAILABILITY is gone. The count-back warnings then "
+            "name three plans as destinations with nothing saying two of them "
+            "expire")
+        return problems
+
+    # Anchored on the published dates, NOT on the constant being checked.
+    for fragment in ("July 1, 2028", "July 1, 2026", "ICR", "PAYE", "IBR"):
+        if fragment not in note:
+            problems.append(
+                f"  COUNTBACK_PLAN_AVAILABILITY no longer mentions {fragment!r}. "
+                "It has to name both dates and all three plans, or it stops "
+                "answering the question it exists for")
+
+    # ALL THREE SURFACES, by reference to the constant. A surface that spells
+    # the sentence out again is the drift this replaced.
+    for func, what in (("render_existing_loan_comparison", "the on-screen warnings"),
+                       ("generate_pdf_repayment_report", "the PDF caption")):
+        node = next((n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == func), None)
+        if node is None:
+            problems.append(f"  {func} is gone; {what} cannot be checked")
+            continue
+        uses = sum(1 for n in ast.walk(node)
+                   if isinstance(n, ast.Name) and n.id == "COUNTBACK_PLAN_AVAILABILITY")
+        want = 2 if func == "render_existing_loan_comparison" else 1
+        if uses < want:
+            problems.append(
+                f"  {what} reads COUNTBACK_PLAN_AVAILABILITY {uses} time(s), "
+                f"expected {want}. Both count-back branches need it: the "
+                "zero-months branch and the partial one describe the same "
+                "switch and must not disagree about whether it is available")
+    return problems
+
+
 def main() -> int:
     ns = load()
     compare = ns["compare_existing_loan_plans"]
@@ -248,6 +312,10 @@ def main() -> int:
     # WHERE the counting months sit, which is what the warning now names.
     problems.extend(check_countback_position(ns))
     checked += 8
+
+    # And whether there is a plan left to switch back to.
+    problems.extend(check_plan_availability_note(ns))
+    checked += 7
 
     BAL, RATE = 60_000.0, 6.5
 

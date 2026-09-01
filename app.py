@@ -3762,6 +3762,23 @@ TIERED_STANDARD_STRATEGY_LABEL = "2026 Tiered Standard Plan"
 # before that date; see migrations.sql, and treat the two strings as one plan.
 LEGACY_RAP_STRATEGY_LABEL = "Repayment Assistance Plan (RAP)"
 RAP_FIRST_ORIGINATION_YEAR = 2026
+
+# WHETHER THERE IS ANYTHING TO SWITCH BACK TO, which the count-back arithmetic
+# assumes and never states. Both facts are OBBBA's, and together they mean the
+# count-back rule has exactly one live destination for a borrower today: IBR,
+# and only on loans originated before the 2026 cutoff. A borrower whose loans
+# are all newer faces a door closed by statute rather than by the payment
+# threshold, which is a stronger fact arriving for an entirely different
+# reason.
+#
+# ONE STRING, read by three surfaces: both on-screen count-back branches and
+# the PDF's plan-comparison caption. It lived only in the PDF until 2026-09-01,
+# so the downloadable report was more accurate than the page it was printed
+# from -- the chart-twin drift running backwards. A shared constant is what
+# makes that unrepeatable; check_plan_switching asserts all three read it.
+COUNTBACK_PLAN_AVAILABILITY = (
+    "ICR and PAYE terminate on July 1, 2028, and IBR is closed to loans "
+    "originated on or after July 1, 2026.")
 # The pre-OBBBA pair. Reachable only via the Advanced Analysis toggle, or on a
 # start year before the cutoff -- which the start-year list no longer offers.
 LEGACY_STRATEGY_LABELS = [STANDARD_STRATEGY_LABEL, IDR_STRATEGY_LABEL]
@@ -15876,9 +15893,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         "Payments under an income-driven plan count toward discharge under RAP, "
         "but moving to RAP extends the repayment period to RAP's 30 years. Going "
         "the other way, RAP payments count toward IBR/ICR/PAYE only in months "
-        "where the RAP payment was at least the 10-year Standard payment. ICR and "
-        "PAYE terminate on July 1, 2028, and IBR is closed to loans originated on "
-        "or after July 1, 2026.", styles["caption"]))
+        "where the RAP payment was at least the 10-year Standard payment. "
+        + COUNTBACK_PLAN_AVAILABILITY, styles["caption"]))
     story.append(Spacer(1, 12))
 
     # One chart, for whichever plan the visitor was looking at on screen --
@@ -21060,7 +21076,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     f"when the RAP payment is at least the 10-year Standard payment "
                     f"of {fmt_money_md(_back['threshold'])}, and at this income "
                     f"RAP never reaches it. The lower your payment, the more you "
-                    f"give up by switching."
+                    f"give up by switching. And there may be nothing to switch "
+                    f"back to: " + COUNTBACK_PLAN_AVAILABILITY
                 )
             elif _back["total"] and _back["share"] < 1:
                 # WHERE those months sit, not only how many there are. A bare
@@ -21087,6 +21104,13 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                         + ", because the RAP payment only reaches that bar "
                         "once your income has grown into it. Switch back "
                         "before then and you keep none of it.")
+                # AND WHETHER THERE IS A PLAN TO SWITCH BACK TO. The sentence
+                # above now names a month two decades out, which reads as an
+                # assurance that the option is waiting there. For two of the
+                # three plans named it will not be, and that is not something
+                # the count-back arithmetic can see.
+                _when += (" Whether you can switch back at all is a separate "
+                          "question: " + COUNTBACK_PLAN_AVAILABILITY)
                 st.info(
                     f"**Switching back would cost you some credit.** "
                     f"{_back['counting']} of {_back['total']} RAP payments "
