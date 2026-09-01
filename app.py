@@ -26645,6 +26645,45 @@ would mean guessing at which majors feed which careers. We'd rather tell
 you the assumption than invent a number to hide it. Read every figure below
 as "if you land the job," not "you will land the job."
 
+#### And that you are working at all
+
+Underemployment is about which job you land. Underneath it sits a second
+assumption, which is that you land one: the model puts you to work in the first
+year after you finish and in every year after that, and it does the same for
+the high school graduate you are measured against. Neither side of the
+comparison ever spends a year looking.
+
+That assumption carries more weight than it used to. Stanford's Digital Economy
+Lab, reading ADP payroll records through June 2026, finds employment of 22 to
+25 year olds in the most AI-exposed occupations running about 19% below where
+it would be had it kept pace with less exposed occupations, a gap that widened
+from 15% a year earlier, while experienced workers show no comparable gap
+([Brynjolfsson, Chandar and Chen,
+2026](https://digitaleconomy.stanford.edu/app/uploads/2026/08/Canaries_August2026.pdf)).
+Two features of that finding bear on this model specifically. The gap opens
+through reduced hiring rather than through layoffs, which the authors describe
+as a narrowing entry point rather than the displacement of people already
+working. And the adjustment runs through employment rather than pay: among new
+hires they find no obvious relationship between exposure and real starting pay
+for young workers. The salary figures on this page are not the thing that
+moved. The assumption underneath them is.
+
+Their own caveats travel with the number, and one of them lands here. They call
+these descriptive patterns rather than causal estimates, they find no broad
+displacement across the economy as a whole, and controlling for the share of
+each occupation held by college graduates roughly halves the estimate, from
+about 18 points to about 9. They publish both figures and say the pair brackets
+a range.
+
+We disclose it rather than model it, for the reason underemployment gets the
+same treatment. There is no per-occupation hiring rate we could apply to 836
+careers without inventing most of it, and an invented haircut is
+indistinguishable from a measured one once it is printed beside real figures.
+Where the exposure sits is something we can point at: of the 293 careers here
+that typically need a bachelor's degree or more, 36 fall in occupation groups
+the AI module bands High, and 28 of those are business and financial
+operations.
+
 #### "Careers this major commonly leads to" (Major mode)
 
 Beside that

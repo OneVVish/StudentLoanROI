@@ -88,6 +88,10 @@ ends at the calculator.
   Your O*NET Interest Profiler results are a list of careers that fit
   you. Here is what each one pays, what the training costs to reach,
   and how to check whether it pays off.
+- [Which careers AI touches, and what a slow first year costs](https://worthmydegree.com/guides/entry-level-hiring-and-college-roi):
+  What the Stanford Canaries in the Coal Mine study actually found,
+  which occupation groups carry the most task exposure, and how much
+  of a degree's ten-year payoff a slow first year really costs.
 - [The 2026 repayment plans, and what they replaced](https://worthmydegree.com/guides/repayment-plans-2026-what-changed):
   RAP charges a percentage of everything you earn. The plans it
   replaced charged only on what was left after a living allowance.

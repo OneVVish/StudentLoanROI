@@ -147,3 +147,6 @@ brand/feature-og-*.png
 #                                        front matter.
 static/guide-hero-1600x460.png
 static/guide-hero-for-parents-run-the-numbers.png
+
+# macOS Finder droppings; committed once by accident (c183c14).
+.DS_Store

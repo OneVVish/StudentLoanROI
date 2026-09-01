@@ -91,6 +91,16 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "entry-level-hiring-and-college-roi": (
+        # The set is warm interiors and one gate, so this one is a waiting
+        # room: the guide is about the first year after graduation, which is
+        # the year spent waiting to start. Cool and empty on purpose.
+        "An empty office reception area at first light, a row of identical "
+        "waiting chairs along a glass wall, polished concrete floor, one "
+        "unattended desk in the background, nobody in frame. Documentary "
+        "photography, muted cool colour, quiet and still. No text, no legible "
+        "signs, no people.",
+        20260901, 4),
     "upper-middle-class-financial-aid": (
         # Reprompted from the kitchen-counter scene: seven heroes in, the set
         # had converged on warm interiors with papers, and this one is about
