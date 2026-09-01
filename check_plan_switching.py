@@ -137,6 +137,182 @@ def check_household(ns):
     return problems
 
 
+def check_countback_position(ns):
+    """WHERE the counting months sit, which is what makes naming one honest.
+
+    The count alone reads as credit accruing along the way. It is the reverse:
+    the RAP payment is a step function of an income that only grows, so the
+    qualifying months are one block at the END. On a $60,000 balance at
+    $45,000 with 40 prior payments, 32 of 320 count and they are months 289 to
+    320 -- a borrower who switches back at year five keeps nothing, which the
+    bare fraction does not say.
+
+    CONTIGUITY IS WHAT THE SENTENCE RESTS ON. Naming a first qualifying month
+    describes the whole set only if nothing counts before it and the rest run
+    on unbroken. If the payment could dip back under the bar mid-schedule the
+    wording would be actively wrong, so that is asserted directly rather than
+    assumed from the shape of the formula.
+
+    The block runs to the last month EXCEPT where the final payment is capped
+    at the remaining balance and so falls under the bar. That is a payoff
+    artifact, it is why this checks the start rather than the tail, and one
+    trailing month is tolerated below.
+    """
+    problems = []
+    compare = ns["compare_existing_loan_plans"]
+    checked = 0
+
+    # Spread deliberately: low earners (nothing counts), high earners relative
+    # to the balance (everything counts from month one), and the middle, which
+    # is where the block starts partway through and the wording matters most.
+    grid = [(30_000, 65_000, 0), (60_000, 85_000, 0), (60_000, 110_000, 0),
+            (90_000, 110_000, 0), (150_000, 110_000, 0), (60_000, 45_000, 40),
+            (60_000, 200_000, 0), (30_000, 45_000, 0)]
+    for bal, inc, prior in grid:
+        rows = compare(float(bal), 6.5, float(inc), 0, True, 0.0, False, prior)
+        _, rap, _ = row(rows, "RAP")
+        if rap is None:
+            continue
+        back = rap.get("countback")
+        if not back:
+            continue
+        sched = rap.get("federal_only", rap)["schedule"]
+        pay = list(sched["payment"])
+        thr = back["threshold"]
+        idx = [i for i, p in enumerate(pay) if p >= thr - 0.005]
+        checked += 1
+
+        if not idx:
+            if back.get("first_month", 0) != 0:
+                problems.append(
+                    f"  ${bal:,.0f} at ${inc:,.0f}: nothing counts, but "
+                    f"first_month is {back['first_month']} rather than 0. The "
+                    "warning would name a month that never qualifies")
+            continue
+
+        # 1. first_month is 1-BASED and is the first qualifying month.
+        if back.get("first_month") != idx[0] + 1:
+            problems.append(
+                f"  ${bal:,.0f} at ${inc:,.0f}: first_month is "
+                f"{back.get('first_month')}, but the first qualifying month is "
+                f"{idx[0] + 1} (1-based). The warning names the wrong month, "
+                "and names it confidently")
+
+        # 2. ONE UNBROKEN BLOCK. Without this, naming a start says nothing
+        #    about the rest and the sentence is wrong rather than incomplete.
+        if idx != list(range(idx[0], idx[-1] + 1)):
+            gaps = [i for i in range(idx[0], idx[-1] + 1) if i not in set(idx)]
+            problems.append(
+                f"  ${bal:,.0f} at ${inc:,.0f}: the counting months are not "
+                f"contiguous ({len(gaps)} gap month(s) inside "
+                f"{idx[0] + 1}-{idx[-1] + 1}). 'the first month that counts' "
+                "then describes only part of the set")
+
+        # 3. It runs to the end, bar the capped closing payment.
+        tail = len(pay) - 1 - idx[-1]
+        if tail > 1:
+            problems.append(
+                f"  ${bal:,.0f} at ${inc:,.0f}: counting stops {tail} months "
+                f"before the end of the schedule. More than one trailing month "
+                "is not a payoff artifact, and 'they are the last of it' stops "
+                "being true")
+
+        # 4. The count and the positions must agree. They are computed two
+        #    different ways -- a sum over the series, and the indices read off
+        #    it -- so a disagreement means one of them is describing something
+        #    other than what the visitor is shown.
+        if back["counting"] != len(idx):
+            problems.append(
+                f"  ${bal:,.0f} at ${inc:,.0f}: countback says "
+                f"{back['counting']} months count while {len(idx)} months "
+                "clear the threshold")
+
+    if not checked:
+        problems.append(
+            "  no scenario in the grid produced a countback at all; this check "
+            "is passing without testing anything")
+    return problems
+
+
+def check_plan_availability_note(ns):
+    """Whether there is anything to switch back TO, said on every surface that
+    talks about switching back.
+
+    The count-back arithmetic assumes a destination and cannot see one. Under
+    OBBBA there is effectively one live destination for a borrower today: IBR,
+    and only on loans originated before the 2026 cutoff. A warning that names
+    a qualifying month two decades out reads as an assurance that the option
+    is waiting there, which for two of the three plans it names it will not be.
+
+    This lived in the PDF caption ALONE until 2026-09-01, so the downloadable
+    report was more accurate than the page it was printed from. That is the
+    chart-twin drift running backwards, and one shared constant is what makes
+    it unrepeatable, so what is asserted here is that all three surfaces read
+    the constant rather than that they each contain the right words.
+
+    BOTH DATES VERIFIED against the regulation on 2026-09-01, and anchored as
+    literals below rather than read off the constant under test, per this
+    file's own rule. eCFR title 34 part 685, issue date 2026-08-31:
+
+      685.209(d)(5): "Notwithstanding the conditions under paragraphs (d)(1)
+      through (3) of this section, only Direct Loans made before July 1, 2026,
+      may be repaid under the PAYE, IBR, and ICR plans."
+
+      685.209(c)(7): before July 1, 2028 a borrower on PAYE or ICR must elect
+      another plan, begins repaying under it on July 1, 2028, and is
+      reassigned if they do not choose. (c)(4), (c)(5), (d)(1) and (d)(3)
+      bound those plans at June 30, 2028 to match.
+
+    The closure is a LOAN-level rule, not a borrower-level one: 685.209(c)(3)
+    lets any borrower elect IBR, and it is (d)(5) that decides which of their
+    loans can go there. A borrower can hold loans on both sides of the date,
+    which is why the wording states the rule rather than deriving a verdict.
+
+    Read the eCFR versioner API, not studentaid.gov, which serves a
+    content-free JavaScript shell to a script for every route. The API needs
+    --compressed or it answers 406 with a body saying exactly that.
+    """
+    problems = []
+    src = open("app.py").read()
+    tree = ast.parse(src)
+
+    note = ns.get("COUNTBACK_PLAN_AVAILABILITY")
+    if not note:
+        problems.append(
+            "  COUNTBACK_PLAN_AVAILABILITY is gone. The count-back warnings then "
+            "name three plans as destinations with nothing saying two of them "
+            "expire")
+        return problems
+
+    # Anchored on the published dates, NOT on the constant being checked.
+    for fragment in ("July 1, 2028", "July 1, 2026", "ICR", "PAYE", "IBR"):
+        if fragment not in note:
+            problems.append(
+                f"  COUNTBACK_PLAN_AVAILABILITY no longer mentions {fragment!r}. "
+                "It has to name both dates and all three plans, or it stops "
+                "answering the question it exists for")
+
+    # ALL THREE SURFACES, by reference to the constant. A surface that spells
+    # the sentence out again is the drift this replaced.
+    for func, what in (("render_existing_loan_comparison", "the on-screen warnings"),
+                       ("generate_pdf_repayment_report", "the PDF caption")):
+        node = next((n for n in ast.walk(tree)
+                     if isinstance(n, ast.FunctionDef) and n.name == func), None)
+        if node is None:
+            problems.append(f"  {func} is gone; {what} cannot be checked")
+            continue
+        uses = sum(1 for n in ast.walk(node)
+                   if isinstance(n, ast.Name) and n.id == "COUNTBACK_PLAN_AVAILABILITY")
+        want = 2 if func == "render_existing_loan_comparison" else 1
+        if uses < want:
+            problems.append(
+                f"  {what} reads COUNTBACK_PLAN_AVAILABILITY {uses} time(s), "
+                f"expected {want}. Both count-back branches need it: the "
+                "zero-months branch and the partial one describe the same "
+                "switch and must not disagree about whether it is available")
+    return problems
+
+
 def main() -> int:
     ns = load()
     compare = ns["compare_existing_loan_plans"]
@@ -147,6 +323,14 @@ def main() -> int:
     household = check_household(ns)
     problems.extend(household)
     checked += 9
+
+    # WHERE the counting months sit, which is what the warning now names.
+    problems.extend(check_countback_position(ns))
+    checked += 8
+
+    # And whether there is a plan left to switch back to.
+    problems.extend(check_plan_availability_note(ns))
+    checked += 7
 
     BAL, RATE = 60_000.0, 6.5
 
