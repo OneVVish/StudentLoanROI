@@ -27690,7 +27690,17 @@ real cost of a degree and leaving them out flatters every path.
   this models AI "task exposure" at the SOC *occupation group* level. The
   research itself runs finer than that, down to individual O*NET tasks, and we
   deliberately do not: a unique score for one job title would imply a precision
-  the underlying estimates do not carry. Those estimates have been checked
+  the underlying estimates do not carry.
+
+  A per-career score is easy to produce, which is the reason to be careful
+  about it rather than the reason to ship one. Ask a language model to rate any
+  occupation out of ten for AI risk and it will answer, for every occupation,
+  instantly and confidently. What it will not give you is a way to check the
+  answer. Every figure in this app is meant to trace back to a published source
+  you can open, and the bands below trace to two of them that have since been
+  measured against what people actually do with AI. A number generated on
+  request traces to nothing, so it would be the only figure on this page that
+  nobody could ever show to be wrong. Those estimates have been checked
   against what people actually do with AI, from two directions and neither of
   them ours. Tomlinson et al. (2025) find the measures below track Microsoft
   Copilot usage closely, and the Stanford payroll study reports that ordering
