@@ -1,7 +1,7 @@
 ---
-title: Entry-level hiring got harder. Which part of the math changes?
-description: What the evidence on young workers and AI actually says, which comparison it is making, and how much of a degree's ten-year payoff a slow first year really costs.
-summary: A first year spent looking removes about 9% of the ten-year earnings this site credits a degree with. Here is what the AI evidence says, and where the exposure sits.
+title: AI is hitting entry-level hiring, not pay. Here is what that changes.
+description: What the strongest evidence on AI and young workers actually shows, which occupation groups carry the most task exposure, and how much of a degree's ten-year payoff a slow first year really costs.
+summary: The adjustment is running through hiring rather than wages. Here are ten occupation groups ranked by AI exposure, and what a lost first year takes out of a degree's premium.
 date: 2026-08-31
 hero: guide-hero-entry-level-hiring-and-college-roi-klein4b.png
 ---
@@ -44,60 +44,28 @@ The high band is narrower than the conversation suggests, and it is specific: 28
 
 Two warnings about that table, because it is the kind of table people screenshot. The bands measure how much of a job's task content overlaps with what current AI tools do, which is not the same as the odds of losing the job. And the pay column describes what these careers pay today, not what the exposure will do to them. Low exposure and high pay landing in the same row is a fact about the present, not a strategy.
 
-## Which careers sit in each band
+## The bands, group by group
 
-Bands this wide are worth opening up. Each list below is the ten highest paid careers in its band, and pay is the sort because the score is not one: a band holds only two to four distinct scores, every one of them a property of the occupation group rather than the job, so ordering careers by exposure inside a band would present a ranking the data cannot support.
+The score is a property of the occupation group rather than the job, so the groups are the honest unit to list. These are the ten groups with at least five careers at this level, ordered by exposure:
 
-### High exposure, scored 80 to 85
+| Occupation group | Exposure | Careers | Median pay | Examples |
+| --- | --- | --- | --- | --- |
+| Business & Financial Operations | High (80) | 28 | ~$81,000 | Accountants and Auditors, Financial Risk Specialists |
+| Legal | High (80) | 5 | ~$118,000 | Lawyers, Judges |
+| Computer & Mathematical | Medium (55) | 19 | ~$106,000 | Software Developers, Data Scientists |
+| Arts, Design, Entertainment, Sports & Media | Medium (55) | 21 | ~$75,000 | Graphic Designers, Technical Writers |
+| Management | Medium (50) | 28 | ~$130,000 | Chief Executives, Marketing Managers |
+| Architecture & Engineering | Medium (45) | 22 | ~$111,000 | Civil Engineers, Mechanical Engineers |
+| Life, Physical & Social Science | Medium (45) | 38 | ~$95,000 | Economists, Physicists |
+| Educational Instruction & Library | Medium (45) | 59 | ~$78,000 | Elementary School Teachers, Law Teachers |
+| Healthcare Practitioners & Technical | Low (30) | 47 | ~$160,000 | Registered Nurses, Pediatric Surgeons |
+| Community & Social Service | Low (20) | 15 | ~$60,000 | Healthcare Social Workers, Clergy |
 
-| Career | Occupation group | Median pay |
-| --- | --- | --- |
-| Lawyers | Legal | ~$160,000 |
-| Judges, Magistrate Judges, and Magistrates | Legal | ~$154,000 |
-| Administrative Law Judges, Adjudicators, and Hearing Officers | Legal | ~$118,000 |
-| Financial Risk Specialists | Business & Financial Operations | ~$117,000 |
-| Personal Financial Advisors | Business & Financial Operations | ~$105,000 |
-| Financial and Investment Analysts | Business & Financial Operations | ~$103,000 |
-| Project Management Specialists | Business & Financial Operations | ~$102,000 |
-| Management Analysts | Business & Financial Operations | ~$102,000 |
-| Labor Relations Specialists | Business & Financial Operations | ~$95,000 |
-| Financial Examiners | Business & Financial Operations | ~$94,000 |
+Five smaller groups are left out, eight careers between them. One of those omissions is worth naming: office and administrative support is the highest scoring group in the file at 85, and the two careers it contributes at this level, proofreaders and copy markers and statistical assistants, both pay about $50,000. Exposure and pay are not aligned, inside a band or across the three of them.
 
-### Medium exposure, scored 45 to 55
+A group median also hides a great deal. Healthcare practitioners runs from about $59,000 for exercise physiologists to about $559,000 for pediatric surgeons, every one of them carrying the same score of 30, and the education group runs from about $42,000 for short-term substitute teachers to about $129,000 for postsecondary law teachers. The band tells you something about the kind of work. It tells you nothing about which job inside that work you would hold.
 
-| Career | Occupation group | Median pay |
-| --- | --- | --- |
-| Chief Executives | Management | ~$214,000 |
-| Industrial-Organizational Psychologists | Life, Physical & Social Science | ~$194,000 |
-| Computer and Information Systems Managers | Management | ~$175,000 |
-| Physicists | Life, Physical & Social Science | ~$172,000 |
-| Architectural and Engineering Managers | Management | ~$171,000 |
-| Natural Sciences Managers | Management | ~$167,000 |
-| Marketing Managers | Management | ~$167,000 |
-| Financial Managers | Management | ~$167,000 |
-| Computer Hardware Engineers | Architecture & Engineering | ~$162,000 |
-| Human Resources Managers | Management | ~$149,000 |
-
-### Low exposure, scored 10 to 30
-
-| Career | Occupation group | Median pay |
-| --- | --- | --- |
-| Pediatric Surgeons | Healthcare Practitioners & Technical | ~$559,000 |
-| Cardiologists | Healthcare Practitioners & Technical | ~$496,000 |
-| Radiologists | Healthcare Practitioners & Technical | ~$421,000 |
-| Surgeons, All Other | Healthcare Practitioners & Technical | ~$414,000 |
-| Anesthesiologists | Healthcare Practitioners & Technical | ~$391,000 |
-| Orthopedic Surgeons, Except Pediatric | Healthcare Practitioners & Technical | ~$359,000 |
-| Oral and Maxillofacial Surgeons | Healthcare Practitioners & Technical | ~$352,000 |
-| Emergency Medicine Physicians | Healthcare Practitioners & Technical | ~$336,000 |
-| Dermatologists | Healthcare Practitioners & Technical | ~$329,000 |
-| Physicians, Pathologists | Healthcare Practitioners & Technical | ~$312,000 |
-
-Sorting by pay hides the two most exposed careers in the whole file, which is worth saying out loud. Proofreaders and copy markers and statistical assistants both score 85, the highest band value there is, and both pay about $50,000. Exposure and pay are not aligned inside a band any more than they are across the three of them.
-
-The low list needs the same warning in the other direction. It is ten kinds of doctor because healthcare practitioners is the only occupation group scored 30 and also the best paid group in that band, so a pay sort can return nothing else. The other 55 low-exposure careers include 15 in community and social service, scored lower still at 20 and paying a median around $60,000. Reading this table as the safe careers gets the reasoning backward: it is the best paid careers in the least exposed band, which is a different sentence.
-
-None of these lists is a forecast, and the Stanford paper is the reason to say so twice. A band describes how much of a group's task content overlaps with what current AI tools do. Overlap on its own does not fix the direction, because the same paper finds employment falling where AI usage substitutes for the work and flat or rising where it complements the work, and a single score cannot tell you which of those you are looking at.
+None of this is a forecast, and the Stanford paper is the reason to say so twice. A band describes how much of a group's task content overlaps with what current AI tools do. Overlap on its own does not fix the direction, because the same paper finds employment falling where AI usage substitutes for the work and flat or rising where it complements the work, and a single score cannot tell you which of those you are looking at.
 
 ## What a slow first year costs
 
