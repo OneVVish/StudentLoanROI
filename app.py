@@ -19783,8 +19783,16 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_has_private", "rhp", int, None),
     ("existing_age", "rage", int, (0, 80)),
     ("existing_extra_monthly", "rx", int, (0, 50_000)),
+    ("existing_current_payment", "rcp", int, (0, 50_000)),
     ("existing_old_ibr", "rob", int, None),
 )
+
+# Fields whose 0 is a REAL ANSWER rather than an untouched control, so the
+# emitter above must ride it rather than skipping it. Kept as a set beside the
+# table instead of a fourth tuple element, because every other consumer of
+# REPAYMENT_SHARE_FIELDS unpacks exactly four values -- including
+# check_share_coverage, which reads the tuples by index.
+REPAYMENT_ZERO_IS_AN_ANSWER = frozenset({"existing_current_payment"})
 
 # How many loans a link may carry per grid. The seeder builds one data_editor
 # row and one amortization per comma-separated balance, so an unbounded list
@@ -19824,7 +19832,14 @@ def build_repayment_share_params() -> dict:
     params = {"tool": "repayment"}
     for key, param, cast, _bounds in REPAYMENT_SHARE_FIELDS:
         value = st.session_state.get(key)
-        if value in (None, "", False, 0):
+        if value is None or value == "":
+            continue
+        # A bare falsy skip is right for every field whose 0 means "left
+        # alone" and WRONG for one whose 0 is the answer being shared. A SAVE
+        # borrower pays nothing, so `rcp=0` is the most informative link this
+        # tool can mint, and the old blanket skip dropped exactly it -- the
+        # recipient's box would open blank and the delta would not render.
+        if not value and key not in REPAYMENT_ZERO_IS_AN_ANSWER:
             continue
         params[param] = str(int(value) if cast is int else value)
     for key, columns in REPAYMENT_LOAN_LIST_PARAMS:
@@ -20699,7 +20714,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # Personal facts first: they read once and apply to everything below,
         # whereas the loan grids are the part a visitor iterates on.
         st.markdown("**Personal info**")
-        p1, p2, p3 = st.columns(3)
+        p1, p2, p3, p4 = st.columns(4)
         income = p1.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
                                   step=1_000, key="existing_income",
                                   help="Adjusted gross income. The income-driven plans "
@@ -20715,6 +20730,28 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             key="existing_age",
             help="Only used to say how old you'd be when each plan ends. "
                  "Leave at 0 to skip.")
+
+        # WHAT YOU PAY TODAY. Blank and zero are DIFFERENT answers here, which
+        # is why this is the one number in this form that is not defaulted to 0
+        # the way age and unpaid interest are. A borrower on SAVE answers zero
+        # -- the plan has been in forbearance with no payment required -- and
+        # zero is the single commonest true answer to this question. Defaulting
+        # to it would tell every visitor who never touched the box that their
+        # payment is about to jump from nothing, and reading it back with
+        # `or` would tell the SAVE borrower nothing at all. st.number_input
+        # returns None for an empty box, and BOTH None and 0 are falsy, so
+        # every reader of this value tests `is None`.
+        st.session_state.setdefault("existing_current_payment", None)
+        current_payment = p4.number_input(
+            "Paying now, a month ($)", min_value=0, max_value=50_000, step=50,
+            value=None, placeholder="Leave blank if unsure",
+            key="existing_current_payment",
+            help="What you actually hand over each month right now, across "
+                 "your federal loans. On SAVE that is $0: the plan is in "
+                 "forbearance, so interest has been running since August 2025 "
+                 "but no payment is due. Enter 0 rather than leaving this "
+                 "blank. It is a real answer and the page uses it. Leave it "
+                 "blank only if you do not know.")
 
         # HOUSEHOLD. Until 2026-08 the income-driven plans sheltered a flat
         # $22,000 and every caption had to apologise for it. Real IBR shelters
@@ -21056,11 +21093,18 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     f"count."
                 )
 
-        # The SAVE wind-down, stated WITHOUT a date on purpose. TICAS describes
-        # it as "the 90-day period communicated by their servicer", so the
-        # deadline is per-borrower and starts whenever that notice arrives --
-        # printing a fixed national date would assert a precision the source
-        # does not have, to the population most likely to act on it.
+        # The SAVE wind-down. The DEADLINE still carries no date, on purpose:
+        # TICAS describes it as "the 90-day period communicated by their
+        # servicer", so it is per-borrower and starts whenever that notice
+        # arrives, and printing a fixed national date would assert a precision
+        # the source does not have to the population most likely to act on it.
+        #
+        # What IS now dated is when the notices START GOING OUT, which NCLC
+        # attributes to ED as "on or around July 1, 2026". That is a different
+        # claim from a deadline and is worth stating: without it a reader has
+        # no way to tell whether their notice is overdue, already sent, or
+        # months away, and the page read as though the clock were hypothetical.
+        # "On or around" is not a deadline and must not be written as one.
         #
         # What IS worth stating precisely is the default, in this visitor's own
         # figures: doing nothing lands you on a fixed-payment plan, which is
@@ -21079,8 +21123,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             _std_fed = _std_row.get("federal_only", _std_row)
             _tiered_fed = _tiered_row.get("federal_only", _tiered_row)
             st.info(
-                "**If you're on SAVE, a clock may already be running.** Your "
-                "servicer's notice to leave SAVE starts a 90-day window to "
+                "**If you're on SAVE, a clock may already be running.** "
+                "Servicers began sending notices to leave SAVE on or around "
+                "July 1, 2026, and the notice starts a 90-day window to "
                 "choose a plan. Miss it and you are enrolled automatically "
                 "into Standard or the new Tiered Standard, "
                 f"{fmt_money_md(_std_fed['monthly_payment'])} and "
@@ -21093,9 +21138,62 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "anything, so the automatic outcome is the one that ignores "
                 "your income. **The window runs from your servicer's notice, "
                 "not a fixed national date.** Check yours rather than this "
-                "page. Source: TICAS, *Upcoming Changes to Income-Driven "
-                "Repayment Plans*."
+                "page. Sources: TICAS, *Upcoming Changes to Income-Driven "
+                "Repayment Plans*, for the 90-day window; the National "
+                "Consumer Law Center, which attributes the July 2026 notice "
+                "date to the Department."
             )
+
+        # WHAT CHANGES FROM WHERE THEY STAND. The table above prices every
+        # destination; this is the only line on the page that prices the MOVE.
+        # ED's own Repayment Calculator cannot: it shows the plans your loans
+        # are eligible for, and an eliminated plan is not one, so it can say
+        # what RAP costs and never what the change is. Renders for anyone who
+        # answered, not only SAVE borrowers -- leaving IBR, PAYE or ICR poses
+        # the same question, and that population outlives SAVE's wind-down.
+        _change = plan_change_from_today(current_payment, rows,
+                                         accrued_interest=accrued)
+        if _change is not None:
+            if _change["direction"] == "same":
+                _headline = (
+                    "**RAP costs about what you already pay**, "
+                    f"{fmt_money_md(_change['rap'])} a month on your federal "
+                    "balance.")
+            elif _change["current"] == 0:
+                _headline = (
+                    "**You pay nothing today. On RAP you would pay "
+                    f"{fmt_money_md(_change['rap'])} a month** on your federal "
+                    "balance.")
+            else:
+                _headline = (
+                    "**Your federal payment goes from "
+                    f"{fmt_money_md(_change['current'])} to "
+                    f"{fmt_money_md(_change['rap'])} a month**, "
+                    f"{'up' if _change['direction'] == 'up' else 'down'} "
+                    f"{fmt_money_md(abs(_change['delta']))}.")
+            # THE PAYMENT DELTA ALONE UNDERSTATES THE CHANGE for anyone whose
+            # payment has been zero, because the balance grew the whole time.
+            # Say both numbers or neither: quoting a jump to $260 a month
+            # without the interest that accrued behind it describes half of
+            # what happened, in the flattering direction.
+            if _change["accrued"] > 0:
+                _interest = (
+                    " Your federal balance already includes "
+                    f"{fmt_money_md(_change['accrued'])} of unpaid interest"
+                    + (", built up while nothing was being paid against it, "
+                       "so the payment is not the only thing that changed."
+                       if _change["current"] == 0 else "."))
+            elif _change["current"] == 0:
+                _interest = (
+                    " If you are on SAVE, interest has been running since "
+                    "August 1, 2025 with no payment required. Where your "
+                    "servicer shows that accrued interest separately, put it "
+                    "in the unpaid interest box above: the payment is only "
+                    "half of what changes.")
+            else:
+                _interest = ""
+            st.info(_headline + _interest +
+                    " The table above prices the other plans.")
 
         _priv_total = sum(loan["balance"] for loan in priv_loans)
         if forgivable:
@@ -21294,6 +21392,66 @@ def first_payment_of(result: dict) -> float:
     if schedule is None or "payment" not in schedule.columns or schedule.empty:
         return 0.0
     return float(schedule["payment"].iloc[0])
+
+
+def plan_change_from_today(current_payment, rows: list,
+                           accrued_interest: float = 0.0) -> dict:
+    """What the monthly payment DOES when a borrower lands on RAP, measured
+    against what they hand over today.
+
+    The question a SAVE borrower is actually asking, and the one no calculator
+    answers. ED's own Repayment Calculator prices the plans your loans are
+    ELIGIBLE for, and an eliminated plan is not one of them, so it can show the
+    destination and never the change. That is a structural gap rather than a
+    coverage one: it will not close on its own.
+
+    DELIBERATELY NOT A SAVE PAYMENT FORMULA. SAVE has been in forbearance since
+    the Department resumed charging interest on 2025-08-01, so for nearly all of
+    the 7.7 million borrowers enrolled the number to compare against is what
+    they pay now, which is nothing. Reproducing SAVE's own rate would need an
+    undergraduate/graduate split of the balance (5% against 10%, weighted) that
+    this tool collects nowhere, to price a plan almost nobody is paying and that
+    is being deleted. "What are you paying now" is also still true in 2027, and
+    still answers the same question for someone leaving IBR, PAYE or ICR.
+
+    `current_payment` is None when the visitor has not answered. **0 IS AN
+    ANSWER, and it is the commonest one**, so the test here is `is None` and
+    can never become `if not current_payment` -- that reads a SAVE borrower's
+    own situation as a blank form and silently deletes the finding for exactly
+    the population this exists for. Same trap as professional_debt_autofill's
+    `entered or default`.
+
+    FEDERAL ONLY, read off the row's `federal_only` result. Auto-enrollment
+    moves the federal loan, and a private balance is owed on identical terms
+    whichever federal plan is chosen, so a combined figure bills the switch for
+    money that does not change. That error has already shipped once beside this
+    very block, quoting $2,581 where the federal change was $681.
+
+    Returns None when there is nothing honest to say: unanswered, or no RAP row
+    at all, which is what a Parent PLUS borrower has -- PLUS is not RAP
+    eligible, so there is no such switch to price.
+    """
+    if current_payment is None:
+        return None
+    rap = next((r for label, r, _ in rows if "RAP" in label), None)
+    if rap is None:
+        return None
+    fed = rap.get("federal_only", rap)
+    # The same conditional _repayment_table uses, so the sentence and the table
+    # cannot quote different first payments for one row.
+    rap_payment = (float(fed["monthly_payment"]) if "monthly_payment" in fed
+                   else first_payment_of(fed))
+    current = float(current_payment)
+    delta = rap_payment - current
+    return {
+        "current": current,
+        "rap": rap_payment,
+        "delta": delta,
+        # A cent of float drift is not a change anyone pays.
+        "direction": ("same" if abs(delta) < 0.005
+                      else ("up" if delta > 0 else "down")),
+        "accrued": float(accrued_interest or 0.0),
+    }
 
 
 def render_rap_subsidy_answer(rows: list) -> None:

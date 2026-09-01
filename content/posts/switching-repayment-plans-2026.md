@@ -6,7 +6,7 @@ date: 2026-08-15
 hero: guide-hero-switching-repayment-plans-2026-klein4b.png
 ---
 
-If your loans are on SAVE, a clock may already be running. Your servicer's notice to leave starts a 90-day window to pick a plan, and the window runs from that notice rather than from a date in the news. Miss it and you are enrolled automatically into Standard or the new Tiered Standard. Neither one is income-driven and neither one forgives anything, so the automatic outcome is the one that ignores what you earn. 
+If your loans are on SAVE, a clock may already be running. Servicers began sending notices to leave on or around July 1, 2026, and that notice starts a 90-day window to pick a plan. The window runs from your own notice rather than from a date in the news. Miss it and you are enrolled automatically into Standard or the new Tiered Standard. Neither one is income-driven and neither one forgives anything, so the automatic outcome is the one that ignores what you earn. 
 
 What almost nobody mentions is that the plans do not swap freely. One of the choices in front of you is much easier to walk into than to walk out of, and the borrowers it was designed for are the ones least able to leave.
 
@@ -35,6 +35,19 @@ The tax is the newest part of this. Since January 1, 2026 a discharged federal b
 The IBR row is the newer version of that plan, 10 percent of discretionary income with forgiveness at 20 years, which is what a first loan disbursed on or after July 1, 2014 gets. It also uses a flat living allowance of $22,000, where real IBR subtracts 150 percent of the poverty guideline for your family size, so a larger household would pay less than this row shows.
 
 None of which makes the ten-year plan affordable. About $900 a month on a $47,000 income is not a plan, it is a wish. The point is narrower and it matters more: the plan with the lowest payment is not the cheapest plan, and on this balance it is the most expensive one on offer.
+
+
+## The number you are moving from is probably zero
+
+If your loans are on SAVE, the plan has been in forbearance. The Department resumed charging interest on August 1, 2025 but has required no payment since, and nearly 7.7 million borrowers were enrolled when the wind-down was announced. So the change in front of you is not one formula being swapped for another. It is a payment of nothing becoming a payment of something.
+
+That is worth saying plainly, because it decides which number matters. On the balance above, every row in that table is an increase. RAP is the smallest of them at about $160 a month, and it is still the difference between paying nothing and paying something every month for thirty years. The question is not whether your payment goes up. It is which increase you are choosing, and what each one costs by the end.
+
+The other half of the change is the part a payment figure cannot show. Interest has been running the whole time nothing was being paid against it, so the balance you land on is larger than the balance you stopped paying on. On the doctoral example above that is about $4,700. Whether it stays interest or becomes principal depends on the route you take, which is the next section but one.
+
+The Department's own Repayment Calculator will not close this gap for you. It shows the plans your loans are eligible for, and a plan that has been eliminated is not one of them, so it can price where you are going and stay silent on what changes when you get there. That is a gap in what the tool is built to do rather than a gap in its coverage, so it will not close on its own.
+
+[The repayment comparison here](/?tool=repayment&from=guide) now asks what you pay a month right now. Answer zero if you are on SAVE, because zero is the answer rather than a blank, and it will put the difference in your own figures beside every plan on the menu.
 
 ## What carries in, and what does not
 
