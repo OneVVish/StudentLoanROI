@@ -1,5 +1,5 @@
 ---
-title: AI is hitting entry-level hiring, not pay. Here is what that changes.
+title: Which careers AI touches, and what a slow first year costs
 description: What the strongest evidence on AI and young workers actually shows, which occupation groups carry the most task exposure, and how much of a degree's ten-year payoff a slow first year really costs.
 summary: The adjustment is running through hiring rather than wages. Here are ten occupation groups ranked by AI exposure, and what a lost first year takes out of a degree's premium.
 date: 2026-08-31

@@ -88,7 +88,7 @@ ends at the calculator.
   Your O*NET Interest Profiler results are a list of careers that fit
   you. Here is what each one pays, what the training costs to reach,
   and how to check whether it pays off.
-- [AI is hitting entry-level hiring, not pay. Here is what that changes.](https://worthmydegree.com/guides/entry-level-hiring-and-college-roi):
+- [Which careers AI touches, and what a slow first year costs](https://worthmydegree.com/guides/entry-level-hiring-and-college-roi):
   What the strongest evidence on AI and young workers actually shows,
   which occupation groups carry the most task exposure, and how much
   of a degree's ten-year payoff a slow first year really costs.
