@@ -137,6 +137,151 @@ def check_household(ns):
     return problems
 
 
+def check_save_transition(ns):
+    """The SAVE-to-RAP delta: what the payment does from where the borrower
+    STANDS, rather than what each destination costs.
+
+    Written because the delta is arithmetic nobody would look at twice and
+    every one of its failure modes is SILENT -- a sentence that renders
+    confidently with the wrong basis, or does not render at all for the exact
+    population it was built for.
+
+    Anchors: SAVE has been in forbearance since the Department resumed
+    charging interest on 2025-08-01 and requires NO PAYMENT, so the borrower
+    this feature exists for answers the current-payment question with a
+    literal zero. That is why zero is tested as an ANSWER throughout and never
+    as an empty control.
+    """
+    problems = []
+    change = ns["plan_change_from_today"]
+    compare = ns["compare_existing_loan_plans"]
+    table = ns["_repayment_table"]
+    fmt_money = ns["fmt_money"]
+
+    BAL, RATE, INCOME = 60_000.0, 6.5, 45_000.0
+    rows = compare(BAL, RATE, INCOME, 0, True, 0.0, False, 0)
+
+    # 1. UNANSWERED IS NOT ZERO. A blank box must produce no sentence at all;
+    #    defaulting it to 0 would tell every visitor who never touched the
+    #    control that their payment is about to rise from nothing.
+    if change(None, rows) is not None:
+        problems.append(
+            "  plan_change_from_today(None, ...) returned a change; an "
+            "unanswered box must produce no sentence, not a delta from $0")
+
+    # 2. AND ZERO IS AN ANSWER. This is the negative control for the
+    #    `if not current_payment` / `current_payment or default` trap: both
+    #    None and 0 are falsy, so a truthiness test deletes the finding for
+    #    the SAVE population while leaving it working for everyone else.
+    zero = change(0, rows)
+    if zero is None:
+        problems.append(
+            "  plan_change_from_today(0, ...) returned nothing. Zero is what a "
+            "SAVE borrower in forbearance actually pays and is the commonest "
+            "true answer to this question; only None means unanswered")
+    else:
+        if abs(zero["delta"] - zero["rap"]) > 0.005:
+            problems.append(
+                f"  paying $0 today, the delta is ${zero['delta']:,.2f} but RAP "
+                f"costs ${zero['rap']:,.2f}; from zero the two are the same "
+                "number")
+
+        # 3. THE FIGURE MUST BE THE ONE ON SCREEN. The table and this sentence
+        #    sit inches apart, so a second way of reading the RAP row is a
+        #    visible contradiction -- the chart-twin rule in prose.
+        rap_cell = next((r["Monthly"] for r in
+                         table(rows, federal_only=True).to_dict("records")
+                         if "RAP" in r["Plan"]), None)
+        if rap_cell != fmt_money(zero["rap"]):
+            problems.append(
+                f"  the sentence quotes {fmt_money(zero['rap'])} for RAP while "
+                f"the federal table shows {rap_cell}; they read the row two "
+                "different ways")
+
+    # 4. FEDERAL ONLY. A private balance is owed on identical terms under every
+    #    federal plan, so it cannot appear in the cost of switching. This is the
+    #    check that catches the error already shipped beside this block once,
+    #    where combined rows quoted $2,581 for a $681 federal change. The
+    #    private loan here is sized to dominate: if it leaks in at all, it
+    #    leaks loudly.
+    PRIV, PRIV_RATE = 90_000.0, 11.0
+    priv_rows = compare(BAL, RATE, INCOME, 0, True, 0.0, False, 0,
+                        private_balance=PRIV, private_rate=PRIV_RATE)
+    with_priv = change(0, priv_rows)
+    if zero is not None and with_priv is not None:
+        if abs(with_priv["rap"] - zero["rap"]) > 0.005:
+            problems.append(
+                f"  adding a ${PRIV:,.0f} private balance moved the quoted RAP "
+                f"payment from ${zero['rap']:,.2f} to ${with_priv['rap']:,.2f}. "
+                "The delta is federal only: a private loan is owed on the same "
+                "terms whichever federal plan is chosen, so billing the switch "
+                "for it overstates the cost of moving")
+
+    # 5. NO RAP ROW, NO SENTENCE. Parent PLUS is not RAP eligible, so there is
+    #    no such switch to price and the honest output is silence.
+    plus_rows = compare(BAL, RATE, INCOME, 0, False, 0.0, False, 0)
+    if change(0, plus_rows) is not None:
+        problems.append(
+            "  a Parent PLUS portfolio (forgivable=False) produced a RAP "
+            "delta. PLUS cannot enrol in RAP, so there is no change to quote")
+
+    # 6. DIRECTION, both ways. Someone already paying MORE than RAP is moving
+    #    down, and a sentence that only knows how to say "up" would tell them
+    #    the opposite of what the numbers say.
+    if zero is not None:
+        rap_now = zero["rap"]
+        for paying, want in ((rap_now + 200, "down"),
+                             (rap_now, "same"),
+                             (max(rap_now - 200, 0), "up")):
+            got = change(paying, rows)
+            if got is None or got["direction"] != want:
+                problems.append(
+                    f"  paying ${paying:,.2f} against a ${rap_now:,.2f} RAP "
+                    f"payment read as {got and got['direction']!r}, not "
+                    f"{want!r}")
+            elif want == "down" and got["delta"] >= 0:
+                problems.append(
+                    f"  a payment that falls reported a non-negative delta of "
+                    f"${got['delta']:,.2f}; the sign is what the wording reads")
+
+    # 7. THE SHARE LINK MUST CARRY A ZERO. The emitter skips falsy values, which
+    #    is right for every control that means "left alone" and wrong for this
+    #    one: ?rcp=0 is the most informative link this tool can mint, and the
+    #    blanket skip drops exactly it -- the recipient's box opens blank and
+    #    the sentence silently does not render. Checked by AST because the
+    #    emitter reads st.session_state and cannot run outside a runtime.
+    src = open("app.py").read()
+    tree = ast.parse(src)
+    zero_set = next((n for n in ast.walk(tree)
+                     if isinstance(n, ast.Assign)
+                     and any(getattr(t, "id", "") == "REPAYMENT_ZERO_IS_AN_ANSWER"
+                             for t in n.targets)), None)
+    if zero_set is None:
+        problems.append(
+            "  REPAYMENT_ZERO_IS_AN_ANSWER is gone, so the share emitter has no "
+            "way to tell a real $0 from an untouched control")
+    else:
+        # frozenset({...}) is a Call, not a literal, so read the string
+        # constants out of the assignment rather than literal_eval'ing it.
+        names = {n.value for n in ast.walk(zero_set.value)
+                 if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+        if "existing_current_payment" not in names:
+            problems.append(
+                "  existing_current_payment is not in REPAYMENT_ZERO_IS_AN_ANSWER; "
+                "a shared link from a SAVE borrower would drop their answer")
+        emitter = next((n for n in ast.walk(tree)
+                        if isinstance(n, ast.FunctionDef)
+                        and n.name == "build_repayment_share_params"), None)
+        if emitter is None or not any(
+                isinstance(n, ast.Name) and n.id == "REPAYMENT_ZERO_IS_AN_ANSWER"
+                for n in ast.walk(emitter)):
+            problems.append(
+                "  build_repayment_share_params no longer consults "
+                "REPAYMENT_ZERO_IS_AN_ANSWER; a falsy skip drops ?rcp=0")
+
+    return problems
+
+
 def check_countback_position(ns):
     """WHERE the counting months sit, which is what makes naming one honest.
 
@@ -323,6 +468,10 @@ def main() -> int:
     household = check_household(ns)
     problems.extend(household)
     checked += 9
+
+    # The SAVE-to-RAP delta: what the switch costs from where they stand.
+    problems.extend(check_save_transition(ns))
+    checked += 11
 
     # WHERE the counting months sit, which is what the warning now names.
     problems.extend(check_countback_position(ns))

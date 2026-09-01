@@ -119,6 +119,11 @@ SHARE_EXEMPT = {
                             "seed_repayment_from_share when ?rpb= is present",
     "existing_age": "repayment tool; rides ?rage=",
     "existing_extra_monthly": "repayment tool; rides ?rx=",
+    "existing_current_payment": "repayment tool; rides ?rcp=, and is the one "
+                                "repayment param whose 0 must RIDE rather "
+                                "than be skipped as an untouched control -- "
+                                "see REPAYMENT_ZERO_IS_AN_ANSWER, asserted by "
+                                "check_plan_switching.py",
     "existing_old_ibr": "repayment tool; rides ?rob=",
     # The loan GRIDS. These are session keys backing st.data_editor (whose
     # widget keys, existing_federal_editor/existing_private_editor, store
