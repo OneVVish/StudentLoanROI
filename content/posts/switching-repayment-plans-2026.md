@@ -55,7 +55,9 @@ Two rules govern moving between plans, and they point in opposite directions.
 
 Payments you have already made under any income-driven plan count toward discharge under RAP. Spend five years on an older plan and switch, and those sixty payments come with you. For the borrower above, that credit moves the RAP discharge from year 30 to year 25, turns a plan that forgave nothing into one that writes off about $42,000, and brings the total, discharge tax included, down from about $164,000 to about $125,000. Roughly $39,000, for having already been paying.
 
-Going the other way, a RAP payment counts toward IBR, ICR or PAYE only in a month where it was at least as large as the ten-year Standard payment on that balance. That one condition is the whole exit, and it is written so that it almost never fires for the people RAP is aimed at. The low payment that makes RAP bearable is exactly what fails the test.
+Going the other way, a RAP payment counts toward IBR, ICR or PAYE only in a month where it was at least as large as the ten-year Standard payment on that balance. That condition is written so that it almost never fires for the people RAP is aimed at. The low payment that makes RAP bearable is exactly what fails the test.
+
+It is also not the only thing in the way, and the other two are easy to miss because they are not about your payment at all. Under 34 CFR 685.209(d)(5), only Direct Loans made before July 1, 2026 may be repaid under IBR, ICR or PAYE. And ICR and PAYE themselves end on July 1, 2028: borrowers still on them must elect another plan before that date, and anyone who does not is moved to one. So if you are borrowing now there is no exit to earn, and if you borrowed earlier it narrows to IBR alone once 2028 arrives. The payment threshold decides how much credit you keep. These decide whether there is anywhere left to take it.
 
 Here is where the bar sits, using the median debt at four credential levels from the same field-of-study data:
 
