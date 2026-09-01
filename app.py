@@ -26645,6 +26645,35 @@ would mean guessing at which majors feed which careers. We'd rather tell
 you the assumption than invent a number to hide it. Read every figure below
 as "if you land the job," not "you will land the job."
 
+#### And that you are working at all
+
+Underemployment is about which job you land. Underneath it sits a second
+assumption, which is that you land one: the model puts you to work in the first
+year after you finish and in every year after that, and it does the same for
+the high school graduate you are measured against. Neither side of the
+comparison ever spends a year looking.
+
+That assumption carries more weight than it used to. Stanford's Digital Economy
+Lab, reading ADP payroll records from November 2022 through June 2026, finds
+employment of 22 to 25 year olds in the most AI-exposed occupations running
+about 19% below where it would be had it kept pace with less exposed
+occupations, a gap that widened from 15% a year earlier, while older workers
+show no comparable gap ([Source: Stanford Digital Economy
+Lab](https://digitaleconomy.stanford.edu/news/canariesaug26/), August 2026).
+The authors call these descriptive patterns rather than causal estimates, and
+they find no broad displacement across the economy as a whole. What they can
+see is concentrated at the entry point, which is the stretch of the timeline
+this calculator is least able to absorb.
+
+We disclose it rather than model it, for the reason underemployment gets the
+same treatment. There is no per-occupation hiring rate we could apply to 836
+careers without inventing most of it, and an invented haircut is
+indistinguishable from a measured one once it is printed beside real figures.
+Where the exposure sits is something we can point at: of the 293 careers here
+that typically need a bachelor's degree or more, 36 fall in occupation groups
+the AI module bands High, and 28 of those are business and financial
+operations.
+
 #### "Careers this major commonly leads to" (Major mode)
 
 Beside that

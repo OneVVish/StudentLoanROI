@@ -1,0 +1,53 @@
+---
+title: Entry-level hiring got harder. Which part of the math changes?
+description: What the evidence on young workers and AI actually says, which comparison it is making, and how much of a degree's ten-year payoff a slow first year really costs.
+summary: A first year spent looking removes about 9% of the ten-year earnings this site credits a degree with. Here is what the AI evidence says, and where the exposure sits.
+date: 2026-08-31
+hero: guide-hero-entry-level-hiring-and-college-roi-klein4b.png
+---
+
+Something real is happening to entry-level hiring, and it is being reported in a way that invites a much larger conclusion than the evidence supports. This guide separates the two: what has been measured, what it is a measurement of, and which parts of a degree's payoff it touches.
+
+Figures computed from this site's own datasets are rounded and marked with a tilde in the table below.
+
+## What has actually been measured
+
+The strongest evidence is a Stanford Digital Economy Lab study reading ADP payroll records from November 2022 through June 2026. It finds that employment of 22 to 25 year olds in the most AI-exposed occupations now runs about 19% below where it would be had it kept pace with less exposed occupations of the same age, a gap that widened from 15% a year earlier. Workers past their twenties show no comparable gap. Two things the authors say about their own finding tend to fall out of the retelling: they describe it as a descriptive pattern rather than a causal estimate, and they find no broad displacement across the economy as a whole. What they can see is concentrated at the entry point ([Stanford Digital Economy Lab](https://digitaleconomy.stanford.edu/news/canariesaug26/), August 2026).
+
+The mood matches the data. Handshake's outlook for the class of 2026 reports that 61% of graduating seniors describe themselves as somewhat or very pessimistic about their careers, with almost half of those naming generative AI as at least part of the reason, while the share of full-time job postings on the platform that mention generative AI has grown nearly fivefold since 2023 ([Handshake](https://joinhandshake.com/network-trends/class-of-2026-outlook/)). Employer demand for the skill and student anxiety about it are rising together.
+
+## The comparison that study is not making
+
+Read the Stanford finding closely and it compares young workers in AI-exposed occupations against young workers in less exposed occupations. It does not compare people who went to college against people who did not. That distinction decides what the number can be used for: it says some fields became harder to enter, and it does not say a degree stopped paying, because the people on both sides of it mostly hold one.
+
+The question this site asks is a different one. Every figure in the calculator measures a career against a debt-free high school graduate who never enrolled, over ten years, after loan payments and taxes. Nothing in the entry-level evidence answers that comparison, in either direction.
+
+## Where the exposure sits in the careers priced here
+
+The calculator carries an optional AI exposure band for every career, set at the level of the occupation group rather than the individual job, because that is the level the published research operates at. Of the 293 careers in this app that typically need a bachelor's degree or more, here is how they fall:
+
+| AI exposure band | Careers | Typical pay |
+| --- | --- | --- |
+| High | 36 | ~$81,000 |
+| Medium | 190 | ~$96,000 |
+| Low | 67 | ~$115,000 |
+
+The high band is narrower than the conversation suggests, and it is specific: 28 of those 36 careers are business and financial operations, six are legal, two are office support. The low band is mostly hands-on health care, 49 of its 67 careers, plus 15 in community and social service.
+
+Two warnings about that table, because it is the kind of table people screenshot. The bands measure how much of a job's task content overlaps with what current AI tools do, which is not the same as the odds of losing the job. And the pay column describes what these careers pay today, not what the exposure will do to them. Low exposure and high pay landing in the same row is a fact about the present, not a strategy.
+
+## What a slow first year costs
+
+Across the 177 careers that typically need a bachelor's degree, the model starts a graduate at a median of about $65,000 and credits them with roughly $740,000 of gross earnings over the following ten years. The first of those years is about 9% of the total.
+
+That is the honest size of the thing. The calculator assumes ten years of work inside a ten-year window, on both sides of the comparison, so a year spent searching comes off the degree's side and nothing comes off the other side's. Nine percent will move a close call and will not reverse a wide one, and which of those you are looking at depends entirely on the career and the price of the school. The Methodology footer states this assumption in full rather than burying it, alongside the related one about underemployment, which is that roughly four in ten graduates work in jobs not requiring a degree at all.
+
+## Doing something with it
+
+Price the career rather than the credential. The spread inside a single education level is far wider than the gap between levels, so "is a bachelor's worth it" is a question with no answer while "is this career worth this school's price" has a precise one.
+
+Check the band on the career you have in mind. It sits under Advanced Analysis Settings, off by default, and it names the occupation group and what the research says about it rather than producing a score for your specific job title.
+
+Then move the window. If you expect the first year to be slow, the calculator will show you the year the career passes the high school graduate and stays past them, which is the number a weak start actually moves.
+
+[Run your own numbers](/?from=guide) with the school, the career and the loan you are actually considering. The entry-level market is one input to that arithmetic. It is not the arithmetic.
