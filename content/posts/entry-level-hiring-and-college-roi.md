@@ -52,7 +52,7 @@ The calculator carries an optional AI exposure band for every career, taken from
 | Low              | 67      | ~$115,000   |
 
 
-Note: Figures computed from this site's own datasets are rounded and marked with a tilde, in this table and in the three below.
+Note: Figures computed from this site's own datasets are rounded and marked with a tilde, in this table and in the others on this page.
 
 The high band is narrower than the conversation suggests, and it is specific: 28 of those 36 careers are business and financial operations, six are legal, two are office support. The low band is mostly hands-on health care, 49 of its 67 careers, plus 15 in community and social service.
 
@@ -80,6 +80,27 @@ Five smaller groups are left out, eight careers between them. One of those omiss
 A group median also hides a great deal. Healthcare practitioners runs from about $59,000 for exercise physiologists to about $559,000 for pediatric surgeons, every one of them carrying the same score of 30, and the education group runs from about $42,000 for short-term substitute teachers to about $129,000 for postsecondary law teachers. The band tells you something about the kind of work. It tells you nothing about which job inside that work you would hold.
 
 None of this is a forecast, and the Stanford paper is the reason to say so twice. A band describes how much of a group's task content overlaps with what current AI tools do. Overlap on its own does not fix the direction, because the same paper finds employment falling where AI usage substitutes for the work and flat or rising where it complements the work, and a single score cannot tell you which of those you are looking at. That distinction is measurable, and the Stanford authors did not invent it: they take it from the Anthropic Economic Index, which reads millions of Claude conversations against the Department of Labor's own task database and estimates, occupation by occupation, how much of the usage substitutes for the work against how much assists it, splitting 43% to 57% across all usage ([Handa et al.](https://arxiv.org/abs/2503.04761)). That index covers one company's platform rather than every use of AI, and the table above does not carry it yet. Adding it is the honest next step, because until a second column exists a band reports how much overlap a group has and not which way the overlap runs.
+
+## The most exposed work does not need a degree
+
+Everything above covers careers that need a bachelor's degree or more, because that is what this site prices. Widen it to all 825 occupations in the federal file and the shape changes: 59 of the 94 careers in the High band need no bachelor's at all, and 52 of those 59 are office and administrative support, the highest scoring group in the file.
+
+Counting careers understates it, because clerical work is enormous. Weighted by the number of people actually employed:
+
+| Entry education | Jobs | Share in High-exposure groups |
+| --- | --- | --- |
+| High school diploma | ~54.7M | 30% |
+| Bachelor's degree | ~39.0M | 26% |
+| No formal credential | ~37.4M | 1% |
+| Associate's degree | ~3.3M | 16% |
+
+More high-school-entry jobs sit in the most exposed groups than bachelor's-entry jobs, as a share and in absolute numbers both, roughly 16 million against 10 million. The largest of them are Customer Service Representatives at about 2.6 million jobs and a median near $45,000, Office Clerks at 2.5 million, Secretaries and Administrative Assistants at 1.7 million, and Receptionists at 0.9 million. The Stanford paper names customer service and clerical work in the same breath as software development, so it is pointing at the same place.
+
+This matters more here than it would almost anywhere else, because of who the calculator compares you against. Every premium on this site is measured against a debt-free high school graduate who never enrolled. If the most exposed work in the economy is disproportionately where high school graduates are, then exposure is not something sitting on the degree side of that comparison. It is on both sides, and possibly more on the side without the degree.
+
+Three limits on how far that can be pushed, all of which cut against the convenient reading. The baseline in this model is not built from those clerical occupations: it is an all-occupations median for high school graduates with an age curve on top, so what happens to receptionists does not mechanically move it. Exposure remains task overlap rather than job loss, and that rule does not get suspended because the conclusion flatters the degree. And the Stanford authors' own education control points the other way, since adjusting for how many graduates an occupation employs roughly halves their estimate, which suggests part of what looks like an AI effect is a shock to educated labor markets in particular.
+
+What survives all three is narrower and still worth having. The evidence does not show AI exposure landing on degree holders and sparing everyone else, and a reader deciding whether a degree is worth its price should not assume the alternative is untouched.
 
 ## What a slow first year costs
 
