@@ -38,11 +38,66 @@ The calculator carries an optional AI exposure band for every career, set at the
 | Low              | 67      | ~$115,000   |
 
 
-Note: Figures computed from this site's own datasets are rounded and marked with a tilde in the table above.
+Note: Figures computed from this site's own datasets are rounded and marked with a tilde, in this table and in the three below.
 
 The high band is narrower than the conversation suggests, and it is specific: 28 of those 36 careers are business and financial operations, six are legal, two are office support. The low band is mostly hands-on health care, 49 of its 67 careers, plus 15 in community and social service.
 
 Two warnings about that table, because it is the kind of table people screenshot. The bands measure how much of a job's task content overlaps with what current AI tools do, which is not the same as the odds of losing the job. And the pay column describes what these careers pay today, not what the exposure will do to them. Low exposure and high pay landing in the same row is a fact about the present, not a strategy.
+
+## Which careers sit in each band
+
+Bands this wide are worth opening up. Each list below is the ten highest paid careers in its band, and pay is the sort because the score is not one: a band holds only two to four distinct scores, every one of them a property of the occupation group rather than the job, so ordering careers by exposure inside a band would present a ranking the data cannot support.
+
+### High exposure, scored 80 to 85
+
+| Career | Occupation group | Median pay |
+| --- | --- | --- |
+| Lawyers | Legal | ~$160,000 |
+| Judges, Magistrate Judges, and Magistrates | Legal | ~$154,000 |
+| Administrative Law Judges, Adjudicators, and Hearing Officers | Legal | ~$118,000 |
+| Financial Risk Specialists | Business & Financial Operations | ~$117,000 |
+| Personal Financial Advisors | Business & Financial Operations | ~$105,000 |
+| Financial and Investment Analysts | Business & Financial Operations | ~$103,000 |
+| Project Management Specialists | Business & Financial Operations | ~$102,000 |
+| Management Analysts | Business & Financial Operations | ~$102,000 |
+| Labor Relations Specialists | Business & Financial Operations | ~$95,000 |
+| Financial Examiners | Business & Financial Operations | ~$94,000 |
+
+### Medium exposure, scored 45 to 55
+
+| Career | Occupation group | Median pay |
+| --- | --- | --- |
+| Chief Executives | Management | ~$214,000 |
+| Industrial-Organizational Psychologists | Life, Physical & Social Science | ~$194,000 |
+| Computer and Information Systems Managers | Management | ~$175,000 |
+| Physicists | Life, Physical & Social Science | ~$172,000 |
+| Architectural and Engineering Managers | Management | ~$171,000 |
+| Natural Sciences Managers | Management | ~$167,000 |
+| Marketing Managers | Management | ~$167,000 |
+| Financial Managers | Management | ~$167,000 |
+| Computer Hardware Engineers | Architecture & Engineering | ~$162,000 |
+| Human Resources Managers | Management | ~$149,000 |
+
+### Low exposure, scored 10 to 30
+
+| Career | Occupation group | Median pay |
+| --- | --- | --- |
+| Pediatric Surgeons | Healthcare Practitioners & Technical | ~$559,000 |
+| Cardiologists | Healthcare Practitioners & Technical | ~$496,000 |
+| Radiologists | Healthcare Practitioners & Technical | ~$421,000 |
+| Surgeons, All Other | Healthcare Practitioners & Technical | ~$414,000 |
+| Anesthesiologists | Healthcare Practitioners & Technical | ~$391,000 |
+| Orthopedic Surgeons, Except Pediatric | Healthcare Practitioners & Technical | ~$359,000 |
+| Oral and Maxillofacial Surgeons | Healthcare Practitioners & Technical | ~$352,000 |
+| Emergency Medicine Physicians | Healthcare Practitioners & Technical | ~$336,000 |
+| Dermatologists | Healthcare Practitioners & Technical | ~$329,000 |
+| Physicians, Pathologists | Healthcare Practitioners & Technical | ~$312,000 |
+
+Sorting by pay hides the two most exposed careers in the whole file, which is worth saying out loud. Proofreaders and copy markers and statistical assistants both score 85, the highest band value there is, and both pay about $50,000. Exposure and pay are not aligned inside a band any more than they are across the three of them.
+
+The low list needs the same warning in the other direction. It is ten kinds of doctor because healthcare practitioners is the only occupation group scored 30 and also the best paid group in that band, so a pay sort can return nothing else. The other 55 low-exposure careers include 15 in community and social service, scored lower still at 20 and paying a median around $60,000. Reading this table as the safe careers gets the reasoning backward: it is the best paid careers in the least exposed band, which is a different sentence.
+
+None of these lists is a forecast, and the Stanford paper is the reason to say so twice. A band describes how much of a group's task content overlaps with what current AI tools do. Overlap on its own does not fix the direction, because the same paper finds employment falling where AI usage substitutes for the work and flat or rising where it complements the work, and a single score cannot tell you which of those you are looking at.
 
 ## What a slow first year costs
 
