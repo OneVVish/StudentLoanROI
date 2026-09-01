@@ -1,20 +1,32 @@
 ---
 title: Which careers AI touches, and what a slow first year costs
-description: What the strongest evidence on AI and young workers actually shows, which occupation groups carry the most task exposure, and how much of a degree's ten-year payoff a slow first year really costs.
+description: What the Stanford Canaries in the Coal Mine study actually found, which occupation groups carry the most task exposure, and how much of a degree's ten-year payoff a slow first year really costs.
 summary: The adjustment is running through hiring rather than wages. Here are ten occupation groups ranked by AI exposure, and what a lost first year takes out of a degree's premium.
 date: 2026-08-31
 hero: guide-hero-entry-level-hiring-and-college-roi-klein4b.png
+citation_name: Canaries in the Coal Mine? Six Facts about the Recent Employment Effects of Artificial Intelligence
+citation_url: https://digitaleconomy.stanford.edu/app/uploads/2026/08/Canaries_August2026.pdf
+citation_authors: Erik Brynjolfsson; Bharat Chandar; Ruyu Chen
 ---
 
 Something real is happening to entry-level hiring, and it is being reported in a way that invites a much larger conclusion than the evidence supports. This guide separates the two: what has been measured, what it is a measurement of, and which parts of a degree's payoff it touches.
 
 ## What has actually been measured
 
-The strongest evidence is a Stanford Digital Economy Lab study reading ADP payroll records from November 2022 through June 2026. It finds that employment of 22 to 25 year olds in the most AI-exposed occupations now runs about 19% below where it would be had it kept pace with less exposed occupations of the same age, a gap that widened from 15% a year earlier. Workers past their twenties show no comparable gap. Two things the authors say about their own finding tend to fall out of the retelling: they describe it as a descriptive pattern rather than a causal estimate, and they find no broad displacement across the economy as a whole. What they can see is concentrated at the entry point ([Brynjolfsson, Chandar and Chen, August 2026](https://digitaleconomy.stanford.edu/app/uploads/2026/08/Canaries_August2026.pdf)).
+The strongest evidence is *Canaries in the Coal Mine? Six Facts about the Recent Employment Effects of Artificial Intelligence*, by Erik Brynjolfsson, Bharat Chandar and Ruyu Chen of the Stanford Digital Economy Lab, which reads ADP payroll records covering millions of American workers from November 2022 through June 2026 ([the paper, August 2026](https://digitaleconomy.stanford.edu/app/uploads/2026/08/Canaries_August2026.pdf)). Because it is cited far more often than it is read, here are its six facts, in the authors' order and in our words:
 
-Two details of the mechanism matter more than the headline does. The gap opens through reduced hiring rather than through layoffs, which the authors describe as a narrowing entry point for new workers rather than the displacement of workers already employed. And the adjustment runs through employment rather than pay: among new hires they find no obvious relationship between AI exposure and real starting pay for young workers. What moved is how many were hired, not what the hired ones were paid.
+- No evidence of widespread, economy-wide job displacement.
+- Employment of 22 to 25 year olds in AI-exposed occupations now sits about 19% below where it would be had it kept pace with their less exposed peers. Experienced workers show no comparable gap.
+- That divergence has widened steadily since the authors first documented it in August 2025, when it stood at about 15%.
+- It runs mainly through reduced hiring of young workers rather than through increased separations.
+- The declines concentrate in occupations where AI usage substitutes for human tasks. Where usage complements the worker, employment is flat or rising, especially for experienced workers.
+- The adjustment is showing up in employment rather than in base compensation.
 
-One caveat belongs beside the number rather than beneath it. When the authors control for the share of each occupation held by college graduates, the estimate for the most exposed quintile of 22 to 25 year olds falls from about 18 points to about 9. They publish both and say the pair brackets a range, because occupational college share may be measuring exposure to precisely the codified knowledge generative AI substitutes for, or may be measuring separate shocks to educated labor markets. A guide about degrees is the last place to quote the larger figure on its own.
+Two of those six matter here more than the headline does. The fourth means the gap opens as what the authors call a narrowing entry point for new workers rather than the displacement of workers already employed. The sixth means pay held: among new hires they find no obvious relationship between AI exposure and real starting pay for young workers. What moved is how many were hired, not what the hired ones were paid.
+
+The authors are careful about what the six facts are, and the retellings usually are not. They call these early descriptive indicators rather than causal estimates. The divergence survives excluding technology firms and computer occupations, controlling for exposure to interest-rate increases and for remote work, and swapping in alternative measures of AI exposure. It also attenuates under an education control, shows some divergent trends predating generative AI, and is more pronounced in the ADP sample than in national survey benchmarks.
+
+That education control deserves its own line in a guide about degrees. When the authors adjust for the share of each occupation held by college graduates, the estimate for the most exposed quintile of 22 to 25 year olds falls from about 18 points to about 9. They publish both and say the pair brackets a range, because occupational college share may be measuring exposure to precisely the codified knowledge generative AI substitutes for, or may be measuring separate shocks to educated labor markets. Quoting the larger figure on its own is quoting half a result.
 
 The mood matches the data. Handshake's outlook for the class of 2026 reports that 61% of graduating seniors describe themselves as somewhat or very pessimistic about their careers, with almost half of those naming generative AI as at least part of the reason, while the share of full-time job postings on the platform that mention generative AI has grown nearly fivefold since 2023 ([Handshake](https://joinhandshake.com/network-trends/class-of-2026-outlook/)). Employer demand for the skill and student anxiety about it are rising together.
 

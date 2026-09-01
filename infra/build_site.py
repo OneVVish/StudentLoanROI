@@ -1030,6 +1030,19 @@ def article_jsonld(post: dict, canonical: str, image: str, lastmod: str) -> str:
         "publisher": {"@type": "Organization", "name": "worthmydegree.com",
                       "url": "https://worthmydegree.com/"},
     }
+    # A guide built around one piece of published research says so in its
+    # structured data, not only in its prose. Optional, and both halves are
+    # required together: a citation with a name and no URL is unresolvable,
+    # and one with a URL and no name is a bare link a reader cannot identify.
+    # Authors are semicolon separated because a name may contain a comma.
+    if post.get("citation_name") and post.get("citation_url"):
+        citation = {"@type": "ScholarlyArticle",
+                    "name": post["citation_name"],
+                    "url": post["citation_url"]}
+        authors = [a.strip() for a in post.get("citation_authors", "").split(";") if a.strip()]
+        if authors:
+            citation["author"] = [{"@type": "Person", "name": a} for a in authors]
+        data["citation"] = citation
     return ('<script type="application/ld+json">'
             + json.dumps(data, ensure_ascii=False) + "</script>")
 
