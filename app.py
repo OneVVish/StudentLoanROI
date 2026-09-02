@@ -12130,6 +12130,41 @@ def repayment_balance_stack(chosen_label: str, chosen_result: dict, rows: list):
             STACK_COLORS, "loan type")
 
 
+def extra_payment_worth_it(chosen_result: dict, pslf: bool = False) -> str:
+    """Whether finding spare money would help at all, for a borrower who has
+    not entered any. Returns a sentence, or "" when there is nothing to say.
+
+    WITHOUT THIS THE PANEL SAYS NOTHING TO THE PERSON WITH NO SPARE MONEY.
+    With no private loan to free up and no extra entered there is no second arm
+    to price, so pivot_strategy_analysis returns None and the borrower gets a
+    prompt to enter something rather than an answer. But the answer does not
+    need an amount: it is a fact about the PLAN, and the app already knows it.
+
+    Same predicate as extra_payment_target, deliberately -- one rule for "does
+    prepaying this balance do anything", so the two cannot come to disagree on
+    one screen. A plan that forgives nothing is plain amortisation and every
+    dollar counts; a plan that writes off the remainder turns an extra dollar
+    into a smaller discharge rather than a smaller cost, and under RAP it also
+    gives up that month's waived interest.
+    """
+    forgives = bool(pslf) or float(
+        (chosen_result or {}).get("forgiven_amount") or 0.0) > 0.0
+    if pslf:
+        return ("**Extra payments would not help you here.** Your balance is "
+                "discharged tax-free after the qualifying payments, so paying "
+                "early mostly shrinks what gets forgiven rather than what this "
+                "costs you.")
+    if forgives:
+        return ("**Extra payments would mostly not help you here.** This plan "
+                "writes off what is left at the end, so money paid early "
+                "shrinks the amount forgiven rather than what you pay. Under "
+                "RAP an extra payment that covers the month's interest also "
+                "gives up that month's waived interest.")
+    return ("**Extra payments would help here.** This plan forgives nothing, "
+            "so every extra dollar shortens the loan and saves interest. Put "
+            "an amount in above and this panel will price it.")
+
+
 def commit_arm_stack(analysis: dict, private_result: dict):
     """(tranches, labels, axis_frame) for the COMMIT arm, or (None, None, None).
 
@@ -22028,6 +22063,16 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                      "above any Actual $/mo in the grid. It is modelled as "
                      "going to your highest-rate private loan first, and when "
                      "that one clears, its whole payment rolls onto the next.")
+        # NOTHING ENTERED IS STILL A QUESTION WORTH ANSWERING. Whether spare
+        # money would help is a fact about the plan, not about an amount, so
+        # it can be said before the borrower has found any -- and for someone
+        # with only federal loans and nothing spare it is the ONLY thing this
+        # panel can say, since there is no second arm to price.
+        if not extra_now and not private_extra:
+            _worth = extra_payment_worth_it(chosen_result,
+                                            pslf=pslf and forgivable)
+            if _worth:
+                st.info(_worth)
         if strategy_analysis is None:
             st.caption(
                 "Enter your income above, plus either a private loan to "

@@ -224,6 +224,7 @@ def main() -> int:
             use("plan_change_from_today")(0, rows, accrued_interest=100.0)
             use("extra_payment_target")(result, fed, priv,
                                         pslf=spec.get("pslf", False))
+            use("extra_payment_worth_it")(result, pslf=spec.get("pslf", False))
             use("private_loan_stack")(result)
             use("private_rolldown_stack")(result)
             use("private_payoff_marker")(result)

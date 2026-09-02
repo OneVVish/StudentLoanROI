@@ -598,6 +598,43 @@ def main() -> int:
             "  a 9.5% private loan beside an 8% federal one on a fixed plan "
             "no longer targets private; the plain rate rule has broken.")
 
+    # WHETHER SPARE MONEY WOULD HELP, for a borrower who has entered none.
+    # With no private loan to free up and no extra, there is no second arm to
+    # price and the panel rendered a prompt instead of an answer -- yet the
+    # answer needs no amount, because it is a fact about the plan.
+    worth = ns["extra_payment_worth_it"]
+    checked += 1
+    fixed_says = worth(std_row)
+    if "would help" not in fixed_says or "not help" in fixed_says:
+        problems.append(
+            f"  on a plan that forgives nothing, prepaying is said to be "
+            f"{fixed_says[:60]!r}. Every extra dollar shortens a fixed plan.")
+    checked += 1
+    forgiving_says = worth(rap_row)
+    if "not help" not in forgiving_says:
+        problems.append(
+            f"  on a plan whose remainder is written off, prepaying is said to "
+            f"be {forgiving_says[:60]!r}. A dollar paid early there shrinks the "
+            f"discharge, not the cost.")
+    checked += 1
+    if "not help" not in worth(std_row, pslf=True):
+        problems.append(
+            "  under PSLF prepaying is not called out as unhelpful, and a "
+            "tax-free discharge is the strongest case there is against it")
+    # IT MUST AGREE WITH THE CAPTION BESIDE IT. Both answer "does prepaying
+    # this balance do anything" and they sit on one screen; one rule, so they
+    # cannot come to disagree.
+    for row_, label_ in ((rap_row, "a forgiving plan"), (std_row, "a fixed plan")):
+        checked += 1
+        says_no = "not help" in worth(row_)
+        targets_private = target_fn(row_, hi_fed, lo_priv) == ("private",
+                                                               "forgiveness")
+        if says_no != targets_private:
+            problems.append(
+                f"  on {label_} the panel and the caption disagree about "
+                f"whether federal prepayment is worth it "
+                f"({says_no} against {targets_private})")
+
     # THE PAYMENT VIEW OF THE ROLL-DOWN, whose whole claim is that the budget
     # NEVER SHRINKS: a cleared loan's share moves onto the next one instead of
     # going back into the borrower's pocket. That is checkable directly -- the
