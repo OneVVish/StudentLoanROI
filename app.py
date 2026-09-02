@@ -7673,6 +7673,52 @@ def optional_residency_disclosure(major_name: str) -> str:
             f"below for that year, and everything here to arrive a year late.")
 
 
+def private_structure_disclosure(major_name: str) -> str:
+    """What this model ASSUMES about a private loan's shape, on the paths where
+    the private tranche is largest. "" when there is no training structure.
+
+    Two assumptions that are silent and neither of them neutral:
+
+    NO GRACE PERIOD. in_school_deferment shifts repayment to the month
+    enrolment ends and bills from there. Private loans commonly carry about
+    six months of grace, with interest accruing throughout, so the real first
+    payment is later and the real balance at that point is larger.
+
+    A FULL AMORTISING PAYMENT THROUGH RESIDENCY. Residency is deliberately not
+    deferred here -- a resident is employed and does owe payments, which is the
+    right default -- but private lenders commonly offer interest-only or
+    reduced payments during training. A borrower who takes one has far better
+    cash flow and a higher total.
+
+    BOTH DIRECTIONS OR NEITHER. "Your payment could be lower" without "and it
+    will cost more" is the flattering half, and this app's whole argument for
+    being trusted is that it does not pick the flattering half. Guarded.
+
+    It says nothing about which lender offers what. That is a product question
+    this tool has no source for and no way to keep current, and it is the same
+    line the extra-payment note holds: cite the rule, name what to ask for,
+    assert nothing about who does it.
+    """
+    overlay = ADVANCED_TRAINING_OVERLAY.get(major_name) or {}
+    school_years = int(overlay.get("unpaid_training_years") or 0)
+    stipend_years = int(overlay.get("stipend_training_years") or 0)
+    if not school_years:
+        return ""
+    residency = (
+        f" It then charges a full monthly payment through your "
+        f"{stipend_years} years of training, on the "
+        f"{fmt_money_md(RESIDENT_STIPEND)} stipend."
+        if stipend_years else "")
+    return (
+        "**Your private loan may not be shaped like this.** The figures here "
+        "start repayment the month you finish school, with no grace period."
+        + residency
+        + " Private lenders commonly offer both a grace period, which still "
+          "accrues interest, and reduced or interest-only payments during "
+          "training. Either lowers what you pay each month and RAISES what "
+          "you pay in total, so ask what a lender offers and price both.")
+
+
 def professional_program_for(major_name: str):
     """The program key ("medicine"/"law"/"dentistry") this occupation attends,
     or None if it needs no professional school."""
@@ -19438,6 +19484,12 @@ if _program_key_a:
     _optional_residency_a = optional_residency_disclosure(major)
     if _optional_residency_a:
         _sb_study.caption(_optional_residency_a)
+    # In the SIDEBAR beside the other path disclosures, which is where things
+    # that describe the PATH rather than a result belong -- it runs once
+    # whichever result branch does, so it cannot become an H2 arm asymmetry.
+    _private_shape_a = private_structure_disclosure(major)
+    if _private_shape_a:
+        _sb_study.caption(_private_shape_a)
 else:
     # Off a professional path there is nothing for the field to hold, and a
     # value Streamlit is still storing for a widget that no longer renders is

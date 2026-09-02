@@ -251,6 +251,67 @@ def check_disclosure_cannot_drift(ns):
     return problems
 
 
+def check_private_structure_disclosure(ns):
+    """The model assumes a private loan's SHAPE, and says so.
+
+    Two assumptions, both silent until now and neither neutral: repayment
+    starts the month enrolment ends with no grace period, and a full
+    amortising payment runs through residency. Real private loans commonly
+    carry ~6 months of grace with interest accruing, and lenders commonly
+    offer interest-only or reduced payments during training.
+
+    BOTH DIRECTIONS OR IT IS ADVERTISING. Either option lowers the monthly
+    payment AND raises the total. Saying only the first is the flattering
+    half, and this app's argument for being trusted is that it does not take
+    it. Asserted directly, because prose decays toward the comfortable.
+
+    It must also stay out of lender recommendations. This tool has no source
+    for which lender offers what and no way to keep one current -- the same
+    line the extra-payment note holds about servicers.
+    """
+    problems = []
+    disclose = ns["private_structure_disclosure"]
+    overlay = ns["ADVANCED_TRAINING_OVERLAY"]
+    schooled = [t for t, e in overlay.items()
+                if int(e.get("unpaid_training_years") or 0) > 0]
+    if not schooled:
+        return ["  no path carries unpaid school years, so this check tests nothing"]
+    for title in schooled:
+        text = disclose(title)
+        if not text:
+            problems.append(f"  {title}: carries {overlay[title]['unpaid_training_years']} "
+                            f"years of unpaid school and discloses nothing about "
+                            f"the private loan's shape")
+            continue
+        if "grace period" not in text:
+            problems.append(f"  {title}: does not mention the grace period the "
+                            f"model assumes away")
+        # BOTH DIRECTIONS.
+        lowers = any(w in text for w in ("lowers", "lower"))
+        raises = "RAISES" in text or "raises" in text
+        if not (lowers and raises):
+            problems.append(
+                f"  {title}: names {'only the lower payment' if lowers else 'only the cost'}. "
+                f"A grace period or reduced training payment does both, and "
+                f"stating one is the flattering half.")
+        stipend_years = int(overlay[title].get("stipend_training_years") or 0)
+        if stipend_years and "training" not in text:
+            problems.append(
+                f"  {title}: has {stipend_years} stipend years and the "
+                f"disclosure never mentions training payments")
+        for lender in ("Sallie Mae", "SoFi", "Earnest", "College Ave", "Discover"):
+            if lender.lower() in text.lower():
+                problems.append(
+                    f"  {title}: names {lender}. This tool has no source for "
+                    f"which lender offers what.")
+    # And it must stay OFF an ordinary path, which has no professional tranche
+    # and no training to be shaped around.
+    if disclose("Software Developers"):
+        problems.append("  an ordinary career got the professional-path "
+                        "private-loan disclosure")
+    return problems
+
+
 def negative_controls(ns):
     """Break it deliberately."""
     problems = []
@@ -303,6 +364,8 @@ def main():
          check_totals_absorb_the_deferment(ns)),
         ("the disclosure cannot quote a different figure than the metric",
          check_disclosure_cannot_drift(ns)),
+        ("the private loan's assumed shape is disclosed, both directions",
+         check_private_structure_disclosure(ns)),
         ("negative controls", negative_controls(ns)),
     ]
     failed = False
