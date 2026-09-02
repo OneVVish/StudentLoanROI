@@ -20,6 +20,7 @@ import contextlib
 import hashlib
 import hmac
 import html
+import base64
 import io
 import math
 import queue
@@ -12390,6 +12391,112 @@ def apply_stack_separator(fig):
     return fig
 
 
+# WHERE A SCREENSHOT CAME FROM. Every on-screen chart is a thing somebody may
+# crop and post, and until now none of them said where it was made -- the
+# share card carries the mark and the infographics burn in the URL precisely
+# because that is how this project is found.
+#
+# THE WORDMARK, NOT THE MARK. draw_logo_mark_mpl exists and the share card uses
+# it, but a symbol alone tells a reader nothing they can type. The infographics
+# already settled this the same way: they carry the address, not just the logo.
+#
+# In PAPER coordinates at the bottom right. The bottom left and centre are
+# taken -- the x-axis title is centred and every stacked chart puts its legend
+# at x=0.5 -- and the top right holds endpoint money labels on the net-position
+# chart and the p90 label on the wage ridgeline. The right-hand gutter under
+# the axis is the one corner nothing else claims.
+_CHART_BRAND_MARK = None
+
+
+def chart_brand_mark_uri():
+    """The logo mark as a small transparent PNG data URI, built once.
+
+    A data URI rather than a file path: Plotly's layout images are resolved by
+    the BROWSER, so a local path would 404 on every visitor. Built with the OO
+    matplotlib API, never pyplot -- the figure manager is module-global with no
+    locking and this runs inside Streamlit's per-session threads, which is the
+    crash check_pdf_concurrency exists for.
+
+    Same geometry as draw_logo_mark_pdf and draw_logo_mark_mpl, from the same
+    LOGO_* constants, so the three cannot drift into different marks.
+    """
+    global _CHART_BRAND_MARK
+    if _CHART_BRAND_MARK is not None:
+        return _CHART_BRAND_MARK or None
+    try:
+        fig = _pdf_figure(figsize=(0.32, 0.32), dpi=200)
+        fig.patch.set_alpha(0.0)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_axis_off()
+        ax.set_xlim(0, 64)
+        # The logo grid runs DOWNWARD, like the PDF and share-card variants.
+        ax.set_ylim(64, 0)
+        ax.plot([LOGO_START[0], LOGO_TROUGH[0], LOGO_CROSS_X],
+                [LOGO_START[1], LOGO_TROUGH[1], LOGO_ZERO_Y],
+                color=LOGO_COST, linewidth=7, solid_capstyle="round",
+                solid_joinstyle="round")
+        ax.plot([LOGO_CROSS_X, LOGO_END[0]], [LOGO_ZERO_Y, LOGO_END[1]],
+                color=LOGO_GAIN, linewidth=7, solid_capstyle="round")
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format="png", transparent=True, dpi=200)
+        _CHART_BRAND_MARK = ("data:image/png;base64,"
+                             + base64.b64encode(buffer.getvalue()).decode())
+    except Exception:
+        # A missing mark costs a decoration, never a chart.
+        _CHART_BRAND_MARK = ""
+    return _CHART_BRAND_MARK or None
+
+
+def apply_chart_brand(fig):
+    """A small wordmark INSIDE the top-right of any Plotly chart.
+
+    INSIDE THE PLOT AREA, WHICH IS THE POINT. A mark under the axis is removed
+    by cropping the bottom strip, which costs a reposter nothing. Inside the
+    data area, cropping it out means cropping the chart, so the cheapest thing
+    to do is leave it. It is not crop-proof -- nothing is -- it just stops
+    being free.
+
+    It also ends a clipping problem that took three attempts to see. Paper
+    coordinates below the axis are fractions of the PLOT area, and Plotly
+    auto-expands the bottom margin for a LEGEND but never for an annotation,
+    so a mark on the legend's row vanished twice while the legend beside it
+    rendered happily. Anything within 0..1 cannot be clipped at all.
+
+    TOP RIGHT IS NOT FREE ON EVERY CHART, and the exceptions are handled by
+    the callers rather than here: the net-position chart labels each line at
+    its right-hand endpoint, and the wage ridgeline anchors p90 money labels
+    outside their markers. Both are checked in a browser, because an overlap
+    is invisible to every assertion.
+    """
+    fig.add_annotation(
+        text=CHART_BRAND_TEXT, xref="paper", yref="paper",
+        x=0.995, y=0.99, xanchor="right", yanchor="top",
+        showarrow=False, font=dict(size=10, color="#b0b6bd"))
+    mark = chart_brand_mark_uri()
+    if mark:
+        # AS AN IMAGE WITH sizing="contain", not as shapes. The mark is two
+        # polylines on a square 64x64 grid, and paper coordinates have
+        # different pixel scales on x and y -- a square in paper units is a
+        # rectangle on screen, by an aspect this builder cannot know because
+        # Streamlit sets the width from the container. "contain" fits the
+        # image inside the box in PIXELS and keeps its aspect, so the mark
+        # stays square whatever the chart is doing.
+        # SIZED TO THE TEXT, and both box dimensions matter: with "contain"
+        # the drawn size is the SMALLER of the two in pixels, so a generous
+        # box on either axis makes the mark as tall as it is wide in whichever
+        # direction has more room. The first attempt gave it 0.030 x 0.115 and
+        # drew a mark three times the height of the words beside it.
+        #
+        # ~15px against a 10px wordmark, centred on the text's own line rather
+        # than hung from the top, so the pair reads as one lockup.
+        fig.add_layout_image(dict(
+            source=mark, xref="paper", yref="paper",
+            x=0.995 - 0.093, y=0.974, sizex=0.014, sizey=0.050,
+            xanchor="right", yanchor="middle", sizing="contain",
+            layer="above"))
+    return fig
+
+
 def stack_color_map(labels: tuple, colors: tuple = STACK_COLORS) -> dict:
     """Colour by POSITION in the stack, not by label text -- so the federal
     band is the same blue whichever wording the caller uses, and so a set of
@@ -12494,7 +12601,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
         # payoff", which is exactly right: it was not on the chart.
         apply_payoff_marker(fig, marker)
         apply_duration_axis(fig, schedule_df["year"])
-        return fig
+        return apply_chart_brand(fig)
     if balance_split_is_informative(schedule_df):
         stacked = schedule_df.melt(
             id_vars="year", value_vars=["principal_balance", "interest_balance"],
@@ -12516,7 +12623,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
             yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
         )
         apply_duration_axis(fig, schedule_df["year"])
-        return fig
+        return apply_chart_brand(fig)
     fig = px.line(
         schedule_df, x="year", y="balance",
         title="Loan Balance Over Time",
@@ -12529,7 +12636,7 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
         yaxis=dict(tickmode="array", tickvals=_tickvals, ticktext=_ticktext),
     )
     apply_duration_axis(fig, schedule_df["year"])
-    return fig
+    return apply_chart_brand(fig)
 
 
 def payment_series(result: dict) -> pd.DataFrame:
@@ -12718,7 +12825,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
                           annotation_text=text, annotation_position="top left",
                           annotation_font_size=11)
         apply_duration_axis(fig, stacked["year"])
-        return fig
+        return apply_chart_brand(fig)
 
     series = payment_series(result)
     fig = px.line(series, x="year", y="payment",
@@ -12733,7 +12840,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
                       annotation_text=text, annotation_position="top left",
                       annotation_font_size=11)
     apply_duration_axis(fig, series["year"])
-    return fig
+    return apply_chart_brand(fig)
 
 
 # One sentence, four renderers (single arm, compare arm, both PDFs): what
@@ -13108,7 +13215,7 @@ def build_net_position_chart(frame: pd.DataFrame, roi_window_years: int,
             x=roi_window_years, y=0.99, yref="paper", showarrow=False,
             xanchor="left", yanchor="top", font=dict(size=10, color="#666666"),
             text=f" {roi_window_years}-year mark")
-    return fig
+    return apply_chart_brand(fig)
 
 
 # The debt-free reference line is OPT-IN, and the toggle is a CHART control
@@ -13471,7 +13578,7 @@ def build_comparison_balance_chart(schedule_a: pd.DataFrame, label_a: str,
         margin=dict(t=60, b=90),
     )
     apply_duration_axis(fig, combined["year"])
-    return fig
+    return apply_chart_brand(fig)
 
 
 def build_comparison_payment_chart(result_a: dict, label_a: str,
@@ -13512,7 +13619,7 @@ def build_comparison_payment_chart(result_a: dict, label_a: str,
         margin=dict(t=60, b=90),
     )
     apply_duration_axis(fig, combined["year"])
-    return fig
+    return apply_chart_brand(fig)
 
 
 # Where a year's salary actually goes, as ONE bar.
@@ -13802,7 +13909,7 @@ def build_salary_flow_chart(take_home: dict, monthly_payment: float,
             # p10/p90 money labels and the tranche payoff events run into.
             annotation_text="salary ends", annotation_position="top",
             annotation_font_size=11)
-    return fig
+    return apply_chart_brand(fig)
 
 
 # Curve height at each published percentile. The apex is pinned to the median
@@ -14075,7 +14182,7 @@ def build_wage_distribution_chart(percentiles: dict, occupation_name: str,
             text=f"◄ {below}   ·   {above} ►   (for {where})",
         )],
     )
-    return fig
+    return apply_chart_brand(fig)
 
 
 def _rgba(hex_color: str, alpha: float) -> str:
@@ -14125,6 +14232,12 @@ def _density_at(row: dict, x: float) -> float:
 # and the legacy streamlit.app URL still serve/redirect, so a PDF downloaded
 # from any host correctly points readers at the canonical one).
 APP_URL = "https://worthmydegree.com"
+# DERIVED from APP_URL, never typed again: the address on a chart somebody
+# screenshots has to be the address the app is actually served from, and a
+# second copy is how those two come to differ. Defined here rather than beside
+# apply_chart_brand because a module-level constant resolves at definition
+# time and this file defines APP_URL well below that helper.
+CHART_BRAND_TEXT = APP_URL.replace("https://", "")
 
 # The organizational status line on every generated PDF. THE WORDING IS THE
 # CLAIM AND IT IS DELIBERATELY NARROW: incorporation with the California
