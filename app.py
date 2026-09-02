@@ -12070,6 +12070,40 @@ PRIVATE_STACK_COLORS = (SERIES_BLUE, SERIES_ORANGE, SERIES_AQUA, SERIES_RED)
 MAX_STACKED_PRIVATE_LOANS = len(PRIVATE_STACK_COLORS)
 
 
+def repayment_balance_stack(chosen_label: str, chosen_result: dict, rows: list):
+    """(tranches, labels, colors, stack_by) for the repayment tool's balance
+    chart, or (None, ...) for a single line.
+
+    Two different splits, decided by which row is selected:
+
+      - The PRIVATE row splits per LOAN, because those notes are amortised
+        individually and a borrower with four of them wants to know which one
+        clears when.
+      - Any COMBINED row splits federal against private, which is the split
+        this repo already calls the one a reader actually asks about: the
+        kink where the federal part clears and the private tail runs on. The
+        labels and colours for it have existed since the payment chart got
+        them; the balance chart in this tool simply never used them.
+
+    NOT PER FEDERAL LOAN, and that is a legal fact rather than a shortcut. An
+    income-driven plan pools every federal loan into one balance at the
+    weighted rate -- one payment covers them all -- so RAP and IBR rows have
+    no per-loan federal schedules and never will. Splitting the fixed rows
+    alone would put per-loan bands on Standard and a single line on RAP, which
+    reads as a rendering fault rather than the statutory difference it is.
+    """
+    if chosen_label == PRIVATE_ROW_LABEL:
+        bands, labels = private_loan_stack(chosen_result)
+        return bands, labels, PRIVATE_STACK_COLORS, "loan"
+    federal_only = (chosen_result or {}).get("federal_only")
+    private_result = next((r for label, r, _ in (rows or [])
+                           if label == PRIVATE_ROW_LABEL), None)
+    if federal_only is None or private_result is None:
+        return None, None, STACK_COLORS, "loan type"
+    return ((federal_only, private_result), REPAYMENT_STACK_LABELS,
+            STACK_COLORS, "loan type")
+
+
 def private_payoff_marker(private_result: dict, chosen_label: str = None):
     """(year, text) for the roll-down payoff, or None.
 
@@ -16060,11 +16094,12 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         # the balance chart's principal/interest split, and this is the same
         # chart.
         _pdf_priv = chosen if chart_label == PRIVATE_ROW_LABEL else None
-        _pdf_stack, _pdf_labels = private_loan_stack(_pdf_priv)
+        _pdf_stack, _pdf_labels, _pdf_colors, _pdf_by = \
+            repayment_balance_stack(chart_label, chosen, rows)
         story.append(build_pdf_balance_chart(
             chosen["schedule"], chart_label,
             tranches=_pdf_stack, labels=_pdf_labels or TRANCHE_LABELS,
-            colors=PRIVATE_STACK_COLORS, stack_by="loan",
+            colors=_pdf_colors, stack_by=_pdf_by,
             marker=private_payoff_marker(_pdf_priv)))
         _pdf_roll, _pdf_roll_labels = private_rolldown_stack(_pdf_priv)
         if _pdf_roll:
@@ -20333,6 +20368,11 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                 "per_loan": [{**loan, "schedule": sched} for loan, sched in
                              zip(priv_loans,
                                  _avalanche["per_loan_schedules"])],
+                # What the borrower hands the private side each month under the
+                # roll-down: every note's required payment plus the extra. It
+                # is what FREES UP when the last private loan clears, which is
+                # the pivot panel's whole premise.
+                "monthly_payment": _avalanche["monthly_payment"],
                 # The COMBINED roll-down curve. The chart reads its money and
                 # time axes off whatever frame it is handed, so handing it one
                 # note's schedule scaled the y-axis to that note: a stack
@@ -20715,9 +20755,18 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
     fed_rate = (sum(loan["balance"] * loan["rate"] for loan in fed_loans)
                 / total_fed if total_fed else 0.0)
 
-    pivot_month = (int(round(private_row["payoff_years"] * 12))
-                   if private_row is not None else 0)
-    freed = float(private_row["monthly_payment"]) if private_row is not None else 0.0
+    # THE ROLL-DOWN MOVES THE PIVOT, and until this read it the panel said
+    # "once the private side clears in year 5.0, redirect its $498/mo" on a
+    # screen that also said those loans clear in 3.8 years. A borrower paying
+    # the extra frees a BIGGER payment SOONER, so ignoring it understated the
+    # pivot arm and contradicted the sentence below it.
+    _priv_av = (private_row or {}).get("avalanche") or {}
+    _priv_payoff = float(_priv_av.get("payoff_years")
+                         or (private_row or {}).get("payoff_years") or 0.0)
+    pivot_month = int(round(_priv_payoff * 12)) if private_row is not None else 0
+    freed = (float(_priv_av.get("monthly_payment")
+                   or private_row["monthly_payment"])
+             if private_row is not None else 0.0)
     extras = tuple(
         entry for entry in ((1, float(extra_now)), (pivot_month + 1, freed))
         if entry[1] > 0)
@@ -21602,15 +21651,23 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # line cannot see which loan dies when, which is what they open the
         # chart for. Reported by a reader.
         _priv_row_selected = chosen_result if chosen == PRIVATE_ROW_LABEL else None
-        _stack, _stack_labels = private_loan_stack(_priv_row_selected)
+        _stack, _stack_labels, _stack_colors, _stack_by = \
+            repayment_balance_stack(chosen, chosen_result, rows)
         _marker = private_payoff_marker(_priv_row_selected)
         st.plotly_chart(
             build_balance_chart(
                 chosen_result["schedule"], chosen,
                 tranches=_stack, labels=_stack_labels or TRANCHE_LABELS,
-                colors=PRIVATE_STACK_COLORS, stack_by="loan", marker=_marker),
+                colors=_stack_colors, stack_by=_stack_by, marker=_marker),
             use_container_width=True, config=PLOTLY_CHART_CONFIG,
             key="existing_balance_chart")
+        if chosen != PRIVATE_ROW_LABEL and _stack:
+            st.caption(
+                "The federal band sits under the private one, so the step is "
+                "where your federal plan finishes and the private balance "
+                "carries on by itself. No federal plan touches private debt, "
+                "which is why that tail is the same in every row."
+            )
         if chosen == PRIVATE_ROW_LABEL and len(priv_loans) > 1:
             if _stack:
                 st.caption(
@@ -21797,8 +21854,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 st.caption(
                     "Your highest interest rate is on a **private** loan, so "
                     "extra dollars there first beat any federal targeting. "
-                    "Model that by raising that loan's **Actual $/mo** in "
-                    "the grid above."
+                    "The **Extra toward private loans** box beside this one "
+                    "models that, sending it to your highest-rate loan first."
                 )
             if not strategy_analysis["pslf"] or strategy_analysis.get("fixed"):
                 st.caption(

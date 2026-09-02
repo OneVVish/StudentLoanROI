@@ -443,6 +443,75 @@ def main() -> int:
             f"stack, but only {ns['MAX_STACKED_PRIVATE_LOANS']} validated hues "
             f"exist -- two loans would share a colour.")
 
+    # WHICH SPLIT EACH ROW GETS. The private row splits per loan; every
+    # COMBINED row splits federal against private, which is the split this repo
+    # already calls the one a reader asks about and which the balance chart in
+    # this tool simply never used. Never per FEDERAL loan: an income-driven
+    # plan pools them by law, so those rows have no per-loan schedules and
+    # splitting only the fixed ones would look like a rendering fault.
+    stack_for = ns["repayment_balance_stack"]
+    for label, res, _ in rows_p:
+        bands, blabels, _c, by = stack_for(label, res, rows_p)
+        checked += 1
+        if label == ns["PRIVATE_ROW_LABEL"]:
+            if by != "loan" or not bands or len(bands) != 4:
+                problems.append(
+                    f"  the private row got {bands and len(bands)} band(s) "
+                    f"by {by!r}; four notes must split per loan")
+        else:
+            if by != "loan type" or not bands or len(bands) != 2:
+                problems.append(
+                    f"  {label!r} got {bands and len(bands)} band(s) by {by!r}; "
+                    f"a combined row splits federal against private")
+            elif tuple(blabels) != tuple(ns["REPAYMENT_STACK_LABELS"]):
+                problems.append(
+                    f"  {label!r} labelled its bands {blabels}, not the "
+                    f"tool's own REPAYMENT_STACK_LABELS")
+            else:
+                # And they add up, exactly as the per-loan bands must.
+                f2 = frame_fn(bands, blabels)
+                s2 = f2.groupby("year")["amount"].sum()
+                l2 = res["schedule"].groupby("year")["balance"].last()
+                sh2 = s2.index.intersection(l2.index)
+                g2 = float((s2.loc[sh2] - l2.loc[sh2]).abs().max()) if len(sh2) else 0.0
+                if g2 > TOLERANCE:
+                    problems.append(
+                        f"  {label!r}'s federal and private bands miss their "
+                        f"own combined line by ${g2:,.2f}")
+
+    # THE PIVOT MUST PRICE THE ROLL-DOWN IT RECOMMENDS. Before this the panel
+    # said "once the private side clears in year 5.0, redirect its $498/mo" on
+    # a screen that also said those loans clear in 3.8 years. A borrower paying
+    # the extra frees a bigger payment sooner, so ignoring it understated the
+    # pivot arm AND contradicted the sentence beneath it.
+    pivot = ns["pivot_strategy_analysis"](
+        rows_x, [{"balance": 24_000.0, "rate": 3.5}], 60_000.0, 0,
+        prefer_label=ns["RAP_STRATEGY_LABEL"])
+    checked += 1
+    if pivot is None:
+        problems.append("  no pivot analysis for a portfolio with both sides")
+    else:
+        av = xrow["avalanche"]
+        # BOTH HALVES: when the freed payment arrives, and how big it is. The
+        # key is pivot_month, not pivot_years -- an earlier draft of this check
+        # read a key that does not exist and fell back to the expected value,
+        # which is an assertion that cannot fail.
+        want_month = int(round(av["payoff_years"] * 12))
+        checked += 1
+        if abs(int(pivot["pivot_month"]) - want_month) > 1:
+            problems.append(
+                f"  the pivot frees the private payment at month "
+                f"{pivot['pivot_month']}, but the roll-down clears those loans "
+                f"at month {want_month}. The panel would say year "
+                f"{pivot['pivot_month'] / 12:.1f} on a screen that also says "
+                f"{av['payoff_years']:.1f}.")
+        checked += 1
+        if abs(float(pivot["freed"]) - av["monthly_payment"]) > 0.51:
+            problems.append(
+                f"  the pivot frees ${pivot.get('freed', 0):,.2f}/mo where the "
+                f"roll-down hands over ${av['monthly_payment']:,.2f}. The panel "
+                f"must free the payment the borrower is actually making.")
+
     # PER-NOTE TERMS, which is what the private side needs: a federal plan sets
     # one term for the whole portfolio, while private notes each carry their
     # own and a borrower can hold a 5-year note beside a 15-year one.
