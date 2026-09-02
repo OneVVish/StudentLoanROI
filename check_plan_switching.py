@@ -389,11 +389,24 @@ def check_plan_availability_note(ns):
     a qualifying month two decades out reads as an assurance that the option
     is waiting there, which for two of the three plans it names it will not be.
 
-    This lived in the PDF caption ALONE until 2026-09-01, so the downloadable
-    report was more accurate than the page it was printed from. That is the
-    chart-twin drift running backwards, and one shared constant is what makes
-    it unrepeatable, so what is asserted here is that all three surfaces read
-    the constant rather than that they each contain the right words.
+    THE HISTORY HERE WAS RECORDED WRONG ON 2026-09-01 AND IS CORRECTED. It was
+    written up as living "in the PDF caption alone", making the downloadable
+    report more accurate than the page it was printed from. That was false:
+    80cd373 had already put it on screen, in the caption below the table, and
+    in better words than the PDF's. What was actually missing was the caveat on
+    the two count-back WARNINGS, which are where the "if you returned" claim is
+    made. The first fix then stated the dates a second time a few paragraphs
+    from the caption, which is the duplication this trim removes.
+
+    So the caption is canonical and the PDF reads the same string, which is the
+    pair that could genuinely drift. The warnings carry a short date-free flag
+    instead, and it is deliberately not asserted here: it is prose, and the
+    dates it would repeat are guarded where they are stated.
+
+    THE CAPTION CANNOT BE DELETED IN FAVOUR OF THE WARNINGS. When every RAP
+    month counts (share == 1) NEITHER warning renders, since the branches are
+    counting == 0 and share < 1, so the caption is the only carrier in that
+    case.
 
     BOTH DATES VERIFIED against the regulation on 2026-09-01, and anchored as
     literals below rather than read off the constant under test, per this
@@ -439,7 +452,7 @@ def check_plan_availability_note(ns):
 
     # ALL THREE SURFACES, by reference to the constant. A surface that spells
     # the sentence out again is the drift this replaced.
-    for func, what in (("render_existing_loan_comparison", "the on-screen warnings"),
+    for func, what in (("render_existing_loan_comparison", "the on-screen caption"),
                        ("generate_pdf_repayment_report", "the PDF caption")):
         node = next((n for n in ast.walk(tree)
                      if isinstance(n, ast.FunctionDef) and n.name == func), None)
@@ -448,13 +461,11 @@ def check_plan_availability_note(ns):
             continue
         uses = sum(1 for n in ast.walk(node)
                    if isinstance(n, ast.Name) and n.id == "COUNTBACK_PLAN_AVAILABILITY")
-        want = 2 if func == "render_existing_loan_comparison" else 1
-        if uses < want:
+        if uses < 1:
             problems.append(
-                f"  {what} reads COUNTBACK_PLAN_AVAILABILITY {uses} time(s), "
-                f"expected {want}. Both count-back branches need it: the "
-                "zero-months branch and the partial one describe the same "
-                "switch and must not disagree about whether it is available")
+                f"  {what} does not read COUNTBACK_PLAN_AVAILABILITY. The "
+                "on-screen caption and the PDF state the same two dates and "
+                "are the pair that can drift, so both read the one string")
     return problems
 
 
