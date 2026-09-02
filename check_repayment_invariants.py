@@ -598,6 +598,31 @@ def main() -> int:
             "  a 9.5% private loan beside an 8% federal one on a fixed plan "
             "no longer targets private; the plain rate rule has broken.")
 
+    # THE TOOL'S EXTRA-PAYMENT FIGURES ASSUME AN ALLOCATION THE BORROWER MUST
+    # REQUEST. 34 CFR 685.211(a)(3) advances the due date on a prepayment of at
+    # least the monthly amount "unless the borrower requests otherwise", so
+    # paying extra buys a later due date by default rather than a smaller
+    # balance. The roll-down and the commit arm are both built on dollars
+    # reaching one chosen note, so this is the assumption most worth stating.
+    note2 = ns.get("EXTRA_PAYMENT_DIRECTION_NOTE") or ""
+    for fragment in ("685.211", "principal", "in writing", "spread"):
+        checked += 1
+        if fragment not in note2:
+            problems.append(
+                f"  EXTRA_PAYMENT_DIRECTION_NOTE no longer mentions "
+                f"{fragment!r}. It has to cite the rule, name what to ask for "
+                f"and say what happens without asking, or it is a vague "
+                f"disclaimer rather than an instruction.")
+    # It must not assert what a particular servicer does -- the allocation
+    # across loans is practice, not regulation, and the only sourced half is
+    # the due-date rule.
+    checked += 1
+    for banned in ("servicers always", "your servicer will", "most servicers"):
+        if banned in note2.lower():
+            problems.append(
+                f"  the note claims {banned!r}, which nothing here sources. "
+                f"Only the due-date default is in the regulation.")
+
     # A FLAT STACKED PAYMENT CHART SAYS NOTHING THE TABLE HAS NOT. On the
     # private row with equal terms and no override every band is constant and
     # they all end together, so the picture's only content is the split, which
