@@ -417,6 +417,39 @@ def main() -> int:
                     f"next one cannot delay anything.")
                 break
 
+    # THE PAYMENT VIEW OF THE ROLL-DOWN, whose whole claim is that the budget
+    # NEVER SHRINKS: a cleared loan's share moves onto the next one instead of
+    # going back into the borrower's pocket. That is checkable directly -- the
+    # bands must sum to the same figure every month until the last note dies.
+    # Conservation cannot see this (paying less each month still balances its
+    # own books, it just takes longer), which is the same reason the federal
+    # avalanche has a budget check of its own.
+    if rbands:
+        pay_frame = ns["tranche_payment_frame"](rbands, rlabels)
+        per_month = pay_frame.groupby("year")["amount"].sum()
+        budget = float(xrow["avalanche"]["monthly_payment"])
+        # Every month but the last, which is a partial payoff.
+        steady = per_month.iloc[:-1]
+        checked += 1
+        if len(steady) and float((steady - budget).abs().max()) > 0.51:
+            worst = float((steady - budget).abs().idxmax())
+            problems.append(
+                f"  the roll-down payment stack does not hold its budget: at "
+                f"year {worst:.2f} the bands sum to "
+                f"${float(per_month.loc[worst]):,.2f} against ${budget:,.2f}. "
+                f"A cleared loan's payment must roll onto the next, not vanish.")
+        # And it must actually MOVE: at least one band has to grow after
+        # another dies, or the chart is four flat lines and shows nothing.
+        checked += 1
+        wide = pay_frame.pivot(index="year", columns="component", values="amount")
+        grew = any(float(wide[name].max()) - float(wide[name].iloc[0]) > 1.0
+                   for name in wide.columns)
+        if not grew:
+            problems.append(
+                "  no band's payment ever rises, so nothing rolls onto "
+                "anything and the payment chart is telling the reader the "
+                "opposite of what the caption claims.")
+
     # And no marker when the roll-down saves no time: a rule sitting on the
     # curve's own end date is noise.
     checked += 1

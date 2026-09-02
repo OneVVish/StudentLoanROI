@@ -16141,6 +16141,10 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                 tranches=_pdf_roll, labels=_pdf_roll_labels,
                 colors=PRIVATE_STACK_COLORS,
                 stack_by="loan, rolling each payment onto the next"))
+            story.append(build_pdf_payment_chart(
+                {"schedule": _pdf_priv["avalanche"]["schedule"]}, chart_label,
+                tranches=_pdf_roll, labels=_pdf_roll_labels,
+                colors=PRIVATE_STACK_COLORS))
         story.append(Paragraph(f"Balance over time under {chart_label}.",
                                styles["caption"]))
         story.append(Spacer(1, 8))
@@ -20663,6 +20667,12 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
     total_paid_in_window = 0.0
     schedule_rows = []
     for month in range(1, n_months + 1):
+        # Per-note payments for this month, so the roll-down can be charted as
+        # a PAYMENT stack and not only a balance one. That is the picture the
+        # strategy actually is: the total stays flat while the money moves
+        # from the cleared note onto the next, which a balance chart shows
+        # only indirectly.
+        paid_by_note = [0.0] * len(notes)
         for note in notes:
             if note["balance"] <= 0:
                 continue
@@ -20672,12 +20682,13 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
         budget = budget_base + sum(amount for start, amount in extra_payments
                                    if month >= start)
         paid = 0.0
-        for note in notes:
+        for index, note in enumerate(notes):
             if note["balance"] <= 0:
                 continue
             payment = min(note["required"], note["balance"])
             note["balance"] -= payment
             paid += payment
+            paid_by_note[index] += payment
         for index in target_order:
             note = notes[index]
             remaining = budget - paid
@@ -20688,6 +20699,7 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
             payment = min(remaining, note["balance"])
             note["balance"] -= payment
             paid += payment
+            paid_by_note[index] += payment
         for note in notes:
             if note["balance"] <= 0 and note["payoff_month"] is None:
                 note["payoff_month"] = month
@@ -20700,9 +20712,10 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
         # way the required-payment chart is. Without this the avalanche knew
         # only its combined balance, and a second chart could show the earlier
         # payoff but not which loan bought it.
-        for note, row in zip(notes, per_note_rows):
+        for index, (note, row) in enumerate(zip(notes, per_note_rows)):
             row.append({"month": month, "year": month / 12,
-                        "balance": max(note["balance"], 0.0)})
+                        "balance": max(note["balance"], 0.0),
+                        "payment": paid_by_note[index]})
         if all(note["balance"] <= 0 for note in notes):
             break
 
@@ -21719,6 +21732,32 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     "same colour is worse than one honest line."
                 )
 
+        # SAME SPLIT AS THE BALANCE CHART, through the same resolver: federal
+        # under private on a combined row, one band per note on the private
+        # row. The comment here used to say "the private row itself is already
+        # just one loan", which stopped being true when the loan grids shipped
+        # and left four notes drawing one flat line -- the identical stale
+        # premise the balance chart carried, in the identical words.
+        #
+        # Payments beside the balance: this shows what the balance cannot, that
+        # an income-driven payment RISES with income (the table's "Monthly" is
+        # only its first month) and that RAP opens on a flat $10 floor.
+        st.plotly_chart(
+            build_payment_chart(chosen_result, chosen,
+                                tranches=_stack,
+                                labels=_stack_labels or REPAYMENT_STACK_LABELS,
+                                colors=_stack_colors,
+                                stack_by=(_stack_by if chosen == PRIVATE_ROW_LABEL
+                                          else None)),
+            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+            key="existing_payment_chart")
+        if "payment" not in chosen_result.get("schedule", pd.DataFrame()).columns:
+            st.caption(
+                "A fixed-payment plan, so this line is flat by construction. It "
+                "is here to be compared against the income-driven plans, whose "
+                "payment moves with income."
+            )
+
         # THE ROLL-DOWN, AS ITS OWN PICTURE. The chart above is the required
         # schedule, which is the honest default: a servicer bills each note its
         # own payment and a cleared note's money only moves if the borrower
@@ -21737,6 +21776,19 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     stack_by="loan, rolling each payment onto the next"),
                 use_container_width=True, config=PLOTLY_CHART_CONFIG,
                 key="existing_rolldown_chart")
+            # THE PAYMENT VIEW OF THE SAME THING, and it is the clearer of
+            # the two: the total stays flat at what the borrower hands over
+            # while each cleared loan's band vanishes and the money appears on
+            # the next one. The balance chart shows the roll-down's RESULT;
+            # this shows the roll-down itself.
+            st.plotly_chart(
+                build_payment_chart(
+                    {"schedule": _priv_row_selected["avalanche"]["schedule"]},
+                    chosen, tranches=_roll, labels=_roll_labels,
+                    colors=PRIVATE_STACK_COLORS,
+                    stack_by="loan, rolling each payment onto the next"),
+                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                key="existing_rolldown_payment_chart")
             _av = _priv_row_selected["avalanche"]
             st.caption(
                 "The same loans and the same colours as above, with every "
@@ -21744,33 +21796,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 f"{_av['payoff_years']:.1f} years instead of "
                 f"{_priv_row_selected['payoff_years']:.1f}. The difference "
                 "between these two charts is the whole of what the roll-down "
-                "buys you."
+                "buys you. In the payment view the total never changes: every "
+                f"month is {fmt_money_md(_av['monthly_payment'])}, and when a "
+                "loan clears its share moves onto the next one instead of "
+                "going back into your budget."
             )
 
-        # Payments beside the balance. The balance chart cannot show that an
-        # income-driven payment RISES with income -- the table's "Monthly" is
-        # only its first month -- nor that RAP opens on a flat $10 floor.
-        # SAME SPLIT AS THE BALANCE CHART, through the same resolver: federal
-        # under private on a combined row, one band per note on the private
-        # row. The comment here used to say "the private row itself is already
-        # just one loan", which stopped being true when the loan grids shipped
-        # and left four notes drawing one flat line -- the identical stale
-        # premise the balance chart carried, in the identical words.
-        st.plotly_chart(
-            build_payment_chart(chosen_result, chosen,
-                                tranches=_stack,
-                                labels=_stack_labels or REPAYMENT_STACK_LABELS,
-                                colors=_stack_colors,
-                                stack_by=(_stack_by if chosen == PRIVATE_ROW_LABEL
-                                          else None)),
-            use_container_width=True, config=PLOTLY_CHART_CONFIG,
-            key="existing_payment_chart")
-        if "payment" not in chosen_result.get("schedule", pd.DataFrame()).columns:
-            st.caption(
-                "A fixed-payment plan, so this line is flat by construction. It "
-                "is here to be compared against the income-driven plans, whose "
-                "payment moves with income."
-            )
         if accrued > 0 and not balance_split_is_informative(chosen_result["schedule"]):
             st.caption(
                 f"This plan clears your {fmt_money(accrued)} of unpaid interest early, "
