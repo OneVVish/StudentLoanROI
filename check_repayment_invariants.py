@@ -274,6 +274,80 @@ def main() -> int:
             f"{single_override['payoff_years']:.2f} -- same loan, same money, "
             f"two answers.")
 
+    # PER-NOTE TERMS, which is what the private side needs: a federal plan sets
+    # one term for the whole portfolio, while private notes each carry their
+    # own and a borrower can hold a 5-year note beside a 15-year one.
+    av = ns["simulate_fixed_avalanche"]
+    PRIVATE_TERM_YEARS = ns["PRIVATE_TERM_YEARS"]
+    mixed = [{"balance": 10_300.0, "rate": 7.33, "term": 10, "actual": 0},
+             {"balance": 3_000.0, "rate": 9.88, "term": 5, "actual": 0},
+             {"balance": 4_000.0, "rate": 9.72, "term": 7, "actual": 0},
+             {"balance": 7_300.0, "rate": 6.96, "term": 15, "actual": 0}]
+    for extra in (0.0, 130.0):
+        r = av(mixed, PRIVATE_TERM_YEARS, per_loan_terms=True,
+               extra_payments=((1, extra),) if extra else ())
+        checked += 1
+        problems += check(f"private avalanche, mixed terms, ${extra:.0f} extra",
+                          sum(l["balance"] for l in mixed), r, 7.5)
+
+    # THE FEDERAL PATH IS PROTECTED BY AN EQUIVALENCE, not by hoping. With the
+    # flag OFF a `term` on a loan must be ignored entirely, and with every note
+    # on the SAME term the two modes must agree to the cent -- which is the
+    # generalisation asserting it did not change the arithmetic it grew out of.
+    equal = [{"balance": 46_300.0, "rate": 6.05, "term": 10, "actual": 0},
+             {"balance": 22_600.0, "rate": 3.4, "term": 10, "actual": 0},
+             {"balance": 8_000.0, "rate": 9.5, "term": 10, "actual": 0}]
+    off = av(equal, 10, extra_payments=((1, 300.0),))
+    on = av(equal, 10, extra_payments=((1, 300.0),), per_loan_terms=True)
+    checked += 1
+    if (abs(off["total_interest"] - on["total_interest"]) > 0.01
+            or abs(off["payoff_years"] - on["payoff_years"]) > 1e-9):
+        problems.append(
+            f"  per_loan_terms changed the answer on EQUAL terms: interest "
+            f"{off['total_interest']:,.2f} vs {on['total_interest']:,.2f}. "
+            f"With one term for every note the two modes are the same "
+            f"calculation, and the federal path depends on that.")
+    misleading = [{"balance": 46_300.0, "rate": 6.05, "term": 2},
+                  {"balance": 22_600.0, "rate": 3.4, "term": 30}]
+    checked += 1
+    if av(misleading, 10)["payoff_years"] != av(
+            [{"balance": 46_300.0, "rate": 6.05},
+             {"balance": 22_600.0, "rate": 3.4}], 10)["payoff_years"]:
+        problems.append(
+            "  a `term` on a loan changed the result with per_loan_terms OFF. "
+            "The federal grid never sets one, but the flag is what keeps that "
+            "true rather than an accident of the caller.")
+
+    # TARGETING, AND IT CANNOT BE THE FEDERAL ASSERTION. With one term the
+    # highest-rate note dies first; with mixed terms that is FALSE, because a
+    # short low-rate note legitimately clears before a long high-rate one. The
+    # honest question is where the EXTRA went, so compare payoff months against
+    # the same run without it and ask which note moved.
+    trap = [{"balance": 5_000.0, "rate": 4.0, "term": 3},
+            {"balance": 20_000.0, "rate": 10.0, "term": 10}]
+    base = av(trap, PRIVATE_TERM_YEARS, per_loan_terms=True)
+    with_extra = av(trap, PRIVATE_TERM_YEARS, per_loan_terms=True,
+                    extra_payments=((1, 130.0),))
+    moved = [(b or 0) - (w or 0) for b, w in
+             zip(base["per_loan_payoff_months"],
+                 with_extra["per_loan_payoff_months"])]
+    checked += 1
+    if moved[1] <= 0 or moved[0] != 0:
+        problems.append(
+            f"  the extra did not go to the highest rate: payoff months moved "
+            f"{moved} for rates (4.0, 10.0). The 10% note must move and the 4% "
+            f"note must not.")
+    # AND PIN THE REASON, so nobody restores the federal form of this check:
+    # on this fixture the LOWEST-rate note really does clear first, because its
+    # term is three years. A guard asserting highest-rate-first would fail on
+    # correct code.
+    checked += 1
+    if not base["per_loan_payoff_months"][0] < base["per_loan_payoff_months"][1]:
+        problems.append(
+            "  the 3-year 4% note no longer clears before the 10-year 10% one, "
+            "so this fixture has stopped demonstrating why the federal "
+            "highest-rate-first assertion must not be copied here.")
+
     # Multi-loan grids: two federal notes on a fixed plan chained with two
     # private loans (one paying an override) -- four schedules combined twice
     # over, which is the repayment tool's whole-bill shape. The books must
