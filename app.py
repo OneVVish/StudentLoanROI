@@ -9571,6 +9571,33 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
     month (negative amortization); any balance still outstanding after
     `max_term_years` is forgiven.
 
+    THE PAYMENT IS "THE LESSER OF" THE PERCENTAGE OR THE 10-YEAR STANDARD
+    PAYMENT. 34 CFR 685.209(f)(2) for the 10% variant and (f)(3) for the 15%:
+    the payment is the percentage of discretionary income "or what the borrower
+    would have paid on a 10-year standard repayment plan", whichever is less.
+    RAP has NO such ceiling, which is most of why the two plans diverge at
+    higher incomes -- so the ceiling belongs here and must never be copied into
+    simulate_rap_schedule.
+
+    The ceiling is figured on the balance at ENTRY to the plan (`principal`,
+    interest pool included), not on the balance as it runs down, so it is a
+    constant for the life of the schedule and the payment does not creep up as
+    principal falls.
+
+    Without it this function charged an uncapped percentage forever: $1,050/mo
+    on a $30,000 balance at a $150,000 income, against a real ceiling of $341.
+    It binds where the BALANCE IS SMALL RELATIVE TO INCOME -- the ordinary
+    bachelor's borrower who does well -- and not on the professional paths,
+    where 10% of discretionary income never approaches a $3,033 cap. The same
+    defect was found and fixed in brand/build_guide_plan_chart.py (#164/#165);
+    the fix never reached this simulator, which is the one every visitor
+    actually drives. check_ibr_standard_cap.py is the guard.
+
+    EXTRA PAYMENTS ARE NOT CAPPED. The ceiling bounds what the borrower is
+    REQUIRED to hand over; a voluntary extra is not a statutory payment and the
+    regulation does not bound it. So the cap is applied to the percentage and
+    the extras are added afterwards.
+
     `extra_payments` is the strategy simulator's hook: ((from_month,
     monthly_amount), ...) increments added to the statutory payment from that
     month on -- how "redirect the freed private payment at the federal
@@ -9594,6 +9621,13 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         }
 
     monthly_rate = annual_rate_pct / 100 / 12
+    # The 10-year Standard payment on the entry balance: this plan's statutory
+    # ceiling, constant for the life of the schedule. Computed once, outside the
+    # loop -- it does not depend on the month, the income or the running
+    # balance.
+    standard_payment_cap = float(calculate_standard_repayment(
+        principal, annual_rate_pct, term_years=STANDARD_TERM_YEARS,
+        roi_window_years=roi_window_years)["monthly_payment"])
     # `principal` is the whole balance owed; starting_interest says how much of
     # it is already-accrued unpaid interest rather than borrowed money. Default
     # zero, which is the prospective case -- nobody has accrued anything yet.
@@ -9615,7 +9649,9 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
         current_salary = income_for_year(major_name, year_index + income_offset_years,
                                          annual_income, income_growth)
         discretionary_monthly = max((current_salary / 12) - (living_adjustment / 12), 0.0)
-        payment = discretionary_monthly * payment_rate
+        # "The lesser of" -- see the docstring. Applied to the statutory
+        # payment only; the voluntary extras below are deliberately outside it.
+        payment = min(discretionary_monthly * payment_rate, standard_payment_cap)
         payment += sum(amount for start, amount in extra_payments
                        if month >= start)
 

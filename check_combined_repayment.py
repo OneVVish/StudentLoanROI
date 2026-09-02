@@ -253,8 +253,21 @@ def main() -> int:
     checked = 0
     income_driven = (ns["RAP_STRATEGY_LABEL"], "Income-Driven Repayment (IDR)")
     fixed = ("Standard 10-Year", ns["TIERED_STANDARD_STRATEGY_LABEL"])
+    # THE SIZES ARE LOAD-BEARING, and the reason changed on 2026-09-02 when
+    # calculate_idr_repayment gained its 10-year Standard ceiling.
+    #
+    # That ceiling is LINEAR IN PRINCIPAL, so when the cap binds on every loan
+    # separately, the summed per-loan payment equals the pooled one exactly --
+    # the bug this guard exists to catch becomes invisible in the payment. The
+    # old (60,000 + 30,000) pair did that against HighEarner: $999.48 summed
+    # against $999.18 pooled, and the negative control correctly refused it.
+    #
+    # A fixture must therefore sit where the PERCENTAGE binds, not the cap:
+    # balance large relative to income. (100,000 + 60,000) gives a $593 gap for
+    # HighEarner and $83 for LowEarner. Do not shrink these to "more typical"
+    # numbers without re-reading what the negative control says.
     for major in ("HighEarner", "LowEarner"):
-        for new_loan, existing in ((60_000.0, 30_000.0), (20_000.0, 120_000.0)):
+        for new_loan, existing in ((100_000.0, 60_000.0), (20_000.0, 120_000.0)):
             for strategy in income_driven:
                 checked += 1
                 problems += check_income_driven(ns, strategy, major, new_loan, existing)
