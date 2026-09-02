@@ -21420,7 +21420,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 st.caption(
                     "Your highest interest rate is on a **private** loan, so "
                     "extra dollars there first beat any federal targeting. "
-                    "model that by raising that loan's **Actual $/mo** in "
+                    "Model that by raising that loan's **Actual $/mo** in "
                     "the grid above."
                 )
             if not strategy_analysis["pslf"] or strategy_analysis.get("fixed"):
