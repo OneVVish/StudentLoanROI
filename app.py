@@ -12130,6 +12130,39 @@ def repayment_balance_stack(chosen_label: str, chosen_result: dict, rows: list):
             STACK_COLORS, "loan type")
 
 
+def commit_arm_stack(analysis: dict, private_result: dict):
+    """(tranches, labels, axis_frame) for the COMMIT arm, or (None, None, None).
+
+    The panel prices two arms and the charts only ever drew the first. On a
+    combined row that left the page saying "the private side clears in year
+    3.8" and "debt-free on the federal side in 5.0 years" directly beneath a
+    picture whose bands ended at 4.9 and 6.9 -- the ride arm, correctly drawn
+    and not the one the sentence was about.
+
+    The private band is the ROLL-DOWN, because that is what the panel assumes
+    when it frees the private payment; the federal band is the arm the panel
+    computed. The axis frame is their SUM, since a stack takes its money and
+    time ranges from the frame it is handed and one band's curve would scale
+    the chart to a fraction of its own height.
+    """
+    if not analysis or private_result is None:
+        return None, None, None
+    federal = (analysis.get("strategy") or {}).get("schedule")
+    av = private_result.get("avalanche") or {}
+    private = av.get("schedule")
+    if federal is None or private is None or federal.empty or private.empty:
+        return None, None, None
+    # Nothing to say when committing changes nothing.
+    if analysis.get("savings", 0.0) <= 0.5:
+        return None, None, None
+    tranches = ({"schedule": federal}, {"schedule": private})
+    axis = pd.merge(federal[["year", "balance"]].groupby("year", as_index=False).last(),
+                    private[["year", "balance"]].groupby("year", as_index=False).last(),
+                    on="year", how="outer", suffixes=("_f", "_p")).fillna(0.0)
+    axis["balance"] = axis["balance_f"] + axis["balance_p"]
+    return tranches, REPAYMENT_STACK_LABELS, axis[["year", "balance"]]
+
+
 def extra_payment_target(chosen_result: dict, fed_loans: list, priv_loans: list,
                           pslf: bool = False):
     """Where an extra dollar should go: ("private"|"federal", reason) or None.
@@ -20924,6 +20957,11 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
         return {"paid": paid, "years": float(result["payoff_years"]),
                 "forgiven": forgiven,
                 "interest": float(result.get("total_interest", 0.0) or 0.0),
+                # The arm's own balance curve. Kept so the commit arm can be
+                # DRAWN and not only described: the panel said "debt-free on
+                # the federal side in 5.0 years" under a chart whose federal
+                # band ran to 6.9, because only the scalars survived here.
+                "schedule": result["schedule"],
                 **tax_info,
                 "all_in": paid + tax_info["tax"]}
 
@@ -21770,6 +21808,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         _stack, _stack_labels, _stack_colors, _stack_by = \
             repayment_balance_stack(chosen, chosen_result, rows)
         _marker = private_payoff_marker(_priv_row_selected)
+        _priv_required_years = float(next(
+            (r["payoff_years"] for label, r, _ in rows
+             if label == PRIVATE_ROW_LABEL), 0.0))
         st.plotly_chart(
             build_balance_chart(
                 chosen_result["schedule"], chosen,
@@ -21826,6 +21867,34 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "A fixed-payment plan, so this line is flat by construction. It "
                 "is here to be compared against the income-driven plans, whose "
                 "payment moves with income."
+            )
+
+        # THE COMMIT ARM, DRAWN. On a combined row the charts above are the
+        # RIDE arm: required payments, private on its own terms. The panel
+        # below prices the other arm and said so in words under a picture of
+        # the first one -- "the private side clears in year 3.8" and
+        # "debt-free on the federal side in 5.0 years" beneath bands ending at
+        # 4.9 and 6.9. Reported by a reader who selected RAP and looked.
+        _commit, _commit_labels, _commit_axis = commit_arm_stack(
+            strategy_analysis,
+            next((r for label, r, _ in rows if label == PRIVATE_ROW_LABEL), None))
+        if _commit and chosen != PRIVATE_ROW_LABEL:
+            st.plotly_chart(
+                build_balance_chart(
+                    _commit_axis, chosen, tranches=_commit,
+                    labels=_commit_labels, colors=STACK_COLORS,
+                    stack_by="loan type, committing instead of riding"),
+                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                key="existing_commit_chart")
+            _cs, _cr = strategy_analysis["strategy"], strategy_analysis["ride"]
+            st.caption(
+                "The other arm of the fork below, drawn. Put the extra at the "
+                "private loans and redirect their payment when they clear, and "
+                f"the private band ends at "
+                f"{strategy_analysis['pivot_month'] / 12:.1f} years instead of "
+                f"{_priv_required_years:.1f}, with the federal balance gone at "
+                f"{_cs['years']:.1f} rather than {_cr['years']:.1f}. The charts "
+                "above are what happens if you do not."
             )
 
         # THE ROLL-DOWN, AS ITS OWN PICTURE. The chart above is the required

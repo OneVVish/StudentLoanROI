@@ -262,10 +262,13 @@ def main() -> int:
                         f"  [{label}] {kind} chart for {plan_label!r} raised "
                         f"{type(exc).__name__}: {exc}")
 
+        _priv_row = next((r for l, r, _ in rows
+                          if l == ns["PRIVATE_ROW_LABEL"]), None)
         analysis = use("pivot_strategy_analysis")(
             rows, fed, spec["income"], 0,
             pslf=spec.get("pslf", False),
             prefer_label=rows[0][0], old_ibr=spec.get("old_ibr", False))
+        use("commit_arm_stack")(analysis, _priv_row)
         if analysis is not None:
             checked += 1
             sentences = use("strategy_verdict_sentences")(analysis)

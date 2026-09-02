@@ -417,6 +417,77 @@ def main() -> int:
                     f"next one cannot delay anything.")
                 break
 
+    # THE COMMIT ARM MUST BE DRAWABLE, not only describable. The panel priced
+    # two arms and the charts drew one, so a combined row said "the private
+    # side clears in year 3.8" and "debt-free on the federal side in 5.0
+    # years" under bands ending at 4.9 and 6.9.
+    commit_fn = ns["commit_arm_stack"]
+    pivot_rows = ns["compare_existing_loan_plans"](
+        24_000.0, 3.5, 60_000.0, 0, True,
+        federal_loans=[{"balance": 24_000.0, "rate": 3.5}],
+        private_loans=priv, private_extra=130.0)
+    prow2 = next(r for label, r, _ in pivot_rows
+                 if label == ns["PRIVATE_ROW_LABEL"])
+    an2 = ns["pivot_strategy_analysis"](
+        pivot_rows, [{"balance": 24_000.0, "rate": 3.5}], 60_000.0, 0,
+        prefer_label=ns["RAP_STRATEGY_LABEL"])
+    cbands, clabels, caxis = commit_fn(an2, prow2)
+    checked += 1
+    if not cbands or len(cbands) != 2:
+        problems.append(
+            "  the commit arm has no drawable stack, so the panel's second arm "
+            "stays prose under a picture of the first")
+    else:
+        fed_band, priv_band = cbands
+        fed_end = float(fed_band["schedule"].loc[
+            fed_band["schedule"]["balance"] > 0.005, "year"].max())
+        priv_end = float(priv_band["schedule"].loc[
+            priv_band["schedule"]["balance"] > 0.005, "year"].max())
+        checked += 1
+        if abs(priv_end - prow2["avalanche"]["payoff_years"]) > 0.09:
+            problems.append(
+                f"  the commit arm's private band ends at {priv_end:.2f}y, not "
+                f"the roll-down's {prow2['avalanche']['payoff_years']:.2f}y. "
+                f"The panel frees the private payment on the roll-down's clock, "
+                f"so the picture has to use the same one.")
+        checked += 1
+        if abs(fed_end - an2["strategy"]["years"]) > 0.09:
+            problems.append(
+                f"  the commit arm's federal band ends at {fed_end:.2f}y while "
+                f"the panel says {an2['strategy']['years']:.2f}y")
+        checked += 1
+        if fed_end >= an2["ride"]["years"]:
+            problems.append(
+                f"  committing does not finish EARLIER than riding "
+                f"({fed_end:.2f}y against {an2['ride']['years']:.2f}y), so the "
+                f"chart argues against the panel it illustrates")
+        # THE AXIS FRAME IS THE SUM. Handing a stack one band's curve scales
+        # the chart to a fraction of its own height -- a $24,600 stack drawn
+        # against a y-axis stopping at $10k, which is how this shipped once.
+        checked += 1
+        # The STACKED height, not the tallest single band -- an earlier
+        # version of this check compared against the latter and passed on an
+        # axis built from one band, which is the exact defect it exists for.
+        top = float(caxis["balance"].max())
+        stacked = None
+        for band in cbands:
+            curve = band["schedule"][["year", "balance"]].groupby(
+                "year", as_index=False).last().set_index("year")["balance"]
+            stacked = curve if stacked is None else stacked.add(curve,
+                                                                fill_value=0.0)
+        peak = float(stacked.max())
+        if top < peak - 0.5:
+            problems.append(
+                f"  the commit chart's axis frame peaks at ${top:,.0f} against "
+                f"a stacked height of ${peak:,.0f}. It must be the SUM of the "
+                f"bands, or the y-axis is scaled to part of its own picture.")
+    # Nothing to draw when committing saves nothing.
+    checked += 1
+    if commit_fn({"savings": 0.0, "strategy": {}, "ride": {}}, prow2)[0] is not None:
+        problems.append(
+            "  a commit chart was offered where committing saves nothing; it "
+            "would draw a second picture identical to the first")
+
     # THE PANEL SAYS WHAT ITS OWN HEADING MEANS. "Commit or ride" named the
     # fork and never defined it, and a reader looking straight at the panel
     # asked what it meant. One string, read by the screen and the PDF, so the
