@@ -21750,16 +21750,19 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # Payments beside the balance. The balance chart cannot show that an
         # income-driven payment RISES with income -- the table's "Monthly" is
         # only its first month -- nor that RAP opens on a flat $10 floor.
-        # Stacked when a private tranche exists and the selected row is a
-        # combined plan, so the constant private floor is visible under the
-        # moving federal part; the private row itself is already just one loan.
-        _fed = chosen_result.get("federal_only") if chosen != PRIVATE_ROW_LABEL else None
-        _priv = next((r for label, r, _ in rows if label == PRIVATE_ROW_LABEL), None)
+        # SAME SPLIT AS THE BALANCE CHART, through the same resolver: federal
+        # under private on a combined row, one band per note on the private
+        # row. The comment here used to say "the private row itself is already
+        # just one loan", which stopped being true when the loan grids shipped
+        # and left four notes drawing one flat line -- the identical stale
+        # premise the balance chart carried, in the identical words.
         st.plotly_chart(
             build_payment_chart(chosen_result, chosen,
-                                federal_result=_fed if _priv is not None else None,
-                                private_result=_priv if _fed is not None else None,
-                                labels=REPAYMENT_STACK_LABELS),
+                                tranches=_stack,
+                                labels=_stack_labels or REPAYMENT_STACK_LABELS,
+                                colors=_stack_colors,
+                                stack_by=(_stack_by if chosen == PRIVATE_ROW_LABEL
+                                          else None)),
             use_container_width=True, config=PLOTLY_CHART_CONFIG,
             key="existing_payment_chart")
         if "payment" not in chosen_result.get("schedule", pd.DataFrame()).columns:
