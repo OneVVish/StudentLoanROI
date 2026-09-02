@@ -598,6 +598,71 @@ def main() -> int:
             "  a 9.5% private loan beside an 8% federal one on a fixed plan "
             "no longer targets private; the plain rate rule has broken.")
 
+    # THE EXTRA MUST REACH THE ROW. It used to sit outside the tables: enter
+    # $130 and the private row still read $498/mo while "Combined, what you
+    # actually pay" read $736, when the answer was $866. A table with that
+    # heading showing a figure the visitor did not enter is describing someone
+    # else.
+    # Self-contained: this block used to read a fixture defined further down
+    # and died with UnboundLocalError rather than failing cleanly. Second time
+    # in this file today, so it now carries its own loans.
+    _same_term = [{"balance": b, "rate": r, "term": 5, "actual": 0}
+                  for b, r in ((10_300, 7.33), (3_000, 9.88),
+                               (4_000, 9.72), (7_300, 6.96))]
+    base_rows = ns["compare_existing_loan_plans"](
+        24_000.0, 3.5, 60_000.0, 0, True,
+        federal_loans=[{"balance": 24_000.0, "rate": 3.5}],
+        private_loans=_same_term)
+    xtra_rows = ns["compare_existing_loan_plans"](
+        24_000.0, 3.5, 60_000.0, 0, True,
+        federal_loans=[{"balance": 24_000.0, "rate": 3.5}],
+        private_loans=_same_term, private_extra=130.0)
+    p0 = next(r for label, r, _ in base_rows if label == ns["PRIVATE_ROW_LABEL"])
+    p1 = next(r for label, r, _ in xtra_rows if label == ns["PRIVATE_ROW_LABEL"])
+    checked += 1
+    if abs(float(p1["monthly_payment"]) - float(p0["monthly_payment"]) - 130.0) > 1.0:
+        problems.append(
+            f"  a $130 private extra moved the row's payment by "
+            f"${float(p1['monthly_payment']) - float(p0['monthly_payment']):,.2f}, "
+            f"not $130. The row has to show what the borrower actually pays.")
+    c0 = next(r for label, r, _ in base_rows if label.startswith("Standard"))
+    c1 = next(r for label, r, _ in xtra_rows if label.startswith("Standard"))
+    checked += 1
+    if abs(float(c1["monthly_payment"]) - float(c0["monthly_payment"]) - 130.0) > 1.0:
+        problems.append(
+            "  the COMBINED row did not move by the extra, and its heading is "
+            "\"what you actually pay\"")
+    checked += 1
+    if float(p1["total_interest"]) >= float(p0["total_interest"]):
+        problems.append("  the extra bought no interest saving at all")
+
+    # AND THE TERM OFTEN DOES NOT MOVE, which is what a reader notices first.
+    # An extra aimed at one note clears THAT note early while the others run
+    # their own terms, and the payoff is the last one. Saying "clears in 5.0
+    # years instead of 5.0" reads as a bug, so the sentence has to explain it.
+    pace_fn = ns["private_pace_sentence"]
+    checked += 1
+    said = pace_fn(p1)
+    if "does not shorten the term" not in said:
+        problems.append(
+            f"  with the term unchanged the pace sentence says {said[:70]!r}. "
+            f"It has to say WHY, or 5.0 years instead of 5.0 reads as a fault.")
+    # And it must still report a real reduction when the extra hits the note
+    # that actually binds the payoff.
+    binding = [{"balance": 20_000.0, "rate": 9.88, "term": 10, "actual": 0},
+               {"balance": 3_000.0, "rate": 6.0, "term": 5, "actual": 0}]
+    b_rows = ns["compare_existing_loan_plans"](
+        24_000.0, 3.5, 60_000.0, 0, True,
+        federal_loans=[{"balance": 24_000.0, "rate": 3.5}],
+        private_loans=binding, private_extra=400.0)
+    b_row = next(r for label, r, _ in b_rows if label == ns["PRIVATE_ROW_LABEL"])
+    checked += 1
+    said_b = pace_fn(b_row)
+    if "does not shorten" in said_b or "instead of" not in said_b:
+        problems.append(
+            f"  an extra on the note that BINDS the payoff must report the "
+            f"reduction, not explain it away: {said_b[:80]!r}")
+
     # THE TOOL'S EXTRA-PAYMENT FIGURES ASSUME AN ALLOCATION THE BORROWER MUST
     # REQUEST. 34 CFR 685.211(a)(3) advances the due date on a prepayment of at
     # least the monthly amount "unless the borrower requests otherwise", so

@@ -12227,6 +12227,44 @@ def extra_payment_worth_it(chosen_result: dict, pslf: bool = False) -> str:
             "an amount in above and this panel will price it.")
 
 
+def private_pace_sentence(private_result: dict) -> str:
+    """What paying above the required amount buys, in words. "" when nothing.
+
+    THE TERM OFTEN DOES NOT MOVE, and saying "clears in 5.0 years instead of
+    5.0" reads as a bug. It is not: an extra aimed at one note clears THAT
+    note early while the others run their own full terms, and the combined
+    payoff is the LAST one. So the money buys interest and not time, and the
+    time only arrives once the freed payment is rolled onto the next loan --
+    which is the roll-down, and has its own charts.
+
+    Reported as "I don't see the reduction in term with extra private
+    payments", which was the right thing to notice and the wrong thing to
+    call a bug.
+    """
+    pace = (private_result or {}).get("required_pace")
+    if not pace:
+        return ""
+    actual = float(private_result["monthly_payment"])
+    if actual <= float(pace["monthly_payment"]) + 0.005:
+        return ("The payment entered is at or below the required payment of "
+                f"{fmt_money_md(pace['monthly_payment'])}, so the rows use the "
+                "required payment.")
+    saved = float(pace["total_interest"]) - float(private_result["total_interest"])
+    years, was = float(private_result["payoff_years"]), float(pace["payoff_years"])
+    if abs(years - was) < 0.05:
+        return (f"At {fmt_money_md(actual)}/mo instead of the required "
+                f"{fmt_money_md(pace['monthly_payment'])}, this saves "
+                f"{fmt_money_md(saved)} in interest and **does not shorten the "
+                f"term**: the extra clears one loan early while the others run "
+                f"their own terms, and you are done when the LAST one ends. "
+                f"Time comes from rolling that freed payment onto the next "
+                f"loan, which is the chart below.")
+    return (f"At {fmt_money_md(actual)}/mo instead of the required "
+            f"{fmt_money_md(pace['monthly_payment'])}, this clears in "
+            f"{years:.1f} years instead of {was:.1f}, saving "
+            f"{fmt_money_md(saved)} in interest.")
+
+
 def commit_arm_stack(analysis: dict, private_result: dict):
     """(tranches, labels, axis_frame) for the COMMIT arm, or (None, None, None).
 
@@ -16411,23 +16449,10 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         # Same aggressive-pace caption the screen shows, from the same
         # precomputed required_pace pair (chart-twin rule): combined actual
         # pace against combined required pace.
-        _pace = private_row[1].get("required_pace")
-        if _pace is not None:
-            _actual_monthly = private_row[1]["monthly_payment"]
-            if _actual_monthly > _pace["monthly_payment"] + 0.005:
-                _saved = _pace["total_interest"] - private_row[1]["total_interest"]
-                story.append(Paragraph(
-                    f"At {fmt_money(_actual_monthly)}/mo instead of the "
-                    f"required {fmt_money(_pace['monthly_payment'])}, this clears "
-                    f"in {private_row[1]['payoff_years']:.1f} years instead of "
-                    f"{_pace['payoff_years']:.1f} -- saving {fmt_money(_saved)} "
-                    "in interest.", styles["caption"]))
-            else:
-                story.append(Paragraph(
-                    "The actual payment entered is at or "
-                    f"below the required payment of "
-                    f"{fmt_money(_pace['monthly_payment'])}, so the rows use the "
-                    "required payment.", styles["caption"]))
+        _pace_text = private_pace_sentence(private_row[1])
+        if _pace_text:
+            story.append(Paragraph(
+                _pace_text.replace("**", ""), styles["caption"]))
         story.append(Spacer(1, 8))
         story.append(Paragraph("Combined -- what you actually pay",
                                styles["section"]))
@@ -20702,13 +20727,33 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     # waiver and discharge behaviour and is deliberately not modelled here.
     private_result = None
     if priv_loans:
-        def _private_sim(loan: dict, with_override: bool) -> dict:
+        # THE EXTRA IS MONEY THE BORROWER SAYS THEY PAY, so it belongs in the
+        # row. It used to sit outside: enter $130 and the private row still
+        # read $498/mo and the combined table -- headed "what you actually
+        # pay" -- still read $736, when the answer was $866. A table that
+        # ignores an amount the visitor typed is describing somebody else.
+        #
+        # Allocated to the HIGHEST-RATE note, which is what the field's own
+        # help text promises and what the caption beside it recommends. NOT
+        # cascaded: rolling a cleared note's payment onto the next is a
+        # BEHAVIOUR the borrower has to choose, and it stays where it was, in
+        # the roll-down charts. That split is also the honest answer to "why
+        # has my term not moved" -- see below.
+        _extra_target = max(range(len(priv_loans)),
+                            key=lambda i: priv_loans[i]["rate"]) if private_extra else None
+
+        def _private_sim(loan: dict, with_override: bool, index: int = -1) -> dict:
+            override = (loan["actual"] or None) if with_override else None
+            if with_override and index == _extra_target:
+                required = calculate_standard_repayment(
+                    loan["balance"], loan["rate"], loan["term"])["monthly_payment"]
+                override = max(override or 0.0, required) + float(private_extra)
             return calculate_standard_repayment(
                 loan["balance"], loan["rate"], loan["term"],
-                monthly_payment_override=(loan["actual"] or None)
-                                          if with_override else None)
+                monthly_payment_override=override)
 
-        _per_results = [_private_sim(loan, True) for loan in priv_loans]
+        _per_results = [_private_sim(loan, True, i)
+                        for i, loan in enumerate(priv_loans)]
         private_result = _per_results[0]
         for _r in _per_results[1:]:
             private_result = combine_repayment_results(private_result, _r)
@@ -20725,7 +20770,7 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
              # which is the only thing the picture was being read for.
              "schedule": result["schedule"]}
             for loan, result in zip(priv_loans, _per_results)]
-        if any(loan["actual"] for loan in priv_loans):
+        if any(loan["actual"] for loan in priv_loans) or private_extra:
             # The required-pace figures, attached to the row like `countback`
             # is: computed HERE so the renderer and the PDF read one
             # precomputed set instead of re-running simulators each on their
@@ -21809,26 +21854,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # already reflects every effective override, so an entered actual
             # that fell at or below its loan's required payment shows up here
             # as "nothing changed" rather than as a phantom saving.
-            _pace = private_row[1].get("required_pace")
-            if _pace is not None:
-                _actual_monthly = private_row[1]["monthly_payment"]
-                if _actual_monthly > _pace["monthly_payment"] + 0.005:
-                    _saved = _pace["total_interest"] - private_row[1]["total_interest"]
-                    st.caption((
-                        f"At **{fmt_money_md(_actual_monthly)}/mo** instead of the "
-                        f"required {fmt_money_md(_pace['monthly_payment'])}, this "
-                        f"clears in **{private_row[1]['payoff_years']:.1f} years** "
-                        f"instead of {_pace['payoff_years']:.1f}, saving "
-                        f"{fmt_money_md(_saved)} in interest."
-                    ))
-                else:
-                    st.caption((
-                        f"The actual payment you entered is at or below the "
-                        f"required payment of "
-                        f"{fmt_money_md(_pace['monthly_payment'])}, so the rows "
-                        "use the required payment, since a lender does not "
-                        "accept less as a plan."
-                    ))
+            # ONE BUILDER, shared with the PDF, so the two cannot phrase the
+            # same pace differently -- and so the "the term did not move"
+            # case is explained in both places rather than reading as a bug.
+            _pace_text = private_pace_sentence(private_row[1])
+            if _pace_text:
+                st.caption(_pace_text)
 
             st.markdown("**Combined**, what you actually pay")
             st.dataframe(_repayment_table(plan_rows),
