@@ -232,6 +232,8 @@ def main() -> int:
                 plan_label, result, rows)
             use("tranche_balance_frame")(bands, blabels or ns["TRANCHE_LABELS"])
             use("tranche_payment_frame")(bands, blabels or ns["TRANCHE_LABELS"])
+            use("payment_stack_is_informative")(
+                bands, blabels or ns["TRANCHE_LABELS"])
             use("payment_series")(result)
             use("tranche_payoff_events")(result.get("federal_only"), result)
 

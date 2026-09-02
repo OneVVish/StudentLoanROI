@@ -12562,6 +12562,50 @@ def tranche_payment_frame(tranches, labels: tuple) -> pd.DataFrame:
                        var_name="component", value_name="amount")
 
 
+def payment_stack_is_informative(tranches, labels: tuple) -> bool:
+    """Does a stacked payment chart say anything the table has not?
+
+    On the private row with equal terms and no per-note override, every band
+    is constant and they all end together: four flat blocks whose only content
+    is the split, which the balance chart above already shows as area and the
+    table states as one figure. It earns its place when the TOTAL steps -- a
+    note clearing early, or an Actual $/mo making one band end before the
+    others -- because a step is the thing a payment chart can show and a
+    balance chart cannot.
+
+    The same discipline the rest of this tool already applies: the roll-down
+    charts render only when they differ, the payoff marker only when months
+    are saved, the principal/interest split only when
+    balance_split_is_informative. A chart that repeats its neighbour costs the
+    reader a screen and earns nothing.
+
+    Only about the STACKED case. An unstacked flat line keeps its place and
+    its caption, which exists to be compared against the income-driven plans
+    whose payment moves.
+    """
+    if not tranches:
+        return True
+    frame = tranche_payment_frame(tranches, labels)
+    if frame.empty:
+        return False
+    total = frame.groupby("year")["amount"].sum()
+    if len(total) < 3:
+        return False
+    # The final month is a partial payoff on schedules that cap it, so it
+    # would step by construction and prove nothing.
+    #
+    # DEFENSIVE, NOT LOAD-BEARING, and worth saying so: a stack of two or more
+    # notes can only be FLAT when they all end together, which needs equal
+    # terms and no override, which is exactly the case whose required
+    # schedules run at the flat payment to the last month. So no current
+    # fixture distinguishes trimming from not trimming, and the guard's third
+    # negative control could not be made to fire. It stays because the
+    # override path DOES cap its final month, and a future caller reaching
+    # here with one should not get a step for free.
+    body = total.iloc[:-1]
+    return float(body.max() - body.min()) > 0.01
+
+
 def build_payment_chart(result: dict, label: str, federal_result: dict = None,
                         private_result: dict = None, events: list = None,
                         labels: tuple = TRANCHE_LABELS,
@@ -21899,16 +21943,23 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # Payments beside the balance: this shows what the balance cannot, that
         # an income-driven payment RISES with income (the table's "Monthly" is
         # only its first month) and that RAP opens on a flat $10 floor.
-        st.plotly_chart(
-            build_payment_chart(chosen_result, chosen,
-                                tranches=_stack,
-                                labels=_stack_labels or REPAYMENT_STACK_LABELS,
-                                colors=_stack_colors,
-                                stack_by=(_stack_by if chosen == PRIVATE_ROW_LABEL
-                                          else None)),
-            use_container_width=True, config=PLOTLY_CHART_CONFIG,
-            key="existing_payment_chart")
-        if "payment" not in chosen_result.get("schedule", pd.DataFrame()).columns:
+        _payment_labels = _stack_labels or REPAYMENT_STACK_LABELS
+        _payment_worth_drawing = payment_stack_is_informative(
+            _stack, _payment_labels)
+        if _payment_worth_drawing:
+            st.plotly_chart(
+                build_payment_chart(chosen_result, chosen,
+                                    tranches=_stack,
+                                    labels=_payment_labels,
+                                    colors=_stack_colors,
+                                    stack_by=(_stack_by
+                                              if chosen == PRIVATE_ROW_LABEL
+                                              else None)),
+                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                key="existing_payment_chart")
+        if (_payment_worth_drawing
+                and "payment" not in chosen_result.get("schedule",
+                                                       pd.DataFrame()).columns):
             st.caption(
                 "A fixed-payment plan, so this line is flat by construction. It "
                 "is here to be compared against the income-driven plans, whose "

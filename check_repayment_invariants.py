@@ -598,6 +598,69 @@ def main() -> int:
             "  a 9.5% private loan beside an 8% federal one on a fixed plan "
             "no longer targets private; the plain rate rule has broken.")
 
+    # A FLAT STACKED PAYMENT CHART SAYS NOTHING THE TABLE HAS NOT. On the
+    # private row with equal terms and no override every band is constant and
+    # they all end together, so the picture's only content is the split, which
+    # the balance chart shows as area and the table states as one figure. It
+    # earns its place when the TOTAL steps, because a step is what a payment
+    # chart can show and a balance chart cannot.
+    informative = ns["payment_stack_is_informative"]
+    equal_priv = [{"balance": b, "rate": r, "term": 5, "actual": 0}
+                  for b, r in ((10_300, 7.33), (3_000, 9.88),
+                               (4_000, 9.72), (7_300, 6.96))]
+    mixed_priv = [{"balance": b, "rate": r, "term": t, "actual": 0}
+                  for b, r, t in ((10_300, 7.33, 10), (3_000, 9.88, 5),
+                                  (7_300, 6.96, 15))]
+    over_priv = [{"balance": 10_300.0, "rate": 7.33, "term": 5, "actual": 400},
+                 {"balance": 3_000.0, "rate": 9.88, "term": 5, "actual": 0}]
+
+    def _priv_bands(loans):
+        rws = ns["compare_existing_loan_plans"](
+            24_000.0, 3.5, 60_000.0, 0, True,
+            federal_loans=[{"balance": 24_000.0, "rate": 3.5}],
+            private_loans=loans)
+        prw = next(r for label, r, _ in rws if label == ns["PRIVATE_ROW_LABEL"])
+        return ns["private_loan_stack"](prw), rws, prw
+
+    (bands_e, labels_e), rows_e, _ = _priv_bands(equal_priv)
+    checked += 1
+    if informative(bands_e, labels_e):
+        problems.append(
+            "  four private notes on equal terms with no override draw a "
+            "payment chart of four flat bands ending together, and it is "
+            "being kept. That is a screen spent repeating the table.")
+    (bands_m, labels_m), _, _ = _priv_bands(mixed_priv)
+    checked += 1
+    if not informative(bands_m, labels_m):
+        problems.append(
+            "  private notes on MIXED terms were called uninformative, but "
+            "their total steps down as each clears -- which is the one thing "
+            "this chart exists to show.")
+    (bands_o, labels_o), _, _ = _priv_bands(over_priv)
+    checked += 1
+    if not informative(bands_o, labels_o):
+        problems.append(
+            "  a per-note Actual $/mo override was called uninformative; it "
+            "makes one band end before the others, so the total steps.")
+    # A COMBINED row keeps its chart: the federal and private parts end at
+    # different times, and under an income-driven plan the federal part also
+    # rises with income.
+    std_e = next(r for label, r, _ in rows_e if label.startswith("Standard"))
+    cb, cl, _cc, _cby = ns["repayment_balance_stack"]("Standard (10-year)",
+                                                      std_e, rows_e)
+    checked += 1
+    if not informative(cb, cl):
+        problems.append(
+            "  a combined row's federal-and-private payment chart was called "
+            "uninformative, but the two parts clear at different times")
+    # And an unstacked line is not this rule's business: it keeps its own
+    # caption, which exists to be compared against the plans whose payment moves.
+    checked += 1
+    if not informative(None, ns["TRANCHE_LABELS"]):
+        problems.append(
+            "  the rule started suppressing UNSTACKED payment lines, which "
+            "have their own justification and their own caption")
+
     # WHETHER SPARE MONEY WOULD HELP, for a borrower who has entered none.
     # With no private loan to free up and no extra, there is no second arm to
     # price and the panel rendered a prompt instead of an answer -- yet the
