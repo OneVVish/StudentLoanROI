@@ -12061,6 +12061,41 @@ SERIES_AQUA_DARK = "#199e70"
 SERIES_RED_DARK = "#e66767"
 
 STACK_COLORS = (SERIES_BLUE, SERIES_ORANGE)
+# Stacking several PRIVATE notes individually needs more than the two-band
+# palette, and these are the four hues check_chart_palette already validates
+# pairwise. Four is also the ceiling: beyond it the chart falls back to the
+# combined line and says so, because repeating a hue would put two different
+# loans in the same colour, which is worse than one honest line.
+PRIVATE_STACK_COLORS = (SERIES_BLUE, SERIES_ORANGE, SERIES_AQUA, SERIES_RED)
+MAX_STACKED_PRIVATE_LOANS = len(PRIVATE_STACK_COLORS)
+
+
+def private_loan_stack(private_result: dict):
+    """(results, labels) for stacking each private note, or (None, None).
+
+    Ordered HIGHEST RATE FIRST, which is the order the roll-down attacks them
+    in, so the band that disappears first is the one the reader was told to
+    target. Each label carries its own rate because "Loan 2" names nothing a
+    borrower recognises -- the grid has no name column and the servicer's
+    numbering is not ours.
+
+    Returns nothing for a single note (a stack of one is a line with extra
+    steps) or for more than MAX_STACKED_PRIVATE_LOANS.
+    """
+    per_loan = (private_result or {}).get("per_loan") or []
+    if not (2 <= len(per_loan) <= MAX_STACKED_PRIVATE_LOANS):
+        return None, None
+    if any(loan.get("schedule") is None for loan in per_loan):
+        return None, None
+    ordered = sorted(per_loan, key=lambda loan: -float(loan.get("rate") or 0))
+    labels = tuple(f"{fmt_money(loan['balance'])} at {float(loan['rate']):.2f}%"
+                   for loan in ordered)
+    # Two notes at the same balance AND rate would collide into one legend
+    # entry and px.area would sum them into a single band, silently drawing
+    # three loans where there are four.
+    if len(set(labels)) != len(labels):
+        labels = tuple(f"{label} ({i + 1})" for i, label in enumerate(labels))
+    return [dict(loan) for loan in ordered], labels
 
 
 # A 2px separator between stacked fills, in the surface colour, so adjacent
@@ -12092,50 +12127,70 @@ def apply_stack_separator(fig):
     return fig
 
 
-def stack_color_map(labels: tuple) -> dict:
+def stack_color_map(labels: tuple, colors: tuple = STACK_COLORS) -> dict:
     """Colour by POSITION in the stack, not by label text -- so the federal
-    band is the same blue whichever wording the caller uses."""
-    return dict(zip(labels, STACK_COLORS))
+    band is the same blue whichever wording the caller uses, and so a set of
+    private notes takes the four validated hues in rate order."""
+    return dict(zip(labels, colors))
 
 
 def tranche_balance_frame(tranches, labels: tuple = TRANCHE_LABELS) -> pd.DataFrame:
-    """Tidy {year, component, amount} for stacking two tranches' balances.
+    """Tidy {year, component, amount} for stacking N balances.
 
-    Reindexes both onto the union of their years and fills the finished one
-    with 0 rather than dropping it -- an area chart with a missing series
-    breaks the stack exactly where the shorter loan clears, which is the
-    moment the reader is trying to understand.
+    Reindexes every series onto the union of their years and fills a finished
+    one with 0 rather than dropping it -- an area chart with a missing series
+    breaks the stack exactly where the shorter loan clears, which is the moment
+    the reader is trying to understand.
+
+    TWO WAS ONCE THE ONLY CASE, and the rest of the app grew past it. A federal
+    tranche beside a private one is two, and so is a capped federal part beside
+    an uncapped one; several private notes stacked individually is N, and a
+    borrower with four of them reading a single combined line cannot see which
+    loan dies when. The guard against a silent regression is that the bands
+    must sum to that line -- asserted in check_repayment_invariants, because a
+    stack that does not add up is a money bug wearing a chart's clothes.
     """
-    if not tranches or len(tranches) != 2:
+    if not tranches or len(tranches) < 2 or len(labels) < len(tranches):
         return pd.DataFrame()
-    frames = []
-    for (label, result) in zip(labels, tranches):
+    labels = list(labels)[:len(tranches)]
+    merged = None
+    for label, result in zip(labels, tranches):
         sched = (result or {}).get("schedule")
         if sched is None or sched.empty:
             return pd.DataFrame()
-        frames.append(sched[["year", "balance"]].rename(
-            columns={"balance": label}).groupby("year", as_index=False).last())
-    merged = pd.merge(frames[0], frames[1], on="year", how="outer").sort_values("year")
-    merged[list(labels)] = merged[list(labels)].fillna(0.0)
-    return merged.melt(id_vars="year", value_vars=list(labels),
+        frame = sched[["year", "balance"]].rename(
+            columns={"balance": label}).groupby("year", as_index=False).last()
+        merged = frame if merged is None else pd.merge(
+            merged, frame, on="year", how="outer")
+    merged = merged.sort_values("year")
+    merged[labels] = merged[labels].fillna(0.0)
+    return merged.melt(id_vars="year", value_vars=labels,
                        var_name="component", value_name="amount")
 
 
-def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str, tranches=None):
+def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
+                        tranches=None, labels: tuple = TRANCHE_LABELS,
+                        colors: tuple = STACK_COLORS,
+                        stack_by: str = "loan type"):
     # Tranche split takes precedence over the principal/interest one when both
     # apply. They cannot share a chart, and this is the split that explains the
     # kink a reader actually asks about: the capped federal part clears first
     # and the uncapped part is the long tail. The principal/interest view still
     # runs whenever there is only one tranche, which is where it was designed
     # to matter (an income-driven payment below the interest).
-    tranche_frame = tranche_balance_frame(tranches)
+    tranche_frame = tranche_balance_frame(tranches, labels)
     if not tranche_frame.empty:
         fig = px.area(
             tranche_frame, x="year", y="amount", color="component",
-            title="Loan Balance Over Time: by loan type",
+            title=f"Loan Balance Over Time: by {stack_by}",
             labels={"year": DURATION_AXIS_TITLE, "amount": "Remaining Balance ($)",
                     "component": ""},
-            color_discrete_map=stack_color_map(TRANCHE_LABELS),
+            # category_orders pins the stack to the ORDER GIVEN. px.area
+            # otherwise sorts the colour categories alphabetically, which for
+            # per-loan labels is by dollar amount and puts the bands in an
+            # order that means nothing.
+            category_orders={"component": list(labels)[:len(tranches)]},
+            color_discrete_map=stack_color_map(labels, colors),
         )
         apply_stack_separator(fig)
         _tickvals, _ticktext = money_k_ticks(schedule_df["balance"])
@@ -14743,7 +14798,9 @@ def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
 
 
 def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
-                            tranches=None) -> Image:
+                            tranches=None, labels: tuple = TRANCHE_LABELS,
+                            colors: tuple = STACK_COLORS,
+                            stack_by: str = "loan type") -> Image:
     """PDF counterpart to build_balance_chart -- simplified redraw for
     print, not required to be pixel-identical to the on-screen interactive
     version.
@@ -14757,19 +14814,22 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
     back to one undifferentiated line. The chart-twin rule in CLAUDE.md is
     about WHAT a chart shows, and this was a what, not a how."""
     fig, ax = _pdf_subplots(figsize=(6, 3.5))
-    tranche_frame = tranche_balance_frame(tranches)
+    tranche_frame = tranche_balance_frame(tranches, labels)
     if not tranche_frame.empty:
         wide = tranche_frame.pivot(index="year", columns="component",
                                    values="amount").fillna(0.0)
-        ax.stackplot(wide.index,
-                     wide[TRANCHE_LABELS[0]], wide[TRANCHE_LABELS[1]],
-                     labels=list(TRANCHE_LABELS), colors=list(STACK_COLORS),
+        # Indexed by the caller's label ORDER, never by the pivot's own column
+        # order, which pandas sorts -- the screen twin pins the same order with
+        # category_orders and the two must stack the same way up.
+        _names = list(labels)[:len(tranches)]
+        ax.stackplot(wide.index, *[wide[name] for name in _names],
+                     labels=_names, colors=list(colors)[:len(_names)],
                      # The twin of apply_stack_separator: a gap between bands,
                      # never a border around them. White here rather than the
                      # translucent screen value -- a PDF page is white.
                      edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper right", fontsize=8)
-        ax.set_title("Loan Balance Over Time: by loan type")
+        ax.set_title(f"Loan Balance Over Time: by {stack_by}")
     elif balance_split_is_informative(schedule_df):
         ax.stackplot(schedule_df["year"],
                      schedule_df["principal_balance"],
@@ -15920,7 +15980,16 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                    if _end_age >= 67 else "."),
                 styles["caption"]))
             story.append(Spacer(1, 6))
-        story.append(build_pdf_balance_chart(chosen["schedule"], chart_label))
+        # The same split the screen draws. A twin showing FEWER series than
+        # the page it was printed from is the defect CLAUDE.md records against
+        # the balance chart's principal/interest split, and this is the same
+        # chart.
+        _pdf_stack, _pdf_labels = private_loan_stack(
+            chosen if chart_label == PRIVATE_ROW_LABEL else None)
+        story.append(build_pdf_balance_chart(
+            chosen["schedule"], chart_label,
+            tranches=_pdf_stack, labels=_pdf_labels or TRANCHE_LABELS,
+            colors=PRIVATE_STACK_COLORS, stack_by="loan"))
         story.append(Paragraph(f"Balance over time under {chart_label}.",
                                styles["caption"]))
         story.append(Spacer(1, 8))
@@ -20128,7 +20197,12 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
         private_result["per_loan"] = [
             {**loan, "monthly_payment": result["monthly_payment"],
              "payoff_years": result["payoff_years"],
-             "total_interest": result["total_interest"]}
+             "total_interest": result["total_interest"],
+             # The note's own balance curve. Carried so the balance chart can
+             # STACK the notes instead of drawing their sum as one line: with
+             # four private loans that single line hides which loan dies when,
+             # which is the only thing the picture was being read for.
+             "schedule": result["schedule"]}
             for loan, result in zip(priv_loans, _per_results)]
         if any(loan["actual"] for loan in priv_loans):
             # The required-pace figures, attached to the row like `countback`
@@ -21420,9 +21494,39 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            federal_loans=fed_loans, private_loans=priv_loans,
                            age=age, strategy=strategy_analysis,
                            old_ibr=old_ibr and forgivable)
-        st.plotly_chart(build_balance_chart(chosen_result["schedule"], chosen),
-                         use_container_width=True, config=PLOTLY_CHART_CONFIG,
-                         key="existing_balance_chart")
+        # STACK THE PRIVATE NOTES INDIVIDUALLY when that row is selected. It
+        # used to draw their sum as one line, on the reasoning -- written into
+        # the comment below before the loan grids existed -- that "the private
+        # row itself is already just one loan". It has not been one loan since
+        # the grids shipped, and a borrower with four notes reading a single
+        # line cannot see which loan dies when, which is what they open the
+        # chart for. Reported by a reader.
+        _stack, _stack_labels = private_loan_stack(
+            chosen_result if chosen == PRIVATE_ROW_LABEL else None)
+        st.plotly_chart(
+            build_balance_chart(
+                chosen_result["schedule"], chosen,
+                tranches=_stack, labels=_stack_labels or TRANCHE_LABELS,
+                colors=PRIVATE_STACK_COLORS, stack_by="loan"),
+            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+            key="existing_balance_chart")
+        if chosen == PRIVATE_ROW_LABEL and len(priv_loans) > 1:
+            if _stack:
+                st.caption(
+                    "One band per loan, highest rate at the bottom, each "
+                    "ending when that loan is paid off. They add up to the "
+                    "single balance the other rows show."
+                )
+            else:
+                # Saying nothing here would leave a reader who entered five
+                # loans wondering why four of their neighbours get bands.
+                st.caption(
+                    f"Showing your {len(priv_loans)} private loans as one "
+                    f"combined balance. Above "
+                    f"{MAX_STACKED_PRIVATE_LOANS} loans the bands would have "
+                    "to repeat a colour, and two different loans drawn in the "
+                    "same colour is worse than one honest line."
+                )
 
         # Payments beside the balance. The balance chart cannot show that an
         # income-driven payment RISES with income -- the table's "Monthly" is

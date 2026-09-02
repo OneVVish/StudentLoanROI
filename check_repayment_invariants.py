@@ -274,6 +274,95 @@ def main() -> int:
             f"{single_override['payoff_years']:.2f} -- same loan, same money, "
             f"two answers.")
 
+    # STACKING THE PRIVATE NOTES. The chart used to draw their sum as one
+    # line, on a comment that said "the private row itself is already just one
+    # loan" -- true before the loan grids shipped and false after. A reader
+    # reported it. What makes the stack checkable rather than a matter of
+    # taste is that it must ADD UP: a band set that does not sum to the line
+    # it replaced is a money bug wearing a chart's clothes.
+    stack_fn = ns["private_loan_stack"]
+    frame_fn = ns["tranche_balance_frame"]
+    priv = [{"balance": 10_300.0, "rate": 7.33, "term": 5, "actual": 0},
+            {"balance": 3_000.0, "rate": 9.88, "term": 5, "actual": 0},
+            {"balance": 4_000.0, "rate": 9.72, "term": 5, "actual": 0},
+            {"balance": 7_300.0, "rate": 6.96, "term": 5, "actual": 0}]
+    rows_p = ns["compare_existing_loan_plans"](
+        24_000.0, 3.5, 60_000.0, 0, True,
+        federal_loans=[{"balance": 24_000.0, "rate": 3.5}], private_loans=priv)
+    prow = next(r for label, r, _ in rows_p if label == ns["PRIVATE_ROW_LABEL"])
+    bands, band_labels = stack_fn(prow)
+    checked += 1
+    if bands is None or len(bands) != 4:
+        problems.append(
+            f"  four private notes produced {bands and len(bands)} bands; the "
+            f"chart falls back to one combined line and the reader cannot see "
+            f"which loan clears when.")
+    else:
+        # 1. THE BANDS ADD UP. This is the one that matters: it ties the
+        #    picture to the row above it.
+        frame = frame_fn(bands, band_labels)
+        # An EMPTY frame is the shape of the original bug: tranche_balance_frame
+        # accepted exactly two series and returned nothing for four, so the
+        # chart quietly fell back to one line. Say that, rather than crashing
+        # on a missing column two lines later.
+        if frame.empty:
+            problems.append(
+                f"  tranche_balance_frame returned nothing for {len(bands)} "
+                f"bands, so the stack silently falls back to a single combined "
+                f"line -- which is the defect this check exists for.")
+            frame = None
+        summed = (frame.groupby("year")["amount"].sum()
+                  if frame is not None else None)
+        line = prow["schedule"].groupby("year")["balance"].last()
+        shared = (summed.index.intersection(line.index)
+                  if summed is not None else [])
+        gap = (float((summed.loc[shared] - line.loc[shared]).abs().max())
+               if len(shared) else 0.0)
+        checked += 1
+        if gap > TOLERANCE:
+            problems.append(
+                f"  the stacked private bands miss their own combined line by "
+                f"${gap:,.2f}. The bands and the row are the same money.")
+        # 2. HIGHEST RATE AT THE BOTTOM, which is the order the roll-down
+        #    attacks them in, so the first band to vanish is the one the page
+        #    tells the reader to target.
+        rates = [float(b["rate"]) for b in bands]
+        checked += 1
+        if rates != sorted(rates, reverse=True):
+            problems.append(
+                f"  private bands are ordered {rates}, not highest-rate-first. "
+                f"The band that disappears first must be the one being "
+                f"targeted, or the picture argues against the advice.")
+        # 3. Distinct labels AND distinct colours. Two bands sharing a label
+        #    are summed into one by the plotting layer, silently drawing three
+        #    loans where there are four.
+        checked += 1
+        if len(set(band_labels)) != len(band_labels):
+            problems.append(f"  private band labels collide: {band_labels}")
+        used = list(ns["PRIVATE_STACK_COLORS"])[:len(bands)]
+        checked += 1
+        if len(set(used)) != len(used):
+            problems.append(
+                f"  two private bands would be drawn in the same colour: {used}")
+
+    # The boundaries, both of them, because each is a different answer.
+    checked += 1
+    if stack_fn({"per_loan": [dict(priv[0], schedule=prow["schedule"])]})[0] is not None:
+        problems.append("  a single private loan produced a stack; a stack of "
+                        "one is a line with extra steps")
+    checked += 1
+    many = ns["compare_existing_loan_plans"](
+        24_000.0, 3.5, 60_000.0, 0, True,
+        federal_loans=[{"balance": 24_000.0, "rate": 3.5}],
+        private_loans=priv + [{"balance": 2_500.0, "rate": 8.5, "term": 5,
+                               "actual": 0}])
+    mrow = next(r for label, r, _ in many if label == ns["PRIVATE_ROW_LABEL"])
+    if stack_fn(mrow)[0] is not None:
+        problems.append(
+            f"  {ns['MAX_STACKED_PRIVATE_LOANS'] + 1} private loans produced a "
+            f"stack, but only {ns['MAX_STACKED_PRIVATE_LOANS']} validated hues "
+            f"exist -- two loans would share a colour.")
+
     # PER-NOTE TERMS, which is what the private side needs: a federal plan sets
     # one term for the whole portfolio, while private notes each carry their
     # own and a borrower can hold a 5-year note beside a 15-year one.
