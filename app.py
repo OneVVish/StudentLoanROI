@@ -19817,6 +19817,7 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_age", "rage", int, (0, 80)),
     ("existing_extra_monthly", "rx", int, (0, 50_000)),
     ("existing_current_payment", "rcp", int, (0, 50_000)),
+    ("existing_private_extra", "rpx", int, (0, 50_000)),
     ("existing_old_ibr", "rob", int, None),
 )
 
@@ -20032,7 +20033,8 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                                  family_size: int = None,
                                  spouse_income: float = 0.0,
                                  filing_status: str = FILING_SINGLE,
-                                 poverty_region: str = "contiguous") -> list:
+                                 poverty_region: str = "contiguous",
+                                 private_extra: float = 0.0) -> list:
     """Every repayment plan a borrower with an EXISTING balance could be on.
 
     Pure computation, no Streamlit, so it can be tested directly -- and it
@@ -20142,6 +20144,45 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                 "monthly_payment": _required["monthly_payment"],
                 "payoff_years": _required["payoff_years"],
                 "total_interest": _required["total_interest"],
+            }
+
+        # THE ROLL-DOWN, as a SEPARATE figure rather than a new basis for the
+        # row above. Each note here is amortised on its own and the results are
+        # chained, so a cleared note's payment simply stops -- which is what
+        # happens if the borrower spends it. Rolling it onto the next highest
+        # rate instead is a different behaviour, not a different calculation,
+        # and it is worth real money: on a reader's four private notes it was
+        # $894 and 14 months against the same $130 a month.
+        #
+        # ADDITIVE ON PURPOSE. It does not touch private_result's own numbers,
+        # so every existing share link, PDF and caption reproduces exactly what
+        # it did before, and deleting this block removes the feature whole.
+        # It also avoids a cliff: routing the row itself through the avalanche
+        # only when an extra was entered would make $1 of extra jump the payoff
+        # by years.
+        _avalanche = simulate_fixed_avalanche(
+            priv_loans, PRIVATE_TERM_YEARS, per_loan_terms=True,
+            extra_payments=((1, float(private_extra)),) if private_extra else ())
+        # Only worth showing when it actually differs from what the row says.
+        # With equal terms and no extra there is nothing to roll forward and
+        # the two agree to the cent, which is the common case.
+        if (private_result["payoff_years"] - _avalanche["payoff_years"] > 1 / 12
+                or private_result["total_interest"]
+                   - _avalanche["total_interest"] > 1.0):
+            private_result["avalanche"] = {
+                "payoff_years": _avalanche["payoff_years"],
+                "total_interest": _avalanche["total_interest"],
+                "extra": float(private_extra),
+                "interest_saved": (private_result["total_interest"]
+                                   - _avalanche["total_interest"]),
+                "months_saved": round((private_result["payoff_years"]
+                                       - _avalanche["payoff_years"]) * 12),
+                # The wording branches on this: with ONE note there is no next
+                # loan to roll onto, so the whole saving is the extra payment
+                # and calling it a roll-down would describe something that
+                # cannot happen. Caught by rendering, not by the arithmetic,
+                # which is correct in both cases.
+                "notes": len(priv_loans),
             }
 
     def with_private(federal_result: dict) -> dict:
@@ -20312,7 +20353,8 @@ def discharge_tax_estimate(forgiven_amount: float, annual_income: float,
 
 def simulate_fixed_avalanche(loans: list, term_years: int,
                               extra_payments: tuple = (),
-                              roi_window_years: int = ROI_WINDOW_YEARS) -> dict:
+                              roi_window_years: int = ROI_WINDOW_YEARS,
+                              per_loan_terms: bool = False) -> dict:
     """Fixed-plan repayment across several notes, with extra dollars targeted
     avalanche-style: highest rate first, rolling down.
 
@@ -20335,20 +20377,43 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
     the highest-rate note must die first -- conservation alone cannot see a
     reversed sort key, since paying the wrong note first still balances the
     books.
+
+    `per_loan_terms` lets each note amortise over ITS OWN `term` instead of one
+    plan term, which is what the private side needs: a federal plan sets one
+    term for the whole portfolio, while private notes each carry their own and
+    a borrower can hold a 5-year note beside a 10-year one. The loop then runs
+    to the longest. Off by default and off on every federal call, where
+    sanitize_loan_rows emits no `term` at all, so the federal path is
+    bit-identical -- asserted, not assumed, by check_repayment_invariants.
+
+    ONE CAVEAT THE FEDERAL GUARD'S TARGETING ASSERTION DOES NOT SURVIVE. With
+    one term, the highest-rate note dies first. With mixed terms that is simply
+    false and must not be checked for: a 3-year note at 4% legitimately clears
+    before a 10-year note at 10%. What still holds is where the EXTRA went, so
+    the honest assertion compares payoff months against the same run with no
+    extra and asks which note moved.
     """
-    loans = sanitize_loan_rows(loans)
+    loans = sanitize_loan_rows(loans, private=per_loan_terms)
     if not loans:
         return calculate_standard_repayment(0.0, 0.0, term_years)
-    n_months = term_years * 12
     notes = []
     for loan in loans:
+        # Each note's own term where the caller asked for it, the plan's
+        # otherwise. A private note's `actual` is a floor on ITS OWN payment,
+        # not a contribution to the shared budget, so it raises this note's
+        # required and nothing else -- the surplus that cascades is the
+        # extra_payments schedule.
+        note_months = int(loan.get("term") or term_years) * 12
         monthly_rate = loan["rate"] / 100 / 12
-        required = (loan["balance"] / n_months if monthly_rate == 0
+        required = (loan["balance"] / note_months if monthly_rate == 0
                     else loan["balance"] * monthly_rate
-                         / (1 - (1 + monthly_rate) ** -n_months))
+                         / (1 - (1 + monthly_rate) ** -note_months))
+        if per_loan_terms and loan.get("actual"):
+            required = max(required, float(loan["actual"]))
         notes.append({"balance": loan["balance"], "monthly_rate": monthly_rate,
                       "required": required, "rate": loan["rate"],
-                      "payoff_month": None})
+                      "months": note_months, "payoff_month": None})
+    n_months = max(note["months"] for note in notes)
     target_order = sorted(range(len(notes)), key=lambda i: -notes[i]["rate"])
     budget_base = sum(note["required"] for note in notes)
 
@@ -20657,7 +20722,16 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         on_click=lambda: log_usage_event(
             f"repayment_pdf:balance={int(balance)}:rate={rate}"
             f":income={int(income)}:deps={int(deps)}:prior={int(prior_payments)}"
-            f":pslf={int(bool(pslf))}:forgivable={int(bool(forgivable))}"),
+            f":pslf={int(bool(pslf))}:forgivable={int(bool(forgivable))}"
+            # HOW MANY PRIVATE NOTES, which nothing recorded before and which
+            # decides whether the roll-down is worth anything: on one note
+            # there is nothing to roll onto. Free text, so no migration and no
+            # PGRST204 exposure. It rides the PDF and Share actions rather than
+            # a new event because those are the only per-run repayment rows
+            # there are -- a biased sample toward engaged visitors, which is
+            # the population that would use the feature anyway. Say so before
+            # quoting a share.
+            f":privn={len(private_loans or [])}"),
     )
 
     if share_col.button("🔗 Share This Comparison", use_container_width=True,
@@ -20670,7 +20744,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         log_usage_event(
             f"repayment_share:balance={int(balance)}:rate={rate}"
             f":income={int(income)}:deps={int(deps)}:prior={int(prior_payments)}"
-            f":pslf={int(bool(pslf))}:forgivable={int(bool(forgivable))}")
+            f":pslf={int(bool(pslf))}:forgivable={int(bool(forgivable))}"
+            f":privn={len(private_loans or [])}")
         components.html(copy_url_to_clipboard_js(), height=0)
         st.success("Link copied to your clipboard.")
         # Said at the moment of sharing, not in a help tooltip nobody opens.
@@ -20990,6 +21065,19 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.session_state["existing_private_loans"] = _priv_edited.to_dict("records")
             priv_loans = sanitize_loan_rows(
                 st.session_state["existing_private_loans"], private=True)
+            # SURPLUS, not a per-note instruction. `Actual $/mo` above says what
+            # one loan gets; this says what is left over, and the model sends it
+            # to the highest-rate note still alive, rolling forward as each
+            # clears. The two are different questions and sharing one control
+            # for both would silently change what an existing ?rpa= link means.
+            private_extra = st.number_input(
+                "Extra toward private loans, a month ($)",
+                min_value=0, max_value=50_000, step=25,
+                key="existing_private_extra",
+                help="Anything you pay beyond the required payments, over and "
+                     "above any Actual $/mo above. It is modelled as going to "
+                     "your highest-rate private loan first, and when that one "
+                     "clears, its whole payment rolls onto the next.")
         else:
             # HIDING AN INPUT MUST ALSO NEUTRALISE IT. Streamlit keeps values
             # in session_state after their widgets stop being rendered, so
@@ -20999,6 +21087,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # stored rows are deliberately NOT cleared, so re-ticking restores
             # what was typed.
             priv_loans = []
+            private_extra = 0
 
         if not fed_loans:
             st.info("Add at least one federal loan, with a balance and its "
@@ -21030,6 +21119,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # that would make the figure meaningless.
         mark_interaction("module_repayment_comparison")
         rows = compare_existing_loan_plans(balance, rate, income, deps, forgivable,
+                                            private_extra=private_extra,
                                             family_size=family_size,
                                             spouse_income=spouse_income,
                                             filing_status=filing_status,
@@ -21414,6 +21504,44 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # doesn't care about that boundary, so when a private rate tops
             # every federal one, say so rather than let the panel imply the
             # federal target is optimal.
+            # THE ROLL-DOWN, said in words, because it is a behaviour the
+            # borrower has to choose rather than a number the model produces.
+            # The row above amortises each note on its own, which is what
+            # happens if a cleared loan's payment gets spent; rolling it onto
+            # the next highest rate instead is free and is worth years. It only
+            # renders when it differs from the row, so a single note or a set
+            # of equal-term notes with no extra says nothing.
+            _av = (private_row[1] if private_row is not None else {}).get("avalanche")
+            if _av:
+                # fmt_duration, not a divmod here: it already drops a zero
+                # month ("6y", not "6y 0m") and is what every other length on
+                # this page reads through.
+                _pieces = []
+                if _av["months_saved"] >= 1:
+                    _pieces.append(f"{fmt_duration(_av['months_saved'])} sooner")
+                if _av["interest_saved"] >= 1:
+                    _pieces.append(f"{fmt_money_md(_av['interest_saved'])} "
+                                   "less interest")
+                _saving = (": " + " and ".join(_pieces)) if _pieces else ""
+                if _av["notes"] > 1:
+                    _lead = (
+                        "**When one private loan clears, put its whole payment "
+                        "on the next one.** Doing that, instead of letting it "
+                        "go back into your budget, clears them in ")
+                    _tail = (". Target the highest rate first. The row above "
+                             "assumes you do not, because that is what happens "
+                             "by default.")
+                else:
+                    _lead = ("**That extra payment is doing real work.** It "
+                             "clears this loan in ")
+                    _tail = (". The row above shows the required payment only, "
+                             "so it does not include the extra.")
+                st.info(
+                    _lead
+                    + f"**{_av['payoff_years']:.1f} years** rather than "
+                    + f"{private_row[1]['payoff_years']:.1f}" + _saving + _tail
+                )
+
             if (priv_loans and fed_loans
                     and max(l["rate"] for l in priv_loans)
                         > max(l["rate"] for l in fed_loans)):

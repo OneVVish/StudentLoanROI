@@ -119,6 +119,9 @@ SHARE_EXEMPT = {
                             "seed_repayment_from_share when ?rpb= is present",
     "existing_age": "repayment tool; rides ?rage=",
     "existing_extra_monthly": "repayment tool; rides ?rx=",
+    "existing_private_extra": "repayment tool; rides ?rpx=. The PRIVATE-side "
+                             "surplus, distinct from ?rx= (federal) and from "
+                             "?rpa= (one note's own payment)",
     "existing_current_payment": "repayment tool; rides ?rcp=, and is the one "
                                 "repayment param whose 0 must RIDE rather "
                                 "than be skipped as an untouched control -- "
