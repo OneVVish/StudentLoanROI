@@ -2404,3 +2404,51 @@ end $$;
 --
 -- NOT A SEAM in the data: no row changes meaning. What changes is who can
 -- read them, which is the point.
+
+-- ===========================================================================
+-- 2026-09-02  IBR GAINS ITS 10-YEAR STANDARD CEILING.  NO DDL.
+-- ===========================================================================
+--
+-- calculate_idr_repayment charged payment_rate x discretionary income with no
+-- ceiling, from the day it was written until today. Real IBR is "the lesser
+-- of" that or the 10-year Standard payment: 34 CFR 685.209(f)(2) for the 10%
+-- variant, (f)(3) for the 15%. PAYE shares (f)(2).
+--
+-- The same defect was found and fixed once already, in
+-- brand/build_guide_plan_chart.py (#164/#165). That fix reached one guide
+-- figure and never reached the simulator, so the repo carried a corrected
+-- chart over an uncorrected model. check_ibr_standard_cap.py is the guard
+-- that did not exist then; it anchors on a longhand amortisation and a
+-- transcribed 120-month term rather than on app.py's own constants.
+--
+-- WHAT MOVED. Only rows whose repayment_strategy is the IDR label -- RAP is a
+-- different simulator with no ceiling, and the fixed plans never had one:
+--
+--   repayment_strategy = 'Income-Driven Repayment (IDR)'
+--
+-- and, among those, only where the CAP BINDS, which is where the balance is
+-- SMALL RELATIVE TO INCOME. Measured against the 801 OEWS occupations at 6.5%:
+--
+--     loan $30,000   ceiling   $341/mo   164/801 occupations capped (20.5%)
+--     loan $100,000  ceiling $1,135/mo     2/801 capped ( 0.2%)
+--     loan $190,000  ceiling $2,157/mo     0/801 capped ( 0.0%)
+--
+-- SO THE SEAM IS NARROW WHERE THE DATA IS THICKEST. $190,000 is the app's own
+-- default loan and nothing is capped there, so the default scenario is
+-- bit-identical. It widens as the loan falls, which is the opposite of where
+-- most logged scenarios sit -- and IDR is not even the default strategy for a
+-- 2026+ start, RAP is. Do not assume a large break without checking the loan
+-- amount on the rows in hand.
+--
+-- WHICH COLUMNS. The payment feeds calculate_roi, so on affected rows
+-- earnings_premium, roi_pct, the break-even figures and any DTI derived from
+-- the monthly payment all move. The direction is one-way: the old payment was
+-- too HIGH, so the old premium was too LOW. Nothing gets worse across this
+-- date; affected scenarios only improve.
+--
+-- Nothing distinguishes the two eras in the row itself -- there is no flag,
+-- and adding one would describe a bug rather than a modelling choice. Split on
+-- the timestamp, and only for IDR-strategy rows with a small loan.
+--
+-- NOT retroactively fixable: the anon key can neither UPDATE nor DELETE, and
+-- recomputing would need the whole scenario, not the stored summary.
