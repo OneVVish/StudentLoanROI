@@ -3845,8 +3845,9 @@ PSLF_BUYBACK_RAP_NOTE = (
 COMMIT_OR_RIDE_EXPLAINER = (
     "Two ways to finish, priced side by side.  \n"
     "**Ride:** Pay only what the plan asks, for as long as it asks.  \n"
-    "**Commit:** Aim spare money at the balance, plus any private payment that "
-    "frees up along the way, so it clears sooner.  \n"
+    "**Commit:** Make extra payments toward the principal of your "
+    "highest-rate loan, plus any private payment that frees up along the "
+    "way, so it clears sooner.  \n"
     "On a plan that forgives, riding ends in a discharge you owe income tax "
     "on, and committing trades that away for finishing earlier.")
 
@@ -22026,6 +22027,24 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                               else None)),
                 use_container_width=True, config=PLOTLY_CHART_CONFIG,
                 key="existing_payment_chart")
+        if not _payment_worth_drawing and _stack:
+            # A CHART THAT VANISHES WITH NO EXPLANATION READS AS A FAULT, which
+            # is what the >4-loans fallback already says in its own words and
+            # what this case was missing: reported as "the monthly payment
+            # chart does not show up". Suppressing it is right -- four level
+            # bands ending together only restate the table -- but the reader
+            # has to be told that, and told what would make it say something.
+            _flat = tranche_payment_frame(_stack, _payment_labels)
+            _flat_total = (float(_flat.groupby("year")["amount"].sum().iloc[0])
+                           if not _flat.empty else 0.0)
+            st.caption(
+                f"No payment chart here: this stays a flat "
+                f"{fmt_money_md(_flat_total)} a month until the loans clear, "
+                "so it would be level bands repeating the table above. It "
+                "appears when the total actually steps, which happens when "
+                "your loans run to different terms, when one carries an "
+                "Actual $/mo of its own, or when you add an extra below."
+            )
         if (_payment_worth_drawing
                 and "payment" not in chosen_result.get("schedule",
                                                        pd.DataFrame()).columns):
