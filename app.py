@@ -12409,9 +12409,36 @@ def tranche_payoff_events(federal_part: dict, nonfederal_part: dict) -> list:
     return [(non, "PLUS/private paid off")]
 
 
+def tranche_payment_frame(tranches, labels: tuple) -> pd.DataFrame:
+    """Tidy {year, component, amount} for stacking N payment series.
+
+    The payment twin of tranche_balance_frame, and generalised past two for the
+    same reason: a private row is several notes, and one flat line across four
+    of them cannot show the total stepping down as each clears.
+
+    A loan that ends leaves the others running; its payment is then ZERO, not
+    missing, or the area chart breaks the series exactly where the shorter loan
+    finishes.
+    """
+    if not tranches or len(tranches) < 2 or len(labels) < len(tranches):
+        return pd.DataFrame()
+    names = list(labels)[:len(tranches)]
+    merged = None
+    for name, result in zip(names, tranches):
+        frame = payment_series(result).rename(columns={"payment": name})
+        merged = frame if merged is None else pd.merge(
+            merged, frame, on="year", how="outer")
+    merged = merged.sort_values("year")
+    merged[names] = merged[names].fillna(0.0)
+    return merged.melt(id_vars="year", value_vars=names,
+                       var_name="component", value_name="amount")
+
+
 def build_payment_chart(result: dict, label: str, federal_result: dict = None,
                         private_result: dict = None, events: list = None,
-                        labels: tuple = TRANCHE_LABELS):
+                        labels: tuple = TRANCHE_LABELS,
+                        tranches=None, colors: tuple = STACK_COLORS,
+                        stack_by: str = None):
     """Monthly payment over time.
 
     The companion to the balance chart, and it shows something the balance
@@ -12423,23 +12450,25 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
     the private part is a constant floor while the federal part moves -- the
     same fact the three-table split states in numbers.
     """
-    if federal_result is not None and private_result is not None:
-        fed = payment_series(federal_result).rename(columns={"payment": labels[0]})
-        priv = payment_series(private_result).rename(columns={"payment": labels[1]})
-        merged = pd.merge(fed, priv, on="year", how="outer").sort_values("year")
-        # A loan that ends leaves the other still running; its payment is then
-        # zero, not missing, or the area chart would break the series where the
-        # shorter loan finishes.
-        merged[list(labels)] = merged[list(labels)].fillna(0.0)
-        stacked = merged.melt(id_vars="year", value_vars=list(labels),
-                              var_name="component", value_name="payment")
+    if tranches is None and federal_result is not None and private_result is not None:
+        tranches = (federal_result, private_result)
+    if tranches:
+        # Already tidy {year, component, amount}; the chart's y is "payment".
+        stacked = tranche_payment_frame(tranches, labels).rename(
+            columns={"amount": "payment"})
         fig = px.area(
             stacked, x="year", y="payment", color="component",
             title=f"Monthly Payment Over Time: {label}",
             labels={"year": DURATION_AXIS_TITLE, "payment": "Monthly payment ($)",
                     "component": ""},
-            color_discrete_map=stack_color_map(labels),
+            # Pinned, like the balance twin: px sorts colour categories
+            # alphabetically, which for per-loan labels is by dollar amount.
+            category_orders={"component": list(labels)[:len(tranches)]},
+            color_discrete_map=stack_color_map(labels, colors),
         )
+        if stack_by:
+            fig.update_layout(title_text=(f"Monthly Payment Over Time: {label}"
+                                          f", by {stack_by}"))
         apply_stack_separator(fig)
         fig.update_layout(
             hovermode="x unified", title_font_size=14,
@@ -12455,7 +12484,7 @@ def build_payment_chart(result: dict, label: str, federal_result: dict = None,
             fig.add_vline(x=when, line_dash="dot", line_color="#888",
                           annotation_text=text, annotation_position="top left",
                           annotation_font_size=11)
-        apply_duration_axis(fig, merged["year"])
+        apply_duration_axis(fig, stacked["year"])
         return fig
 
     series = payment_series(result)
@@ -14962,7 +14991,9 @@ def build_pdf_payment_chart(result: dict, label: str,
                             federal_result: dict = None,
                             private_result: dict = None,
                             events: list = None,
-                            labels: tuple = TRANCHE_LABELS) -> Image:
+                            labels: tuple = TRANCHE_LABELS,
+                            tranches=None,
+                            colors: tuple = STACK_COLORS) -> Image:
     """PDF twin of build_payment_chart. Same data, same stacking rule, same
     payoff markers, redrawn for print -- see the chart-twin warning in
     CLAUDE.md. Not required to be pixel-identical, but a change to what the
@@ -14971,16 +15002,18 @@ def build_pdf_payment_chart(result: dict, label: str,
     head-start annotation does: the report is read away from the app, so an
     unexplained cliff has no hover and no caption nearby to resolve it."""
     fig, ax = _pdf_subplots(figsize=(6, 3.0))
-    if federal_result is not None and private_result is not None:
-        fed = payment_series(federal_result)
-        priv = payment_series(private_result)
-        merged = pd.merge(fed, priv, on="year", how="outer",
-                          suffixes=("_fed", "_priv")).sort_values("year").fillna(0.0)
-        ax.stackplot(merged["year"], merged["payment_fed"], merged["payment_priv"],
-                     labels=list(labels), colors=list(STACK_COLORS),
+    if tranches is None and federal_result is not None and private_result is not None:
+        tranches = (federal_result, private_result)
+    if tranches:
+        # The screen twin's frame, so the two cannot merge or fill differently.
+        _names = list(labels)[:len(tranches)]
+        wide = tranche_payment_frame(tranches, labels).pivot(
+            index="year", columns="component", values="amount").fillna(0.0)
+        ax.stackplot(wide.index, *[wide[name] for name in _names],
+                     labels=_names, colors=list(colors)[:len(_names)],
                      edgecolor="white", linewidth=PDF_STACK_SEPARATOR_WIDTH)
         ax.legend(loc="upper right", fontsize=8)
-        _x_years = merged["year"]
+        _x_years = pd.Series(wide.index)
     else:
         series = payment_series(result)
         ax.plot(series["year"], series["payment"], linewidth=2.5)
