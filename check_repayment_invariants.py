@@ -623,6 +623,44 @@ def main() -> int:
                 f"  the note claims {banned!r}, which nothing here sources. "
                 f"Only the due-date default is in the regulation.")
 
+    # PSLF BUYBACK IS SHUT FOR MONTHS ON RAP, and only for those. Verified on
+    # studentaid.gov's own buyback page: months are buyable only if you were
+    # NOT enrolled in RAP or Tiered Standard during them. The panel points PSLF
+    # borrowers at riding an income-driven plan, so it has to say what that
+    # costs -- but IBR carries no such restriction, and naming RAP on an IBR
+    # row would warn someone off a limit their plan does not have.
+    verdicts = ns["strategy_verdict_sentences"]
+    pslf_fed = [{"balance": 60_000.0, "rate": 6.5}]
+    pslf_priv = [{"balance": 20_000.0, "rate": 8.0, "term": 10, "actual": 0}]
+    pslf_rows = ns["compare_existing_loan_plans"](
+        60_000.0, 6.5, 45_000.0, 0, True, 0.0, True, 0,
+        federal_loans=pslf_fed, private_loans=pslf_priv)
+    for plan_label, want in ((ns["RAP_STRATEGY_LABEL"], True),
+                             ("IBR-style income-driven (new IBR)", False)):
+        an3 = ns["pivot_strategy_analysis"](
+            pslf_rows, pslf_fed, 45_000.0, 0, pslf=True,
+            prefer_label=plan_label)
+        checked += 1
+        if an3 is None:
+            problems.append(f"  no PSLF analysis for {plan_label!r}")
+            continue
+        said = any("buyback" in line for line in verdicts(an3))
+        if said != want:
+            problems.append(
+                f"  under PSLF on {plan_label!r} the buyback restriction is "
+                f"{'stated' if said else 'not stated'}, expected the opposite. "
+                f"It applies to RAP and Tiered Standard only; IBR months stay "
+                f"buyable.")
+    checked += 1
+    note = ns.get("PSLF_BUYBACK_RAP_NOTE") or ""
+    for fragment in ("buyback", "Tiered Standard", "SAVE", "IBR"):
+        if fragment not in note:
+            problems.append(
+                f"  PSLF_BUYBACK_RAP_NOTE no longer mentions {fragment!r}. It "
+                f"has to name the excluded plans, the SAVE months that are "
+                f"still buyable, and the plan that has no such limit, or it "
+                f"reads as a blanket warning against PSLF itself.")
+
     # A FLAT STACKED PAYMENT CHART SAYS NOTHING THE TABLE HAS NOT. On the
     # private row with equal terms and no override every band is constant and
     # they all end together, so the picture's only content is the split, which

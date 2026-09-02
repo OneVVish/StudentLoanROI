@@ -3792,6 +3792,38 @@ EXTRA_PAYMENT_DIRECTION_NOTE = (
     "of them. Tell your servicer in writing to apply it to principal on the "
     "loan you chose, and check the balance actually moved.")
 
+# WHAT RAP COSTS A PSLF BORROWER IF THEY EVER STOP PAYING. Verified against
+# studentaid.gov's own PSLF Buyback page on 2026-09-02, in the browser, since
+# that site serves a content-free shell to a script:
+#
+#   "You can buy back these months only if you weren't enrolled in either the
+#    Repayment Assistance Plan or the Tiered Standard Plan during the month(s)
+#    you want to buy back"
+#
+# Buyback is how a borrower recovers PSLF credit for months lost to an
+# ineligible deferment or forbearance. It is closed for months spent on RAP,
+# so a RAP borrower who takes a forbearance loses those months permanently
+# rather than being able to pay for them later.
+#
+# THIS IS SHARPEST FOR NEW BORROWERS AND THEY HAVE NO WAY OUT OF IT. For loans
+# made on or after July 1, 2026 the only plans available are RAP and Tiered
+# Standard (34 CFR 685.210(b)(5), verified the same day), and Tiered Standard
+# does not qualify for PSLF at all -- so pursuing PSLF means RAP, and RAP means
+# no buyback. It is not a choice between plans; it is the only plan.
+#
+# The limit matters as much as the rule: it is the months ON RAP that are shut
+# out. Months in an earlier SAVE forbearance are still buyable, which is the
+# population most likely to be asking.
+PSLF_BUYBACK_RAP_NOTE = (
+    "**One thing RAP costs you here.** PSLF buyback lets you reclaim months "
+    "lost to an ineligible deferment or forbearance, and studentaid.gov "
+    "excludes any month you were enrolled in RAP or Tiered Standard. So if you "
+    "pause payments while on RAP, those months are gone for PSLF rather than "
+    "recoverable later. Months from an earlier SAVE forbearance are not "
+    "affected. IBR carries no such restriction, though IBR is closed to loans "
+    "made on or after July 1, 2026. Source: studentaid.gov, *Public Service "
+    "Loan Forgiveness (PSLF) Buyback*.")
+
 # WHAT "COMMIT OR RIDE" MEANS, because the heading alone does not say. Added
 # 2026-09-02 after a reader who had been looking at the panel asked outright.
 # The two arms are a SEQUENCE, which is the thing the plan table cannot show:
@@ -21111,12 +21143,20 @@ def strategy_verdict_sentences(analysis: dict) -> list:
     # forgives nothing under PSLF either way (Standard retires in exactly 120
     # payments), so the fixed fork is priced normally.
     if analysis["pslf"] and not analysis.get("fixed"):
-        return [
+        sentences = [
             f"With PSLF, riding usually wins. Your {plan} payments stop at "
             f"{PSLF_QUALIFYING_PAYMENTS} qualifying payments and the discharge "
             "is tax-free -- extra federal payments mostly just shrink what "
             "gets forgiven. Keep the federal minimum and point spare dollars "
             "at the private side instead."]
+        # ONLY ON RAP. This branch also serves the IBR row, where buyback is
+        # not restricted at all -- naming RAP there would warn a borrower off
+        # a limit their own plan does not have. The exclusion names RAP and
+        # Tiered Standard, and Tiered does not qualify for PSLF, so RAP is the
+        # only plan that reaches here under it.
+        if RAP_STRATEGY_LABEL in plan or LEGACY_RAP_STRATEGY_LABEL in plan:
+            sentences.append(PSLF_BUYBACK_RAP_NOTE)
+        return sentences
 
     if analysis.get("fixed"):
         ride_txt = (
