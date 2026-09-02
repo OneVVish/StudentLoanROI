@@ -417,6 +417,87 @@ def main() -> int:
                     f"next one cannot delay anything.")
                 break
 
+    # THE PANEL SAYS WHAT ITS OWN HEADING MEANS. "Commit or ride" named the
+    # fork and never defined it, and a reader looking straight at the panel
+    # asked what it meant. One string, read by the screen and the PDF, so the
+    # two cannot come to explain the same fork differently.
+    import ast as _ast
+    _src = open("app.py").read()
+    _tree = _ast.parse(_src)
+    explainer = ns.get("COMMIT_OR_RIDE_EXPLAINER") or ""
+    checked += 1
+    for word in ("Ride", "Commit", "forgives"):
+        if word not in explainer:
+            problems.append(
+                f"  COMMIT_OR_RIDE_EXPLAINER no longer says {word!r}. It has to "
+                f"define BOTH arms and carve out the plans that forgive, or it "
+                f"asserts a discharge the fixed rows never reach.")
+    for func, what in (("render_existing_loan_comparison", "the panel"),
+                       ("generate_pdf_repayment_report", "the PDF")):
+        node = next((n for n in _ast.walk(_tree)
+                     if isinstance(n, _ast.FunctionDef) and n.name == func), None)
+        checked += 1
+        if node is None or not any(
+                isinstance(x, _ast.Name) and x.id == "COMMIT_OR_RIDE_EXPLAINER"
+                for x in _ast.walk(node)):
+            problems.append(
+                f"  {what} does not read COMMIT_OR_RIDE_EXPLAINER, so the fork "
+                f"is named there and never explained.")
+
+    # WHERE AN EXTRA DOLLAR SHOULD GO, which is not a rate comparison. The
+    # caption used to fire only when the top private rate beat the top federal
+    # one, so it stayed SILENT on the case where the answer is least obvious:
+    # a federal loan at a HIGHER rate that is headed for forgiveness, where
+    # prepaying loses by $84,314 on this model. Rate ordering is valid only
+    # among loans that will actually be repaid in full.
+    target_fn = ns["extra_payment_target"]
+    hi_fed = [{"balance": 90_000.0, "rate": 8.0}]
+    lo_priv = [{"balance": 20_000.0, "rate": 7.0, "term": 10, "actual": 0}]
+    forgiving = ns["compare_existing_loan_plans"](
+        90_000.0, 8.0, 38_000.0, 0, True, federal_loans=hi_fed,
+        private_loans=lo_priv)
+    rap_row = next(r for label, r, _ in forgiving
+                   if label == ns["RAP_STRATEGY_LABEL"])
+    std_row = next(r for label, r, _ in forgiving
+                   if label.startswith("Standard"))
+    checked += 1
+    if float(rap_row.get("forgiven_amount") or 0) <= 0:
+        problems.append(
+            "  the RAP fixture stopped forgiving anything, so it no longer "
+            "demonstrates the case this rule exists for")
+    got = target_fn(rap_row, hi_fed, lo_priv)
+    checked += 1
+    if got != ("private", "forgiveness"):
+        problems.append(
+            f"  a federal loan at 8% headed for forgiveness, beside a 7% "
+            f"private loan, sends extra money {got}. Prepaying a balance that "
+            f"will be discharged shrinks the discharge, not the cost -- the "
+            f"panel prices that gap at about $84,000.")
+    # A plan that forgives NOTHING is plain amortisation on both sides, and
+    # then the higher rate really does win. Same loans, same rates.
+    got = target_fn(std_row, hi_fed, lo_priv)
+    checked += 1
+    if got != ("federal", "rate"):
+        problems.append(
+            f"  on a fixed plan that forgives nothing, an 8% federal loan "
+            f"beside a 7% private one sends extra money {got}, not to the "
+            f"higher rate. Rate ordering IS right where nothing is discharged.")
+    # PSLF forgives tax-free at 120 payments, so it decides even before any
+    # forgiven_amount shows up on the row.
+    checked += 1
+    if target_fn(std_row, hi_fed, lo_priv, pslf=True) != ("private", "forgiveness"):
+        problems.append(
+            "  PSLF did not send extra money to the private side. A tax-free "
+            "discharge at 120 payments is the strongest case there is for not "
+            "prepaying the federal balance.")
+    # And the ordinary case still works.
+    checked += 1
+    hi_priv = [{"balance": 20_000.0, "rate": 9.5, "term": 10, "actual": 0}]
+    if target_fn(std_row, hi_fed, hi_priv) != ("private", "rate"):
+        problems.append(
+            "  a 9.5% private loan beside an 8% federal one on a fixed plan "
+            "no longer targets private; the plain rate rule has broken.")
+
     # THE PAYMENT VIEW OF THE ROLL-DOWN, whose whole claim is that the budget
     # NEVER SHRINKS: a cleared loan's share moves onto the next one instead of
     # going back into the borrower's pocket. That is checkable directly -- the

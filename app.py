@@ -3763,6 +3763,32 @@ TIERED_STANDARD_STRATEGY_LABEL = "2026 Tiered Standard Plan"
 LEGACY_RAP_STRATEGY_LABEL = "Repayment Assistance Plan (RAP)"
 RAP_FIRST_ORIGINATION_YEAR = 2026
 
+# WHAT "COMMIT OR RIDE" MEANS, because the heading alone does not say. Added
+# 2026-09-02 after a reader who had been looking at the panel asked outright.
+# The two arms are a SEQUENCE, which is the thing the plan table cannot show:
+# every row there holds one plan constant for thirty years.
+#
+# It has to be true of BOTH shapes the panel prices. On an income-driven plan
+# riding ends in a discharge and the tax on it; on a fixed plan nothing is ever
+# forgiven and riding just means paying the required schedule. So the sentence
+# describes what each arm DOES and puts the forgiveness clause behind "on a
+# plan that forgives", rather than asserting a discharge that half the rows
+# never reach.
+#
+# One string, read by the panel and by the PDF, so the two cannot come to
+# explain the same fork differently.
+# Stated as DEFINITIONS on their own lines rather than as a paragraph naming
+# both arms. A reader who does not know the words is looking for the words, and
+# in running prose they arrive mid-sentence with the explanation wrapped around
+# them. Two labelled lines are found by scanning; a paragraph has to be read.
+COMMIT_OR_RIDE_EXPLAINER = (
+    "Two ways to finish, priced side by side.  \n"
+    "**Ride:** Pay only what the plan asks, for as long as it asks.  \n"
+    "**Commit:** Aim spare money at the balance, plus any private payment that "
+    "frees up along the way, so it clears sooner.  \n"
+    "On a plan that forgives, riding ends in a discharge you owe income tax "
+    "on, and committing trades that away for finishing earlier.")
+
 # WHETHER THERE IS ANYTHING TO SWITCH BACK TO, which the count-back arithmetic
 # assumes and never states. Both facts are OBBBA's, and together they mean the
 # count-back rule has exactly one live destination for a borrower today: IBR,
@@ -12104,6 +12130,40 @@ def repayment_balance_stack(chosen_label: str, chosen_result: dict, rows: list):
             STACK_COLORS, "loan type")
 
 
+def extra_payment_target(chosen_result: dict, fed_loans: list, priv_loans: list,
+                          pslf: bool = False):
+    """Where an extra dollar should go: ("private"|"federal", reason) or None.
+
+    NOT A RATE COMPARISON, which is what this used to be and why it went quiet
+    exactly where a reader needed it. Rate ordering is only valid among loans
+    that will actually be REPAID IN FULL. A federal balance headed for
+    forgiveness is not one: every dollar prepaid there shrinks what gets
+    discharged rather than what you pay, and under RAP an extra payment that
+    covers the interest also forfeits that month's subsidy.
+
+    Measured on the app's own model, a federal loan at 8% on RAP against a
+    private loan at 7%: riding beats prepaying by $84,314. The old rule --
+    fire only when the top private rate beats the top federal one -- stayed
+    SILENT on that case, because 8 is bigger than 7. It spoke only when the
+    answer was already obvious.
+
+    So: a forgiving plan sends extra money to the private side whatever the
+    rates say. A plan that forgives nothing is plain amortisation on both
+    sides, and then the highest rate really does win.
+    """
+    if not priv_loans or not fed_loans:
+        return None
+    top_private = max(loan["rate"] for loan in priv_loans)
+    top_federal = max(loan["rate"] for loan in fed_loans)
+    forgives = bool(pslf) or float(
+        (chosen_result or {}).get("forgiven_amount") or 0.0) > 0.0
+    if forgives:
+        return ("private", "forgiveness")
+    if top_private > top_federal:
+        return ("private", "rate")
+    return ("federal", "rate")
+
+
 def private_payoff_marker(private_result: dict, chosen_label: str = None):
     """(year, text) for the roll-down payoff, or None.
 
@@ -16168,6 +16228,15 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         story.append(Spacer(1, 10))
         story.append(Paragraph("Commit or ride: the fork, in numbers",
                                styles["section"]))
+        # reportlab has no markdown, so the screen's bold markers are stripped
+        # rather than printed literally -- the same treatment the Outcomes
+        # caption needs.
+        # reportlab has no markdown, so the bold markers are stripped rather
+        # than printed literally, and the screen's "  \n" line breaks become
+        # reportlab's own <br/> instead of collapsing into one run-on line.
+        story.append(Paragraph(
+            COMMIT_OR_RIDE_EXPLAINER.replace("**", "").replace("  \n", "<br/>"),
+            styles["caption"]))
         for sentence in strategy_verdict_sentences(strategy):
             story.append(Paragraph(sentence, styles["body"]))
         if not strategy["pslf"]:
@@ -20928,7 +20997,7 @@ def strategy_verdict_sentences(analysis: dict) -> list:
         _outcome = (f". Debt-free on the federal side in "
                     f"{strat['years']:.1f} years, "
                     f"{fmt_money(strat['paid'])} paid")
-    pivot_txt = ("Or pivot: " + ", and ".join(parts) + _outcome
+    pivot_txt = ("Or commit: " + ", and ".join(parts) + _outcome
                  + (" -- the extra targets the highest-rate note first and "
                     "rolls down as each clears"
                     if analysis.get("fixed") else "")
@@ -20942,7 +21011,8 @@ def strategy_verdict_sentences(analysis: dict) -> list:
                        f"{ride['years'] - strat['years']:.1f} years against "
                        "the required schedule.")
         else:
-            verdict = f"The pivot saves about {fmt_money(delta)} against riding it out."
+            verdict = (f"Committing saves about {fmt_money(delta)} "
+                       "against riding it out.")
     elif delta < -0.5:
         verdict = (f"Riding it out costs about {fmt_money(-delta)} less than the "
                    "pivot -- the low payment plus the discharge beats prepaying "
@@ -21835,6 +21905,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # for Parent PLUS too -- no income-driven rows exist there, but the
         # avalanche fork on the fixed rows is exactly as real.
         st.markdown("**🧭 Commit or ride: the fork, in numbers**")
+        st.caption(COMMIT_OR_RIDE_EXPLAINER)
         # BOTH EXTRAS, SIDE BY SIDE, because they are the same spare dollar
         # spent two ways and the caption below tells the reader to choose
         # between them. Splitting them across the page -- which they were until
@@ -21864,7 +21935,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         if strategy_analysis is None:
             st.caption(
                 "Enter your income above, plus either a private loan to "
-                "pivot from or an extra amount here, and this panel "
+                "free up or an extra amount here, and this panel "
                 "prices the fork: stay on the plan's minimum, or pay the "
                 "balance down."
             )
@@ -21915,14 +21986,20 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     + f"{private_row[1]['payoff_years']:.1f}" + _saving + _tail
                 )
 
-            if (priv_loans and fed_loans
-                    and max(l["rate"] for l in priv_loans)
-                        > max(l["rate"] for l in fed_loans)):
+            _target = extra_payment_target(chosen_result, fed_loans, priv_loans,
+                                            pslf=pslf and forgivable)
+            if _target and _target[0] == "private":
                 st.caption(
-                    "Your highest interest rate is on a **private** loan, so "
-                    "extra dollars there first beat any federal targeting. "
-                    "The **Extra toward private loans** box beside this one "
-                    "models that, sending it to your highest-rate loan first."
+                    ("Your federal balance is on a plan that **forgives what "
+                     "is left**, so extra dollars there mostly shrink the "
+                     "forgiveness rather than what you pay. Private loans "
+                     "forgive nothing, so send spare money there first, "
+                     "whatever the rates say."
+                     if _target[1] == "forgiveness" else
+                     "Your highest interest rate is on a **private** loan, so "
+                     "extra dollars there first beat any federal targeting.")
+                    + " The **Extra toward private loans** box beside this one "
+                      "models that, sending it to your highest-rate loan first."
                 )
             if not strategy_analysis["pslf"] or strategy_analysis.get("fixed"):
                 st.caption(
