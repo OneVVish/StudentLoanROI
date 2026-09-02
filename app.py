@@ -3763,6 +3763,35 @@ TIERED_STANDARD_STRATEGY_LABEL = "2026 Tiered Standard Plan"
 LEGACY_RAP_STRATEGY_LABEL = "Repayment Assistance Plan (RAP)"
 RAP_FIRST_ORIGINATION_YEAR = 2026
 
+# EVERY EXTRA-PAYMENT FIGURE IN THIS TOOL ASSUMES AN ALLOCATION THE BORROWER
+# HAS TO ASK FOR. The avalanche sends spare dollars to the highest-rate note
+# and reduces principal. Neither is the default, and the first one is written
+# into the regulation:
+#
+#   34 CFR 685.211(a)(3): where a prepayment equals or exceeds the monthly
+#   repayment amount, the Secretary "advances the due date of the next payment
+#   UNLESS THE BORROWER REQUESTS OTHERWISE".
+#
+# So paying extra buys a later due date by default rather than a smaller
+# balance, which is not a servicer bug but the rule. Reported on r/StudentLoans
+# by a borrower whose targeted payment was spread across seven loan groups and
+# parked as "paid ahead" for six months; verified against the eCFR 2026-09-02.
+#
+# Which loan an extra lands on is NOT in the regulation, so it is servicer
+# practice and the borrower has to name the loan. The note says to instruct
+# and to check, and does not assert what any particular servicer does.
+#
+# It matters most exactly where this tool is most confident: the roll-down and
+# the commit arm are both built on dollars reaching one chosen note.
+EXTRA_PAYMENT_DIRECTION_NOTE = (
+    "**Targeting only works if you tell them.** These figures assume your "
+    "extra goes to the loan you picked and comes off the principal. By "
+    "default it may do neither: a prepayment of at least your monthly payment "
+    "advances your due date unless you request otherwise (34 CFR "
+    "685.211(a)(3)), and unless you name a loan it can be spread across all "
+    "of them. Tell your servicer in writing to apply it to principal on the "
+    "loan you chose, and check the balance actually moved.")
+
 # WHAT RAP COSTS A PSLF BORROWER IF THEY EVER STOP PAYING. Verified against
 # studentaid.gov's own PSLF Buyback page on 2026-09-02, in the browser, since
 # that site serves a content-free shell to a script:
@@ -22164,6 +22193,10 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             pslf=pslf and forgivable)
             if _worth:
                 st.info(_worth)
+        # Only once an extra is actually entered. Before that it is a warning
+        # about a thing the visitor has not done.
+        if extra_now or private_extra:
+            st.caption(EXTRA_PAYMENT_DIRECTION_NOTE)
         if strategy_analysis is None:
             st.caption(
                 "Enter your income above, plus either a private loan to "
