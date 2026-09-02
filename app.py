@@ -16238,6 +16238,17 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                 {"schedule": _pdf_priv["avalanche"]["schedule"]}, chart_label,
                 tranches=_pdf_roll, labels=_pdf_roll_labels,
                 colors=PRIVATE_STACK_COLORS))
+        _c_bands, _c_labels, _c_axis = commit_arm_stack(
+            strategy,
+            next((r for label, r, _ in rows if label == PRIVATE_ROW_LABEL), None))
+        if _c_bands and chart_label != PRIVATE_ROW_LABEL:
+            story.append(build_pdf_balance_chart(
+                _c_axis, chart_label, tranches=_c_bands, labels=_c_labels,
+                colors=STACK_COLORS,
+                stack_by="loan type, committing instead of riding"))
+            story.append(build_pdf_payment_chart(
+                {"schedule": _c_axis}, chart_label, tranches=_c_bands,
+                labels=_c_labels, colors=STACK_COLORS))
         story.append(Paragraph(f"Balance over time under {chart_label}.",
                                styles["caption"]))
         story.append(Spacer(1, 8))
@@ -21886,6 +21897,18 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     stack_by="loan type, committing instead of riding"),
                 use_container_width=True, config=PLOTLY_CHART_CONFIG,
                 key="existing_commit_chart")
+            # THE PAYMENT VIEW OF COMMITTING, and it is the one that shows the
+            # redirect happening: the federal band STEPS UP the month the
+            # private loans clear, by exactly the payment they were taking.
+            # The balance chart shows that the federal side finishes sooner;
+            # this shows why.
+            st.plotly_chart(
+                build_payment_chart(
+                    {"schedule": _commit_axis}, chosen, tranches=_commit,
+                    labels=_commit_labels, colors=STACK_COLORS,
+                    stack_by="loan type, committing instead of riding"),
+                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                key="existing_commit_payment_chart")
             _cs, _cr = strategy_analysis["strategy"], strategy_analysis["ride"]
             st.caption(
                 "The other arm of the fork below, drawn. Put the extra at the "
@@ -21893,8 +21916,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 f"the private band ends at "
                 f"{strategy_analysis['pivot_month'] / 12:.1f} years instead of "
                 f"{_priv_required_years:.1f}, with the federal balance gone at "
-                f"{_cs['years']:.1f} rather than {_cr['years']:.1f}. The charts "
-                "above are what happens if you do not."
+                f"{_cs['years']:.1f} rather than {_cr['years']:.1f}. In the "
+                f"payment view the federal band steps up by "
+                f"{fmt_money_md(strategy_analysis['freed'])} the month the "
+                "private loans clear, which is that payment arriving rather "
+                "than being spent. The charts above are what happens if you "
+                "do not."
             )
 
         # THE ROLL-DOWN, AS ITS OWN PICTURE. The chart above is the required

@@ -481,6 +481,35 @@ def main() -> int:
                 f"  the commit chart's axis frame peaks at ${top:,.0f} against "
                 f"a stacked height of ${peak:,.0f}. It must be the SUM of the "
                 f"bands, or the y-axis is scaled to part of its own picture.")
+        # THE PAYMENT VIEW MUST SHOW THE REDIRECT. The federal band steps up
+        # the month the private loans clear, by exactly the payment they were
+        # taking. That step IS the strategy; without it the two arms differ
+        # only in where their lines end and the reader has to take the
+        # caption's word for why.
+        fed_pay = fed_band["schedule"]
+        checked += 1
+        if "payment" not in fed_pay.columns:
+            problems.append(
+                "  the commit arm's federal schedule has no payment column, so "
+                "its chart cannot show the freed payment arriving")
+        else:
+            pm = int(an2["pivot_month"])
+            before = fed_pay.loc[fed_pay["month"] <= pm, "payment"]
+            after = fed_pay.loc[fed_pay["month"] > pm + 1, "payment"]
+            checked += 1
+            if not len(before) or not len(after):
+                problems.append(
+                    f"  the commit arm has no months either side of the pivot "
+                    f"at {pm}, so there is no step to draw")
+            else:
+                step = float(after.iloc[0]) - float(before.iloc[-1])
+                if abs(step - float(an2["freed"])) > 1.0:
+                    problems.append(
+                        f"  the federal payment steps up ${step:,.2f} at the "
+                        f"pivot, not the ${float(an2['freed']):,.2f} the panel "
+                        f"says is freed. The step is the strategy; if it is the "
+                        f"wrong size the picture and the prose disagree.")
+
     # Nothing to draw when committing saves nothing.
     checked += 1
     if commit_fn({"savings": 0.0, "strategy": {}, "ride": {}}, prow2)[0] is not None:
