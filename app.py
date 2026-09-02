@@ -12070,6 +12070,21 @@ PRIVATE_STACK_COLORS = (SERIES_BLUE, SERIES_ORANGE, SERIES_AQUA, SERIES_RED)
 MAX_STACKED_PRIVATE_LOANS = len(PRIVATE_STACK_COLORS)
 
 
+def private_payoff_marker(private_result: dict, chosen_label: str = None):
+    """(year, text) for the roll-down payoff, or None.
+
+    One builder for both twins so they cannot label the same rule differently.
+    Only when the roll-down actually finishes EARLIER than the drawn bands --
+    it can save interest without moving the payoff, and a rule sitting on the
+    curve's own end date says nothing.
+    """
+    av = (private_result or {}).get("avalanche")
+    if not av or av["months_saved"] < 1:
+        return None
+    return (av["payoff_years"],
+            f"{av['payoff_years']:.1f}y with the roll-down")
+
+
 def private_loan_stack(private_result: dict):
     """(results, labels) for stacking each private note, or (None, None).
 
@@ -12087,6 +12102,14 @@ def private_loan_stack(private_result: dict):
         return None, None
     if any(loan.get("schedule") is None for loan in per_loan):
         return None, None
+    return _band_order_and_labels(per_loan)
+
+
+def _band_order_and_labels(per_loan: list):
+    """Rate order and legend text, shared by the required-payment chart and the
+    roll-down one. SHARED ON PURPOSE: the two sit one above the other and a
+    loan that changed colour or position between them would make the pair
+    unreadable, which is the whole reason the second chart exists."""
     ordered = sorted(per_loan, key=lambda loan: -float(loan.get("rate") or 0))
     labels = tuple(f"{fmt_money(loan['balance'])} at {float(loan['rate']):.2f}%"
                    for loan in ordered)
@@ -12096,6 +12119,23 @@ def private_loan_stack(private_result: dict):
     if len(set(labels)) != len(labels):
         labels = tuple(f"{label} ({i + 1})" for i, label in enumerate(labels))
     return [dict(loan) for loan in ordered], labels
+
+
+def private_rolldown_stack(private_result: dict):
+    """(results, labels) for the ROLL-DOWN chart, or (None, None).
+
+    The same notes as private_loan_stack, on the avalanche's schedules instead
+    of each note's own amortisation, so the pair reads as one picture twice:
+    same loans, same colours, same order, different behaviour.
+    """
+    av = (private_result or {}).get("avalanche") or {}
+    per_loan = av.get("per_loan") or []
+    if not (2 <= len(per_loan) <= MAX_STACKED_PRIVATE_LOANS):
+        return None, None
+    if any(loan.get("schedule") is None or loan["schedule"].empty
+           for loan in per_loan):
+        return None, None
+    return _band_order_and_labels(per_loan)
 
 
 # A 2px separator between stacked fills, in the surface colour, so adjacent
@@ -12168,10 +12208,29 @@ def tranche_balance_frame(tranches, labels: tuple = TRANCHE_LABELS) -> pd.DataFr
                        var_name="component", value_name="amount")
 
 
+def apply_payoff_marker(fig, marker) -> None:
+    """A dotted rule at a payoff the drawn curve does not reach.
+
+    The bands are the required-payment schedule, which is the honest default:
+    a servicer bills each note its own payment, and a cleared note's money
+    only moves to the next one if the borrower moves it. So the roll-down
+    payoff cannot BE the curve without asserting a behaviour nobody chose --
+    but leaving it off the chart entirely put the figure in a sentence under a
+    picture that contradicted it.
+    """
+    if not marker:
+        return
+    when, text = marker
+    fig.add_vline(x=when, line_dash="dot", line_color="#888",
+                  annotation_text=text, annotation_position="top right",
+                  annotation_font_size=11)
+
+
 def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
                         tranches=None, labels: tuple = TRANCHE_LABELS,
                         colors: tuple = STACK_COLORS,
-                        stack_by: str = "loan type"):
+                        stack_by: str = "loan type",
+                        marker: tuple = None):
     # Tranche split takes precedence over the principal/interest one when both
     # apply. They cannot share a chart, and this is the split that explains the
     # kink a reader actually asks about: the capped federal part clears first
@@ -12205,6 +12264,12 @@ def build_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
         # that padding puts a "-2" on an axis labelled Years. There is no year
         # before the loan starts.
         fig.update_xaxes(rangemode="tozero")
+        # A payoff the DRAWN curve does not reach -- the roll-down clears these
+        # loans years before the required-payment bands do, and until this line
+        # existed that finding lived only in a sentence while the picture above
+        # it ran to the later date. Reported as "I don't see the earlier
+        # payoff", which is exactly right: it was not on the chart.
+        apply_payoff_marker(fig, marker)
         apply_duration_axis(fig, schedule_df["year"])
         return fig
     if balance_split_is_informative(schedule_df):
@@ -14800,7 +14865,8 @@ def _pdf_wage_distribution_block(occupation_name: str, styles: dict,
 def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
                             tranches=None, labels: tuple = TRANCHE_LABELS,
                             colors: tuple = STACK_COLORS,
-                            stack_by: str = "loan type") -> Image:
+                            stack_by: str = "loan type",
+                            marker: tuple = None) -> Image:
     """PDF counterpart to build_balance_chart -- simplified redraw for
     print, not required to be pixel-identical to the on-screen interactive
     version.
@@ -14842,6 +14908,15 @@ def build_pdf_balance_chart(schedule_df: pd.DataFrame, strategy_label: str,
     else:
         ax.plot(schedule_df["year"], schedule_df["balance"], linewidth=2.5)
         ax.set_title("Loan Balance Over Time")
+    # The screen twin's payoff marker. A report drawing fewer annotations than
+    # the page it was printed from is the same defect as one drawing fewer
+    # series.
+    if marker:
+        _when, _text = marker
+        ax.axvline(_when, color="#888", linewidth=1.2, linestyle=":")
+        ax.annotate(_text, xy=(_when, ax.get_ylim()[1]), fontsize=7,
+                    ha="right", va="top", color="#555",
+                    xytext=(-4, -4), textcoords="offset points")
     apply_pdf_duration_axis(ax, schedule_df["year"])
     ax.set_ylabel("Remaining Balance ($)")
     ax.yaxis.set_major_formatter(_PDF_MONEY_K_FORMATTER)
@@ -15984,12 +16059,20 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         # the page it was printed from is the defect CLAUDE.md records against
         # the balance chart's principal/interest split, and this is the same
         # chart.
-        _pdf_stack, _pdf_labels = private_loan_stack(
-            chosen if chart_label == PRIVATE_ROW_LABEL else None)
+        _pdf_priv = chosen if chart_label == PRIVATE_ROW_LABEL else None
+        _pdf_stack, _pdf_labels = private_loan_stack(_pdf_priv)
         story.append(build_pdf_balance_chart(
             chosen["schedule"], chart_label,
             tranches=_pdf_stack, labels=_pdf_labels or TRANCHE_LABELS,
-            colors=PRIVATE_STACK_COLORS, stack_by="loan"))
+            colors=PRIVATE_STACK_COLORS, stack_by="loan",
+            marker=private_payoff_marker(_pdf_priv)))
+        _pdf_roll, _pdf_roll_labels = private_rolldown_stack(_pdf_priv)
+        if _pdf_roll:
+            story.append(build_pdf_balance_chart(
+                _pdf_priv["avalanche"]["schedule"], chart_label,
+                tranches=_pdf_roll, labels=_pdf_roll_labels,
+                colors=PRIVATE_STACK_COLORS,
+                stack_by="loan, rolling each payment onto the next"))
         story.append(Paragraph(f"Balance over time under {chart_label}.",
                                styles["caption"]))
         story.append(Spacer(1, 8))
@@ -20244,6 +20327,17 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                 or private_result["total_interest"]
                    - _avalanche["total_interest"] > 1.0):
             private_result["avalanche"] = {
+                # The per-note curves, so the roll-down gets its own stacked
+                # chart rather than only a payoff number. Zipped with the
+                # loans in INPUT order, which is what the simulator aligns to.
+                "per_loan": [{**loan, "schedule": sched} for loan, sched in
+                             zip(priv_loans,
+                                 _avalanche["per_loan_schedules"])],
+                # The COMBINED roll-down curve. The chart reads its money and
+                # time axes off whatever frame it is handed, so handing it one
+                # note's schedule scaled the y-axis to that note: a stack
+                # reaching $24,600 drawn against ticks that stopped at $10k.
+                "schedule": _avalanche["schedule"],
                 "payoff_years": _avalanche["payoff_years"],
                 "total_interest": _avalanche["total_interest"],
                 "extra": float(private_extra),
@@ -20490,6 +20584,7 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
     n_months = max(note["months"] for note in notes)
     target_order = sorted(range(len(notes)), key=lambda i: -notes[i]["rate"])
     budget_base = sum(note["required"] for note in notes)
+    per_note_rows = [[] for _ in notes]
 
     total_interest = 0.0
     total_paid_in_window = 0.0
@@ -20528,6 +20623,13 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
         schedule_rows.append({"month": month, "year": month / 12,
                               "balance": sum(n["balance"] for n in notes),
                               "payment": paid})
+        # Each note's own curve, so the roll-down can be STACKED per loan the
+        # way the required-payment chart is. Without this the avalanche knew
+        # only its combined balance, and a second chart could show the earlier
+        # payoff but not which loan bought it.
+        for note, row in zip(notes, per_note_rows):
+            row.append({"month": month, "year": month / 12,
+                        "balance": max(note["balance"], 0.0)})
         if all(note["balance"] <= 0 for note in notes):
             break
 
@@ -20540,6 +20642,8 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
         "total_paid_in_roi_window": total_paid_in_window,
         "forgiven_amount": 0.0,
         "per_loan_payoff_months": [note["payoff_month"] for note in notes],
+        # Aligned to the INPUT order, like per_loan_payoff_months.
+        "per_loan_schedules": [pd.DataFrame(rows) for rows in per_note_rows],
     }
 
 
@@ -21139,19 +21243,15 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.session_state["existing_private_loans"] = _priv_edited.to_dict("records")
             priv_loans = sanitize_loan_rows(
                 st.session_state["existing_private_loans"], private=True)
-            # SURPLUS, not a per-note instruction. `Actual $/mo` above says what
-            # one loan gets; this says what is left over, and the model sends it
-            # to the highest-rate note still alive, rolling forward as each
-            # clears. The two are different questions and sharing one control
-            # for both would silently change what an existing ?rpa= link means.
-            private_extra = st.number_input(
-                "Extra toward private loans, a month ($)",
-                min_value=0, max_value=50_000, step=25,
-                key="existing_private_extra",
-                help="Anything you pay beyond the required payments, over and "
-                     "above any Actual $/mo above. It is modelled as going to "
-                     "your highest-rate private loan first, and when that one "
-                     "clears, its whole payment rolls onto the next.")
+            # READ-BEFORE-RENDER, the pattern the federal extra already uses.
+            # The widget itself lives in the strategy panel beside its federal
+            # twin, because the grids hold FACTS about the loans (balance,
+            # rate, term, what you pay today) and the extras hold INTENT, and
+            # because the two are competing uses of the same spare dollar and
+            # have to be visible together to be compared. But the value is
+            # consumed HERE, ~500 lines earlier, where the rows are built.
+            private_extra = float(
+                st.session_state.get("existing_private_extra") or 0)
         else:
             # HIDING AN INPUT MUST ALSO NEUTRALISE IT. Streamlit keeps values
             # in session_state after their widgets stop being rendered, so
@@ -21501,13 +21601,14 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # the grids shipped, and a borrower with four notes reading a single
         # line cannot see which loan dies when, which is what they open the
         # chart for. Reported by a reader.
-        _stack, _stack_labels = private_loan_stack(
-            chosen_result if chosen == PRIVATE_ROW_LABEL else None)
+        _priv_row_selected = chosen_result if chosen == PRIVATE_ROW_LABEL else None
+        _stack, _stack_labels = private_loan_stack(_priv_row_selected)
+        _marker = private_payoff_marker(_priv_row_selected)
         st.plotly_chart(
             build_balance_chart(
                 chosen_result["schedule"], chosen,
                 tranches=_stack, labels=_stack_labels or TRANCHE_LABELS,
-                colors=PRIVATE_STACK_COLORS, stack_by="loan"),
+                colors=PRIVATE_STACK_COLORS, stack_by="loan", marker=_marker),
             use_container_width=True, config=PLOTLY_CHART_CONFIG,
             key="existing_balance_chart")
         if chosen == PRIVATE_ROW_LABEL and len(priv_loans) > 1:
@@ -21527,6 +21628,34 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     "to repeat a colour, and two different loans drawn in the "
                     "same colour is worse than one honest line."
                 )
+
+        # THE ROLL-DOWN, AS ITS OWN PICTURE. The chart above is the required
+        # schedule, which is the honest default: a servicer bills each note its
+        # own payment and a cleared note's money only moves if the borrower
+        # moves it. So the roll-down cannot BE that chart without asserting a
+        # behaviour nobody chose -- but as a second chart, drawn from the same
+        # loans in the same colours, the difference between the two IS the
+        # argument. Reported as "I don't see the earlier payoff": it was in a
+        # sentence, under a picture that ran to the later date.
+        _roll, _roll_labels = private_rolldown_stack(_priv_row_selected)
+        if _roll:
+            _roll_sched = _priv_row_selected["avalanche"]["schedule"]
+            st.plotly_chart(
+                build_balance_chart(
+                    _roll_sched, chosen, tranches=_roll, labels=_roll_labels,
+                    colors=PRIVATE_STACK_COLORS,
+                    stack_by="loan, rolling each payment onto the next"),
+                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                key="existing_rolldown_chart")
+            _av = _priv_row_selected["avalanche"]
+            st.caption(
+                "The same loans and the same colours as above, with every "
+                f"cleared loan's payment moved onto the next. Done in "
+                f"{_av['payoff_years']:.1f} years instead of "
+                f"{_priv_row_selected['payoff_years']:.1f}. The difference "
+                "between these two charts is the whole of what the roll-down "
+                "buys you."
+            )
 
         # Payments beside the balance. The balance chart cannot show that an
         # income-driven payment RISES with income -- the table's "Monthly" is
@@ -21582,8 +21711,15 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         # for Parent PLUS too -- no income-driven rows exist there, but the
         # avalanche fork on the fixed rows is exactly as real.
         st.markdown("**🧭 Commit or ride: the fork, in numbers**")
-        st.number_input(
-            "Extra you could put toward the federal balance each month ($)",
+        # BOTH EXTRAS, SIDE BY SIDE, because they are the same spare dollar
+        # spent two ways and the caption below tells the reader to choose
+        # between them. Splitting them across the page -- which they were until
+        # a reader asked why -- makes that comparison something you have to
+        # scroll to hold in your head.
+        _x_fed, _x_priv = (st.columns(2) if priv_loans
+                           else (st.container(), None))
+        _x_fed.number_input(
+            "Extra toward the federal balance, a month ($)",
             min_value=0, max_value=50_000, step=25,
             key="existing_extra_monthly",
             help="Optional, added on top of the automatic pivot of freed "
@@ -21592,6 +21728,15 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "forfeits that month's subsidy, and the simulation prices "
                  "that). On a fixed plan it targets the highest-rate note "
                  "first and rolls down as each clears.")
+        if _x_priv is not None:
+            _x_priv.number_input(
+                "Extra toward private loans, a month ($)",
+                min_value=0, max_value=50_000, step=25,
+                key="existing_private_extra",
+                help="Anything you pay beyond the required payments, over and "
+                     "above any Actual $/mo in the grid. It is modelled as "
+                     "going to your highest-rate private loan first, and when "
+                     "that one clears, its whole payment rolls onto the next.")
         if strategy_analysis is None:
             st.caption(
                 "Enter your income above, plus either a private loan to "

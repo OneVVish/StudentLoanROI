@@ -345,6 +345,86 @@ def main() -> int:
             problems.append(
                 f"  two private bands would be drawn in the same colour: {used}")
 
+    # THE MARKER, which is where the roll-down payoff becomes visible. Until
+    # it existed the figure lived only in a sentence, under a chart whose bands
+    # ran to the LATER date -- reported as "I don't see the earlier payoff",
+    # which was exactly right. It must agree with the sentence to the tenth of
+    # a year, since the two sit inches apart.
+    marker_fn = ns["private_payoff_marker"]
+    rows_x = ns["compare_existing_loan_plans"](
+        24_000.0, 3.5, 60_000.0, 0, True,
+        federal_loans=[{"balance": 24_000.0, "rate": 3.5}], private_loans=priv,
+        private_extra=130.0)
+    xrow = next(r for label, r, _ in rows_x if label == ns["PRIVATE_ROW_LABEL"])
+    mark = marker_fn(xrow)
+    checked += 1
+    if not mark:
+        problems.append(
+            "  a $130 private extra produced no payoff marker, so the earlier "
+            "payoff is claimed in prose above a chart that does not show it")
+    else:
+        checked += 1
+        if abs(mark[0] - xrow["avalanche"]["payoff_years"]) > 1e-9:
+            problems.append(
+                f"  the chart marker sits at {mark[0]:.2f}y while the sentence "
+                f"says {xrow['avalanche']['payoff_years']:.2f}y")
+        checked += 1
+        if mark[0] >= xrow["payoff_years"]:
+            problems.append(
+                f"  the marker at {mark[0]:.2f}y is not EARLIER than the drawn "
+                f"bands' {xrow['payoff_years']:.2f}y, so it marks nothing")
+    # THE SECOND CHART, which is where the roll-down became visible rather
+    # than merely stated. It is the same loans drawn a second way, so the two
+    # only work as a pair if a loan keeps its identity between them.
+    roll_fn = ns["private_rolldown_stack"]
+    rbands, rlabels = roll_fn(xrow)
+    qbands, qlabels = stack_fn(xrow)
+    checked += 1
+    if not rbands:
+        problems.append(
+            "  no roll-down chart for a portfolio with an extra; the earlier "
+            "payoff is claimed in prose with no picture behind it")
+    else:
+        checked += 1
+        if rlabels != qlabels:
+            problems.append(
+                f"  the two charts label their bands differently: "
+                f"{qlabels} vs {rlabels}. Same colours in a different order "
+                f"makes the pair unreadable, which is the only reason the "
+                f"second chart exists.")
+        # The roll-down bands must sum to the roll-down's OWN combined curve,
+        # exactly as the required bands sum to theirs.
+        rframe = frame_fn(rbands, rlabels)
+        rsum = rframe.groupby("year")["amount"].sum()
+        rline = xrow["avalanche"]["schedule"].groupby("year")["balance"].last()
+        rshared = rsum.index.intersection(rline.index)
+        rgap = float((rsum.loc[rshared] - rline.loc[rshared]).abs().max())
+        checked += 1
+        if rgap > TOLERANCE:
+            problems.append(
+                f"  the roll-down bands miss their own combined curve by "
+                f"${rgap:,.2f}")
+        # And every band must clear no later than its required twin -- the
+        # roll-down can only bring a payoff forward.
+        checked += 1
+        for lab, q, r in zip(rlabels, qbands, rbands):
+            qe = q["schedule"].loc[q["schedule"]["balance"] > 0.005, "year"].max()
+            re_ = r["schedule"].loc[r["schedule"]["balance"] > 0.005, "year"].max()
+            if re_ > qe + 1e-9:
+                problems.append(
+                    f"  {lab} clears LATER with the roll-down ({re_:.2f}y vs "
+                    f"{qe:.2f}y). Moving a cleared loan's payment onto the "
+                    f"next one cannot delay anything.")
+                break
+
+    # And no marker when the roll-down saves no time: a rule sitting on the
+    # curve's own end date is noise.
+    checked += 1
+    if marker_fn(prow) is not None:
+        problems.append(
+            "  a marker was drawn with no months saved; it would sit on the "
+            "bands' own end date and label it as a finding")
+
     # The boundaries, both of them, because each is a different answer.
     checked += 1
     if stack_fn({"per_loan": [dict(priv[0], schedule=prow["schedule"])]})[0] is not None:
