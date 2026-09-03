@@ -17822,6 +17822,33 @@ st.sidebar.header("🎓 Your Profile")
 # route through an active container context -- only calls made on the slot
 # variable itself land inside it. That asymmetry is why every sidebar call
 # below names its slot explicitly.
+# HIDE THE SIDEBAR BEFORE IT RENDERS, NOT SIX THOUSAND LINES LATER.
+#
+# The ?tool= and ?admin= pages hide the sidebar with CSS because it still has
+# to EXECUTE (it defines names section 5 reads) while describing a scenario
+# those pages are not about. That CSS used to be injected beside each page's
+# title, in section 5a/5b -- about six thousand lines below here.
+#
+# Streamlit streams the page top to bottom, so the sidebar rendered, stayed on
+# screen for as long as the model took to run, and only then vanished. Opening
+# ?tool=repayment showed the whole calculator with its sidebar first and the
+# tool second. Reported as exactly that.
+#
+# THE CONDITION IS COPIED, NOT REINVENTED. Section 5's `active_tool` is the
+# session_state value when present and requested_tool() otherwise, and the
+# obvious shorthand `session_state.get(...) or requested_tool()` is NOT the
+# same: a latched empty string would fall through to the URL here and not
+# there, which would hide the sidebar on a page that then rendered the
+# calculator. Same expression, so the two cannot disagree.
+_early_tool = (st.session_state["active_tool"] if "active_tool" in st.session_state
+               else requested_tool())
+if _early_tool or st.session_state.get("admin_revealed"):
+    # The expand-sidebar button goes too: the sidebar is display:none, so the
+    # button would open nothing.
+    st.markdown("<style>section[data-testid='stSidebar'],"
+                "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
+                unsafe_allow_html=True)
+
 _sb_who = st.sidebar.container()
 _sb_who.subheader("👤 About you")
 _sb_study = st.sidebar.container()
@@ -23909,11 +23936,8 @@ repayment_only = active_tool == "repayment"
 # NAV_ORIGINS, the traffic split and the cross-page links, and an admin
 # surface belongs in none of them.
 if st.session_state.admin_revealed:
-    # Hide the expand-sidebar button too: the sidebar is display:none, so the
-    # button would open nothing. Same on the ?tool= pages below.
-    st.markdown("<style>section[data-testid='stSidebar'],"
-                "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
-                unsafe_allow_html=True)
+    # The sidebar is already hidden, above the sidebar block itself, so it
+    # never flashes on screen. Do not re-inject it here.
     st.title("📊 Admin Analytics Dashboard")
     st.caption(
         "Visible only with the `?admin=` key. This session logs nothing: "
@@ -23925,11 +23949,8 @@ if st.session_state.admin_revealed:
 if active_tool:
     # The sidebar still executes -- it defines names section 5 reads -- but it
     # describes a scenario this page is not about, so it is hidden rather than
-    # shown empty. Cheaper and far less invasive than making 2,000 lines of
-    # module-level sidebar code conditional.
-    st.markdown("<style>section[data-testid='stSidebar'],"
-                "button[data-testid='stExpandSidebarButton']{display:none;}</style>",
-                unsafe_allow_html=True)
+    # shown empty. That hiding now happens ABOVE the sidebar block, so it never
+    # renders visibly; see the note there. Do not re-inject the CSS here.
     # The lockup, in the page BODY. st.logo renders inside the sidebar, and
     # these pages hide the sidebar with the CSS above -- so the one call that
     # brands every other page renders into a display:none container here and
