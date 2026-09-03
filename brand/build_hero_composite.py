@@ -98,15 +98,64 @@ def detect_screen(img: Image.Image):
     # read the panel's top-left at x=781 where it belongs near x=660. A least
     # squares line through every row is immune to one bad row and handles the
     # slight trapezoid of a monitor that is not perfectly square to the camera.
+    # THE SIDE EDGES COME FROM THE FIRST AND LAST DARK PIXEL IN EACH ROW, not
+    # from the bounds of that row's LONGEST run. The longest run jumps sideways
+    # wherever something interrupts it, and the badge on a monitor's chin does
+    # exactly that: the fitted left edge came out sloping ninety pixels across
+    # the screen and the outline cut the panel in half diagonally.
     band = list(range(top, bottom + 1))
-    lefts = np.array([runs[y][1] for y in band], dtype=float)
-    rights = np.array([runs[y][1] + runs[y][0] for y in band], dtype=float)
-    ys = np.array(band, dtype=float)
-    lm, lc = np.polyfit(ys, lefts, 1)
-    rm, rc = np.polyfit(ys, rights, 1)
-    t, b = float(top), float(bottom)
-    return [(lm * t + lc, t), (rm * t + rc, t),
-            (rm * b + rc, b), (lm * b + lc, b)]
+    ys, lefts, rights = [], [], []
+    for y in band:
+        idx = np.nonzero(dark[y])[0]
+        if idx.size < MIN_PANEL_WIDTH_FRAC * w:
+            continue
+        ys.append(y); lefts.append(idx[0]); rights.append(idx[-1])
+    if len(ys) < 20:
+        sys.exit("could not trace the panel's side edges")
+    ys = np.array(ys, float)
+    lefts = np.array(lefts, float)
+    rights = np.array(rights, float)
+
+    def robust_fit(x, y):
+        """Least squares, then refit without the worst tenth of residuals.
+
+        One stray row (a reflection, a cable crossing the bezel) drags a plain
+        fit visibly on an edge only a few hundred pixels long.
+        """
+        m, c = np.polyfit(x, y, 1)
+        keep = np.abs(y - (m * x + c)) <= np.quantile(np.abs(y - (m * x + c)), 0.9)
+        return np.polyfit(x[keep], y[keep], 1) if keep.sum() > 10 else (m, c)
+
+    lm, lc = robust_fit(ys, lefts)
+    rm, rc = robust_fit(ys, rights)
+
+    # FIT THE TOP AND BOTTOM AS LINES TOO, rather than taking the band's first
+    # and last row as horizontals. A monitor that is a degree or two off square
+    # has a SLOPED top edge, and a horizontal top edge drawn across it sits
+    # above the bezel on the high side: the paste then overhangs the monitor
+    # onto the wall, which is exactly what shipped once. Scan each column of
+    # the panel for its topmost and bottommost dark pixel and fit those.
+    inner = range(int(max(lefts.min(), 0)) + 2, int(min(rights.max(), w)) - 2)
+    cols, tops, bots = [], [], []
+    for x in inner:
+        col = dark[top:bottom + 1, x]
+        idx = np.nonzero(col)[0]
+        if idx.size < 0.5 * (bottom - top):      # skip columns the panel misses
+            continue
+        cols.append(x); tops.append(top + idx[0]); bots.append(top + idx[-1])
+    if len(cols) < 20:
+        sys.exit("could not trace the panel's top and bottom edges")
+    tm, tc = robust_fit(np.array(cols, float), np.array(tops, float))
+    bm, bc = robust_fit(np.array(cols, float), np.array(bots, float))
+
+    def corner(edge_m, edge_c, side_m, side_c):
+        """Intersect a sloped horizontal edge with a sloped vertical edge."""
+        # y = edge_m*x + edge_c   and   x = side_m*y + side_c
+        y = (edge_m * side_c + edge_c) / (1.0 - edge_m * side_m)
+        return (side_m * y + side_c, y)
+
+    return [corner(tm, tc, lm, lc), corner(tm, tc, rm, rc),
+            corner(bm, bc, rm, rc), corner(bm, bc, lm, lc)]
 
 
 def perspective_coeffs(dst, src):

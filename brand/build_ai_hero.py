@@ -34,6 +34,13 @@ is byte-identical across runs, which is what lets a change in output size mean
 something rather than being compression noise. Do not edit a prompt in place
 without changing the seed too, or the recorded pair stops describing the file.
 
+HOUSE RULE: EVERY HERO CARRIES A FINANCIAL CALCULATOR, IN FOCUS. Not a phone,
+not a laptop, not a generic desk calculator seen from across the room: a
+financial calculator, close enough to read as one. It is the object that says
+what this site does at a glance, it survives being cropped to a card thumbnail,
+and it is the one prop that ties twelve otherwise unrelated photographs into a
+set. A prompt without one is incomplete; say so in review.
+
 COST. 1024x1024 at 4 steps is 4 tiles plus 4 steps, about $0.00065 an image.
 """
 import argparse
@@ -172,27 +179,34 @@ PROMPTS = {
         "colour, unposed. No text, no charts, no screens showing content.",
         20260815, 4),
     "refinancing-federal-student-loans": (
-        # Fifth prompt, same job: a BLANK dark screen for
-        # build_hero_composite.py to paste a real chart onto. Never ask the
-        # model for the calculator itself; it invents the labels, the numbers
-        # and the charts, and a fabricated picture of our own product is the
-        # one thing a site built on traceable figures cannot publish.
+        # Seventh prompt. Same job throughout: a BLANK dark screen for
+        # build_hero_composite.py to paste a real chart onto, never the
+        # calculator UI itself, which a diffusion model would invent.
         #
         # THE FRAMING IS ARITHMETIC. The hero is 1600x459, about 3.5:1, so a
         # 16:9 monitor shown WHOLE can be at most ~816px wide before its height
-        # exceeds the frame. Seed 20260905 left it at ~350px and the chart read
-        # as a coloured rectangle; seed 20260906 filled the frame and cropped
-        # the screen's top edge, which would have cut the chart's own title and
-        # legend off. So: whole monitor, as tall as the frame allows, with a
-        # margin above it.
+        # exceeds the frame. Seed 20260905 left it at ~350px, a coloured
+        # rectangle on a phone; 20260906 filled the frame and cropped the
+        # screen's top edge, cutting the chart's own title off; 20260907 got the
+        # framing right; 20260908 lost the calculator to a mouse and shrank the
+        # monitor again.
+        #
+        # NOTHING TOUCHES THE FRAME EDGE. Every prop that has run off the side
+        # so far has looked like a mistake rather than a crop, because this
+        # letterbox is short enough that a half-item at the margin reads as
+        # damage. Say it in the prompt rather than hoping.
         "A slim widescreen monitor seen straight on and standing on a tidy "
-        "desk, the whole monitor visible from top edge to base with a little "
-        "space above it, filling the height of a wide letterbox frame, its "
-        "screen switched off and completely blank dark grey. A keyboard below "
-        "it, a notebook, a calculator and a cup further off to the sides, out "
-        "of focus. Documentary photography, muted natural colour, unposed. No "
-        "text, no charts, nothing displayed on the screen.",
-        20260907, 4),
+        "wooden desk, the whole monitor visible from top edge to base with a "
+        "little space above it, filling the height of a wide letterbox frame, "
+        "its screen switched off and completely blank dark grey. On the desk in "
+        "front of it and sharply in focus: a financial calculator with a long "
+        "printed keypad, and a yellow legal pad with a wooden pencil and a pen "
+        "lying on it. A keyboard behind them and a cup to one side. Every "
+        "object complete and well inside the picture, nothing touching or "
+        "running off the edges of the frame, no mouse. Documentary "
+        "photography, muted natural colour, unposed. No text, no charts, "
+        "nothing displayed on the screen.",
+        20260909, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
