@@ -172,25 +172,27 @@ PROMPTS = {
         "colour, unposed. No text, no charts, no screens showing content.",
         20260815, 4),
     "refinancing-federal-student-loans": (
-        # Reprompted a third time, for a DIFFERENT job. The screen is
-        # deliberately dark and empty and the monitor stands square to the
-        # camera, because a REAL screenshot of the repayment tool is
-        # composited onto it afterwards by build_hero_composite.py.
+        # Fifth prompt, same job: a BLANK dark screen for
+        # build_hero_composite.py to paste a real chart onto. Never ask the
+        # model for the calculator itself; it invents the labels, the numbers
+        # and the charts, and a fabricated picture of our own product is the
+        # one thing a site built on traceable figures cannot publish.
         #
-        # That is why this asks for a blank screen rather than a calculator on
-        # it. A diffusion model would invent the labels, the numbers and the
-        # charts, and a fabricated picture of our own product is the one thing
-        # a site built on traceable figures cannot publish. Blank plus a real
-        # paste is the honest way to show the tool. New seed with the new
-        # prompt, per the rule above.
-        "Three quarter view of a tidy home office desk in flat daylight, a "
-        "slim widescreen monitor standing square to the camera with its "
-        "screen switched off and completely blank dark grey, a keyboard below "
-        "it, a small stack of printed papers and a calculator to one side, a "
-        "cold cup of coffee, a notebook and a pen, nobody in frame. "
-        "Documentary photography, muted natural colour, unposed. No text, no "
-        "charts, nothing displayed on the screen.",
-        20260905, 4),
+        # THE FRAMING IS ARITHMETIC. The hero is 1600x459, about 3.5:1, so a
+        # 16:9 monitor shown WHOLE can be at most ~816px wide before its height
+        # exceeds the frame. Seed 20260905 left it at ~350px and the chart read
+        # as a coloured rectangle; seed 20260906 filled the frame and cropped
+        # the screen's top edge, which would have cut the chart's own title and
+        # legend off. So: whole monitor, as tall as the frame allows, with a
+        # margin above it.
+        "A slim widescreen monitor seen straight on and standing on a tidy "
+        "desk, the whole monitor visible from top edge to base with a little "
+        "space above it, filling the height of a wide letterbox frame, its "
+        "screen switched off and completely blank dark grey. A keyboard below "
+        "it, a notebook, a calculator and a cup further off to the sides, out "
+        "of focus. Documentary photography, muted natural colour, unposed. No "
+        "text, no charts, nothing displayed on the screen.",
+        20260907, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "

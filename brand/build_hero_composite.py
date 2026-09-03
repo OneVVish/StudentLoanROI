@@ -126,9 +126,18 @@ def main() -> int:
     ap.add_argument("--shot", help="PNG of the real app screen")
     ap.add_argument("--detect-only", action="store_true")
     ap.add_argument("--corners", help="x1,y1,x2,y2,x3,y3,x4,y4 (tl,tr,br,bl)")
-    ap.add_argument("--inset", type=float, default=0.075,
-                    help="shrink toward the centre, to land on the GLASS rather "
-                         "than on the bezel the detector includes")
+    # PER EDGE, NOT ONE NUMBER. The detector finds the dark PANEL, which is
+    # glass plus bezel, and a monitor's bezel is not the same width all the way
+    # round: the chin under the screen is two or three times the side bezels
+    # and usually carries the maker's badge. A single uniform inset that clears
+    # the chin eats into the picture at the top and sides, and one that fits
+    # the sides leaves the paste sitting over the badge.
+    ap.add_argument("--inset-x", type=float, default=0.018)
+    ap.add_argument("--inset-top", type=float, default=0.022)
+    ap.add_argument("--inset-bottom", type=float, default=0.085)
+    ap.add_argument("--stretch", action="store_true",
+                    help="force the shot onto the quad, distorting it; padding "
+                         "to the screen's aspect is the default and is correct")
     ap.add_argument("--dim", type=float, default=0.93,
                     help="slight darkening so the paste reads as a lit screen")
     a = ap.parse_args()
@@ -147,15 +156,15 @@ def main() -> int:
         quad = [(v[0], v[1]), (v[2], v[3]), (v[4], v[5]), (v[6], v[7])]
     else:
         quad = detect_screen(base)
-    if a.inset:
-        # The detector finds the dark PANEL, which is glass plus bezel. A
-        # screenshot pasted over the bezel reads as a sticker on the monitor
-        # rather than as something displayed by it, so pull the quad in toward
-        # its own centre.
-        cx = sum(p[0] for p in quad) / 4.0
-        cy = sum(p[1] for p in quad) / 4.0
-        k = 1.0 - a.inset
-        quad = [(cx + (x - cx) * k, cy + (y - cy) * k) for x, y in quad]
+    # Pull each edge in by its own fraction of the panel, so the paste lands on
+    # the glass. A screenshot sitting over the bezel reads as a sticker stuck
+    # to the monitor rather than as something the monitor is displaying.
+    (tlx, tly), (trx, try_), (brx, bry), (blx, bly) = quad
+    pw = ((trx - tlx) + (brx - blx)) / 2.0
+    ph = ((bly - tly) + (bry - try_)) / 2.0
+    dx, dt, db = a.inset_x * pw, a.inset_top * ph, a.inset_bottom * ph
+    quad = [(tlx + dx, tly + dt), (trx - dx, try_ + dt),
+            (brx - dx, bry - db), (blx + dx, bly - db)]
     print(f"  hero   {hero.name}  ({base.width}x{base.height})")
     print(f"  screen tl={quad[0]} tr={quad[1]} br={quad[2]} bl={quad[3]}")
 
@@ -169,6 +178,28 @@ def main() -> int:
         return 0
 
     shot = Image.open(a.shot).convert("RGB")
+    if not a.stretch:
+        # PAD TO THE SCREEN'S ASPECT RATHER THAN STRETCH TO IT. The quad is
+        # whatever shape the monitor in the photograph is, and the chart is
+        # whatever shape matplotlib drew; forcing one onto the other visibly
+        # squashes the type and the bars, and a distorted chart of ours is a
+        # misrepresentation of ours. Padding reads as the chart displayed in a
+        # window that is wider than it needs, which is what it would be.
+        qw = ((quad[1][0] - quad[0][0]) + (quad[2][0] - quad[3][0])) / 2.0
+        qh = ((quad[3][1] - quad[0][1]) + (quad[2][1] - quad[1][1])) / 2.0
+        want = qw / qh
+        have = shot.width / shot.height
+        if abs(want - have) > 0.01:
+            if have < want:
+                w2, h2 = int(round(shot.height * want)), shot.height
+            else:
+                w2, h2 = shot.width, int(round(shot.width / want))
+            bg = shot.getpixel((0, 0))          # the chart's own paper colour
+            padded = Image.new("RGB", (w2, h2), bg)
+            padded.paste(shot, ((w2 - shot.width) // 2, (h2 - shot.height) // 2))
+            print(f"  padded the shot {shot.width}x{shot.height} -> {w2}x{h2} "
+                  f"to match the screen's {want:.2f}:1 without stretching")
+            shot = padded
     coeffs = perspective_coeffs(quad, [(0, 0), (shot.width, 0),
                                        (shot.width, shot.height), (0, shot.height)])
     warped = shot.transform(base.size, Image.PERSPECTIVE, coeffs, Image.BICUBIC)
