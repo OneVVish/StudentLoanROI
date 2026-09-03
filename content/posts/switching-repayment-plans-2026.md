@@ -124,7 +124,23 @@ That fork is the thing a comparison table cannot show you, because every row in 
 
 Private loans sit outside all of this. No federal plan forgives them, none of them lowers the payment when your income falls, and nothing about them changes when you switch. 
 
-Federal loans work the other way, and that arithmetic surprises people. Several federal loans do not mean several income-driven payments. The plan sizes one payment from your income and that payment covers all of them. Split the $79,000 above across two federal loans at different rates and the RAP payment is still about $160 a month rather than double that. If you have been adding up per-loan estimates from a servicer's website, the total you are dreading may not exist.
+That does not leave you with nothing to decide. It leaves you with one decision, and it is worth more than it looks. Say four private notes of about $9,000 each, at rates from 7.0 to 9.9 percent on ten-year terms, and $130 a month you can find on top of the required payments.
+
+| Where the $130 goes | Monthly | Paid off in | Interest |
+|---|---|---|---|
+| Nowhere, only the required payments | $445 | 10 years | $17,600 |
+| All of it at the highest-rate note | $575 | 10 years | $14,100 |
+| The same, then rolled down | $575 | about 7 years | $11,100 |
+
+The middle row is the one worth staring at. That extra $130 saves real interest, and the date you become debt free does not move at all. The 9.9 percent note clears years early and the other three still run their own full terms, so the finish line is wherever the slowest loan says it is. Paying one loan off early does not make you free any sooner when three more are still running.
+
+The third row changes exactly one thing. When the 9.9 percent note clears, its required payment rolls onto the next highest rate instead of being spent, and when that one clears both roll onto the one after. Same $130 a month, about $3,000 less interest, and more than three years earlier. Nothing was added. A payment that was already leaving your account every month simply kept going.
+
+The repayment tool on this site models both, and keeps them apart deliberately. Its table holds the extra on one note, because that is what happens if you do nothing else. The roll-down is drawn beside it as its own charts, because rolling a freed payment forward is a thing you decide to do rather than a thing that happens to you.
+
+One practical caution sits under all three rows. They assume the extra actually comes off the principal of the loan you meant, and that is worth arranging in writing rather than assuming. Money paid above the minimum is often applied to the next due date instead, which buys a month off rather than a smaller balance.
+
+Federal loans do not work like that at all, and that arithmetic surprises people. Several federal loans do not mean several income-driven payments. The plan sizes one payment from your income and that payment covers all of them. Split the $79,000 above across two federal loans at different rates and the RAP payment is still about $160 a month rather than double that. If you have been adding up per-loan estimates from a servicer's website, the total you are dreading may not exist.
 
 What the tool will not do is tell you which row to pick. It prices them. Whether a smaller payment for thirty years is worth more to you than a bigger one for ten is a question about your life and about how much certainty you want.
 
