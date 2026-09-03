@@ -5915,6 +5915,16 @@ def repayment_strategy_help() -> str:
             f"({guides_url(REPAYMENT_GUIDE_SLUG)}).")
 
 
+def refinance_guide_pointer() -> str:
+    """The one line sending a refinancing reader to the guide that argues it.
+
+    Reuses REPAYMENT_SECTION_GUIDES' own entry rather than a second literal, so
+    a renamed or unpublished guide fails one guard rather than rotting in two
+    places.
+    """
+    return repayment_section_guide("private_loans")
+
+
 def repayment_section_guide(key: str) -> str:
     """One further-reading line for a section of the repayment tool, or "".
 
@@ -20575,6 +20585,10 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_family_size", "rfs", int, (MIN_FAMILY_SIZE, MAX_FAMILY_SIZE)),
     ("existing_spouse_income", "rsi", int, (0, 2_000_000)),
     ("existing_filing_status", "rfst", str, None),
+    # The rate a lender actually offered. 0 means "not considering", which is
+    # the default: there is no private refinance rate dataset in this repo and
+    # a modelled figure would be fabricated. See refinance_comparison.
+    ("existing_refi_offer_rate", "rro", float, (0.0, 25.0)),
     ("existing_accrued_interest", "rui", int, (0, 2_000_000)),
     ("existing_prior_payments", "rp", int, (0, 480)),
     ("existing_forgivable", "rf", int, None),
@@ -21432,6 +21446,206 @@ def affordability_sentences(flag: dict) -> list:
     out.append("A nonprofit student loan counselor will go through your "
                "options with you at no cost, and is not paid by anyone who "
                "benefits from the answer.")
+    return out
+
+
+def refinance_privileges_lost(forgivable: bool = True) -> list:
+    """What moves to the private side, as (heading, explanation) pairs.
+
+    NEVER A DOLLAR FIGURE, for the reason css_profile_divergences records:
+    pricing insurance needs the PROBABILITY of the bad year, and nobody knows
+    that about one household. A number here would sit beside computable ones
+    wearing the same authority.
+
+    `forgivable` is False for Parent PLUS, whose borrowers cannot reach RAP or
+    IBR anyway. Listing income-driven payments and forgiveness among their
+    losses would name a loss they have not got.
+    """
+    out = []
+    if forgivable:
+        out += [
+            ("A payment that follows your income",
+             "The federal payment falls when earnings fall. A refinanced "
+             "payment is the same in a bad year as in a good one."),
+            ("Forgiveness",
+             "Whatever remains at the end of an income-driven term is written "
+             "off. Private loans run until they are paid."),
+            ("Public Service Loan Forgiveness",
+             "Refinancing ends eligibility outright. There is no partial "
+             "version of this one."),
+        ]
+    out += [
+        ("Deferment and forbearance",
+         "Federal loans carry statutory grounds for pausing payments. Private "
+         "lenders may offer hardship programs, and they set their own terms."),
+        ("Discharge on death or permanent disability",
+         "Federal loans are canceled. Private contracts vary, and the estate "
+         "or a cosigner may be liable."),
+        ("Whatever relief a future Congress provides",
+         "The interest-free pause that ran from 2020 was not in anybody's "
+         "spreadsheet in 2019."),
+    ]
+    return out
+
+
+def refinance_cost_band(fed_total: float, fed_rate: float, offer_rate: float,
+                        offer_years: int, dependents: int = 0,
+                        lo: float = 15_000.0, hi: float = 250_000.0,
+                        step: float = 5_000.0):
+    """The income range in which refinancing costs less over the life of the
+    loan, as (low, high), or None when there is no such range.
+
+    THE CURVE IS NOT MONOTONIC AND A BISECTION OVER THE WHOLE RANGE IS WRONG.
+    That is how this was first written and it returned None for every case,
+    which is what exposed the error. The federal total crosses the refinanced
+    total TWICE: the federal path is cheap at the bottom because forgiveness
+    writes a balance off, and cheap at the top because ten percent of a large
+    income clears the loan in a couple of years and pays little interest. It is
+    dear in the middle, where it gets neither.
+
+    So: scan coarsely for sign changes, then bisect inside each bracket. `high`
+    is None when the federal path never becomes cheaper again inside `hi`,
+    which is the honest answer rather than a number invented off the end of the
+    range.
+
+    Every input is a parameter rather than a session_state read, the staleness
+    CLAUDE.md records against find_breakeven_loan's cache key.
+    """
+    if fed_total <= 0 or offer_rate <= 0 or offer_years <= 0:
+        return None
+    refi_total = (float(calculate_standard_repayment(
+        fed_total, offer_rate, term_years=offer_years)["monthly_payment"])
+        * offer_years * 12)
+
+    def refi_cheaper(income: float) -> bool:
+        sched = simulate_rap_schedule(fed_total, fed_rate, "", dependents,
+                                      annual_income=income)["schedule"]
+        fed = float(sched["payment"].sum()) if "payment" in sched.columns else 0.0
+        return fed > refi_total
+
+    def bisect(a: float, b: float) -> float:
+        for _ in range(30):
+            mid = (a + b) / 2
+            if refi_cheaper(a) == refi_cheaper(mid):
+                a = mid
+            else:
+                b = mid
+        return (a + b) / 2
+
+    xs = []
+    x = lo
+    while x <= hi:
+        xs.append(x)
+        x += step
+    flags = [refi_cheaper(v) for v in xs]
+    edges = [(xs[i], xs[i + 1]) for i in range(len(flags) - 1)
+             if flags[i] != flags[i + 1]]
+    if not edges or not any(flags):
+        return None
+    low = bisect(*edges[0]) if not flags[0] else lo
+    high = bisect(*edges[1]) if len(edges) > 1 else None
+    return (round(low, -2), round(high, -2) if high else None)
+
+
+def refinance_comparison(fed_loans: list, annual_income: float,
+                         offer_rate: float, offer_years: int = PRIVATE_TERM_YEARS,
+                         dependents: int = 0, pslf: bool = False,
+                         forgivable: bool = True,
+                         federal_monthly: float = 0.0) -> dict:
+    """Price refinancing the FEDERAL balance against keeping it, or refuse.
+
+    THE OFFERED RATE IS AN INPUT AND MUST STAY ONE. There is no private
+    refinance rate dataset in this repo and there is not going to be one, so a
+    modelled or typical rate would be a fabricated figure sitting beside
+    traceable ones. `offer_rate <= 0` means "not considering" and returns None.
+
+    IT REFUSES UNDER PSLF rather than answering badly. Refinancing forfeits a
+    tax-free discharge at 120 payments; that is not a trade with a band, it is
+    a forfeiture, and putting a crossover figure on it would dignify it as a
+    close call. Returns {"refused": ...} so the caller can say why instead of
+    rendering nothing.
+
+    Parent PLUS (`forgivable=False`) is NOT refused: the comparison is valid
+    there, because those borrowers cannot reach RAP or IBR anyway. What changes
+    is the privileges list, which refinance_privileges_lost filters.
+    """
+    total = sum(float(l.get("balance") or 0) for l in (fed_loans or []))
+    if total <= 0 or float(offer_rate or 0) <= 0 or float(annual_income or 0) <= 0:
+        return None
+    if pslf:
+        return {"refused": "pslf", "offer_rate": float(offer_rate)}
+
+    rate = (sum(float(l["balance"]) * float(l["rate"]) for l in fed_loans) / total
+            if total else 0.0)
+    refi = calculate_standard_repayment(total, float(offer_rate),
+                                        term_years=offer_years)
+    refi_monthly = float(refi["monthly_payment"])
+    band = refinance_cost_band(total, rate, float(offer_rate), offer_years,
+                               dependents=dependents)
+    gross_monthly = float(annual_income) / 12.0
+    inside = bool(band and band[0] <= float(annual_income)
+                  and (band[1] is None or float(annual_income) <= band[1]))
+    return {
+        "refused": None,
+        "federal_total": total,
+        "federal_rate": rate,
+        "federal_monthly": float(federal_monthly or 0.0),
+        "offer_rate": float(offer_rate),
+        "offer_years": offer_years,
+        "refi_monthly": refi_monthly,
+        "refi_share_of_gross": refi_monthly / gross_monthly * 100.0,
+        "band": band,
+        "inside_band": inside,
+        "forgivable": forgivable,
+    }
+
+
+def refinance_sentences(analysis: dict) -> list:
+    """The refinance comparison in words, or [].
+
+    LEADS ON THE MONTHLY, NOT THE TOTAL, because the totals are where every
+    defect in this comparison has lived: they are nominal, they run over
+    different terms, and the curve behind them crosses twice. The monthly
+    figure is one number at one moment and needs no horizon.
+
+    STATES THE BAND, NEVER A SAVING. "You would save $X" is the claim the
+    model cannot support: it has one income path and represents no
+    non-completion, illness or unemployment, so the protections a refinance
+    sells are worth exactly the variance it leaves out.
+    """
+    if not analysis:
+        return []
+    if analysis.get("refused") == "pslf":
+        return ["You are counting on Public Service Loan Forgiveness, so this "
+                "is not a trade with a break-even. Refinancing ends that "
+                "eligibility outright and there is no partial version of it. "
+                "This page will not put a crossover figure on a forfeiture."]
+    out = [f"An offer of {analysis['offer_rate']:g} percent over "
+           f"{analysis['offer_years']} years on your "
+           f"{fmt_money_md(analysis['federal_total'])} of federal debt is "
+           f"{fmt_money_md(analysis['refi_monthly'])} a month, about "
+           f"{analysis['refi_share_of_gross']:.0f}% of your income before tax. "
+           f"That figure does not move when your income does."]
+    band = analysis.get("band")
+    if not band:
+        out.append("On total cost the federal path is cheaper at every income "
+                   "this page checks, so the offer is buying certainty rather "
+                   "than money.")
+    else:
+        lo, hi = band
+        span = (f"between {fmt_money_md(lo)} and {fmt_money_md(hi)}"
+                if hi else f"above {fmt_money_md(lo)}")
+        out.append(f"On total cost the refinance is cheaper only while your "
+                   f"income is {span}. Below that the federal path reaches "
+                   f"forgiveness; above it the federal payment clears the "
+                   f"balance fast enough to pay less interest than a "
+                   f"{analysis['offer_years']}-year loan does.")
+        out.append("You are inside that range today."
+                   if analysis["inside_band"] else
+                   "You are outside that range today.")
+    out.append("What the offer costs beyond the rate is not a number this page "
+               "can give you, because pricing it would need to know how likely "
+               "a bad year is. The list below is what moves, and which way.")
     return out
 
 
@@ -22775,6 +22989,36 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     "paid identically in both arms and is excluded from "
                     "these totals. Estimates, not advice."
                 )
+
+        # ---- Refinancing: price the trade, name the band, refuse under PSLF ----
+        # Its own block at the end rather than a column anywhere above: this is
+        # a different question from "which federal plan", and the answer is
+        # mostly prose. The input defaults to 0, meaning not considering, so
+        # the whole section is absent until somebody has an actual offer.
+        st.markdown("**Thinking about refinancing?**")
+        _refi_rate = st.number_input(
+            "A rate you have been offered (%), 0 if you are not considering it",
+            min_value=0.0, max_value=25.0, step=0.1,
+            key="existing_refi_offer_rate",
+            help="The rate a lender actually quoted you. This page models no "
+                 "typical refinance rate, because there is no federal source "
+                 "for one and a made-up figure would sit beside numbers that "
+                 "are traceable.")
+        _refi = refinance_comparison(
+            fed_loans, income, _refi_rate,
+            offer_years=st.session_state.get("existing_private_term",
+                                             PRIVATE_TERM_YEARS),
+            dependents=deps, pslf=pslf and forgivable, forgivable=forgivable,
+            federal_monthly=first_payment_of(chosen_result))
+        for _line in refinance_sentences(_refi):
+            st.markdown(_line)
+        if _refi and not _refi.get("refused"):
+            for _head, _why in refinance_privileges_lost(forgivable):
+                st.markdown(f"- **{_head}.** {_why}")
+            st.caption("Every item on that list moves one way. A private loan "
+                       "cannot be converted back into a federal one, at any "
+                       "price, for any reason.")
+            st.caption(refinance_guide_pointer())
 
         st.caption(
             "Simplified models of the real plans, not your servicer's figures. Payments "

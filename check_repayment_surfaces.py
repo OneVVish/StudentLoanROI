@@ -299,6 +299,28 @@ def main() -> int:
                 problems.append(f"  [{label}] the affordability note on "
                                 f"{_label!r} does not name its basis")
 
+        # The refinance comparison. Exercised across the shapes that differ,
+        # because each returns a different thing: no offer at all (None), a
+        # real offer (a band), and PSLF (a refusal). A guard that only drove
+        # the happy path would let the refusal rot.
+        for _off, _pslf in ((0.0, False), (6.0, False), (6.0, True)):
+            checked += 1
+            _rf = use("refinance_comparison")(
+                fed, spec["income"], _off, dependents=0, pslf=_pslf,
+                forgivable=spec.get("forgivable", True),
+                federal_monthly=use("first_payment_of")(rows[0][1]))
+            _lines = use("refinance_sentences")(_rf)
+            if _off <= 0 and _rf is not None:
+                problems.append(f"  [{label}] a zero offer produced a comparison")
+            if _pslf and _off > 0 and not _lines:
+                problems.append(f"  [{label}] PSLF produced no refusal")
+            if _off > 0 and not _pslf and not _lines:
+                problems.append(f"  [{label}] a real offer produced no prose")
+        checked += 1
+        if not use("refinance_privileges_lost")(True):
+            problems.append(f"  [{label}] the privileges list is empty")
+        use("refinance_guide_pointer")()
+
         # The per-section further-reading pointers. Pure string builders, so
         # they are exercised rather than exempted: the whole point of this
         # guard is that a function the tool reaches is a function that ran.
