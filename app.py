@@ -22430,10 +22430,21 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "Extra toward private loans, a month ($)",
                 min_value=0, max_value=50_000, step=25,
                 key="existing_private_extra",
+                # THE SECOND HALF OF THIS USED TO BE FALSE. It promised that a
+                # cleared note's payment "rolls onto the next", which is the
+                # avalanche, and the ROW deliberately does not do that: the
+                # extra sits on the highest-rate note and the roll-down is
+                # priced separately below, to avoid the cliff the comment in
+                # compare_existing_loan_plans describes. Measured on a reader's
+                # four notes the two differ by $577 and 11 months, so the
+                # tooltip was describing a better outcome than the number
+                # beside it. Say where each one lives instead.
                 help="Anything you pay beyond the required payments, over and "
-                     "above any Actual $/mo in the grid. It is modelled as "
-                     "going to your highest-rate private loan first, and when "
-                     "that one clears, its whole payment rolls onto the next.")
+                     "above any Actual $/mo in the grid. In the table above it "
+                     "goes to your highest-rate private loan and stays there. "
+                     "Rolling a cleared loan's payment onto the next one is a "
+                     "different strategy, and it is priced separately in the "
+                     "roll-down charts below.")
         # NOTHING ENTERED IS STILL A QUESTION WORTH ANSWERING. Whether spare
         # money would help is a fact about the plan, not about an amount, so
         # it can be said before the borrower has found any -- and for someone
