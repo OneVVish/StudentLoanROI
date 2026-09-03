@@ -42,9 +42,15 @@ The two total columns need a caution the monthly ones do not. They add up every 
 
 The table above gives three incomes. The picture gives the shape between them, and the shape is the argument: one line is a function of income and the other is a flat rate that does not know what the borrower earns.
 
-Two different crossings live on this page and they answer different questions. On total cost, refinancing wins almost everywhere: that crossover sits a little over $30,000, which means that for nearly anyone with a job, the model says the refinance is cheaper over the life of the loan. By how much is the question those two columns cannot answer, for the reason just given.
+Two different crossings live on this page, and the first of them turns out to be two. Start with total cost. Below about $30,000 of income the federal path costs less. Between there and about $95,000 the refinance costs less. Above $95,000 the federal path costs less again.
 
-The monthly payments cross much later, near $83,300. Below that income the refinanced payment is the larger of the two, and above it the refinanced payment is smaller as well as cheaper overall. Somebody earning $90,000 with a stable job is looking at a genuinely better deal on both counts, which is worth saying plainly rather than burying.
+That top end surprises people, and it is worth understanding rather than waving away. Somebody earning six figures on an income-driven plan is paying ten percent of a large income, which clears this balance in a couple of years and pays very little interest along the way. A ten-year refinance pays a decade of it. The federal plan that looks expensive in the middle of the income range is the cheaper one at the top, for the same reason it was cheaper at the bottom: it is not on the ten-year clock.
+
+By how much, at any of those incomes, is the question those two columns cannot answer, for the reason just given.
+
+The monthly payments cross once, near $83,300. Below that income the refinanced payment is the larger of the two, and above it the smaller.
+
+Put the two together and there is one narrow band, roughly $83,300 to $95,000, where a refinance is both smaller every month and cheaper in total. That is a real place to be and worth saying plainly rather than burying. Outside it you are trading one against the other: a smaller payment for a larger total, or the reverse.
 
 Look at what the monthly column is doing underneath that recommendation. At a $50,000 income the refinanced payment is about an eighth of gross pay, against roughly 4 percent for the federal plan. At $30,000 it is more than a fifth of everything earned, against 2 percent. The model is at its most enthusiastic about refinancing for exactly the borrowers who would struggle most to make the payment.
 
