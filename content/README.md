@@ -15,7 +15,25 @@ git add -A && git commit && git push        # merge, then: npx wrangler deploy
 
 **Preview before you build.** `--preview` renders through the same code the real
 build uses and serves it on `localhost:8787`, but writes nothing at all: no
-`landing.html`, no `worker.js` injection, no sitemap. Building is what arms the
+`landing.html`, no `worker.js` injection, no sitemap.
+
+**IT RENDERS ONCE, AT STARTUP, AND HOLDS THAT IN MEMORY. RESTART IT AFTER EVERY
+EDIT.** There is no file watcher. A reload in the browser re-serves the same
+bytes the server built when it launched, so an edit made while it is running is
+invisible no matter how many times the page is refreshed. This is worse than it
+sounds because every other signal says the change landed: the Markdown has it,
+`infra/build_site.py` has written it into `infra/guides/*.html`, and
+`check_content.py` passes. Only the thing you are LOOKING at is stale, which is
+the one place the house style says to check.
+
+Observed 2026-09-03: a body figure and three edited paragraphs were all absent
+from a preview that had been running since before any of them, and the first
+guess was a browser cache. `curl` the preview and grep for a phrase you just
+wrote before believing the page:
+
+```bash
+curl -s localhost:8787/guides/<slug> | grep -c "<a phrase you just added>"
+``` Building is what arms the
 next `wrangler deploy`, so previewing first keeps "let me look at it" and "ship
 it" as separate acts. It maps `/app/static/*` to the real `static/` directory,
 so inline images resolve exactly as they will in production.
