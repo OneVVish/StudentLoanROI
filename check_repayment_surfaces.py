@@ -283,13 +283,15 @@ def main() -> int:
         # function the tool reaches is a function that ran. Both outcomes are
         # driven, because the note is as wrong when it fires on everyone as
         # when it fires on nobody, and only the first gets noticed.
-        _afford_priv = 0.0
+        _afford_priv = _afford_priv_years = 0.0
         if _priv_row is not None:
             _afford_priv = float(_priv_row.get("monthly_payment") or 0.0)
+            _afford_priv_years = float(_priv_row.get("payoff_years") or 0.0)
         for _label, _res, _ in rows:
             checked += 1
             _flag = use("repayment_affordability")(
-                _res, spec["income"], private_monthly=_afford_priv)
+                _res, spec["income"], private_monthly=_afford_priv,
+                private_payoff_years=_afford_priv_years)
             if _flag is None:
                 continue
             _lines = use("affordability_sentences")(_flag)
@@ -321,7 +323,8 @@ def main() -> int:
                 # that RAN. Built from the same call the screen makes, so the
                 # report cannot be exercised on a basis the screen never uses.
                 affordability=use("repayment_affordability")(
-                    rows[0][1], spec["income"], private_monthly=_afford_priv))
+                    rows[0][1], spec["income"], private_monthly=_afford_priv,
+                    private_payoff_years=_afford_priv_years))
             checked += 1
             if not pdf or bytes(pdf[:5]) != b"%PDF-":
                 problems.append(f"  [{label}] the PDF report is not a PDF")

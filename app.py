@@ -21296,7 +21296,8 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
 
 
 def repayment_affordability(row_result: dict, annual_income: float,
-                            private_monthly: float = 0.0) -> dict:
+                            private_monthly: float = 0.0,
+                            private_payoff_years: float = 0.0) -> dict:
     """What the selected plan asks for as a share of income, or None.
 
     THE TOOL RENDERS EVERY ROW WITH EQUAL CONFIDENCE, and for some portfolios
@@ -21342,6 +21343,25 @@ def repayment_affordability(row_result: dict, annual_income: float,
     # effective_tax_rate=0.0 puts this on the GROSS basis; see the docstring.
     risk = get_loan_to_income_risk_tier(pct, 0.0)
     priv = max(float(private_monthly or 0.0), 0.0)
+
+    # THE CLIFF. On a portfolio like the one above the burden is not a slope,
+    # it is a plateau and then a drop: the private note clears on its own term
+    # and the federal payment left behind is a fraction of the combined one.
+    # That date is the thing worth knowing, and it is worth more than the shape
+    # of the curve around it.
+    #
+    # STATED ON TODAY'S INCOME, deliberately. Growing the income first would
+    # make the figure depend on the 3% assumption compounding for a decade,
+    # and the whole reason this is a sentence rather than a chart is that the
+    # cliff is driven by a LOAN TERM, which is known, rather than by income
+    # growth, which is assumed.
+    after = max(monthly - priv, 0.0)
+    cliff_years = float(private_payoff_years or 0.0)
+    row_years = float(row_result.get("payoff_years") or 0.0)
+    # Only when the private note really does clear first and leaves something
+    # behind. Equal payoffs mean the private note IS the binding one, and there
+    # is no "after" to describe.
+    has_cliff = bool(priv > 0 and 0 < cliff_years < row_years - 1 / 12 and after > 0)
     return {
         "monthly": monthly,
         "gross_monthly": gross_monthly,
@@ -21353,6 +21373,10 @@ def repayment_affordability(row_result: dict, annual_income: float,
         "private_monthly": priv,
         "private_pct": (priv / gross_monthly * 100.0) if priv else 0.0,
         "over_gross": pct > 100.0,
+        "has_cliff": has_cliff,
+        "cliff_years": cliff_years if has_cliff else 0.0,
+        "after_private_monthly": after if has_cliff else 0.0,
+        "after_private_pct": (after / gross_monthly * 100.0) if has_cliff else 0.0,
     }
 
 
@@ -21379,6 +21403,12 @@ def affordability_sentences(flag: dict) -> list:
         out.append(f"{fmt_money_md(flag['private_monthly'])} of it is the "
                    f"private loan, which no federal plan changes, so choosing "
                    f"a different row above moves less than it looks.")
+    if flag.get("has_cliff"):
+        out.append(f"That private loan clears in about "
+                   f"{flag['cliff_years']:.0f} years. On today's income the "
+                   f"federal payment left after it would be "
+                   f"{fmt_money_md(flag['after_private_monthly'])} a month, "
+                   f"about {flag['after_private_pct']:.0f}% of gross.")
     out.append("A nonprofit student loan counselor will go through your "
                "options with you at no cost, and is not paid by anyone who "
                "benefits from the answer.")
@@ -22336,8 +22366,12 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         _priv_monthly = 0.0
         if private_row is not None:
             _priv_monthly = float(private_row[1].get("monthly_payment") or 0.0)
-        affordability = repayment_affordability(chosen_result, income,
-                                                private_monthly=_priv_monthly)
+        _priv_payoff = 0.0
+        if private_row is not None:
+            _priv_payoff = float(private_row[1].get("payoff_years") or 0.0)
+        affordability = repayment_affordability(
+            chosen_result, income, private_monthly=_priv_monthly,
+            private_payoff_years=_priv_payoff)
         _afford_lines = affordability_sentences(affordability)
         if _afford_lines:
             st.warning("  \n".join(_afford_lines))

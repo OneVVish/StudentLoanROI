@@ -65,8 +65,10 @@ def flag_for(ns, spec, needle):
     rows = rows_for(ns, spec)
     pr = next((r for l, r, _ in rows if l == ns["PRIVATE_ROW_LABEL"]), None)
     pm = float(pr.get("monthly_payment") or 0.0) if pr else 0.0
+    py = float(pr.get("payoff_years") or 0.0) if pr else 0.0
     res = next(r for l, r, _ in rows if needle in l)
-    return ns["repayment_affordability"](res, spec["income"], private_monthly=pm), res, pm
+    return ns["repayment_affordability"](res, spec["income"], private_monthly=pm,
+                                         private_payoff_years=py), res, pm
 
 
 def check_gross_basis(ns):
@@ -181,6 +183,57 @@ def check_no_verdict(ns):
     return out
 
 
+def check_cliff(ns):
+    """The cliff sentence: when the private note clears and what is left.
+
+    THE FIGURE IS ON TODAY'S INCOME, and that is the whole reason this is a
+    sentence rather than a chart. Growing the income first would make it depend
+    on the 3% assumption compounding for a decade; the cliff itself is driven
+    by a LOAN TERM, which is known. So the check recomputes it against today's
+    gross and fails if anything has started projecting.
+
+    It must also NOT fire when there is no "after" to describe: on Standard
+    (10-year) the federal plan ends when the private note does, and announcing
+    a cliff there would promise relief that is simply the end of the loan.
+    """
+    out = []
+    rap, rap_res, pm = flag_for(ns, HARD, "RAP")
+    if not rap["has_cliff"]:
+        out.append("  no cliff on a 30-year plan beside a 10-year private note, "
+                   "which is the case the sentence exists for")
+        return out
+
+    combined = rap["monthly"]
+    want_after = combined - pm
+    if abs(rap["after_private_monthly"] - want_after) > 0.01:
+        out.append(f"  after-cliff payment is {rap['after_private_monthly']:,.2f}; "
+                   f"combined minus private is {want_after:,.2f}")
+    # Today's gross, longhand. If a projection creeps in, this diverges.
+    want_pct = want_after / (HARD["income"] / 12.0) * 100.0
+    if abs(rap["after_private_pct"] - want_pct) > 1e-6:
+        out.append(f"  after-cliff share is {rap['after_private_pct']:.2f}%, but "
+                   f"on TODAY's income it is {want_pct:.2f}%. Something is "
+                   f"growing the income, which makes the figure depend on an "
+                   f"assumption the sentence exists to avoid")
+    if rap["after_private_pct"] >= rap["pct"]:
+        out.append("  the after-cliff share is not lower than the current one; "
+                   "there is no cliff to report")
+
+    # And the negative case, in the same fixture rather than a separate one.
+    std, _, _ = flag_for(ns, HARD, "Standard (10")
+    if std["has_cliff"]:
+        out.append("  claims a cliff on Standard (10-year), where the federal "
+                   "plan ends when the private note does. There is no 'after' "
+                   "there, and naming one promises relief that is just the end "
+                   "of the loan")
+
+    text = " ".join(ns["affordability_sentences"](rap)).lower()
+    if "today" not in text:
+        out.append("  the cliff sentence does not say the figure is on today's "
+                   "income; a reader cannot tell it from a projection")
+    return out
+
+
 def main() -> int:
     ns, src = load()
     checks = (
@@ -190,6 +243,7 @@ def main() -> int:
         ("the private share is the private row's", check_private_share, (ns,)),
         ("fires where it must, silent where it must", check_fires_and_stays_silent, (ns,)),
         ("no verdict, no legal terms, no lender", check_no_verdict, (ns,)),
+        ("the cliff, on today's income", check_cliff, (ns,)),
     )
     problems = []
     for name, fn, args in checks:
