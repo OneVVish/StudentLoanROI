@@ -16445,7 +16445,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   federal_loans: list = None,
                                   private_loans: list = None,
                                   strategy: dict = None,
-                                  old_ibr: bool = False) -> bytes:
+                                  old_ibr: bool = False,
+                                  affordability: dict = None) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -16600,6 +16601,19 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         "the other way, RAP payments count toward IBR/ICR/PAYE only in months "
         "where the RAP payment was at least the 10-year Standard payment. "
         + COUNTBACK_PLAN_AVAILABILITY, styles["caption"]))
+    # THE AFFORDABILITY NOTE, PASSED IN RATHER THAN RECOMPUTED. This report is
+    # what somebody takes to the person helping them, which is the single most
+    # useful place for it. It reads the flag the screen already computed, the
+    # `strategy` and `countback` discipline: a renderer that recomputes can
+    # pick a different basis for a number, and gross against take-home is
+    # exactly the difference nobody would see.
+    _afford = affordability_sentences(affordability) if affordability else []
+    if _afford:
+        # fmt_money_md escapes the dollar sign so Streamlit does not read two
+        # figures in one string as LaTeX. reportlab has no markdown, so the
+        # backslash would print. Same unescape the school-search report does.
+        _afford_text = " ".join(_afford).replace("\\$", "$").replace("**", "")
+        story.append(Paragraph(xml_escape(_afford_text), styles["caption"]))
     story.append(Spacer(1, 12))
 
     # One chart, for whichever plan the visitor was looking at on screen --
@@ -21281,6 +21295,126 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
     }
 
 
+def repayment_affordability(row_result: dict, annual_income: float,
+                            private_monthly: float = 0.0,
+                            private_payoff_years: float = 0.0) -> dict:
+    """What the selected plan asks for as a share of income, or None.
+
+    THE TOOL RENDERS EVERY ROW WITH EQUAL CONFIDENCE, and for some portfolios
+    every row is fiction. On the case that prompted this (a reader with
+    $130,000 federal and $180,000 private at 15% on $53,000) no row came in
+    under 87% of take-home, and nothing on the page said so.
+
+    ON GROSS, NOT TAKE-HOME, and that is a deliberate difference from the
+    calculator's ratio. This tool collects income, filing status and household
+    size; `poverty_region` is contiguous/alaska/hawaii for the poverty
+    guideline rather than a state for tax, so there is NO state income tax
+    available here. A federal-only effective rate would overstate take-home and
+    therefore understate the burden, and a warning that errs toward reassurance
+    is worse than no warning. Passing effective_tax_rate=0.0 makes net_basis
+    1.0, so get_loan_to_income_risk_tier's thresholds revert to the published
+    gross figures and no second set of constants exists.
+
+    THE THRESHOLDS ARE app.py's OWN AND ARE CITED: 10% of gross from student
+    loan budgeting guidance, and 36% from the back-end debt-to-income ceiling
+    mortgage lenders apply to ALL debts combined. Nothing here invents one.
+    There is no published line meaning "you cannot pay this" and this must not
+    imply one; the tiers stop at High.
+
+    NAMING THE PRIVATE SHARE is the one thing this tool knows that the borrower
+    cannot easily see. On that reader's portfolio 81 of the 87 points were
+    private debt no federal plan touches, so the choice the table is built
+    around moved about 6 points of an 87 point problem.
+
+    Returns None when there is nothing to say: no income, no payment. A flag
+    that fires on an empty form teaches people to ignore it.
+    """
+    income = float(annual_income or 0.0)
+    monthly = float(row_result.get("monthly_payment") or 0.0)
+    if monthly <= 0:
+        sched = row_result.get("schedule")
+        if sched is not None and "payment" in getattr(sched, "columns", []):
+            monthly = float(sched["payment"].iloc[0])
+    if income <= 0 or monthly <= 0:
+        return None
+
+    gross_monthly = income / 12.0
+    pct = monthly / gross_monthly * 100.0
+    # effective_tax_rate=0.0 puts this on the GROSS basis; see the docstring.
+    risk = get_loan_to_income_risk_tier(pct, 0.0)
+    priv = max(float(private_monthly or 0.0), 0.0)
+
+    # THE CLIFF. On a portfolio like the one above the burden is not a slope,
+    # it is a plateau and then a drop: the private note clears on its own term
+    # and the federal payment left behind is a fraction of the combined one.
+    # That date is the thing worth knowing, and it is worth more than the shape
+    # of the curve around it.
+    #
+    # STATED ON TODAY'S INCOME, deliberately. Growing the income first would
+    # make the figure depend on the 3% assumption compounding for a decade,
+    # and the whole reason this is a sentence rather than a chart is that the
+    # cliff is driven by a LOAN TERM, which is known, rather than by income
+    # growth, which is assumed.
+    after = max(monthly - priv, 0.0)
+    cliff_years = float(private_payoff_years or 0.0)
+    row_years = float(row_result.get("payoff_years") or 0.0)
+    # Only when the private note really does clear first and leaves something
+    # behind. Equal payoffs mean the private note IS the binding one, and there
+    # is no "after" to describe.
+    has_cliff = bool(priv > 0 and 0 < cliff_years < row_years - 1 / 12 and after > 0)
+    return {
+        "monthly": monthly,
+        "gross_monthly": gross_monthly,
+        "pct": pct,
+        "tier": risk["tier"],
+        "color": risk["color"],
+        "manageable_threshold": risk["manageable_threshold"],
+        "caution_threshold": risk["caution_threshold"],
+        "private_monthly": priv,
+        "private_pct": (priv / gross_monthly * 100.0) if priv else 0.0,
+        "over_gross": pct > 100.0,
+        "has_cliff": has_cliff,
+        "cliff_years": cliff_years if has_cliff else 0.0,
+        "after_private_monthly": after if has_cliff else 0.0,
+        "after_private_pct": (after / gross_monthly * 100.0) if has_cliff else 0.0,
+    }
+
+
+def affordability_sentences(flag: dict) -> list:
+    """The affordability note, as sentences, or [] when there is nothing to say.
+
+    STATES A RATIO AND POINTS AT FREE HELP. It returns no verdict and names no
+    outcome: default, garnishment and bankruptcy are legal questions with no
+    arithmetic answer, and SCOPE.md puts "should I do this" out of scope. The
+    counselor wording is the guides' own, and it names no servicer or lender
+    for the reason private_structure_disclosure records.
+
+    Silent at the manageable tier. A note under every portfolio is furniture,
+    and the ones that need it are the ones where it has to be read.
+    """
+    if not flag or flag["tier"] == "Manageable":
+        return []
+    out = [f"This plan asks {fmt_money_md(flag['monthly'])} a month, about "
+           f"{flag['pct']:.0f}% of your income before tax. Take-home is lower "
+           f"than gross, so the real share is higher than that."]
+    if flag["over_gross"]:
+        out.append("That is more than your whole income before tax.")
+    if flag["private_monthly"] > 0:
+        out.append(f"{fmt_money_md(flag['private_monthly'])} of it is the "
+                   f"private loan, which no federal plan changes, so choosing "
+                   f"a different row above moves less than it looks.")
+    if flag.get("has_cliff"):
+        out.append(f"That private loan clears in about "
+                   f"{flag['cliff_years']:.0f} years. On today's income the "
+                   f"federal payment left after it would be "
+                   f"{fmt_money_md(flag['after_private_monthly'])} a month, "
+                   f"about {flag['after_private_pct']:.0f}% of gross.")
+    out.append("A nonprofit student loan counselor will go through your "
+               "options with you at no cost, and is not paid by anyone who "
+               "benefits from the answer.")
+    return out
+
+
 def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
                              starting_interest: float = 0.0,
                              prior_payments: int = 0,
@@ -21521,7 +21655,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        private_loans: list = None,
                        age: int = 0,
                        strategy: dict = None,
-                       old_ibr: bool = False) -> None:
+                       old_ibr: bool = False,
+                       affordability: dict = None) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
     Only on the standalone page (`enabled`). Inside the calculator this module
@@ -21545,13 +21680,20 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         # chart_label is the extra: the chart-row selector is a main-page
         # widget the share guard cannot see, and it decides which plan's
         # charts the report carries.
+        # THE AFFORDABILITY NOTE NEEDS NO EXTRA IN THIS SIGNATURE, and that is
+        # worth stating because a missing extra serves a stale report silently.
+        # The flag derives from exactly three things: the selected row
+        # (chart_label, the extra already here), the income and the private
+        # loans -- and the last two are share params, so any change to them
+        # already moves the signature. Nothing it reads is invisible to it.
         data=memoized_pdf("repayment", pdf_memo_signature(
             build_repayment_share_params(), chart_label),
             lambda: generate_pdf_repayment_report(
                 rows, balance, rate, income, deps, accrued, prior_payments,
                 forgivable, pslf, chart_label=chart_label,
                 federal_loans=federal_loans, private_loans=private_loans,
-                age=age, strategy=strategy, old_ibr=old_ibr)),
+                age=age, strategy=strategy, old_ibr=old_ibr,
+                affordability=affordability)),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -22209,6 +22351,30 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         chosen = st.selectbox("Show the charts for", plan_labels,
                                key="existing_chart_plan")
         chosen_result = next(r for label, r, _ in rows if label == chosen)
+
+        # AFFORDABILITY, ON THE SELECTED ROW. Placed here rather than under a
+        # table because "this plan" is only defined once the selector has run,
+        # and the selector's stored value is reconciled a few lines above --
+        # so the row this describes is the row the charts below draw.
+        #
+        # Not a table column: six columns already clip (the count-back lesson),
+        # and this is a sentence rather than a cell.
+        #
+        # Computed ONCE and passed to the PDF as well, the shape
+        # pivot_strategy_analysis uses, so the report cannot quote a different
+        # share than the screen.
+        _priv_monthly = 0.0
+        if private_row is not None:
+            _priv_monthly = float(private_row[1].get("monthly_payment") or 0.0)
+        _priv_payoff = 0.0
+        if private_row is not None:
+            _priv_payoff = float(private_row[1].get("payoff_years") or 0.0)
+        affordability = repayment_affordability(
+            chosen_result, income, private_monthly=_priv_monthly,
+            private_payoff_years=_priv_payoff)
+        _afford_lines = affordability_sentences(affordability)
+        if _afford_lines:
+            st.warning("  \n".join(_afford_lines))
         # Read-before-render (the sidebar's established pattern): the extra-
         # payment widget renders inside the strategy panel at the bottom, but
         # the analysis has to exist HERE so the PDF button a few lines down
@@ -22239,7 +22405,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            chosen, enabled=always_open,
                            federal_loans=fed_loans, private_loans=priv_loans,
                            age=age, strategy=strategy_analysis,
-                           old_ibr=old_ibr and forgivable)
+                           old_ibr=old_ibr and forgivable,
+                           affordability=affordability)
         # STACK THE PRIVATE NOTES INDIVIDUALLY when that row is selected. It
         # used to draw their sum as one line, on the reasoning -- written into
         # the comment below before the loan grids existed -- that "the private
