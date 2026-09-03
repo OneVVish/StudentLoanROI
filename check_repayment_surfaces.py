@@ -278,6 +278,20 @@ def main() -> int:
             if not sentences:
                 problems.append(f"  [{label}] the strategy panel produced no prose")
 
+        # The per-section further-reading pointers. Pure string builders, so
+        # they are exercised rather than exempted: the whole point of this
+        # guard is that a function the tool reaches is a function that ran.
+        # Asserting the link is absolute here as well as in
+        # check_internal_links is deliberate: this is the guard that drives the
+        # real render path, so it is the one that would notice if a call site
+        # started passing something the registry does not have.
+        for _key in ns["REPAYMENT_SECTION_GUIDES"]:
+            checked += 1
+            _line = use("repayment_section_guide")(_key)
+            if "https://" not in _line:
+                problems.append(f"  [{label}] the {_key!r} guide pointer is not "
+                                f"an absolute link: {_line!r}")
+
         try:
             pdf = use("generate_pdf_repayment_report")(
                 rows, total, rate, spec["income"], 0, 0.0,

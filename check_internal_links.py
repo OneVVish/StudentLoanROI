@@ -156,6 +156,63 @@ def check_landing_action_separate(ns, fail):
              f"the admin panel would show nothing with no error anywhere")
 
 
+def check_repayment_section_guides(ns, src):
+    """Every per-section guide pointer names a guide that is actually published.
+
+    The repayment tool carries one further-reading line per result section.
+    A link to a guide that has been renamed or unpublished 404s SILENTLY: the
+    page renders, the caption reads correctly, and only a click finds it. So
+    the slugs are checked against content/posts/ rather than trusted.
+
+    Also asserts the three things that make the mechanism safe:
+
+      - every key passed at a call site is in the registry, because
+        repayment_section_guide returns "" for an unknown key and a typo
+        would cost the line with nothing failing;
+      - no guide is registered twice, which is the "reads as furniture"
+        objection the registry's own comment records;
+      - the link is built by guides_url and never as a bare /guides/ path,
+        because this app answers on two hosts and only one of them serves the
+        guides.
+    """
+    out = []
+    reg = ns["REPAYMENT_SECTION_GUIDES"]
+    posts = {p.stem for p in (ROOT / "content" / "posts").glob("*.md")}
+
+    for key, (slug, blurb) in reg.items():
+        if slug not in posts:
+            out.append(f"  {key!r} points at {slug!r}, which is not a published "
+                       f"guide in content/posts/")
+        if not blurb or blurb.endswith("."):
+            out.append(f"  {key!r}'s blurb should be a fragment without a final "
+                       f"period; the renderer adds one")
+
+    slugs = [slug for slug, _ in reg.values()]
+    dupes = {s for s in slugs if slugs.count(s) > 1}
+    if dupes:
+        out.append(f"  the same guide is registered for more than one section: "
+                   f"{sorted(dupes)}. One guide per section, or the pointers "
+                   f"read as furniture rather than as further reading")
+
+    used = set(re.findall(r'repayment_section_guide\("([a-z_]+)"\)', src))
+    unknown = used - set(reg)
+    if unknown:
+        out.append(f"  called with unregistered key(s) {sorted(unknown)}; "
+                   f"repayment_section_guide returns \"\" for those, so the "
+                   f"line silently disappears")
+    unused = set(reg) - used
+    if unused:
+        out.append(f"  registered but never rendered: {sorted(unused)}")
+
+    for key in used & set(reg):
+        link = ns["repayment_section_guide"](key)
+        if "/guides/" not in link or not link.startswith("\U0001f4d6 [Further reading](http"):
+            out.append(f"  {key!r} does not render an absolute guides_url link: "
+                       f"{link!r}. A bare path resolves against whichever host "
+                       f"is serving, and only one of the two serves /guides")
+    return out
+
+
 def main() -> int:
     ns = load_app_namespace()
     st = ns["st"]
@@ -172,6 +229,11 @@ def main() -> int:
 
     problems, checked = [], 0
     worker = (ROOT / "infra" / "worker.js").read_text()
+    src = (ROOT / "app.py").read_text()
+    found = check_repayment_section_guides(ns, src)
+    checked += 1
+    if found:
+        problems.append("repayment section guides:\n" + "\n".join(found))
 
     def check(label, url, must_have, must_not):
         nonlocal checked

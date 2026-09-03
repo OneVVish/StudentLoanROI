@@ -3898,6 +3898,35 @@ REPAYMENT_STRATEGY_HELP = (
 # app, and which is defined ~1,750 lines below this constant.
 REPAYMENT_GUIDE_SLUG = "repayment-plans-2026-what-changed"
 
+# FURTHER READING, ONE LINE PER SECTION OF THE REPAYMENT TOOL.
+#
+# The calculator has linked out to the guides for a while; the standalone
+# repayment tool has not, and it is the page where the writing is most use.
+# `?tool=` hides the sidebar with CSS, so repayment_strategy_help's pointer is
+# rendered into a display:none container there, and the "More tools" Guides
+# link sits inside the calculator branch. A visitor on ?tool=repayment reached
+# none of it.
+#
+# ONE GUIDE PER SECTION, AND NO GUIDE TWICE. Three sections of that page ask
+# three genuinely different questions, and repeating a link under each heading
+# reads as furniture rather than as a pointer. Consolidation deliberately has
+# no entry: the tool mentions it only inside the switching caption, and the
+# switching guide links onward to it, so a reader is one hop away without a
+# fourth line here.
+#
+# A REGISTRY RATHER THAN THREE INLINE MARKDOWN STRINGS, so a guard can read the
+# slugs and check they still name published guides. A link to a guide that has
+# been renamed or unpublished 404s silently: the page renders, the line looks
+# right, and only a click finds it.
+REPAYMENT_SECTION_GUIDES = {
+    "federal_plans": (REPAYMENT_GUIDE_SLUG,
+                      "what each plan asks for, worked on one balance"),
+    "private_loans": ("refinancing-federal-student-loans",
+                      "what moving federal debt to a private loan costs"),
+    "switching": ("switching-repayment-plans-2026",
+                  "what carries over when you switch, and what does not"),
+}
+
 
 def income_driven_label_for(start_year) -> str:
     """The income-driven plan available to someone starting in `start_year`.
@@ -5884,6 +5913,25 @@ def repayment_strategy_help() -> str:
     return (f"{REPAYMENT_STRATEGY_HELP} Full explanation, with what each plan "
             f"costs on the same balance: [the 2026 repayment plans]"
             f"({guides_url(REPAYMENT_GUIDE_SLUG)}).")
+
+
+def repayment_section_guide(key: str) -> str:
+    """One further-reading line for a section of the repayment tool, or "".
+
+    Returns the empty string for an unregistered key rather than raising. The
+    same reasoning hs_young_wage_disclosure records: this is a pointer, and a
+    typo here should cost a sentence rather than the page it sits on. The guard
+    checks the keys, which is the right place for a failure nobody can see.
+
+    It goes through guides_url, never a bare /guides/ path. The app answers on
+    two hosts and only one of them serves the guides, so a relative link works
+    on worthmydegree.com and goes nowhere on studentloanroi.streamlit.app.
+    """
+    entry = REPAYMENT_SECTION_GUIDES.get(key)
+    if not entry:
+        return ""
+    slug, blurb = entry
+    return f"📖 [Further reading]({guides_url(slug)}) — {blurb}."
 
 
 def guides_url(slug: str = "") -> str:
@@ -21929,12 +21977,14 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.markdown("**Federal plans**, the choice you're making")
             st.dataframe(_repayment_table(plan_rows, federal_only=True),
                          hide_index=True, use_container_width=True)
+            st.caption(repayment_section_guide("federal_plans"))
 
             st.markdown("**Private / non-federal loan"
                         + ("s" if len(priv_loans) > 1 else "")
                         + "**, the same under every plan above")
             st.dataframe(_repayment_table([private_row]),
                          hide_index=True, use_container_width=True)
+            st.caption(repayment_section_guide("private_loans"))
             # What the aggressive pace is worth, from the required_pace pair
             # compare_existing_loan_plans precomputed -- read, never recompute,
             # for the same reason the countback verdict is read (the renderer
@@ -22140,7 +22190,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 + COUNTBACK_PLAN_AVAILABILITY
                 + " Sources: studentaid.gov OBBBA "
                 "definitions, *Repayment Assistance Plan*; TICAS, *Upcoming "
-                "Changes to Income-Driven Repayment Plans*."
+                "Changes to Income-Driven Repayment Plans*.  \n"
+                + repayment_section_guide("switching")
             )
 
         # A chart for whichever plan the visitor wants to look at. Without one,
