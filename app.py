@@ -21297,7 +21297,9 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
 
 def repayment_affordability(row_result: dict, annual_income: float,
                             private_monthly: float = 0.0,
-                            private_payoff_years: float = 0.0) -> dict:
+                            private_payoff_years: float = 0.0,
+                            filing_status: str = FILING_SINGLE,
+                            spouse_income: float = 0.0) -> dict:
     """What the selected plan asks for as a share of income, or None.
 
     THE TOOL RENDERS EVERY ROW WITH EQUAL CONFIDENCE, and for some portfolios
@@ -21373,6 +21375,14 @@ def repayment_affordability(row_result: dict, annual_income: float,
         "private_monthly": priv,
         "private_pct": (priv / gross_monthly * 100.0) if priv else 0.0,
         "over_gross": pct > 100.0,
+        # WHETHER A SPOUSE'S INCOME IS IN THIS PAYMENT. The mechanism is
+        # already in the filing control's tooltip, and a borrower in distress
+        # does not hover tooltips: on r/StudentLoans the single most upvoted
+        # diagnostic reply on a "my payment jumped" thread was a stranger
+        # asking whether the poster files jointly. The app knows the answer
+        # and has been keeping it in a hover.
+        "joint_with_spouse": bool(filing_status == FILING_JOINT
+                                  and float(spouse_income or 0.0) > 0),
         "has_cliff": has_cliff,
         "cliff_years": cliff_years if has_cliff else 0.0,
         "after_private_monthly": after if has_cliff else 0.0,
@@ -21409,6 +21419,16 @@ def affordability_sentences(flag: dict) -> list:
                    f"federal payment left after it would be "
                    f"{fmt_money_md(flag['after_private_monthly'])} a month, "
                    f"about {flag['after_private_pct']:.0f}% of gross.")
+    if flag.get("joint_with_spouse"):
+        # DIRECTION, NEVER AN AMOUNT, the css_profile_divergences treatment.
+        # The separate-filing payment IS computable, and quoting it would be
+        # flattering in one direction: filing separately raises the tax bill,
+        # by an amount this tool does not model at all. A saving stated without
+        # its cost is the error this repo keeps recording.
+        out.append("This payment counts your spouse's income because you file "
+                   "jointly. Filing separately would leave it out, and would "
+                   "change what you owe in tax by an amount this page does not "
+                   "model.")
     out.append("A nonprofit student loan counselor will go through your "
                "options with you at no cost, and is not paid by anyone who "
                "benefits from the answer.")
@@ -22371,7 +22391,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             _priv_payoff = float(private_row[1].get("payoff_years") or 0.0)
         affordability = repayment_affordability(
             chosen_result, income, private_monthly=_priv_monthly,
-            private_payoff_years=_priv_payoff)
+            private_payoff_years=_priv_payoff,
+            filing_status=filing_status, spouse_income=spouse_income)
         _afford_lines = affordability_sentences(affordability)
         if _afford_lines:
             st.warning("  \n".join(_afford_lines))

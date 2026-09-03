@@ -54,21 +54,23 @@ def load():
     return ns, src
 
 
-def rows_for(ns, spec):
+def rows_for(ns, spec, **kw):
+    kw.setdefault("family_size", 1)
     return ns["compare_existing_loan_plans"](
         balance=spec["fed"], rate=spec["fed_rate"], annual_income=spec["income"],
-        private_balance=spec["priv"], private_rate=spec["priv_rate"],
-        family_size=1)
+        private_balance=spec["priv"], private_rate=spec["priv_rate"], **kw)
 
 
-def flag_for(ns, spec, needle):
-    rows = rows_for(ns, spec)
+def flag_for(ns, spec, needle, **kw):
+    rows = rows_for(ns, spec, **kw)
     pr = next((r for l, r, _ in rows if l == ns["PRIVATE_ROW_LABEL"]), None)
     pm = float(pr.get("monthly_payment") or 0.0) if pr else 0.0
     py = float(pr.get("payoff_years") or 0.0) if pr else 0.0
     res = next(r for l, r, _ in rows if needle in l)
-    return ns["repayment_affordability"](res, spec["income"], private_monthly=pm,
-                                         private_payoff_years=py), res, pm
+    return ns["repayment_affordability"](
+        res, spec["income"], private_monthly=pm, private_payoff_years=py,
+        filing_status=kw.get("filing_status", ns["FILING_SINGLE"]),
+        spouse_income=kw.get("spouse_income", 0.0)), res, pm
 
 
 def check_gross_basis(ns):
@@ -234,6 +236,58 @@ def check_cliff(ns):
     return out
 
 
+def check_filing_status(ns):
+    """The spouse-income line: fires only when it is true, and names no amount.
+
+    THE MECHANISM WAS ALREADY IN A TOOLTIP on the filing control, and a
+    borrower in distress does not hover tooltips. On r/StudentLoans the single
+    most upvoted diagnostic reply on a "my payment jumped" thread was a
+    stranger asking whether the poster files jointly. This surfaces the same
+    fact where the payment is.
+
+    DIRECTION, NEVER AN AMOUNT. The separate-filing payment IS computable, and
+    quoting it would be flattering in one direction: filing separately raises
+    the tax bill by an amount this tool does not model at all. A saving stated
+    without its cost is the error this repo keeps recording, so the check
+    refuses a dollar figure or a percentage in that sentence.
+    """
+    out = []
+    joint, _, _ = flag_for(ns, HARD, "RAP", family_size=2,
+                           filing_status=ns["FILING_JOINT"], spouse_income=40_000.0)
+    if not joint["joint_with_spouse"]:
+        out.append("  a joint filer with spouse income is not flagged as such")
+    joint_text = [l for l in ns["affordability_sentences"](joint)
+                  if "file jointly" in l or "filing separately" in l.lower()]
+    if not joint_text:
+        out.append("  no sentence names the spouse's income as the reason the "
+                   "payment counts it")
+    else:
+        line = joint_text[0]
+        import re as _re
+        if _re.search(r"\$[\d,]+|\d+\s*%|\d+\s*percent", line):
+            out.append(f"  the filing sentence quotes a figure: {line!r}. "
+                       f"Filing separately raises the tax bill by an amount "
+                       f"this tool does not model, so a saving stated without "
+                       f"its cost is flattering in one direction")
+        if "does not model" not in line:
+            out.append("  the filing sentence does not say the tax side is "
+                       "unmodelled; without that it reads as a recommendation")
+
+    # Both negative cases, in the same fixture rather than separate ones.
+    single, _, _ = flag_for(ns, HARD, "RAP")
+    if single["joint_with_spouse"]:
+        out.append("  a single filer is flagged as filing jointly")
+    if any("jointly" in l for l in ns["affordability_sentences"](single)):
+        out.append("  the filing sentence renders for a single filer")
+    nospouse, _, _ = flag_for(ns, HARD, "RAP", family_size=2,
+                              filing_status=ns["FILING_JOINT"], spouse_income=0.0)
+    if nospouse["joint_with_spouse"]:
+        out.append("  flagged as joint-with-spouse when the spouse earns "
+                   "nothing; there is no spouse income being counted, so the "
+                   "sentence would name a lever that moves nothing")
+    return out
+
+
 def main() -> int:
     ns, src = load()
     checks = (
@@ -244,6 +298,7 @@ def main() -> int:
         ("fires where it must, silent where it must", check_fires_and_stays_silent, (ns,)),
         ("no verdict, no legal terms, no lender", check_no_verdict, (ns,)),
         ("the cliff, on today's income", check_cliff, (ns,)),
+        ("the spouse-income line", check_filing_status, (ns,)),
     )
     problems = []
     for name, fn, args in checks:
