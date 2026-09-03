@@ -150,3 +150,15 @@ static/guide-hero-for-parents-run-the-numbers.png
 
 # macOS Finder droppings; committed once by accident (c183c14).
 .DS_Store
+
+# Agent skills installed by `npx skills add` (ScrapeCreators and friends).
+# They land INSIDE the repo, and this repo is PUBLIC. They are third-party
+# vendor tooling for whoever is working here, not this project's code, so
+# committing them would publish someone else's skill definitions and add
+# noise nobody reading this repo wants.
+#
+# skills-lock.json goes with them: it records a personal tooling choice
+# rather than a dependency the app has. requirements.txt is where this
+# project's real dependencies live, pinned deliberately.
+.agents/
+skills-lock.json
