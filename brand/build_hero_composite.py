@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Paste a REAL screenshot onto the blank monitor in a generated hero.
+
+    python3 brand/build_hero_composite.py --slug <slug> --shot <screenshot.png>
+    python3 brand/build_hero_composite.py --slug <slug> --detect-only
+
+WHY THIS EXISTS AND WHY IT IS NOT A PROMPT. A guide hero that shows this
+site's own tool on a screen has to show the REAL tool. A diffusion model asked
+for "our repayment calculator on a monitor" invents the labels, the numbers and
+the charts, and a fabricated picture of our own product is the one thing a site
+built on traceable figures cannot publish: a reader takes it for a screenshot,
+clicks through, and finds something else.
+
+So the hero is generated with the screen deliberately BLANK, and a real
+screenshot is perspective-mapped onto it here. Everything on the screen in the
+finished image came out of the running app.
+
+THE SCREENSHOT IS NOT PRODUCED HERE, AND CANNOT BE. Headless Chrome hangs on
+this machine, verified twice including on a trivial local file with a fresh
+profile, and the browser extension returns images into the conversation rather
+than writing them to disk. Capture it by hand, and capture it with `?test=1`
+or the session writes rows to the production research dataset:
+
+    python3 -m streamlit run app.py --server.port 8502
+    localhost:8502/?tool=repayment&test=1&rb=50000&rr=8.5&ri=50000
+
+THE CORNERS ARE DETECTED, NOT TYPED, because a reseeded hero moves the monitor
+and hand-typed corners would silently paste the screenshot into the wall. The
+detector looks for the largest dark near-rectangular region and prints what it
+found; --detect-only draws the outline so it can be checked before compositing.
+If detection ever picks the wrong thing, pass --corners explicitly rather than
+loosening the threshold.
+"""
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+REPO = Path(__file__).resolve().parents[1]
+STATIC = REPO / "static"
+BRAND = Path(__file__).resolve().parent
+DARK_MAX = 90          # a switched-off screen; the desk and wall are far lighter
+MIN_PANEL_WIDTH_FRAC = 0.15   # a monitor panel spans a good part of the frame
+MIN_PANEL_ROWS = 60           # and is tall; a dark pen or cable is not
+
+
+def detect_screen(img: Image.Image):
+    """Corners of the monitor's dark panel, as (tl, tr, br, bl).
+
+    ROW RUNS, NOT CONNECTED COMPONENTS. The first version took the largest dark
+    blob and got the monitor, its stand AND the keyboard as one region, because
+    all three are dark and all three touch. The outline it drew spanned half
+    the desk.
+
+    A screen is distinguishable by SHAPE rather than by darkness: its rows
+    carry one long unbroken run of dark pixels, where the stand's rows carry a
+    narrow one and the desk's carry none. So take the topmost band of
+    consecutive rows whose longest dark run is wide, and that is the panel.
+    """
+    g = np.asarray(img.convert("L"), dtype=np.int16)
+    dark = g <= DARK_MAX
+    h, w = dark.shape
+
+    def longest_run(row):
+        best = cur = start = best_start = 0
+        for x, v in enumerate(row):
+            if v:
+                if cur == 0:
+                    start = x
+                cur += 1
+                if cur > best:
+                    best, best_start = cur, start
+            else:
+                cur = 0
+        return best, best_start
+
+    runs = [longest_run(dark[y]) for y in range(h)]
+    wide = [y for y, (n, _) in enumerate(runs) if n >= MIN_PANEL_WIDTH_FRAC * w]
+    if not wide:
+        sys.exit(f"no row carries a dark run of {MIN_PANEL_WIDTH_FRAC:.0%} of the "
+                 f"frame width; is the screen blank and facing the camera?")
+    # The topmost consecutive band of those rows. Anything lower is the
+    # keyboard, which is also wide and also dark.
+    top = wide[0]
+    bottom = top
+    for y in wide:
+        if y - bottom > 2:
+            break
+        bottom = y
+    if bottom - top < MIN_PANEL_ROWS:
+        sys.exit(f"the widest dark band is only {bottom - top} rows tall; "
+                 f"that is not a monitor panel")
+    # FIT BOTH EDGES ACROSS EVERY ROW IN THE BAND, rather than trusting the
+    # single top row and the single bottom row. A highlight on the bezel breaks
+    # one row's run and moves that corner by a hundred pixels: the first version
+    # read the panel's top-left at x=781 where it belongs near x=660. A least
+    # squares line through every row is immune to one bad row and handles the
+    # slight trapezoid of a monitor that is not perfectly square to the camera.
+    band = list(range(top, bottom + 1))
+    lefts = np.array([runs[y][1] for y in band], dtype=float)
+    rights = np.array([runs[y][1] + runs[y][0] for y in band], dtype=float)
+    ys = np.array(band, dtype=float)
+    lm, lc = np.polyfit(ys, lefts, 1)
+    rm, rc = np.polyfit(ys, rights, 1)
+    t, b = float(top), float(bottom)
+    return [(lm * t + lc, t), (rm * t + rc, t),
+            (rm * b + rc, b), (lm * b + lc, b)]
+
+
+def perspective_coeffs(dst, src):
+    """PIL's PERSPECTIVE wants the inverse map, dst -> src."""
+    m = []
+    for (dx, dy), (sx, sy) in zip(dst, src):
+        m.append([dx, dy, 1, 0, 0, 0, -sx * dx, -sx * dy])
+        m.append([0, 0, 0, dx, dy, 1, -sy * dx, -sy * dy])
+    A = np.array(m, dtype=float)
+    b = np.array(src, dtype=float).reshape(8)
+    return np.linalg.solve(A, b)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--slug", required=True)
+    ap.add_argument("--shot", help="PNG of the real app screen")
+    ap.add_argument("--detect-only", action="store_true")
+    ap.add_argument("--corners", help="x1,y1,x2,y2,x3,y3,x4,y4 (tl,tr,br,bl)")
+    ap.add_argument("--inset", type=float, default=0.075,
+                    help="shrink toward the centre, to land on the GLASS rather "
+                         "than on the bezel the detector includes")
+    ap.add_argument("--dim", type=float, default=0.93,
+                    help="slight darkening so the paste reads as a lit screen")
+    a = ap.parse_args()
+
+    blank = BRAND / f"guide-hero-{a.slug}-klein4b.png"
+    hero = STATIC / f"guide-hero-{a.slug}-klein4b.png"
+    if not blank.exists():
+        sys.exit(f"no blank hero at {blank}; generate it with build_ai_hero.py")
+    # ALWAYS composite from the pristine brand/ copy, never from static/, which
+    # may already carry a paste. This makes the script idempotent: run it twice
+    # and you get the same picture, not a chart on top of a chart.
+    base = Image.open(blank).convert("RGB")
+
+    if a.corners:
+        v = [float(x) for x in a.corners.split(",")]
+        quad = [(v[0], v[1]), (v[2], v[3]), (v[4], v[5]), (v[6], v[7])]
+    else:
+        quad = detect_screen(base)
+    if a.inset:
+        # The detector finds the dark PANEL, which is glass plus bezel. A
+        # screenshot pasted over the bezel reads as a sticker on the monitor
+        # rather than as something displayed by it, so pull the quad in toward
+        # its own centre.
+        cx = sum(p[0] for p in quad) / 4.0
+        cy = sum(p[1] for p in quad) / 4.0
+        k = 1.0 - a.inset
+        quad = [(cx + (x - cx) * k, cy + (y - cy) * k) for x, y in quad]
+    print(f"  hero   {hero.name}  ({base.width}x{base.height})")
+    print(f"  screen tl={quad[0]} tr={quad[1]} br={quad[2]} bl={quad[3]}")
+
+    if a.detect_only or not a.shot:
+        out = base.copy()
+        from PIL import ImageDraw
+        ImageDraw.Draw(out).polygon(quad, outline=(255, 80, 0))
+        p = STATIC / f"_detect-{a.slug}.png"
+        out.save(p)
+        print(f"  wrote {p}  (outline only; check it, then rerun with --shot)")
+        return 0
+
+    shot = Image.open(a.shot).convert("RGB")
+    coeffs = perspective_coeffs(quad, [(0, 0), (shot.width, 0),
+                                       (shot.width, shot.height), (0, shot.height)])
+    warped = shot.transform(base.size, Image.PERSPECTIVE, coeffs, Image.BICUBIC)
+    mask = Image.new("L", base.size, 0)
+    from PIL import ImageDraw
+    ImageDraw.Draw(mask).polygon(quad, fill=255)
+    if a.dim != 1.0:
+        warped = Image.eval(warped, lambda v: int(v * a.dim))
+    base.paste(warped, (0, 0), mask)
+    base.save(hero)
+    print(f"  composited the real screenshot onto {hero.name}")
+    print("  now rerun: python3 infra/build_site.py")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

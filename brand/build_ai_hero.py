@@ -172,26 +172,25 @@ PROMPTS = {
         "colour, unposed. No text, no charts, no screens showing content.",
         20260815, 4),
     "refinancing-federal-student-loans": (
-        # Reprompted to put a calculator in the scene: the guide is about
-        # working out whether an offer is worth taking, and the first render
-        # was a signing scene with no arithmetic in it. The phone is dropped
-        # in the same edit, because that render produced TWO of them and the
-        # calculator is the better object for this piece anyway. New seed with
-        # the new prompt, per the rule above.
+        # Reprompted a third time, for a DIFFERENT job. The screen is
+        # deliberately dark and empty and the monitor stands square to the
+        # camera, because a REAL screenshot of the repayment tool is
+        # composited onto it afterwards by build_hero_composite.py.
         #
-        # The display is specified BLANK on purpose. Diffusion models render
-        # digits badly, and a calculator showing a garbled number is the one
-        # way this composition could break the no-text rule.
-        "Overhead flat lay of a kitchen table in flat afternoon light, one "
-        "printed document set slightly apart from a small pile of other "
-        "papers, a slim financial calculator with a blank display and a "
-        "complete even grid of small dark keys resting on the wood beside "
-        "them, an adult hand holding an uncapped pen without touching the "
-        "page, a cold cup of coffee to one side, photographed from directly "
-        "above so no face is in the frame. Documentary photography, muted "
-        "natural colour, unposed. No text, no charts, no screens showing "
-        "content.",
-        20260904, 4),
+        # That is why this asks for a blank screen rather than a calculator on
+        # it. A diffusion model would invent the labels, the numbers and the
+        # charts, and a fabricated picture of our own product is the one thing
+        # a site built on traceable figures cannot publish. Blank plus a real
+        # paste is the honest way to show the tool. New seed with the new
+        # prompt, per the rule above.
+        "Three quarter view of a tidy home office desk in flat daylight, a "
+        "slim widescreen monitor standing square to the camera with its "
+        "screen switched off and completely blank dark grey, a keyboard below "
+        "it, a small stack of printed papers and a calculator to one side, a "
+        "cold cup of coffee, a notebook and a pen, nobody in frame. "
+        "Documentary photography, muted natural colour, unposed. No text, no "
+        "charts, nothing displayed on the screen.",
+        20260905, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
