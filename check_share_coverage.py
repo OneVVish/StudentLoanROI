@@ -112,6 +112,7 @@ SHARE_EXEMPT = {
     "existing_family_size": "repayment tool; rides ?rfs=",
     "existing_spouse_income": "repayment tool; rides ?rsi=",
     "existing_filing_status": "repayment tool; rides ?rfst=",
+    "existing_refi_offer_rate": "repayment tool; rides ?rro=",
     "existing_forgivable": "repayment tool; rides ?rf=",
     "existing_pslf": "repayment tool; rides ?rpslf=",
     "existing_prior_payments": "repayment tool; rides ?rp=",
