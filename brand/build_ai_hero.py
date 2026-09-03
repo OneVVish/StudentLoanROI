@@ -171,6 +171,27 @@ PROMPTS = {
         "no face is in the frame. Documentary photography, muted natural "
         "colour, unposed. No text, no charts, no screens showing content.",
         20260815, 4),
+    "refinancing-federal-student-loans": (
+        # Reprompted to put a calculator in the scene: the guide is about
+        # working out whether an offer is worth taking, and the first render
+        # was a signing scene with no arithmetic in it. The phone is dropped
+        # in the same edit, because that render produced TWO of them and the
+        # calculator is the better object for this piece anyway. New seed with
+        # the new prompt, per the rule above.
+        #
+        # The display is specified BLANK on purpose. Diffusion models render
+        # digits badly, and a calculator showing a garbled number is the one
+        # way this composition could break the no-text rule.
+        "Overhead flat lay of a kitchen table in flat afternoon light, one "
+        "printed document set slightly apart from a small pile of other "
+        "papers, a slim financial calculator with a blank display and a "
+        "complete even grid of small dark keys resting on the wood beside "
+        "them, an adult hand holding an uncapped pen without touching the "
+        "page, a cold cup of coffee to one side, photographed from directly "
+        "above so no face is in the frame. Documentary photography, muted "
+        "natural colour, unposed. No text, no charts, no screens showing "
+        "content.",
+        20260904, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
