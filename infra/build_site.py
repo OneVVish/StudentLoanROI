@@ -667,8 +667,8 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
             for c in eligible[:2])
         charts_section = f'''<section>
   <h2>Infographics</h2>
-  <p class="deck">One picture, one finding, sourced. Twelve of them, free to
-  share.</p>
+  <p class="deck">One picture, one finding, sourced. {len(charts)} of them, free
+  to share.</p>
   <div class="infos">
 {chart_cards}
   </div>
