@@ -131,6 +131,10 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [A degree is not worth one number](https://worthmydegree.com/charts#what-degree-holders-earn-by-age):
+  The median pay of full-time year-round workers with a bachelor's
+  degree or higher against workers with a high school diploma and no
+  college, by age, with the years the high school side earns alone.
 - [In California, too rich for aid by the government's own math](https://worthmydegree.com/charts#what-the-aid-formula-expects-ca):
   The Student Aid Index for a two-parent family of four at $100,000 to
   $300,000 of income, against the median CSU, UC and California
