@@ -229,6 +229,21 @@ PROMPTS = {
         "notebook. Documentary photography, muted natural colour, unposed. "
         "No text, no charts, nothing displayed on the screen.",
         20260910, 4),
+    "where-the-federal-money-runs-out": (
+        # Ninth prompt. Not a screen this time: the guide is about a line
+        # that colleges sit on one side or the other of, so the picture is
+        # the threshold itself, a campus gate seen from the public side of
+        # the street. No lettering on the pillars, no plaque, no banner: a
+        # named gate is a named college, and this guide names none.
+        "The entrance gates of a college campus seen from the sidewalk "
+        "across a quiet street at dawn, two plain brick pillars with open "
+        "wrought iron gates between them, a long tree-lined drive beyond "
+        "leading to a distant building, low mist on the lawn, warm early "
+        "light from the left. No people, no cars, no signs, no lettering, no "
+        "plaque, no banner, no flags. Wide letterbox frame, the gates well "
+        "inside the picture. Documentary photography, muted natural colour, "
+        "unposed. No text anywhere.",
+        20260905, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
