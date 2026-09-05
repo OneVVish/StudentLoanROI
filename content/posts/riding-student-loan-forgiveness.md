@@ -43,14 +43,18 @@ Under IBR there is one line. Below it riding wins; above it riding loses, mildly
 
 RAP has no such cap. A high earner on RAP overpays, clears the loan early, and comes out cheaper than the Standard plan outright, so RAP's losing region is a band rather than everything above a line. That sounds better and is not, because the band is worse where it bites and it opens lower. On the same $175,000, RAP's worst case is about $90,000 of starting income at roughly $187,000 more than paying off, against IBR's worst of $107,000 at about $150,000. RAP's ride stops winning at about $55,000 of income where IBR's holds to about $78,000, and RAP only becomes cheaper than the Standard plan again above about $225,000. Neither plan is simply better than the other, which is why the infographic has two panels.
 
+![Two stacked panels, balance along the bottom and adjusted gross income up the side, shaded blue where riding an income-driven plan to a taxed discharge costs less than the ten-year Standard plan and orange where it costs more. The IBR panel has one boundary rising with balance, blue below and orange above. The RAP panel has two, a blue wedge at the bottom, an orange band in the middle and blue again above it](guide-forgiveness-map-900x1256.svg)
+
+Blue is where riding costs less than paying the loan off in ten years, orange is where it costs more, at 7 percent for a single filer in a household of one with income rising 3 percent a year, federal tax only, in nominal dollars. The one line on the IBR panel is the cap at work. The two lines on the RAP panel are its absence: the band between them is where riding loses, and it is both worse and lower than IBR's.
+
 ## Paying extra on a loan headed for forgiveness
 
-The intuitive move is to pay more than the minimum, but if you're on track for loan forgiveness, that’s about the most expensive mistake you can make. Every extra dollar you throw at a balance destined to be wiped clean buys you nothing—it just shrinks the amount the government forgives.
+The intuitive move is to pay more than the minimum, but if you're on track for loan forgiveness, that’s about the most expensive mistake you can make. Every extra dollar you throw at a balance destined to be wiped clean buys you nothing. It just shrinks the amount the government forgives.
 
 Look at those extra payments as an investment return, especially if you're juggling something like $40,000 in private debt at 9%. Prepaying that 7% federal loan only makes mathematical sense if your earnings are high:
 
 - **At $140,000 of income:** You won't receive forgiveness anyway, so paying early locks in a standard 7% return (though paying down that 9% private debt would still beat it).
-- **At $80,000 of income:** The return drops to roughly 3.6% a year—worse than what you’d earn simply parking the cash in Treasuries.
+- **At $80,000 of income:** The return drops to roughly 3.6% a year, worse than what you’d earn simply parking the cash in Treasuries.
 - **At $60,000 of income:** The return plummets to around negative 12% a year. Paying early here actively destroys your money, because you’re footing the bill for a balance that was going to disappear on its own.
 
 Under 34 CFR 685.211(a)(3), a prepayment of at least one monthly amount advances the next due date unless the borrower asks otherwise, so an unlabeled extra payment buys a payment holiday rather than a smaller balance. Anyone paying extra has to name the loan and ask, in writing, for the money to go to principal.
@@ -64,7 +68,5 @@ A plan comparison table, on this site and everywhere else, lists what each plan 
 ## What this cannot tell you
 
 Everything above is in nominal dollars. The income-driven payments arrive later and smaller, so in today's money the ride looks better than these totals make it look; anyone who objects that a dollar in year twenty is not a dollar today is right. The tax is federal only, single filer, standard deduction, at the projected income in the discharge year, so a state with an income tax makes the discharge cost more, never less. very figure assumes a 7 percent rate. A different rate moves every line on the map.
-
-None of this is a recommendation. It prices both paths at your balance, your income and the plan your loans qualify for, and it says how far that answer holds. What to do with it is yours to decide.
 
 This is not advice. It works out what each path costs at your balance and your income, on whichever plan your loans qualify for, and it tells you how much a change in income would change that answer. What you do with it is up to you. If you are thinking about switching plans, the switching guide (/guides/switching-repayment-plans-2026) covers that separately.
