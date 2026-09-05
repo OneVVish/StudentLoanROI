@@ -26579,7 +26579,7 @@ def render_start_wizard(always_open: bool = False) -> None:
 
     q_mode = "Are you choosing a major to study, or a career to aim for?"
     q_pick = {DATASET_MODE_MAJOR: "Which major?", DATASET_MODE_CAREER: "Which career?"}
-    q_school = "Do you have a school in mind? Type part of its name, or skip this."
+    q_school = "Do you have a school in mind? Start typing its name, or skip this."
     q_state = "Will you pay the in-state price there?"
     q_city = "Where do you expect to live and work after?"
 
@@ -26596,46 +26596,57 @@ def render_start_wizard(always_open: bool = False) -> None:
 
     if step == 0:
         with st.chat_message("assistant"):
-            st.write(q_mode)
-            label = st.radio("Choosing by", ["A major", "A career"],
-                             key="wizard_mode", label_visibility="collapsed",
-                             horizontal=True)
+            # The question IS the widget's label, so Streamlit's help icon
+            # sits beside it; the help text is the sidebar's own, shortened.
+            label = st.radio(q_mode, ["A major", "A career"], key="wizard_mode",
+                             horizontal=True,
+                             help="Major: what people who studied that subject "
+                                  "actually earn, including those working "
+                                  "outside it (NY Fed, 73 majors). Career: what "
+                                  "people already doing a specific job earn "
+                                  "(BLS, 836 occupations), which assumes you "
+                                  "get that job.")
             answers["mode_label"] = label
             answers["mode"] = (DATASET_MODE_MAJOR if label == "A major"
                                else DATASET_MODE_CAREER)
             nav(0)
     elif step == 1:
         with st.chat_message("assistant"):
-            st.write(q_pick[answers["mode"]])
             if answers["mode"] == DATASET_MODE_MAJOR:
                 names = sorted(load_nyfed_majors(MAJORS_CSV_PATH))
             else:
                 names = sorted(build_major_data(CAREERS_CSV_PATH_NATIONAL,
                                                 mode=DATASET_MODE_CAREER))
-            answers["major"] = st.selectbox("Pick one", names, key="wizard_major",
-                                            label_visibility="collapsed")
+            answers["major"] = st.selectbox(
+                q_pick[answers["mode"]], names, key="wizard_major",
+                help="This sets the salary numbers used everywhere in the "
+                     "calculator. Click the box and type part of the name to "
+                     "jump to it.")
             nav(1)
     elif step == 2:
         with st.chat_message("assistant"):
-            st.write(q_school)
-            query = st.text_input("School name", key="wizard_school_q",
-                                  placeholder="e.g. Purdue",
-                                  label_visibility="collapsed")
-            answers["school"] = None
-            if query.strip():
-                coa = load_coa_dataset()
-                hits = coa[coa["INSTNM"].str.contains(query.strip(), case=False,
-                                                       regex=False, na=False)]
-                hits = hits.sort_values("INSTNM").head(25)
-                if hits.empty:
-                    st.caption("No school in the cost dataset matches that. "
-                               "Try fewer words, or skip.")
-                else:
-                    options = [f"{r.INSTNM} ({r.STABBR})" for r in hits.itertuples()]
-                    picked = st.selectbox("Matches", options, key="wizard_school",
-                                          label_visibility="collapsed")
-                    answers["school"] = picked.rsplit(" (", 1)[0]
-            if answers["school"] is None:
+            # ONE list, not a search box and a picker. The first version
+            # showed matches only after Enter, so a name typed and followed
+            # straight by Next handed off the first alphabetical match, and
+            # a visitor who chose Purdue's main campus arrived at Fort Wayne.
+            # A selectbox filters as you type and cannot be skipped past.
+            # Options are UNITIDs with the sidebar's own labels, so two
+            # schools sharing a name stay distinguishable; 0 is "not yet".
+            coa = load_coa_dataset().sort_values("INSTNM")
+            ids = [0] + coa["UNITID"].tolist()
+            picked = st.selectbox(
+                q_school, ids, key="wizard_school",
+                format_func=lambda u: ("Not yet, skip this" if u == 0
+                                       else school_option_label(u, coa)),
+                help="Naming a school fills in its published Cost of "
+                     "Attendance from College Scorecard, which is what the "
+                     "loan estimate is built from. Click the box and type to "
+                     "search all 5,035.")
+            if picked:
+                answers["school"] = str(coa.loc[coa["UNITID"] == picked,
+                                                "INSTNM"].iloc[0])
+            else:
+                answers["school"] = None
                 st.caption("Skipping keeps the calculator's default school; "
                            "you can change it in the sidebar.")
             nav(2)
@@ -26644,16 +26655,22 @@ def render_start_wizard(always_open: bool = False) -> None:
             st.session_state.wizard_step = 4
             st.rerun()
         with st.chat_message("assistant"):
-            st.write(q_state)
-            answers["in_state"] = st.checkbox("I pay the in-state price",
-                                              value=True, key="wizard_in_state")
+            answers["in_state"] = st.checkbox(
+                q_state, value=True, key="wizard_in_state",
+                help="In-state tuition at a public university is usually far "
+                     "lower than out-of-state. Residency is a year of physical "
+                     "presence plus intent, and a dependent student normally "
+                     "follows their parents' state.")
             nav(3)
     elif step == 4:
         with st.chat_message("assistant"):
-            st.write(q_city)
             cities = list(CITY_DATA)
-            answers["city"] = st.selectbox("City", cities, key="wizard_city",
-                                           label_visibility="collapsed")
+            answers["city"] = st.selectbox(
+                q_city, cities, key="wizard_city",
+                help="Sets the cost-of-living adjustment, and in Career mode "
+                     "the metro's own wages too. Major mode wages are "
+                     "national, since the NY Fed publishes no per-city "
+                     "figures. National Average is a fair default.")
             nav(4)
     else:
         params = {"mode": answers["mode"], "major": answers["major"],
