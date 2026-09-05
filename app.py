@@ -21689,6 +21689,37 @@ def refinance_sentences(analysis: dict) -> list:
     return out
 
 
+def arm_summary(result: dict, annual_income: float, pslf: bool = False) -> dict:
+    """One repayment result as the strategy panel prices it: payments made,
+    the discharge, the tax on the discharge, and the all-in sum.
+
+    Hoisted out of pivot_strategy_analysis so that plan_choice_analysis can
+    price a row the SAME way. Two copies of this arithmetic is how the panel
+    and the table come to disagree about one number, and the discharge tax is
+    the number that already went missing once (see plan_choice_analysis).
+    """
+    schedule = result["schedule"]
+    paid = float(schedule["payment"].sum() if "payment" in schedule.columns
+                 else result.get("monthly_payment", 0.0) * len(schedule))
+    forgiven = float(result.get("forgiven_amount", 0.0) or 0.0)
+    if forgiven > 0 and not pslf:
+        tax_info = discharge_tax_estimate(forgiven, annual_income,
+                                          result["payoff_years"])
+    else:
+        tax_info = {"tax": 0.0, "income_at_discharge": 0.0,
+                    "effective_rate": 0.0}
+    return {"paid": paid, "years": float(result["payoff_years"]),
+            "forgiven": forgiven,
+            "interest": float(result.get("total_interest", 0.0) or 0.0),
+            # The arm's own balance curve. Kept so the commit arm can be
+            # DRAWN and not only described: the panel said "debt-free on
+            # the federal side in 5.0 years" under a chart whose federal
+            # band ran to 6.9, because only the scalars survived here.
+            "schedule": schedule,
+            **tax_info,
+            "all_in": paid + tax_info["tax"]}
+
+
 def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
                              starting_interest: float = 0.0,
                              prior_payments: int = 0,
@@ -21705,9 +21736,12 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
     every row holds one plan CONSTANT, while the decision borrowers actually
     face is a sequence. Pure computation on precomputed rows, shared by the
     renderer and the PDF so the two cannot disagree (the countback
-    discipline); returns None when the fork does not exist -- no income-driven
-    row, no income entered, or nothing to redirect (no private loans and no
-    extra).
+    discipline). Returns one of TWO SHAPES, told apart by "kind":
+    "commit_or_ride" when there is something to redirect, and the
+    plan_choice_analysis shape when there is not -- a federal-only borrower
+    with nothing spare still chooses which plan to be on, and that choice is
+    free. Returns None only when there is no fork at all: no federal loans,
+    no income, or no plan rows to compare.
 
     The private side is deliberately EXCLUDED from both arms' totals: it is
     paid identically either way, so only federal-side dollars differ, and
@@ -21724,7 +21758,17 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
     private_row = next((r for label, r, _ in rows if label == PRIVATE_ROW_LABEL),
                        None)
     if private_row is None and extra_now <= 0:
-        return None
+        # NOTHING TO REDIRECT IS NOT NOTHING TO DECIDE. This returned None,
+        # and for a federal-only borrower with nothing spare that meant no
+        # panel at all -- which mattered more than a missing panel, because
+        # discharge_tax_estimate is reached from this analysis and nowhere
+        # else. The table above it showed those borrowers an income-driven
+        # row WITHOUT the tax on the discharge, beside a note that the balance
+        # is forgiven, which reads as a benefit: understated by up to 48% in
+        # a sample, only for the borrowers with the least room to manoeuvre.
+        # They still have a fork, and it costs nothing to take: which plan.
+        return plan_choice_analysis(rows, annual_income, pslf=pslf,
+                                    prefer_label=prefer_label)
 
     income_driven = [label for label, _, _ in rows
                      if "RAP" in label or label.startswith("IBR")]
@@ -21797,30 +21841,10 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
             max_term_years=idr_term, max_months=max(idr_term * 12 - prior, 0),
             extra_payments=extras)
 
-    def _arm(result: dict) -> dict:
-        paid = float(result["schedule"]["payment"].sum()
-                     if "payment" in result["schedule"].columns
-                     else result.get("monthly_payment", 0.0) * len(result["schedule"]))
-        forgiven = float(result.get("forgiven_amount", 0.0) or 0.0)
-        if forgiven > 0 and not pslf:
-            tax_info = discharge_tax_estimate(forgiven, annual_income,
-                                              result["payoff_years"])
-        else:
-            tax_info = {"tax": 0.0, "income_at_discharge": 0.0,
-                        "effective_rate": 0.0}
-        return {"paid": paid, "years": float(result["payoff_years"]),
-                "forgiven": forgiven,
-                "interest": float(result.get("total_interest", 0.0) or 0.0),
-                # The arm's own balance curve. Kept so the commit arm can be
-                # DRAWN and not only described: the panel said "debt-free on
-                # the federal side in 5.0 years" under a chart whose federal
-                # band ran to 6.9, because only the scalars survived here.
-                "schedule": result["schedule"],
-                **tax_info,
-                "all_in": paid + tax_info["tax"]}
-
-    ride_arm, strategy_arm = _arm(ride), _arm(strategy)
+    ride_arm = arm_summary(ride, annual_income, pslf)
+    strategy_arm = arm_summary(strategy, annual_income, pslf)
     return {
+        "kind": "commit_or_ride",
         "plan_label": plan_label,
         "fixed": is_fixed,
         "pslf": bool(pslf),
@@ -21833,12 +21857,108 @@ def pivot_strategy_analysis(rows, fed_loans, annual_income, dependents,
     }
 
 
+def plan_choice_analysis(rows, annual_income, pslf: bool = False,
+                         prefer_label: str = None):
+    """The fork for a borrower with nothing to redirect: which plan.
+
+    Prices the selected plan against the cheapest plan of the OTHER kind,
+    income-driven against fixed, each all-in: payments plus the tax on any
+    discharge. The rows are the ones compare_existing_loan_plans already
+    computed, so this adds no simulation, only discharge_tax_estimate per row
+    through arm_summary, which is the same arithmetic the commit-or-ride arms
+    use. Pure computation shared by the screen and the PDF.
+
+    THE CHOICE IS LARGE AND IT IS FREE. Across twenty federal-only cases at 7
+    percent it moved the all-in bill by more than $10,000 in fourteen and by up
+    to $161,590, and the fixed plan won six of them -- so a borrower left on the
+    2026 default may be losing five figures by riding, with nothing on screen
+    saying so until this existed. Switching plans costs no money.
+
+    Returns None when there is no comparison to make: no income, or only one
+    kind of plan on offer (Parent PLUS has no income-driven rows).
+    """
+    if (annual_income or 0) <= 0:
+        return None
+    income_driven = [(l, r) for l, r, _ in rows
+                     if "RAP" in l or l.startswith("IBR")]
+    fixed = [(l, r) for l, r, _ in rows
+             if l.startswith(("Standard", "Extended", "2026 Tiered"))]
+    if not income_driven or not fixed:
+        return None
+
+    def priced(label, row):
+        # federal_only is what the row holds when a private side was combined
+        # in; here there is none, but reading it the same way as the
+        # commit-or-ride path keeps the two shapes on one definition.
+        return {"label": label,
+                **arm_summary(row.get("federal_only", row), annual_income, pslf)}
+
+    idr = [priced(l, r) for l, r in income_driven]
+    fix = [priced(l, r) for l, r in fixed]
+    chosen = next((s for s in idr + fix if s["label"] == prefer_label), idr[0])
+    chosen_is_fixed = any(s is chosen for s in fix)
+    alternative = min(idr if chosen_is_fixed else fix, key=lambda s: s["all_in"])
+    return {
+        "kind": "plan_choice",
+        "plan_label": chosen["label"],
+        "fixed": chosen_is_fixed,
+        "pslf": bool(pslf),
+        "chosen": chosen,
+        "alternative": alternative,
+        # Same sign convention as commit_or_ride: positive means the
+        # alternative is cheaper than staying put.
+        "savings": chosen["all_in"] - alternative["all_in"],
+    }
+
+
+def plan_choice_sentences(analysis: dict) -> list:
+    """The plan-choice verdict as plain sentences, the plan_choice twin of
+    strategy_verdict_sentences and shared the same way. Plain fmt_money: the
+    screen caller escapes the block for markdown, the PDF uses it as-is."""
+    chosen, alt = analysis["chosen"], analysis["alternative"]
+    lines = [
+        "You have only federal loans and nothing spare, so the fork here is "
+        "which plan you are on, not how much extra to pay. Switching plans "
+        "costs nothing. The table above does not include the tax on a "
+        "discharge; these totals do."]
+
+    def describe(s, verb):
+        if s["forgiven"] > 0 and not analysis["pslf"]:
+            tail = (f", then {fmt_money(s['forgiven'])} is discharged and taxed "
+                    f"as that year's income, roughly {fmt_money(s['tax'])} more")
+        elif s["forgiven"] > 0:
+            tail = (f", then {fmt_money(s['forgiven'])} is discharged tax free "
+                    f"under PSLF")
+        else:
+            tail = ", clearing the balance"
+        return (f"{verb} {s['label']}: {fmt_money(s['paid'])} in payments over "
+                f"{s['years']:.0f} years{tail}. All-in: {fmt_money(s['all_in'])}.")
+
+    lines.append(describe(chosen, "Stay on"))
+    lines.append(describe(alt, "Or switch to"))
+    delta = analysis["savings"]
+    if delta > 0.5:
+        lines.append(f"Switching saves about {fmt_money(delta)} all-in.")
+    elif delta < -0.5:
+        lines.append(f"Staying is cheaper by about {fmt_money(-delta)} all-in.")
+    else:
+        lines.append("The two come out about the same all-in.")
+    # The buyback restriction is a fact about RAP, not about the fork, so it
+    # travels with the plan here as it does on the commit-or-ride path.
+    if analysis["pslf"] and (RAP_STRATEGY_LABEL in chosen["label"]
+                             or LEGACY_RAP_STRATEGY_LABEL in chosen["label"]):
+        lines.append(PSLF_BUYBACK_RAP_NOTE)
+    return lines
+
+
 def strategy_verdict_sentences(analysis: dict) -> list:
     """The commit-or-ride verdict as plain sentences, shared by the on-screen
     panel and the PDF so the wording cannot drift (the chart-twin rule,
     applied to prose). Plain fmt_money throughout: the screen caller escapes
     the whole block for markdown, the PDF uses it as-is.
     """
+    if analysis.get("kind") == "plan_choice":
+        return plan_choice_sentences(analysis)
     ride, strat = analysis["ride"], analysis["strategy"]
     plan = analysis["plan_label"]
     # Under PSLF the income-driven ride is tax-free forgiveness at 120
@@ -22940,9 +23060,10 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                      "roll-down charts below.")
         # NOTHING ENTERED IS STILL A QUESTION WORTH ANSWERING. Whether spare
         # money would help is a fact about the plan, not about an amount, so
-        # it can be said before the borrower has found any -- and for someone
-        # with only federal loans and nothing spare it is the ONLY thing this
-        # panel can say, since there is no second arm to price.
+        # it can be said before the borrower has found any. It used to be the
+        # ONLY thing this panel could say to someone with only federal loans
+        # and nothing spare; the plan-choice analysis below now prices their
+        # actual fork, and this note stays as the complement to it.
         if not extra_now and not private_extra:
             _worth = extra_payment_worth_it(chosen_result,
                                             pslf=pslf and forgivable)
@@ -22954,10 +23075,9 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             st.caption(EXTRA_PAYMENT_DIRECTION_NOTE)
         if strategy_analysis is None:
             st.caption(
-                "Enter your income above, plus either a private loan to "
-                "free up or an extra amount here, and this panel "
-                "prices the fork: stay on the plan's minimum, or pay the "
-                "balance down."
+                "Enter your income above and this panel prices the fork: "
+                "stay on the plan's minimum, pay the balance down, or "
+                "switch plans."
             )
         else:
             st.info("\n\n".join(

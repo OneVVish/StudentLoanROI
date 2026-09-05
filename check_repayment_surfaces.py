@@ -272,8 +272,34 @@ def main() -> int:
             pslf=spec.get("pslf", False),
             prefer_label=rows[0][0], old_ibr=spec.get("old_ibr", False))
         use("commit_arm_stack")(analysis, _priv_row)
-        if analysis is not None:
+        # THE PANEL MUST RENDER FOR EVERY PORTFOLIO WITH FEDERAL LOANS AND AN
+        # INCOME. This block used to skip on None, and five of the ten
+        # portfolios above returned None: every federal-only borrower with
+        # nothing spare got no panel at all, and this guard counted the run
+        # clean, because a None is not a crash. That is the limit its own
+        # docstring names ("finds crashes, not wiring"), biting exactly where
+        # it warned. The cost was not a missing nicety: discharge_tax_estimate
+        # is reached from the panel and nowhere else, so those borrowers saw a
+        # plan table understating an income-driven row by up to 48%.
+        #
+        # The one honest exemption is Parent PLUS with nothing spare: no
+        # income-driven row exists, so there is no plan to compare against.
+        has_idr = any("RAP" in l or l.startswith("IBR") for l, _, _ in rows)
+        spare = bool(priv) or bool(spec.get("private_extra"))
+        if analysis is None:
+            if has_idr or spare:
+                problems.append(
+                    f"  [{label}] the strategy panel returned None. A borrower "
+                    f"with federal loans and an income always has a fork to "
+                    f"price, if only which plan to be on.")
+        else:
             checked += 1
+            want = "commit_or_ride" if spare else "plan_choice"
+            if analysis.get("kind") != want:
+                problems.append(
+                    f"  [{label}] the strategy panel is the {analysis.get('kind')!r} "
+                    f"shape where {want!r} was expected; the fallback fired on "
+                    f"the wrong portfolio, or did not fire at all")
             sentences = use("strategy_verdict_sentences")(analysis)
             if not sentences:
                 problems.append(f"  [{label}] the strategy panel produced no prose")
