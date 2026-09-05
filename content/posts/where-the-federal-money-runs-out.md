@@ -3,7 +3,7 @@ title: Where the federal money runs out
 description: A family can borrow $92,000 from the federal government for one bachelor's degree. At 1,644 of 2,235 colleges, four years costs more. By sector, and on a map.
 summary: The government will lend a family $92,000 for one bachelor's degree. Four years at three quarters of the colleges that grant one costs more. Here is the shape of that gap, by sector and on a map, and what to do about your own school.
 date: 2026-09-05
-hero: guide-hero-where-the-federal-money-runs-out-klein4b.png
+hero: guide-hero-where-the-federal-money-runs-out-road-klein4b.png
 ---
 
 Every aid letter has two federal loans in it. One is in the student's name and one is in the parents' name, and both come with a ceiling that no school, no aid officer and no appeal can raise. Add the two ceilings together and you have the most the federal government will lend one family for one bachelor's degree. This guide puts that number beside the sticker price of every college that grants a bachelor's, and shows where the money runs out.
