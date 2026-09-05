@@ -154,7 +154,6 @@ SHARE_EXEMPT = {
     # the wizard page itself has nothing to reopen.
     "wizard_mode": "start wizard answer; hands off as ?mode=",
     "wizard_major": "start wizard answer; hands off as ?major=",
-    "wizard_school_q": "start wizard search box; ?school= carries the result",
     "wizard_school": "start wizard answer; hands off as ?school=",
     "wizard_in_state": "start wizard answer; hands off as ?in_state=",
     "wizard_city": "start wizard answer; hands off as ?city=",
