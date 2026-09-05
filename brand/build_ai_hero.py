@@ -230,20 +230,20 @@ PROMPTS = {
         "No text, no charts, nothing displayed on the screen.",
         20260910, 4),
     "where-the-federal-money-runs-out": (
-        # Ninth prompt. Not a screen this time: the guide is about a line
-        # that colleges sit on one side or the other of, so the picture is
-        # the threshold itself, a campus gate seen from the public side of
-        # the street. No lettering on the pillars, no plaque, no banner: a
-        # named gate is a named college, and this guide names none.
-        "The entrance gates of a college campus seen from the sidewalk "
-        "across a quiet street at dawn, two plain brick pillars with open "
-        "wrought iron gates between them, a long tree-lined drive beyond "
-        "leading to a distant building, low mist on the lawn, warm early "
-        "light from the left. No people, no cars, no signs, no lettering, no "
-        "plaque, no banner, no flags. Wide letterbox frame, the gates well "
-        "inside the picture. Documentary photography, muted natural colour, "
-        "unposed. No text anywhere.",
-        20260905, 4),
+        # Ninth prompt, second attempt. The first was a campus gate, and the
+        # upper-middle-class guide already has one. This guide is the map,
+        # and the map's finding is geography: the blue is the interior. So
+        # the picture is the road into a small college town across open
+        # country, no campus, no screen, no kitchen, and nothing to read.
+        "A straight two-lane highway running across flat open farmland "
+        "toward a small college town on the horizon at dusk, a water tower "
+        "and a few low brick buildings and a bell tower just visible in the "
+        "distance, wide sky with long low clouds catching the last light, "
+        "the road empty. Seen from low beside the road. No road signs, no "
+        "billboards, no lettering, no cars, no people. Wide letterbox frame. "
+        "Documentary photography, muted natural colour, unposed. No text "
+        "anywhere.",
+        20260906, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
