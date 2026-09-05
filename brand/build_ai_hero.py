@@ -207,6 +207,28 @@ PROMPTS = {
         "photography, muted natural colour, unposed. No text, no charts, "
         "nothing displayed on the screen.",
         20260909, 4),
+    "riding-student-loan-forgiveness": (
+        # Eighth prompt, and the second built for build_hero_composite.py: a
+        # BLANK dark screen that the two-panel forgiveness map gets pasted
+        # onto, because the map is the guide's finding and a diffusion model
+        # asked for it would invent one. Same letterbox arithmetic as the
+        # refinancing hero (1600x459, so a whole screen tops out near 816px
+        # wide), different room so the two guides do not share a picture. No
+        # paper anywhere: klein4b writes illegible squiggles on any page it
+        # draws, and a squiggle that reads as a loan statement is a fabricated
+        # document on a site built on traceable figures.
+        "A laptop open on a kitchen table in the evening, seen straight on, "
+        "the whole laptop visible from the top of the lid to the table with a "
+        "little space above it, filling the height of a wide letterbox frame, "
+        "its screen switched off and completely blank dark grey. Warm lamp "
+        "light from one side. On the table and sharply in focus: a ceramic "
+        "mug, a pair of reading glasses folded beside the laptop, and a small "
+        "potted plant a little behind it. A phone lying face down. Every "
+        "object complete and well inside the picture, nothing touching or "
+        "running off the edges of the frame, no paper, no papers, no "
+        "notebook. Documentary photography, muted natural colour, unposed. "
+        "No text, no charts, nothing displayed on the screen.",
+        20260910, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "

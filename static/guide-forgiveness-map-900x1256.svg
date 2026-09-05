@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1256" width="900" height="1256" role="img" aria-labelledby="fm-t fm-d">
+  <title id="fm-t">Where riding forgiveness out costs less than paying the loan off, under IBR and under RAP</title>
+  <desc id="fm-d">Two stacked panels with balance along the bottom and adjusted gross income up the side, shaded blue where riding an income-driven plan to a taxed discharge costs less than the ten-year Standard plan and orange where it costs more. The IBR panel has one boundary rising with balance: blue below, orange above. The RAP panel has two: a blue wedge at the bottom, an orange band in the middle, and blue again above, because RAP has no payment ceiling and a high earner overpays and beats the Standard plan outright.</desc>
+  <style>
+    .f { font-family: "Avenir Next", -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+    .deck { font-size: 30px; font-weight: 600; fill: #14161a; }
+    .key { font-size: 27px; font-weight: 500; fill: #14161a; }
+    .ptitle { font-size: 28px; font-weight: 700; fill: #14161a; }
+    .tick { font-size: 26px; font-weight: 500; fill: #5c636d; }
+    .axis { font-size: 27px; font-weight: 500; fill: #5c636d; }
+    .mark-word { font-size: 19px; font-weight: 700; fill: #14161a; }
+    .mark-tld { font-size: 19px; font-weight: 500; fill: #5c636d; }
+  </style>
+  <rect width="900" height="1256" fill="#ffffff"/>
+  <g transform="translate(40 20) scale(0.3)">
+    <path d="M 8 38 L 24 54 L 35.826 38" fill="none" stroke="#eb6834" stroke-width="9.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 35.826 38 L 58 8" fill="none" stroke="#2a78d6" stroke-width="9.5" stroke-linecap="round"/>
+  </g>
+  <text class="f" x="66" y="37"><tspan class="mark-word">worthmydegree</tspan><tspan class="mark-tld">.com</tspan></text>
+  <text class="f deck" x="40" y="84">Ride it out, or pay it off?</text>
+  <text class="f axis" x="40" y="124">At 7 percent, by what you owe and what you earn</text>
+  <rect x="40" y="150" width="36" height="26" fill="#bcd3ee" stroke="#14161a" stroke-width="1.5"/>
+  <text class="f key" x="88" y="172">Riding costs less</text>
+  <rect x="420" y="150" width="36" height="26" fill="#f5c4ac" stroke="#14161a" stroke-width="1.5"/>
+  <text class="f key" x="468" y="172">Riding costs more</text>
+  <text class="f ptitle" x="40" y="232">IBR: loans made before July 1, 2026</text>
+  <rect x="128" y="262.0" width="710" height="340" fill="#f5c4ac"/>
+  <polygon points="128.0,602.0 165.4,602.0 202.7,602.0 240.1,602.0 277.5,602.0 314.8,602.0 352.2,602.0 389.6,602.0 426.9,602.0 464.3,602.0 501.7,602.0 539.1,602.0 576.4,602.0 613.8,602.0 651.2,602.0 688.5,602.0 725.9,602.0 763.3,602.0 800.6,602.0 838.0,602.0 838.0,481.6 800.6,486.4 763.3,491.3 725.9,496.1 688.5,500.9 651.2,505.6 613.8,510.1 576.4,514.9 539.1,519.8 501.7,524.6 464.3,529.4 426.9,534.3 389.6,539.1 352.2,543.9 314.8,548.8 277.5,553.8 240.1,559.4 202.7,566.1 165.4,572.8 128.0,579.3" fill="#bcd3ee"/>
+  <polyline points="128.0,579.3 165.4,572.8 202.7,566.1 240.1,559.4 277.5,553.8 314.8,548.8 352.2,543.9 389.6,539.1 426.9,534.3 464.3,529.4 501.7,524.6 539.1,519.8 576.4,514.9 613.8,510.1 651.2,505.6 688.5,500.9 725.9,496.1 763.3,491.3 800.6,486.4 838.0,481.6" fill="none" stroke="#14161a" stroke-width="3" stroke-linejoin="round"/>
+  <line x1="128" y1="602.0" x2="838" y2="602.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="611.0" text-anchor="end">$0k</text>
+  <line x1="128" y1="517.0" x2="838" y2="517.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="526.0" text-anchor="end">$100k</text>
+  <line x1="128" y1="432.0" x2="838" y2="432.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="441.0" text-anchor="end">$200k</text>
+  <line x1="128" y1="347.0" x2="838" y2="347.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="356.0" text-anchor="end">$300k</text>
+  <line x1="128" y1="262.0" x2="838" y2="262.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="271.0" text-anchor="end">$400k</text>
+  <line x1="277.5" y1="602.0" x2="277.5" y2="262.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="277.5" y="636" text-anchor="middle">$100k</text>
+  <line x1="464.3" y1="602.0" x2="464.3" y2="262.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="464.3" y="636" text-anchor="middle">$200k</text>
+  <line x1="651.2" y1="602.0" x2="651.2" y2="262.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="651.2" y="636" text-anchor="middle">$300k</text>
+  <line x1="838.0" y1="602.0" x2="838.0" y2="262.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="838.0" y="636" text-anchor="middle">$400k</text>
+  <text class="f ptitle" x="40" y="712">RAP: every loan made since</text>
+  <rect x="128" y="742.0" width="710" height="340" fill="#f5c4ac"/>
+  <polygon points="128.0,1082.0 165.4,1082.0 202.7,1082.0 240.1,1082.0 277.5,1082.0 314.8,1082.0 352.2,1082.0 389.6,1082.0 426.9,1082.0 464.3,1082.0 501.7,1082.0 539.1,1082.0 576.4,1082.0 613.8,1082.0 651.2,1082.0 688.5,1082.0 725.9,1082.0 763.3,1082.0 800.6,1082.0 838.0,1082.0 838.0,1005.4 800.6,1008.6 763.3,1011.8 725.9,1014.8 688.5,1017.8 651.2,1020.6 613.8,1023.4 576.4,1026.3 539.1,1029.0 501.7,1031.8 464.3,1034.3 426.9,1037.0 389.6,1039.6 352.2,1042.1 314.8,1044.7 277.5,1047.6 240.1,1050.9 202.7,1054.6 165.4,1059.0 128.0,1059.5" fill="#bcd3ee"/>
+  <polygon points="128.0,1039.2 165.4,1021.6 202.7,1007.7 240.1,994.4 277.5,972.5 314.8,950.6 352.2,928.7 389.6,906.8 426.9,884.9 464.3,863.0 501.7,841.1 539.1,819.2 576.4,797.3 613.8,775.4 651.2,753.5 651.2,742.0 613.8,742.0 576.4,742.0 539.1,742.0 501.7,742.0 464.3,742.0 426.9,742.0 389.6,742.0 352.2,742.0 314.8,742.0 277.5,742.0 240.1,742.0 202.7,742.0 165.4,742.0 128.0,742.0" fill="#bcd3ee"/>
+  <polyline points="128.0,1059.5 165.4,1059.0 202.7,1054.6 240.1,1050.9 277.5,1047.6 314.8,1044.7 352.2,1042.1 389.6,1039.6 426.9,1037.0 464.3,1034.3 501.7,1031.8 539.1,1029.0 576.4,1026.3 613.8,1023.4 651.2,1020.6 688.5,1017.8 725.9,1014.8 763.3,1011.8 800.6,1008.6 838.0,1005.4" fill="none" stroke="#14161a" stroke-width="3" stroke-linejoin="round"/>
+  <polyline points="128.0,1039.2 165.4,1021.6 202.7,1007.7 240.1,994.4 277.5,972.5 314.8,950.6 352.2,928.7 389.6,906.8 426.9,884.9 464.3,863.0 501.7,841.1 539.1,819.2 576.4,797.3 613.8,775.4 651.2,753.5 688.5,742.0" fill="none" stroke="#14161a" stroke-width="3" stroke-linejoin="round"/>
+  <line x1="128" y1="1082.0" x2="838" y2="1082.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="1091.0" text-anchor="end">$0k</text>
+  <line x1="128" y1="997.0" x2="838" y2="997.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="1006.0" text-anchor="end">$100k</text>
+  <line x1="128" y1="912.0" x2="838" y2="912.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="921.0" text-anchor="end">$200k</text>
+  <line x1="128" y1="827.0" x2="838" y2="827.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="836.0" text-anchor="end">$300k</text>
+  <line x1="128" y1="742.0" x2="838" y2="742.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="116" y="751.0" text-anchor="end">$400k</text>
+  <line x1="277.5" y1="1082.0" x2="277.5" y2="742.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="277.5" y="1116" text-anchor="middle">$100k</text>
+  <line x1="464.3" y1="1082.0" x2="464.3" y2="742.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="464.3" y="1116" text-anchor="middle">$200k</text>
+  <line x1="651.2" y1="1082.0" x2="651.2" y2="742.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="651.2" y="1116" text-anchor="middle">$300k</text>
+  <line x1="838.0" y1="1082.0" x2="838.0" y2="742.0" stroke="#ffffff" stroke-width="1.5" opacity="0.7"/>
+  <text class="f tick" x="838.0" y="1116" text-anchor="middle">$400k</text>
+  <text class="f axis" x="40" y="1212">Balance along the bottom, adjusted gross income up the side</text>
+</svg>
