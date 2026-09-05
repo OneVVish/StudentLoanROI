@@ -7310,6 +7310,32 @@ def apply_shared_flag(param_name: str, state_key: str) -> None:
     st.session_state[state_key] = raw == "1"
 
 
+def ua_is_mobile(user_agent: str) -> bool:
+    """Whether a User-Agent string names a phone or tablet browser.
+
+    The two tokens every mobile browser sends: "Mobi" (Mobile, Mobile Safari,
+    the Android and iOS Chromes) and "Android" (tablets, whose Chrome omits
+    "Mobile"). iPadOS Safari sends a desktop string by choice and is treated
+    as a desktop here, which is right for a screen that shows the sidebar.
+    A pure function so a guard can test it without a request."""
+    ua = str(user_agent or "")
+    return "Mobi" in ua or "Android" in ua
+
+
+def is_mobile_visit() -> bool:
+    """Whether THIS session arrived from a phone, read once from the request
+    headers and latched, the get_user_timezone pattern. Outside a Streamlit
+    runtime (the guards, analyze_model.py) it is False rather than an error.
+    """
+    try:
+        if "is_mobile" not in st.session_state:
+            st.session_state.is_mobile = ua_is_mobile(
+                st.context.headers.get("User-Agent", ""))
+        return bool(st.session_state.is_mobile)
+    except Exception:
+        return False
+
+
 def get_user_timezone() -> str:
     """The visitor's browser-detected IANA timezone (e.g. "America/Denver"),
     from st.context.timezone. Falls back to UTC if a browser ever supplies
@@ -26795,6 +26821,28 @@ if active_tool:
     if _others:
         st.caption("Other tools: " + " · ".join(_others))
     st.stop()
+
+# PHONES GET OFFERED THE WIZARD, and nobody else does. On a phone the
+# sidebar is folded behind a chevron, so a first-time visitor is looking at
+# results for a scenario they never chose with no visible way to change it;
+# the wizard is six questions built for exactly that screen. On a desktop the
+# sidebar is open beside the results and the offer would be noise. An OFFER,
+# not a redirect: the pageview still logs and the experiment arm still
+# assigns, so mobile arrivals stay in the research dataset like any other.
+# The offer itself is logged once per session as wizard_offer, and a click
+# arrives on the wizard page as nav:from=calculator:to=start, so the
+# click-through is the ratio of those two counts. Not shown to a visitor who
+# came FROM the wizard: they have already answered it.
+if is_mobile_visit() and get_shared_default("from", "") != "start":
+    st.info(
+        "📱 On a phone? "
+        f"[Answer six questions]({internal_tool_url('start')}) and the "
+        "calculator opens filled in. Every setting is also in the sidebar, "
+        "behind the » at the top left."
+    )
+    if not st.session_state.get("wizard_offered"):
+        st.session_state.wizard_offered = True
+        log_usage_event("wizard_offer")
 
 # Collapsed on purpose. This app's whole premise is that real numbers are on
 # screen before you touch anything -- there is deliberately no "calculate"
