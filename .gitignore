@@ -162,3 +162,8 @@ static/guide-hero-for-parents-run-the-numbers.png
 # project's real dependencies live, pinned deliberately.
 .agents/
 skills-lock.json
+
+# PPD:2026 raw downloads from ed.gov (49.5 MB and 37.2 MB). Manual download,
+# see build_ppd_flags.py. curl gets the proxy block page here; urllib through
+# certifi gets the real file.
+ppd2026_*.xlsx
