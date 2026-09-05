@@ -135,6 +135,12 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [The best-paid career depends on when you ask](https://worthmydegree.com/charts#best-career-by-year):
+  Where each career ranks by that year's pay among the 825 occupations
+  the calculator models, at years 1, 5, 10 and 20 after a bachelor's
+  degree, for every career that is ever in the top 20. At year 1 the
+  best-paid career is Nurse Anesthetists; by year 10 it is Pediatric
+  Surgeons, and 17 of the year-20 top 20 earned nothing at year 1.
 - [Ride forgiveness or pay it off?](https://worthmydegree.com/charts#forgiveness-map-pair):
   Whether riding an income-driven plan to a taxed discharge costs less
   than paying the loan off in ten years, by balance and adjusted gross
