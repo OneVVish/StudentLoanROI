@@ -99,12 +99,37 @@ def check_landing_ctas_tagged(ns, fail):
         #     counted; tagging the link INTO it would claim a nav the app
         #     never sees;
         #   * llms.txt leaves the site entirely.
-        if (href == "/" or href.startswith("/guides")
+        #   * /welcome is this page by its other name, and the only name that
+        #     survives a carried query string (see check_logo_goes_to_welcome).
+        if (href == "/" or href == "/welcome" or href.startswith("/guides")
                 or href.startswith("/charts") or "llms.txt" in href):
             continue
         if f"from={ns['NAV_WELCOME']}" not in href:
             fail(f"landing CTA {href!r} does not carry from={ns['NAV_WELCOME']} "
                  f"-- clicks through it will not be counted")
+
+
+def check_logo_goes_to_welcome(fail):
+    """The header mark on every edge page must link to /welcome, never "/".
+
+    The Worker serves the landing page for a bare "/" and the Streamlit app
+    for "/" with ANY query string, and CARRY_QS_JS appends the visitor's own
+    query string to every internal link. So a logo pointing at "/" sends a
+    visitor who arrived with ?src=, ?test=1 or ?from= straight into the app,
+    with no way back to the edge site from any guide or the gallery. Reported
+    2026-09-05 as "no way to navigate from the guides page back to
+    worthmydegree.com". /welcome is the landing page under a name the Worker
+    honours whatever the query string carries, and the tag rides along.
+    """
+    import glob
+    pages = ["infra/landing.html"] + sorted(glob.glob("infra/guides/*.html"))
+    for page in pages:
+        text = Path(page).read_text()
+        if 'class="logo"' not in text:
+            continue
+        if 'class="logo" href="/welcome"' not in text:
+            fail(f"{page}: the header logo does not link to /welcome, so a "
+                 f"carried query string lands it on the app instead")
 
 
 def check_landing_action_separate(ns, fail):
@@ -481,6 +506,7 @@ def main() -> int:
     _fail = lambda msg: problems.append("  " + msg)
     check_landing_action_separate(ns, _fail)
     check_landing_ctas_tagged(ns, _fail)
+    check_logo_goes_to_welcome(_fail)
 
     if problems:
         print(f"internal links: {len(problems)} problem(s) across {checked} checks\n")
