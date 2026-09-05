@@ -139,6 +139,11 @@ anywhere with attribution. One page, so each is addressed by fragment.
   Whether riding an income-driven plan to a taxed discharge costs less
   than paying the loan off in ten years, by balance and adjusted gross
   income, under IBR and under the 2026 RAP plan.
+- [The 2026 plan cut the payment for 52 majors and raised it for 21](https://worthmydegree.com/charts#plan-change-by-major):
+  First-year monthly payment on the median bachelor's federal debt
+  under IBR, the income-driven plan an older loan can use, and under
+  RAP, the plan a loan made from July 2026 gets, one line per NY Fed
+  major at its early-career median pay.
 - [A degree is not worth one number](https://worthmydegree.com/charts#what-degree-holders-earn-by-age):
   The median pay of full-time year-round workers with a bachelor's
   degree or higher against workers with a high school diploma and no
