@@ -146,7 +146,9 @@ anywhere with attribution. One page, so each is addressed by fragment.
   sorted by four years of its in-state sticker cost of attendance,
   coloured by whether that total fits under the $92,000 a dependent
   student's family can borrow from the federal government in all. The
-  student's own $27,000 covers four years at one college.
+  student's own $27,000 covers four years at one college. Dot size is
+  selectivity: of the 88 colleges that admit a quarter or fewer of
+  applicants, 85 sit above the line.
 - [Ride forgiveness or pay it off?](https://worthmydegree.com/charts#forgiveness-map-pair):
   Whether riding an income-driven plan to a taxed discharge costs less
   than paying the loan off in ten years, by balance and adjusted gross
