@@ -5867,8 +5867,33 @@ def requested_tool() -> str:
     a visit was. An unknown ?tool= falls back to the calculator rather than a
     blank page.
     """
-    return get_shared_default("tool", "") if \
-        get_shared_default("tool", "") in STANDALONE_TOOLS else ""
+    tool = get_shared_default("tool", "")
+    if tool in STANDALONE_TOOLS:
+        return tool
+    # A PHONE ARRIVING AT THE BARE CALCULATOR GETS THE WIZARD. On a phone the
+    # sidebar is folded behind a chevron, so the bare page is results for a
+    # scenario the visitor never chose with no visible way to change it. The
+    # wizard is six questions built for that screen, and its hand-off is a
+    # real navigation carrying the answers, so the NEXT arrival has params and
+    # is the calculator. Decided HERE, in the same function the pageview
+    # logger and the section-5 latch both read, so the row written and the
+    # page shown cannot disagree: a phone's bare arrival is a pageview_start.
+    # Anything in the URL beyond the session flags (a shared scenario, a
+    # from=, a src=) means the visitor was sent somewhere specific and gets
+    # it; the wizard's own "skip" link carries from=start for that reason.
+    # Recorded as a seam in migrations.sql.
+    if is_mobile_visit() and bare_arrival():
+        return "start"
+    return ""
+
+
+def bare_arrival() -> bool:
+    """True when the URL carries nothing but the session flags."""
+    try:
+        return not any(k not in ("test", "research", "admin")
+                       for k in st.query_params.keys())
+    except Exception:
+        return False
 
 
 def internal_tool_url(tool: str = "") -> str:
@@ -26613,6 +26638,10 @@ def render_start_wizard(always_open: bool = False) -> None:
     conversation it is pretending to be. A "Back" button pops one answer.
     """
     del always_open  # the page is the wizard; there is nothing to open
+    if is_mobile_visit() and bare_arrival():
+        # This phone was routed here from the bare calculator URL. The link
+        # carries from=start, so the arrival is not bare and is the calculator.
+        st.caption(f"Prefer the full calculator? [Skip to it]({internal_tool_url()}).")
     answers = st.session_state.setdefault("wizard_answers", {})
     step = st.session_state.setdefault("wizard_step", 0)
 
@@ -26834,6 +26863,9 @@ if active_tool:
 # click-through is the ratio of those two counts. Not shown to a visitor who
 # came FROM the wizard: they have already answered it.
 if is_mobile_visit() and get_shared_default("from", "") != "start":
+    # Reached only with a scenario already in the URL (a shared link, a chart
+    # or guide CTA): a bare phone arrival is the wizard itself, see
+    # requested_tool. Still an offer, still logged once.
     st.info(
         "📱 On a phone? "
         f"[Answer six questions]({internal_tool_url('start')}) and the "
