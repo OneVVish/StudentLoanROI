@@ -4141,6 +4141,10 @@ CSS_PROFILE_URL = "https://cssprofile.collegeboard.org/"
 # Hillsdale and Patrick Henry take no federal money, so no federal dataset
 # prices them and no search can return them.
 CSS_PROFILE_PATH = "data/css_profile_schools_clean.csv"
+# ED's Program Performance Data (PPD:2026), joined through the OPE ID
+# crosswalk by build_ppd_flags.py. Preliminary by ED's own statement, and with a
+# KNOWN EXPIRY: the first real measurement on 2027-07-01 supersedes it.
+PPD_FLAGS_PATH = "data/ppd_program_flags.csv"
 
 
 
@@ -17312,6 +17316,143 @@ def css_profile_school_caption(unitid) -> str:
     return text
 
 
+# PPD's credlev against the labels this app already resolves. The search's
+# three certificate lengths are ONE PPD level; PPD does not distinguish them.
+PPD_CREDLEV_BY_EDUCATION = {
+    "Postsecondary nondegree award": 1, "Associate's degree": 2,
+    "Bachelor's degree": 3, "Master's degree": 5,
+    "Doctoral or professional degree": 6,
+}
+PPD_CREDLEV_BY_SEARCH_LEVEL = {
+    "Certificate (under 1 year)": 1, "Certificate (1-2 years)": 1,
+    "Certificate (2-4 years)": 1, "Associate's degree": 2,
+    "Bachelor's degree": 3,
+}
+PPD_LEVEL_WORD = {1: "certificate", 2: "associate", 3: "bachelor's",
+                  5: "master's", 6: "doctoral"}
+PPD_FIRST_MEASUREMENT = "July 2027"
+
+
+@st.cache_data
+def load_ppd_flags() -> pd.DataFrame:
+    """The PPD:2026 earnings-test lookup, or an EMPTY frame when the file is
+    absent. Empty rather than raising, so a deploy without the file loses a
+    caption and not a page, and empty means UNKNOWN downstream: no caller may
+    read "not in the frame" as "not flagged"."""
+    cols = ["UNITID", "OPEID6", "CIPCODE", "CREDLEV", "obbb_fail",
+            "master_fail", "campuses", "propagation"]
+    try:
+        frame = pd.read_csv(PPD_FLAGS_PATH, dtype={"OPEID6": "str"},
+                            usecols=cols)
+    except (FileNotFoundError, ValueError):
+        return pd.DataFrame(columns=cols)
+    frame["cip_family"] = (frame["CIPCODE"] // 100).astype(int).astype(str).str.zfill(2)
+    return frame
+
+
+def ppd_program_status(unitid, credlev: int = None, cip_family: str = None) -> dict:
+    """What PPD says about a school's programs at a level, or {} when it says
+    NOTHING. Three states, and the caller must be able to tell them apart:
+
+        {}                      not in the data: UNKNOWN, never "clear"
+        {"flagged": 0, ...}     assessed, none flagged
+        {"flagged": n, ...}     n programs flagged as failing the earnings test
+
+    Returns {} rather than a zero-filled dict for the same reason
+    css_profile_requirement does: so no caller can render "not flagged" out of
+    a lookup that simply found nothing. Between the 4.5% of programs ED
+    excludes as uncommon, the fifteen-student IRS floor and the noise rule,
+    absence is common and means nothing about the school.
+    """
+    frame = load_ppd_flags()
+    if frame.empty or unitid is None:
+        return {}
+    rows = frame[frame["UNITID"] == int(unitid)]
+    if credlev is not None:
+        rows = rows[rows["CREDLEV"] == int(credlev)]
+    if cip_family is not None:
+        rows = rows[rows["cip_family"] == str(cip_family).zfill(2)]
+    if rows.empty:
+        return {}
+    flagged = rows[rows["master_fail"] == 1]
+    return {"flagged": int(len(flagged)), "assessed": int(len(rows)),
+            "campuses": int(rows["campuses"].max()),
+            "inherited": bool((flagged["campuses"] > 1).any())}
+
+
+def ppd_caveat() -> str:
+    """The sentence every PPD surface carries. ED's data description says the
+    file is not the final data and differs from the one ED analyzes, so the
+    wording asserts a preliminary flag and never a determination."""
+    return (f"That data is preliminary and not a determination; the first "
+            f"real measurement is {PPD_FIRST_MEASUREMENT}, and a school absent "
+            f"from it is unknown rather than clear.")
+
+
+def ppd_search_caption(results: pd.DataFrame, credential: str, cip_family: str) -> str:
+    """One sentence under the school search when some LISTED school has a
+    flagged program in this field at this level. Counted over the rows on
+    screen, the thin-cohort asterisk's discipline, so it is silent on every
+    search where nothing shown is flagged, which is every search outside
+    health and cosmetology. Never a column: the table is at its width limit,
+    and at 55% of a cosmetology list a per-row marker would be the table
+    shouting."""
+    credlev = PPD_CREDLEV_BY_SEARCH_LEVEL.get(credential)
+    if credlev is None or results is None or results.empty or "UNITID" not in results:
+        return ""
+    frame = load_ppd_flags()
+    if frame.empty:
+        return ""
+    hit = frame[(frame["CREDLEV"] == credlev)
+                & (frame["cip_family"] == str(cip_family).zfill(2))
+                & (frame["master_fail"] == 1)
+                & (frame["UNITID"].isin(results["UNITID"]))]
+    n = int(hit["UNITID"].nunique())
+    if n == 0:
+        return ""
+    text = (f"**{n} of the {len(results)} shown** have a {PPD_LEVEL_WORD[credlev]} "
+            f"program in this field that the Education Department's preliminary "
+            f"Program Performance Data flags as failing the earnings test that "
+            f"decides federal loan eligibility. {ppd_caveat()}")
+    if bool((hit["campuses"] > 1).any()):
+        text += (" Some of those flags come from a school's Title IV "
+                 "certification, which can cover several campuses.")
+    return text
+
+
+def ppd_school_caption(unitid, typical_education: str, selected_title: str) -> str:
+    """Under the named school in the sidebar, the css_profile_school_caption
+    shape: only once a school AND a level are known, and only when something
+    is flagged. Says nothing otherwise, because "not flagged" cannot be
+    distinguished from "not in the data" at the point where it would be said.
+
+    The CIP family comes from MAJOR_TO_CIP_FAMILY when the selection is a
+    major; an occupation has no crosswalk, so the note is then about every
+    program at that level, which is the honest scope for a beauty school that
+    teaches one thing.
+    """
+    credlev = PPD_CREDLEV_BY_EDUCATION.get(typical_education)
+    if credlev is None or unitid is None:
+        return ""
+    family = MAJOR_TO_CIP_FAMILY.get(selected_title)
+    status = ppd_program_status(unitid, credlev, family)
+    if not status or status["flagged"] == 0:
+        return ""
+    scope = " in this field" if family else ""
+    plural = "s" if status["assessed"] != 1 else ""
+    text = (f"⚠️ **The Education Department's preliminary data flags "
+            f"{status['flagged']} of this school's {status['assessed']} "
+            f"{PPD_LEVEL_WORD[credlev]} program{plural}{scope}** as failing "
+            f"the earnings test that decides federal Direct Loan eligibility: "
+            f"two failing years and its students could not borrow federally "
+            f"for it. {ppd_caveat()}")
+    if status["inherited"]:
+        text += (f" The flag comes from the school's Title IV certification, "
+                 f"which covers {status['campuses']} campuses, and the program "
+                 f"may be taught at only some of them.")
+    return text
+
+
 def css_profile_divergences(*, home_equity: float = 0.0,
                             noncustodial_parent: bool = False,
                             business_net_worth: float = 0.0,
@@ -18310,6 +18451,12 @@ else:
     _css_profile_note_a = css_profile_school_caption(school_unitid_a)
     if _css_profile_note_a:
         _sb_where.caption(_css_profile_note_a)
+    # Same shape as the CSS Profile note, same reasoning: well posed only once
+    # one school and a level are named, and silent unless something is flagged.
+    _ppd_note_a = ppd_school_caption(school_unitid_a, _typical_education_a,
+                                     _selected_title_a)
+    if _ppd_note_a:
+        _sb_where.caption(_ppd_note_a)
 
     # A shared link's explicit COA wins over auto-fill -- it may reflect a
     # manual override the original sharer typed in, not just whatever the
@@ -25557,6 +25704,9 @@ def render_school_search(always_open: bool = False) -> None:
             "cheaper once grants are applied, so treat this as a starting list and "
             "run the **Net price** calculator on any school you're serious about."
         )
+        _ppd_caption = ppd_search_caption(results, credential, family)
+        if _ppd_caption:
+            st.caption(_ppd_caption)
         # Shown per row because it varies per row -- the visitor is resident in
         # one of these states and a visitor state elsewhere. Naming the rate is
         # what makes the price checkable against the school's own published
