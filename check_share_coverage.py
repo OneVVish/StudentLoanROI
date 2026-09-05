@@ -148,6 +148,16 @@ SHARE_EXEMPT = {
     # a variable and the constant-only scan above cannot see any of them.
     "sai_two_parents": "SAI tool; rides ?sap=",
     "sai_family_size": "SAI tool; rides ?sas=",
+    # The start wizard: five transient answers that become ?mode=, ?major=,
+    # ?school=, ?in_state= and ?city= on a real navigation into the calculator.
+    # They ride the calculator's OWN share params on the other side; a link to
+    # the wizard page itself has nothing to reopen.
+    "wizard_mode": "start wizard answer; hands off as ?mode=",
+    "wizard_major": "start wizard answer; hands off as ?major=",
+    "wizard_school_q": "start wizard search box; ?school= carries the result",
+    "wizard_school": "start wizard answer; hands off as ?school=",
+    "wizard_in_state": "start wizard answer; hands off as ?in_state=",
+    "wizard_city": "start wizard answer; hands off as ?city=",
     "sai_parent_agi": "SAI tool; rides ?saa=",
     "sai_parent_assets": "SAI tool; rides ?sav=",
     "sai_business": "SAI tool; rides ?sab=",
