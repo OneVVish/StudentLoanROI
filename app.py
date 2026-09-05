@@ -9621,10 +9621,23 @@ def calculate_idr_repayment(principal: float, annual_rate_pct: float,
                              extra_payments: tuple = (),
                              income_offset_years: int = 0) -> dict:
     """
-    Models a payment as 10% of discretionary income (salary above a flat
-    living allowance). Salary each year comes from get_annual_salary_for_year,
-    so majors with a training delay (Medicine, Law, Athletic Training) pay
-    $0 while their salary there is $0. Because the payment is income-based
+    Models a payment as 10% of discretionary income, meaning ADJUSTED GROSS
+    INCOME above a flat living allowance (150% of the poverty guideline, via
+    idr_income_allowance). `annual_income` is therefore an AGI, the same
+    quantity calculate_rap_payment names `agi` outright and applies its
+    published bands to directly. THE TWO PLANS TAKE THE SAME INPUT: IBR
+    subtracts the allowance first, RAP does not, and both descend from AGI.
+
+    This docstring used to say "salary", which is what a caller supplies in
+    practice and is not the same number: AGI is after above-the-line deductions
+    such as retirement and HSA contributions. Nothing in the arithmetic was
+    wrong, but two functions naming one quantity two ways is how a real basis
+    error arrives later, and a chart comparing the plans had already inherited
+    the looser word.
+
+    Income each year comes from get_annual_salary_for_year, so majors with a
+    training delay (Medicine, Law, Athletic Training) pay $0 while their income
+    there is $0. Because the payment is income-based
     rather than balance-based, it can fall below the interest accruing that
     month (negative amortization); any balance still outstanding after
     `max_term_years` is forgiven.
