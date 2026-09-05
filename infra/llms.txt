@@ -141,6 +141,13 @@ anywhere with attribution. One page, so each is addressed by fragment.
   degree, for every career that is ever in the top 20. At year 1 the
   best-paid career is Nurse Anesthetists; by year 10 it is Pediatric
   Surgeons, and 17 of the year-20 top 20 earned nothing at year 1.
+- [Where four years costs more than the government will lend](https://worthmydegree.com/charts#federal-money-map):
+  One dot per bachelor's-granting college at its own address, coloured
+  by whether four years of in-state sticker cost of attendance fits
+  under the $92,000 a dependent student's family can borrow from the
+  federal government in all, sized by admission rate. 84 percent of
+  colleges in the Northeast sit above the line, 63 percent in the
+  West.
 - [At 1,644 of 2,235 colleges, four years costs more than the government will lend](https://worthmydegree.com/charts#federal-money-runs-out):
   One dot per bachelor's-granting college, grouped by sector and
   sorted by four years of its in-state sticker cost of attendance,
