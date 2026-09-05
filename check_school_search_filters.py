@@ -1727,6 +1727,112 @@ def check_picker_identity(ns, base) -> list:
     return problems
 
 
+
+# ---------------------------------------------------------------------------
+# PPD:2026 on the search and the sidebar. Every row of that file is a claim
+# about a real school's federal loan eligibility, ED calls it preliminary, and
+# absence in it is common and means nothing. So the checks are about what the
+# surfaces may NOT say: "clear" for a school that is merely absent, a verdict
+# for a flag, or a count over anything but the rows on screen.
+# ---------------------------------------------------------------------------
+def _ppd_fixture_ids():
+    import pandas as pd
+    f = pd.read_csv("data/ppd_program_flags.csv", dtype={"OPEID6": "str"})
+    coa = pd.read_csv("data/college_coa_clean.csv", usecols=["UNITID"])
+    beauty = f[(f.master_fail == 1) & (f.CREDLEV == 1) & (f.CIPCODE // 100 == 12)
+               & f.UNITID.isin(coa.UNITID)]
+    single = int(beauty[beauty.campuses == 1].UNITID.iloc[0])
+    inherited = int(beauty[beauty.campuses > 1].UNITID.iloc[0])
+    return f, single, inherited
+
+
+def check_ppd_absence_is_unknown(ns) -> list:
+    """{} for a school not in the data, never a zero-filled dict, and both
+    captions silent for it. A zero-filled dict is how "not flagged" gets
+    rendered out of a lookup that found nothing."""
+    problems = []
+    status = ns["ppd_program_status"]
+    if status(999_999, 1, "12") != {}:
+        problems.append("  ppd_program_status returns something for a school not "
+                        "in the data; absence must be {} (unknown), never 'clear'")
+    if ns["ppd_school_caption"](999_999, "Postsecondary nondegree award", "x") != "":
+        problems.append("  the sidebar note speaks about a school PPD has never seen")
+    _, single, _ = _ppd_fixture_ids()
+    st = status(single, 1, "12")
+    if not st or st.get("flagged", 0) < 1:
+        problems.append("  a known flagged beauty school reports no flag")
+    if ns["ppd_school_caption"](single, "High school diploma or equivalent", "x") != "":
+        problems.append("  the sidebar note speaks at a level PPD does not assess")
+    return problems
+
+
+def check_ppd_caption_counts_rows_on_screen(ns) -> list:
+    """The count is over the rows shown, recomputed here from the file, and
+    the caption is silent when no listed school is flagged."""
+    import pandas as pd
+    problems = []
+    f, _, _ = _ppd_fixture_ids()
+    res = ns["search_schools_by_budget"]("12", "Certificate (under 1 year)", 60_000, limit=25)
+    cap = ns["ppd_search_caption"](res, "Certificate (under 1 year)", "12")
+    hit = f[(f.master_fail == 1) & (f.CREDLEV == 1) & (f.CIPCODE // 100 == 12)
+            & f.UNITID.isin(res.UNITID)].UNITID.nunique()
+    if hit == 0:
+        problems.append("  the cosmetology fixture has no flagged school on screen; "
+                        "the fixture drifted")
+    elif f"**{hit} of the {len(res)} shown**" not in cap:
+        problems.append(f"  caption count does not match the rows on screen: "
+                        f"expected {hit} of {len(res)}, caption reads {cap[:60]!r}")
+    quiet = ns["search_schools_by_budget"]("11", "Bachelor's degree", 60_000, limit=25)
+    if ns["ppd_search_caption"](quiet, "Bachelor's degree", "11") != "":
+        problems.append("  the caption speaks on a search with no flagged school shown")
+    return problems
+
+
+def check_ppd_wording(ns) -> list:
+    """Preliminary, dated, and never a determination, on both surfaces."""
+    problems = []
+    _, single, inherited = _ppd_fixture_ids()
+    res = ns["search_schools_by_budget"]("12", "Certificate (under 1 year)", 60_000, limit=25)
+    texts = {
+        "search caption": ns["ppd_search_caption"](res, "Certificate (under 1 year)", "12"),
+        "sidebar note": ns["ppd_school_caption"](single, "Postsecondary nondegree award", "x"),
+    }
+    # The caveat is ONE shared sentence, and each surface must carry it
+    # verbatim. The first version of this check looked for the word
+    # "preliminary" anywhere in the text, and a control that stripped it from
+    # the shared caveat passed, because both surfaces also use the word in
+    # their own lead sentence. An inconclusive control is worse than none.
+    caveat = ns["ppd_caveat"]()
+    if "preliminary" not in caveat.lower() or "2027" not in caveat:
+        problems.append("  the shared caveat no longer says preliminary and dated")
+    for where, t in texts.items():
+        low = t.lower()
+        if caveat not in t:
+            problems.append(f"  the {where} does not carry the shared caveat verbatim")
+        for banned in ("will lose", "loses eligibility", "has lost", "is ineligible"):
+            if banned in low:
+                problems.append(f"  the {where} states a determination: {banned!r}")
+    inh = ns["ppd_school_caption"](inherited, "Postsecondary nondegree award", "x")
+    if "campuses" not in inh:
+        problems.append("  a flag inherited across a Title IV certification is not "
+                        "worded as one; it reads as a campus fact")
+    return problems
+
+
+def check_ppd_never_a_sort_key(ns) -> list:
+    """Display only. Ranking on it would rank schools by other people's
+    earnings against a metric ED calls provisional."""
+    import inspect
+    problems = []
+    if any("fail" in str(v).lower() or "ppd" in str(v).lower()
+           for v in ns["SEARCH_SORT_MODES"]):
+        problems.append("  a PPD flag is offered as a sort mode")
+    src = inspect.getsource(ns["search_schools_by_budget"])
+    if "master_fail" in src or "obbb_fail" in src or "load_ppd_flags" in src:
+        problems.append("  search_schools_by_budget reads the PPD flags; they must "
+                        "stay out of the search, filter and sort entirely")
+    return problems
+
 def main() -> int:
     ns = load_app_namespace()
     if ns["load_coa_dataset"]().empty:
@@ -1768,6 +1874,10 @@ def main() -> int:
         ("discipline map keys", lambda: check_discipline_map_keys(ns)),
         ("pdf columns fit", lambda: check_pdf_columns_fit_their_content(ns)),
         ("pdf header repeats", lambda: check_pdf_table_repeats_header(ns)),
+        ("ppd absence is unknown", lambda: check_ppd_absence_is_unknown(ns)),
+        ("ppd counts rows on screen", lambda: check_ppd_caption_counts_rows_on_screen(ns)),
+        ("ppd wording", lambda: check_ppd_wording(ns)),
+        ("ppd never a sort key", lambda: check_ppd_never_a_sort_key(ns)),
         ("net price and completion",
          lambda: check_net_price_and_completion(ns, base)),
         ("search level catalog", lambda: check_search_level_catalog(ns)),
