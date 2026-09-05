@@ -2452,3 +2452,22 @@ end $$;
 --
 -- NOT retroactively fixable: the anon key can neither UPDATE nor DELETE, and
 -- recomputing would need the whole scenario, not the stored summary.
+
+
+-- 2026-09-05  SEAM: a phone arriving at the bare calculator URL is the wizard.
+--
+-- No DDL. From this date requested_tool() returns "start" for a session whose
+-- User-Agent is a phone or Android tablet AND whose URL carries nothing but
+-- the session flags (test/research/admin). Consequences for the data:
+--   * usage_logs: those sessions write pageview_start, not pageview. The
+--     calculator's pageview count falls by roughly the mobile share of bare
+--     arrivals; the two rows together are the old series.
+--   * scenario_events / H2: a phone visitor reaches the calculator through
+--     the wizard's hand-off, which sends compare=0, so their session's arm
+--     and initial state disagree and they sit OUTSIDE the randomised analysis
+--     the way share-link arrivals always have. Mobile bare arrivals are
+--     therefore no longer in the H2 sample from this date. Condition on
+--     traffic_source/from as before; there is no device column and none was
+--     added.
+--   * wizard_offer (2026-09-05, earlier the same day) now fires only for
+--     phones that reached the calculator WITH a scenario in the URL.
