@@ -26568,7 +26568,7 @@ def render_start_wizard(always_open: bool = False) -> None:
             st.write(answer)
 
     def nav(i: int, ready: bool = True) -> None:
-        back, nxt = st.columns([1, 1])
+        back, nxt, _ = st.columns([1, 1, 5])
         if i > 0 and back.button("Back", key=f"wizard_back_{i}"):
             st.session_state.wizard_step = i - 1
             st.rerun()
