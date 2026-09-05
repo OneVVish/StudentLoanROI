@@ -26670,8 +26670,14 @@ def render_start_wizard(always_open: bool = False) -> None:
                      "default.")
             nav(4)
     else:
+        # compare=0 is deliberate. Without it the arrival is randomised into
+        # the contrast arm half the time and lands on Compare Mode with a
+        # Scenario B nobody asked about. Sending it explicitly is what a
+        # share link does, and it has the same consequence: the session's
+        # arm and its initial state disagree, which is how such sessions are
+        # kept outside the randomised analysis.
         params = {"mode": answers["mode"], "major": answers["major"],
-                  "city": answers["city"]}
+                  "city": answers["city"], "compare": "0"}
         if answers.get("school"):
             params["school"] = answers["school"]
             params["in_state"] = "1" if answers.get("in_state") else "0"
