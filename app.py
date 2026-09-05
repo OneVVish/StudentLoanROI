@@ -5742,7 +5742,7 @@ STANDALONE_TOOLS = {
         "label": "Estimate your Student Aid Index",
     },
     "start": {
-        # A scripted interview: five questions in chat bubbles that end in a
+        # A scripted interview: six questions in chat bubbles that end in a
         # prefilled calculator link. No model behind it. It exists to learn
         # whether visitors want to be walked through the sidebar at all,
         # which is the product question an assistant would answer at far
@@ -5751,11 +5751,11 @@ STANDALONE_TOOLS = {
         # reason: the registry hands it a pageview action, a traffic split
         # and cross-links for free, and a phone hides the sidebar entirely.
         "action": "pageview_start",
-        "title": "🧭 Start Here: Five Questions",
+        "title": "🧭 Start Here: Six Questions",
         "caption": "**Free · anonymous · no sign-up.** Answer five "
                    "questions and open the calculator already filled in. "
                    "Nothing you type here is stored.",
-        "label": "Start with five questions",
+        "label": "Start with six questions",
     },
 }
 
@@ -26542,8 +26542,31 @@ def render_sai_worksheet(always_open: bool = False) -> None:
             )
 
 
+@st.cache_data
+def wizard_school_options() -> tuple:
+    """(ids, labels, names) for the wizard's school list, built ONCE.
+
+    school_option_label does a frame lookup per call, and a selectbox calls
+    format_func once per option per rerun: 5,036 lookups on every click,
+    measured at 3.7 seconds a step. Cached, the labels are a dict read."""
+    coa = load_coa_dataset().sort_values("INSTNM")
+    ids = [0] + coa["UNITID"].tolist()
+    labels = {0: "Not yet, skip this"}
+    labels.update({int(u): school_option_label(u, coa) for u in coa["UNITID"]})
+    names = {int(u): str(n) for u, n in zip(coa["UNITID"], coa["INSTNM"])}
+    return ids, labels, names
+
+
+@st.cache_data
+def wizard_choice_names(mode: str) -> list:
+    """The sorted major or career names for the wizard's second question."""
+    if mode == DATASET_MODE_MAJOR:
+        return sorted(load_nyfed_majors(MAJORS_CSV_PATH))
+    return sorted(build_major_data(CAREERS_CSV_PATH_NATIONAL, mode=DATASET_MODE_CAREER))
+
+
 def render_start_wizard(always_open: bool = False) -> None:
-    """Five questions in chat bubbles, ending in a prefilled calculator link.
+    """Six questions in chat bubbles, ending in a prefilled calculator link.
 
     A FORM WEARING A CHAT COSTUME, on purpose. There is no model behind it and
     nothing here computes: the hand-off is a real navigation through
@@ -26552,6 +26575,12 @@ def render_start_wizard(always_open: bool = False) -> None:
     already guards. Computing anything here would be a second call site for
     compute_scenario_results, which is the shape that put a 76 percent
     overstatement on screen once.
+
+    The first question is who is going to school, because it is the one that
+    changes the QUESTION rather than the answer: a returning student is
+    measured against their own pay, not a debt-free 18-year-old, and a wrong
+    default there silently answers a different question. It rides ?smode=,
+    ?age=, ?cur_sal= and ?sal10=, the same params a share link carries.
 
     State is two session keys: the step index and the answers so far. Answered
     steps render as bubbles above the current one, so the page reads as the
@@ -26577,6 +26606,7 @@ def render_start_wizard(always_open: bool = False) -> None:
             st.session_state.wizard_step = i + 1
             st.rerun()
 
+    q_who = "Who is going to school?"
     q_mode = "Are you choosing a major to study, or a career to aim for?"
     q_pick = {DATASET_MODE_MAJOR: "Which major?", DATASET_MODE_CAREER: "Which career?"}
     q_school = "Do you have a school in mind? Start typing its name, or skip this."
@@ -26584,17 +26614,52 @@ def render_start_wizard(always_open: bool = False) -> None:
     q_city = "Where do you expect to live and work after?"
 
     if step > 0:
-        said(q_mode, answers["mode_label"])
+        who = answers["who"]
+        if answers.get("returning"):
+            who += (f" (age {answers['age']}, {fmt_money(answers['cur_sal'])} now, "
+                    f"{fmt_money(answers['sal10'])} in ten years without it)")
+        said(q_who, who)
     if step > 1:
-        said(q_pick[answers["mode"]], answers["major"])
+        said(q_mode, answers["mode_label"])
     if step > 2:
+        said(q_pick[answers["mode"]], answers["major"])
+    if step > 3:
         said(q_school, answers.get("school") or "Not yet")
-    if step > 3 and answers.get("school"):
+    if step > 4 and answers.get("school"):
         said(q_state, "Yes" if answers.get("in_state") else "No")
-    if step > 4:
+    if step > 5:
         said(q_city, answers["city"])
 
     if step == 0:
+        with st.chat_message("assistant"):
+            who = st.radio(q_who, STUDENT_MODE_OPTIONS, key="wizard_who",
+                           horizontal=True,
+                           help="Straight from high school measures the degree "
+                                "against a debt-free high school graduate. Going "
+                                "back to school measures it against your own "
+                                "pay today, which is the honest comparison if "
+                                "you already have a job.")
+            answers["who"] = who
+            answers["returning"] = who == STUDENT_MODE_RETURNING
+            if answers["returning"]:
+                answers["age"] = st.number_input(
+                    "Your age now", min_value=18, max_value=80, step=1,
+                    value=30, key="wizard_age")
+                answers["cur_sal"] = st.number_input(
+                    "Your salary now, per year", min_value=0,
+                    max_value=1_000_000, step=1_000, value=50_000,
+                    key="wizard_cur_sal",
+                    help="What you earn today. The degree is measured "
+                         "against this instead of a high school graduate.")
+                answers["sal10"] = st.number_input(
+                    "Your salary in ten years if you do not go", min_value=0,
+                    max_value=1_000_000, step=1_000,
+                    value=int(answers["cur_sal"]), key="wizard_sal10",
+                    help="Staying put is not standing still. Leaving this at "
+                         "today's salary assumes no raises ever, which "
+                         "flatters the degree.")
+            nav(0)
+    elif step == 1:
         with st.chat_message("assistant"):
             # The question IS the widget's label, so Streamlit's help icon
             # sits beside it; the help text is the sidebar's own, shortened.
@@ -26608,21 +26673,17 @@ def render_start_wizard(always_open: bool = False) -> None:
             answers["mode_label"] = label
             answers["mode"] = (DATASET_MODE_MAJOR if label == "A major"
                                else DATASET_MODE_CAREER)
-            nav(0)
-    elif step == 1:
+            nav(1)
+    elif step == 2:
         with st.chat_message("assistant"):
-            if answers["mode"] == DATASET_MODE_MAJOR:
-                names = sorted(load_nyfed_majors(MAJORS_CSV_PATH))
-            else:
-                names = sorted(build_major_data(CAREERS_CSV_PATH_NATIONAL,
-                                                mode=DATASET_MODE_CAREER))
+            names = wizard_choice_names(answers["mode"])
             answers["major"] = st.selectbox(
                 q_pick[answers["mode"]], names, key="wizard_major",
                 help="This sets the salary numbers used everywhere in the "
                      "calculator. Click the box and type part of the name to "
                      "jump to it.")
-            nav(1)
-    elif step == 2:
+            nav(2)
+    elif step == 3:
         with st.chat_message("assistant"):
             # ONE list, not a search box and a picker. The first version
             # showed matches only after Enter, so a name typed and followed
@@ -26631,26 +26692,22 @@ def render_start_wizard(always_open: bool = False) -> None:
             # A selectbox filters as you type and cannot be skipped past.
             # Options are UNITIDs with the sidebar's own labels, so two
             # schools sharing a name stay distinguishable; 0 is "not yet".
-            coa = load_coa_dataset().sort_values("INSTNM")
-            ids = [0] + coa["UNITID"].tolist()
+            ids, labels, names = wizard_school_options()
             picked = st.selectbox(
-                q_school, ids, key="wizard_school",
-                format_func=lambda u: ("Not yet, skip this" if u == 0
-                                       else school_option_label(u, coa)),
+                q_school, ids, key="wizard_school", format_func=labels.get,
                 help="Naming a school fills in its published yearly cost, "
                      "which is what the loan estimate is built from. Click "
                      "the box and type to search.")
             if picked:
-                answers["school"] = str(coa.loc[coa["UNITID"] == picked,
-                                                "INSTNM"].iloc[0])
+                answers["school"] = names[int(picked)]
             else:
                 answers["school"] = None
                 st.caption("Skipping keeps the calculator's default school; "
                            "you can change it in the sidebar.")
-            nav(2)
-    elif step == 3:
+            nav(3)
+    elif step == 4:
         if not answers.get("school"):
-            st.session_state.wizard_step = 4
+            st.session_state.wizard_step = 5
             st.rerun()
         with st.chat_message("assistant"):
             answers["in_state"] = st.checkbox(
@@ -26659,8 +26716,8 @@ def render_start_wizard(always_open: bool = False) -> None:
                      "lower than out-of-state. Residency is a year of physical "
                      "presence plus intent, and a dependent student normally "
                      "follows their parents' state.")
-            nav(3)
-    elif step == 4:
+            nav(4)
+    elif step == 5:
         with st.chat_message("assistant"):
             cities = list(CITY_DATA)
             answers["city"] = st.selectbox(
@@ -26668,7 +26725,7 @@ def render_start_wizard(always_open: bool = False) -> None:
                 help="Sets the cost of living, and for a career the local "
                      "pay as well. Not sure yet? National Average is a fair "
                      "default.")
-            nav(4)
+            nav(5)
     else:
         # compare=0 is deliberate. Without it the arrival is randomised into
         # the contrast arm half the time and lands on Compare Mode with a
@@ -26677,7 +26734,12 @@ def render_start_wizard(always_open: bool = False) -> None:
         # arm and its initial state disagree, which is how such sessions are
         # kept outside the randomised analysis.
         params = {"mode": answers["mode"], "major": answers["major"],
-                  "city": answers["city"], "compare": "0"}
+                  "city": answers["city"], "compare": "0",
+                  "smode": "returning" if answers.get("returning") else "first"}
+        if answers.get("returning"):
+            params.update({"age": str(int(answers["age"])),
+                           "cur_sal": str(int(answers["cur_sal"])),
+                           "sal10": str(int(answers["sal10"]))})
         if answers.get("school"):
             params["school"] = answers["school"]
             params["in_state"] = "1" if answers.get("in_state") else "0"
@@ -26688,14 +26750,17 @@ def render_start_wizard(always_open: bool = False) -> None:
         with st.chat_message("assistant"):
             st.write("That is everything the calculator needs to start. It "
                      "will fill in the loan from the school's published costs "
-                     "and show the ten-year result against not going at all; "
-                     "every answer here can be changed in its sidebar.")
+                     "and show the ten-year result against "
+                     + ("your own pay today" if answers.get("returning")
+                        else "not going at all")
+                     + "; every answer here can be changed in its sidebar.")
             st.link_button("Open the calculator with these answers", url,
                            type="primary")
         if not st.session_state.get("wizard_logged"):
             st.session_state.wizard_logged = True
             log_usage_event(f"wizard_done:mode={answers['mode']}"
-                            f":school={int(bool(answers.get('school')))}")
+                            f":school={int(bool(answers.get('school')))}"
+                            f":returning={int(bool(answers.get('returning')))}")
         if st.button("Start over", key="wizard_reset"):
             for k in ("wizard_answers", "wizard_step", "wizard_logged"):
                 st.session_state.pop(k, None)

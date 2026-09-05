@@ -152,6 +152,10 @@ SHARE_EXEMPT = {
     # ?school=, ?in_state= and ?city= on a real navigation into the calculator.
     # They ride the calculator's OWN share params on the other side; a link to
     # the wizard page itself has nothing to reopen.
+    "wizard_who": "start wizard answer; hands off as ?smode=",
+    "wizard_age": "start wizard answer; hands off as ?age=",
+    "wizard_cur_sal": "start wizard answer; hands off as ?cur_sal=",
+    "wizard_sal10": "start wizard answer; hands off as ?sal10=",
     "wizard_mode": "start wizard answer; hands off as ?mode=",
     "wizard_major": "start wizard answer; hands off as ?major=",
     "wizard_school": "start wizard answer; hands off as ?school=",
