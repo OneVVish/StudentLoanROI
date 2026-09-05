@@ -26600,12 +26600,11 @@ def render_start_wizard(always_open: bool = False) -> None:
             # sits beside it; the help text is the sidebar's own, shortened.
             label = st.radio(q_mode, ["A major", "A career"], key="wizard_mode",
                              horizontal=True,
-                             help="Major: what people who studied that subject "
-                                  "actually earn, including those working "
-                                  "outside it (NY Fed, 73 majors). Career: what "
-                                  "people already doing a specific job earn "
-                                  "(BLS, 836 occupations), which assumes you "
-                                  "get that job.")
+                             help="A major is what you would study; the "
+                                  "numbers follow everyone who studied it, "
+                                  "whatever job they ended up in. A career is "
+                                  "a specific job; the numbers assume you get "
+                                  "that job.")
             answers["mode_label"] = label
             answers["mode"] = (DATASET_MODE_MAJOR if label == "A major"
                                else DATASET_MODE_CAREER)
@@ -26638,10 +26637,9 @@ def render_start_wizard(always_open: bool = False) -> None:
                 q_school, ids, key="wizard_school",
                 format_func=lambda u: ("Not yet, skip this" if u == 0
                                        else school_option_label(u, coa)),
-                help="Naming a school fills in its published Cost of "
-                     "Attendance from College Scorecard, which is what the "
-                     "loan estimate is built from. Click the box and type to "
-                     "search all 5,035.")
+                help="Naming a school fills in its published yearly cost, "
+                     "which is what the loan estimate is built from. Click "
+                     "the box and type to search.")
             if picked:
                 answers["school"] = str(coa.loc[coa["UNITID"] == picked,
                                                 "INSTNM"].iloc[0])
@@ -26667,10 +26665,9 @@ def render_start_wizard(always_open: bool = False) -> None:
             cities = list(CITY_DATA)
             answers["city"] = st.selectbox(
                 q_city, cities, key="wizard_city",
-                help="Sets the cost-of-living adjustment, and in Career mode "
-                     "the metro's own wages too. Major mode wages are "
-                     "national, since the NY Fed publishes no per-city "
-                     "figures. National Average is a fair default.")
+                help="Sets the cost of living, and for a career the local "
+                     "pay as well. Not sure yet? National Average is a fair "
+                     "default.")
             nav(4)
     else:
         params = {"mode": answers["mode"], "major": answers["major"],
