@@ -725,7 +725,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 <div class="wrap">
 
 <header>
-  <a class="logo" href="/" aria-label="worthmydegree.com">{logo_svg}</a>
+  <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
   <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
@@ -1137,7 +1137,7 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
 <body>
 <div class="wrap">
 <header>
-  <a class="logo" href="/" aria-label="worthmydegree.com">{logo_svg}</a>
+  <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 
@@ -1673,7 +1673,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 <body>
 <div class="wrap">
 <header>
-  <a class="logo" href="/" aria-label="worthmydegree.com">{logo_svg}</a>
+  <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">
@@ -1834,7 +1834,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
 <body>
 <div class="wrap">
 <header>
-  <a class="logo" href="/" aria-label="worthmydegree.com">{logo_svg}</a>
+  <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 <section class="guides-band">
