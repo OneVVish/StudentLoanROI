@@ -21948,7 +21948,120 @@ def plan_choice_sentences(analysis: dict) -> list:
     if analysis["pslf"] and (RAP_STRATEGY_LABEL in chosen["label"]
                              or LEGACY_RAP_STRATEGY_LABEL in chosen["label"]):
         lines.append(PSLF_BUYBACK_RAP_NOTE)
-    return lines
+    if analysis.get("flip"):
+        lines.append(flip_sentence(analysis, analysis["flip"].get("income", 0.0)))
+    return [l for l in lines if l]
+
+
+def ride_flip_income(analysis, at_income, income: float,
+                     lo: float = 20_000.0, hi: float = None,
+                     step: float = 10_000.0):
+    """How fragile the verdict is: the income at which it reverses.
+
+    Two borrowers $20,000 apart can get opposite verdicts, and a borrower near
+    the peak of the cost curve is in the worst place on a curve they cannot
+    see. This answers "does this still hold if I end up earning more", which
+    is the one sentence the panel never said.
+
+    `at_income(inc)` is the caller's closure that rebuilds the whole analysis
+    at another income, everything else held fixed; this function only reads
+    the sign of `savings` off what comes back. It serves BOTH shapes the
+    analysis can take, because the sign convention is shared: positive means
+    the alternative (committing, or switching plans) beats staying put.
+
+    SCAN, NEVER BISECT FROM THE ENDS. The cost curve is not monotonic in
+    income: under IBR it rises, peaks and converges on the Standard plan
+    without crossing it, and under RAP it crosses TWICE, because RAP has no
+    payment ceiling and a high earner overpays and beats the Standard plan
+    outright. A bisection assuming one crossing reported "riding wins below
+    $420,000" on the first attempt at drawing this. So the grid is scanned
+    for every sign change and each bracket is then refined, which is safe
+    because a bracket holds exactly one edge by construction.
+
+    Returns one of four shapes, or None:
+      "same"   no income tested tells the two paths apart
+      "holds"  the verdict never reverses across the range tested
+      "flip"   one reversal, at `at`
+      "band"   two reversals, at `at[0]` and `at[1]` (the RAP shape)
+    Three or more reversals returns None rather than picking any of them.
+    PSLF returns None: a tax-free discharge at 120 payments has no fork of
+    this kind to be sensitive about.
+    """
+    if analysis is None or analysis.get("pslf"):
+        return None
+    hi = hi or min(max(3.0 * float(income), 300_000.0), 500_000.0)
+
+    def sign(a):
+        if a is None:
+            return 0
+        s = float(a.get("savings", 0.0) or 0.0)
+        return 1 if s > 0.5 else (-1 if s < -0.5 else 0)
+
+    grid = []
+    inc = float(lo)
+    while inc <= hi + 1e-9:
+        grid.append(inc)
+        inc += step
+    signs = [sign(at_income(g)) for g in grid]
+    nz = [(g, s) for g, s in zip(grid, signs) if s]
+    now = sign(analysis)
+    if not nz:
+        return {"kind": "same", "now": now, "lo": lo, "hi": hi}
+    changes = [i for i in range(1, len(nz)) if nz[i][1] != nz[i - 1][1]]
+
+    def refine(a, b, sa):
+        # Exactly one edge between a and b, so bisection is safe HERE and
+        # nowhere else. It converges on where the verdict stops holding.
+        for _ in range(12):
+            m = (a + b) / 2
+            if sign(at_income(m)) == sa:
+                a = m
+            else:
+                b = m
+        return (a + b) / 2
+
+    crossings = [refine(nz[i - 1][0], nz[i][0], nz[i - 1][1]) for i in changes]
+    base = {"now": now, "lo": nz[0][0], "hi": nz[-1][0], "grid_hi": hi,
+            "zeros_above": nz[-1][0] < grid[-1] - step / 2}
+    if not crossings:
+        return {"kind": "holds", **base}
+    if len(crossings) == 1:
+        return {"kind": "flip", "at": crossings[0], **base}
+    if len(crossings) == 2:
+        return {"kind": "band", "at": sorted(crossings), **base}
+    return None
+
+
+def flip_sentence(analysis: dict, income: float) -> str:
+    """The sensitivity as one sentence, appended to whichever verdict the
+    panel gave. Figures round to the nearest thousand and say "about": the
+    edge is a grid refinement, never a number to the dollar. Empty when the
+    verdict at this income is itself "about the same", since a reversal of
+    nothing is not a sentence."""
+    flip = analysis.get("flip")
+    if not flip:
+        return ""
+    k = lambda v: fmt_money(round(v / 1000.0) * 1000)
+    if flip["kind"] == "same":
+        return "The two paths cost about the same at every income tested."
+    if flip["now"] == 0:
+        return ""
+    if flip["kind"] == "flip":
+        at = flip["at"]
+        return (f"That holds up to about {k(at)} of income and reverses above it."
+                if income < at else
+                f"That holds down to about {k(at)} of income and reverses below it.")
+    if flip["kind"] == "band":
+        lo, hi = flip["at"]
+        return (f"That holds between about {k(lo)} and {k(hi)} of income and "
+                f"reverses outside that band."
+                if lo <= income <= hi else
+                f"That holds below about {k(lo)} and above about {k(hi)} of "
+                f"income, and reverses between them.")
+    tail = (" Above that the two paths cost about the same."
+            if flip.get("zeros_above") else "")
+    return (f"That holds at every income tested, from about {k(flip['lo'])} "
+            f"to {k(flip['hi'])}.{tail}")
 
 
 def strategy_verdict_sentences(analysis: dict) -> list:
@@ -22039,7 +22152,10 @@ def strategy_verdict_sentences(analysis: dict) -> list:
                    "here.")
     else:
         verdict = "The two paths land within a dollar of each other."
-    return [ride_txt, pivot_txt, verdict]
+    out = [ride_txt, pivot_txt, verdict]
+    if analysis.get("flip"):
+        out.append(flip_sentence(analysis, analysis["flip"].get("income", 0.0)))
+    return [l for l in out if l]
 
 
 def _repayment_actions(rows, balance, rate, income, deps, accrued,
@@ -22781,6 +22897,37 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             prior_payments=prior_payments, pslf=pslf and forgivable,
             extra_now=extra_now, prefer_label=chosen,
             old_ibr=old_ibr and forgivable)
+        if strategy_analysis is not None:
+            # HOW FRAGILE IS THAT VERDICT. Rebuilds the analysis across a grid
+            # of incomes with everything else held fixed, and attaches the
+            # answer to the analysis dict so the shared sentence builder
+            # carries it to the screen AND the PDF. Attached HERE, above
+            # _repayment_actions, or the report would print a verdict without
+            # the sentence the panel shows under it.
+            #
+            # Memoized on the tool's share params plus the two panel inputs
+            # they cannot see: 3 to 10 ms per income point, times a grid of
+            # up to fifty, on every rerun is the cost this saves. session_state
+            # rather than st.cache_data, for memoized_pdf's reasons.
+            def _at_income(_inc):
+                _rows = compare_existing_loan_plans(
+                    balance, rate, _inc, deps, forgivable,
+                    private_extra=private_extra, family_size=family_size,
+                    spouse_income=spouse_income, filing_status=filing_status,
+                    starting_interest=accrued, pslf=pslf and forgivable,
+                    prior_payments=prior_payments, federal_loans=fed_loans,
+                    private_loans=priv_loans, old_ibr=old_ibr and forgivable)
+                return pivot_strategy_analysis(
+                    _rows, fed_loans, _inc, deps, starting_interest=accrued,
+                    prior_payments=prior_payments, pslf=pslf and forgivable,
+                    extra_now=extra_now, prefer_label=chosen,
+                    old_ibr=old_ibr and forgivable)
+            _flip = memoized_pdf(
+                "ride_flip",
+                pdf_memo_signature(build_repayment_share_params(), chosen, extra_now),
+                lambda: ride_flip_income(strategy_analysis, _at_income, income))
+            if _flip is not None:
+                strategy_analysis["flip"] = {**_flip, "income": float(income)}
         # "Payoff 16.8 yrs" is a number; "you'd be 43" is a decision aid --
         # the same reasoning as render_payoff_age on the calculator side,
         # including its retirement-age warning threshold. For the selected
