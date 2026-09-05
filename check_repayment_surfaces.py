@@ -300,6 +300,29 @@ def main() -> int:
                     f"  [{label}] the strategy panel is the {analysis.get('kind')!r} "
                     f"shape where {want!r} was expected; the fallback fired on "
                     f"the wrong portfolio, or did not fire at all")
+            # The sensitivity rides the analysis dict, so it has to be attached
+            # before the sentences are built, exactly as the renderer does.
+            def _at_income(inc, _spec=spec, _fed=fed, _priv=priv,
+                           _total=total, _rate=rate):
+                r = use("compare_existing_loan_plans")(
+                    _total, _rate, inc, 0,
+                    _spec.get("forgivable", True), 0.0,
+                    _spec.get("pslf", False), _spec.get("prior_payments", 0),
+                    federal_loans=_fed, private_loans=_priv,
+                    old_ibr=_spec.get("old_ibr", False),
+                    private_extra=_spec.get("private_extra", 0.0),
+                    family_size=_spec.get("family_size"),
+                    spouse_income=_spec.get("spouse_income", 0.0),
+                    filing_status=(ns["FILING_JOINT"] if _spec.get("filing_joint")
+                                   else ns["FILING_SINGLE"]),
+                    poverty_region=_spec.get("poverty_region", "contiguous"))
+                return use("pivot_strategy_analysis")(
+                    r, _fed, inc, 0, pslf=_spec.get("pslf", False),
+                    prefer_label=r[0][0], old_ibr=_spec.get("old_ibr", False))
+            flip = use("ride_flip_income")(analysis, _at_income, spec["income"],
+                                           step=20_000.0)
+            if flip is not None:
+                analysis["flip"] = {**flip, "income": float(spec["income"])}
             sentences = use("strategy_verdict_sentences")(analysis)
             if not sentences:
                 problems.append(f"  [{label}] the strategy panel produced no prose")
