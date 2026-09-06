@@ -26898,10 +26898,14 @@ elif active_tool == "sai":
 elif active_tool == "start":
     render_start_wizard(always_open=True)
 if active_tool:
-    st.caption(
-        "Looking at whether a degree is worth borrowing for instead? "
-        f"[Open the full calculator]({internal_tool_url()})."
-    )
+    # The wizard IS the way into the calculator, and on a phone it already
+    # carries a skip link at the top; a second invitation under the questions
+    # read as a competing door. Removed on request, 2026-09-06.
+    if active_tool != "start":
+        st.caption(
+            "Looking at whether a degree is worth borrowing for instead? "
+            f"[Open the full calculator]({internal_tool_url()})."
+        )
     # The other tools, so each standalone page is a way IN to the rest rather
     # than a dead end. Only ever the ones this page is not.
     _others = [f"[{t['label']}]({internal_tool_url(key)})"
