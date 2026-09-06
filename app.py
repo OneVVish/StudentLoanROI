@@ -5888,10 +5888,21 @@ def requested_tool() -> str:
 
 
 def bare_arrival() -> bool:
-    """True when the URL carries nothing but the session flags."""
+    """True when the URL names no scenario and no page: nothing but the
+    session flags, a src= tag, or the landing page's own CTA (go=1 with
+    from=welcome).
+
+    src= is a session flag here, not a destination: a phone arriving from a
+    marketing link is exactly who the wizard is for, and the tag rides on
+    through internal_tool_url to every page after. A from= naming any page
+    other than the landing means the visitor clicked "open the calculator"
+    somewhere specific and gets it.
+    """
     try:
-        return not any(k not in ("test", "research", "admin")
-                       for k in st.query_params.keys())
+        keys = set(st.query_params.keys())
+        origin = get_shared_default("from", "")
+        return (keys <= {"test", "research", "admin", "src", "go", "from"}
+                and origin in ("", NAV_WELCOME))
     except Exception:
         return False
 
