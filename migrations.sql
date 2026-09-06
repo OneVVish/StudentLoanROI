@@ -2471,3 +2471,46 @@ end $$;
 --     added.
 --   * wizard_offer (2026-09-05, earlier the same day) now fires only for
 --     phones that reached the calculator WITH a scenario in the URL.
+
+
+-- 2026-09-06  SEAM: an infographic's src tag is <channel>-<code>.
+--
+-- No DDL. From this date traffic_source for the infographics takes the form
+-- <two-letter channel>-<chart code> (chart_codes.py): pi-fmm is the
+-- federal-money map as a PICTURE, sh-fmm the same chart shared from the
+-- gallery's Share button, re-fmm a link we posted on Reddit; ig, li and em
+-- likewise. Two consequences:
+--   * Rows tagged with a bare chart slug (2026-08-22 to 2026-09-06) are the
+--     picture channel under its old name. Fold them onto pi-<code> on read
+--     with this table, which is the initials rule chart_codes.py applies:
+--     best-career-by-year                          bcby
+--     best-major-by-the-data                       bmbtd
+--     borrow-the-federal-maximum                   btfm
+--     business-majors-tier-list                    bmtl
+--     careers-without-a-bachelors                  cwab
+--     community-college-both-careers               ccbc
+--     community-college-careers                    ccc
+--     community-college-certificate-careers        cccc
+--     federal-money-map                            fmm
+--     federal-money-runs-out                       fmro
+--     forgiveness-map-pair                         fmp
+--     majors-tier-list                             mtl
+--     plan-change-by-major                         pcbm
+--     professional-debt-versus-pay                 pdvp
+--     rent-versus-the-raise                        rvtr
+--     same-degree-different-debt                   sddd
+--     student-vs-parent-debt                       svpd
+--     the-family-maximum                           tfm
+--     top-earning-careers                          tec
+--     transfer-path                                tp
+--     what-degree-holders-earn-by-age              wdheba
+--     what-the-aid-formula-expects                 wtafe
+--     what-the-aid-formula-expects-ca              wtafec
+--     what-the-loan-really-costs                   wtlrc
+--     world-tuition                                wt
+--   * sh-<code> rows did not exist before: a visitor arriving through a
+--     shared gallery link was NULL, indistinguishable from organic. A rise
+--     in tagged gallery reads from this date is measurement, not traffic,
+--     and the (organic) bucket falls by the same amount.
+-- reddit, poster and img keep their meaning; they predate this scheme and
+-- are not of its shape.

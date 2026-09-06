@@ -182,6 +182,29 @@ def main() -> int:
                 fail(f"{where}: static/{served} is missing -- the gallery "
                      f"would render a broken image. Run infra/build_site.py "
                      f"with marketing/infographics/ present to regenerate it.")
+    # THE SRC CODE. Every chart resolves one, they are unique, the built card
+    # carries it, and the Share tag it makes is under the writers' 40-char
+    # clamp. all_codes() raises on a collision, which is the negative control:
+    # plant the same `code:` in two manifests and this reports both slugs.
+    if charts:
+        import chart_codes
+        try:
+            codes = chart_codes.all_codes()
+        except ValueError as err:
+            fail(f"content/charts: {err}")
+            codes = {}
+        gallery = ROOT / "infra" / "guides" / "charts.html"
+        built = gallery.read_text() if gallery.exists() else ""
+        for c in charts:
+            where = f"content/charts/{c['slug']}.md"
+            code = codes.get(c["slug"])
+            if not code:
+                continue
+            if len(f"sh-{code}") > 40:
+                fail(f"{where}: tag sh-{code} exceeds the 40-char src clamp")
+            if f'data-code="{code}"' not in built:
+                fail(f"{where}: the built gallery carries no data-code=\"{code}\" "
+                     f"for it, so its Share link would be untagged")
     if charts:
         if '"/charts"' not in worker:
             fail("infra/worker.js has no /charts route -- the Worker 301s "

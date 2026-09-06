@@ -1680,7 +1680,10 @@ def load_charts() -> list:
                                   if has_light else None)
         meta["light_phone_url"] = (meta["light_phone"] + cache_bust(meta["light_phone"])
                                    if has_light_phone else None)
+        # The chart's short code, for ?src= tags (see chart_codes.py).
+        meta["code"] = chart_code(meta["slug"])
         charts.append(meta)
+    all_codes()   # raises on a collision; two charts must never share a tag
     return sorted(charts, key=lambda m: m["date"], reverse=True)
 
 
@@ -1755,6 +1758,8 @@ def card_image_for(post: dict):
 
 
 CHART_SHARE_BASE = "https://worthmydegree.com/charts"
+sys.path.insert(0, str(ROOT))
+from chart_codes import all_codes, chart_code  # noqa: E402  the src vocabulary, one file
 
 
 def build_charts_index_html(charts, logo_svg, favicon) -> str:
@@ -1815,7 +1820,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     <b>{_attr(c["title"])}</b>
     <span class="sum">{_attr(c["summary"])}</span>
     <p class="src">{_attr(c.get("source", ""))}</p>
-    <div class="reactions" data-slug="{c["slug"]}" data-title="{_attr(c["title"])}">
+    <div class="reactions" data-slug="{c["slug"]}" data-code="{c["code"]}" data-title="{_attr(c["title"])}">
       <button class="like" type="button">&#9829; Helpful</button>
       <span class="count">&nbsp;</span>
       <button class="share" type="button">&#128279; Share</button>{thread}
@@ -1880,7 +1885,12 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
   document.querySelectorAll(".chart-card .reactions").forEach(function (bar) {{
     var slug  = bar.dataset.slug;
     var title = bar.dataset.title;
-    var url   = base + "#" + slug;
+    // The shared link carries src=sh-<code>: the CHANNEL (the Share button)
+    // and the PICTURE, never the sharer's own tag, so it is not the
+    // fabricated attribution the guide share refuses. Before this the link
+    // was bare, and everyone who arrived through it was indistinguishable
+    // from organic. Query before the fragment, the CARRY_QS_JS lesson.
+    var url   = base + "?src=sh-" + bar.dataset.code + "#" + slug;
     var like  = bar.querySelector(".like");
     var share = bar.querySelector(".share");
     var out   = bar.querySelector(".count");

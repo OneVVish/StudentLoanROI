@@ -24338,6 +24338,26 @@ def render_admin_dashboard() -> None:
         _by_src = (_by_src.sort_values(["Pageviews", "Unique visits"], ascending=False)
                           .reset_index())
         render_centered_table(_by_src)
+        # THE CHANNEL ROLL-UP. Since 2026-09-06 an infographic's tag is
+        # <two-letter channel>-<chart code> (chart_codes.py): pi-fmm is the
+        # federal-money map as a picture, sh-fmm the same chart shared from
+        # the gallery, re-fmm a link we posted on Reddit. The table above
+        # keeps one row per tag, which answers "which picture"; this one
+        # folds the tag to its channel, which answers "which door". Tags of
+        # any other shape (reddit, poster, img, the pre-2026-09-06 slugs)
+        # stay whole, so the old series is untouched.
+        _chan = _by_src.copy()
+        _chan["Channel"] = _chan["Source"].map(
+            lambda t: t.split("-", 1)[0] if re.match(r"^[a-z]{2}-[a-z]{2,6}$", str(t)) else t)
+        _chan = (_chan.groupby("Channel")[["Pageviews", "Unique visits", "Logged events"]]
+                      .sum().sort_values(["Pageviews", "Unique visits"], ascending=False)
+                      .reset_index())
+        if (_chan["Channel"] != _by_src["Source"]).any() or len(_chan) != len(_by_src):
+            st.caption("**By channel.** The two letters before the hyphen: `pi` a "
+                       "picture, `sh` the gallery's Share button, `re` Reddit, "
+                       "`ig` Instagram, `li` LinkedIn, `em` email. Older tags "
+                       "keep their own row.")
+            render_centered_table(_chan)
 
     st.divider()
     st.markdown("#### 🎓 What visitors configured")

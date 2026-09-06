@@ -33,6 +33,8 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 ROOT = Path(__file__).resolve().parent
 CHARTS = ROOT / "marketing"
 
@@ -105,6 +107,43 @@ def check(path: Path) -> list:
     return problems
 
 
+# Scripts whose pictures are NOT in the gallery keep a plain SRC_TAG: there is
+# no manifest to take a code from, and the tag still names the picture. Each
+# needs a reason, the SHARE_EXEMPT discipline.
+UNPUBLISHED_SCRIPTS = {
+    "forgiveness_by_income_chart.py": "the single-plan version; the pair is what shipped",
+    "forgiveness_map_chart.py": "one panel of forgiveness_map_pair.py, never published alone",
+    "debt_by_major_chart.py": "withheld, see marketing/rejected-charts/",
+    "reel_data.py": "an adapter, draws nothing",
+}
+
+
+def check_src_tags(path: Path) -> list:
+    """A published script burns worthmydegree.com/welcome?src=pi-<code>, the
+    code coming from chart_codes.chart_code so the picture, the gallery's
+    Share link and any link we post agree on the chart's name. The argument
+    must name a manifest by slug or image stem; a typo would tag every click
+    with an unpublished picture's initials, which looks like an answer."""
+    if path.name in UNPUBLISHED_SCRIPTS:
+        return []
+    text = path.read_text()
+    if "chart_code(" not in text:
+        return [f"  {path.name} burns no chart_code() tag; a published picture "
+                f"carries src=pi-<code>, or the script joins UNPUBLISHED_SCRIPTS "
+                f"with a reason"]
+    import chart_codes
+    known = set()
+    for slug, (_, stem) in chart_codes._manifests().items():
+        known.update({slug, stem})
+    problems = []
+    for name in re.findall(r'chart_code\(\s*"([^"]+)"', text):
+        if name not in known:
+            problems.append(f"  {path.name}: chart_code({name!r}) names no manifest "
+                            f"slug or image; the tag would be the initials of a "
+                            f"typo")
+    return problems
+
+
 def main() -> int:
     if not CHARTS.is_dir():
         # marketing/ is gitignored, so a clone genuinely has nothing to read.
@@ -123,6 +162,7 @@ def main() -> int:
             continue
         strings += len(found)
         problems.extend(check(path))
+        problems.extend(check_src_tags(path))
 
     if problems:
         print(f"chart prose: {len(problems)} problem(s)\n")
