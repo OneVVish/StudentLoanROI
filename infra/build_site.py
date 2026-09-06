@@ -746,6 +746,8 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
   <div class="stat"><b>{f['cities']}</b><span>US Metro Areas</span></div>
 </div>
 
+{charts_section}
+
 <section>
   <h2>The numbers colleges don't put on the brochure</h2>
   <p class="deck">Sticker price predicts almost nothing. These are the ones
@@ -840,8 +842,6 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 <div class="wrap">
 
 {guides_section}
-
-{charts_section}
 
 <div class="cta">
   <h2>Two minutes. Zero forms.</h2>
