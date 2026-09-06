@@ -426,7 +426,13 @@ SITE_CSS = """  :root {
        like \\2665 is read as an OCTAL escape and comes out as garbage.
        !important because the shared disc rule below the media block sets
        22px at the same specificity and would win on order. */
-    .chart-card.tall .reactions button { font-size: 0 !important; }
+    .chart-card.tall .reactions button { font-size: 0 !important;
+      pointer-events: auto; line-height: 1; cursor: pointer; border: 0;
+      border-radius: 999px; width: 48px; height: 48px; padding: 0;
+      background: rgba(255,255,255,.92); color: #0b0b0b;
+      box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+    .chart-card.tall .reactions .like { color: #e0245e; }
+    .chart-card.tall .reactions .like.on { background: #e0245e; color: #fff; }
     .chart-card.tall .reactions .like::before { content: "♥"; font-size: 22px; }
     .chart-card.tall .reactions .share::before { content: "🔗"; font-size: 22px; }
     .chart-card.tall .reactions .sharelink { pointer-events: none; order: 1;
@@ -439,10 +445,16 @@ SITE_CSS = """  :root {
   .viewer { position: fixed; inset: 0; z-index: 60; background: #0b0b0b;
     overflow: auto; -webkit-overflow-scrolling: touch; }
   @media (prefers-color-scheme: light) {
-    .viewer, .chart-card.tall, .chart-card.tall .shot { background: #ffffff; }
-    .viewer .close, .viewer .vbar button, .chart-card.tall .reactions button {
+    .viewer { background: #ffffff; }
+    .viewer .close, .viewer .vbar button {
       background: #111210; color: #f2f2f0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
-    .viewer .vlike, .chart-card.tall .reactions .like { color: #e0245e; }
+    .viewer .vlike { color: #e0245e; }
+  }
+  @media (max-width: 720px) and (prefers-color-scheme: light) {
+    .chart-card.tall, .chart-card.tall .shot { background: #ffffff; }
+    .chart-card.tall .reactions button {
+      background: #111210; color: #f2f2f0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+    .chart-card.tall .reactions .like { color: #e0245e; }
   }
   .viewer img { display: block; width: 200vw; max-width: none; }
   .viewer.fit img { width: 100vw; }
@@ -451,15 +463,18 @@ SITE_CSS = """  :root {
   .viewer .vbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61;
     display: flex; justify-content: space-between; pointer-events: none;
     padding: 14px 16px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
-  /* Icon only: a red heart and the chain, in white discs. */
-  .viewer .vbar button, .chart-card.tall .reactions button { pointer-events: auto;
+  /* Icon only: a red heart and the chain, in white discs. The viewer only
+     opens on a phone, so these can be global; the TALL CARD'S bar gets the
+     same discs inside the phone media query below and nowhere else. The
+     first cut applied them at every width and squeezed "Helpful" into a
+     48px disc on the desktop grid. */
+  .viewer .vbar button { pointer-events: auto;
     font: inherit; font-size: 22px; line-height: 1; cursor: pointer; border: 0;
     border-radius: 999px; width: 48px; height: 48px; padding: 0;
     background: rgba(255,255,255,.92); color: #0b0b0b;
     box-shadow: 0 2px 10px rgba(0,0,0,.35); }
-  .viewer .vlike, .chart-card.tall .reactions .like { color: #e0245e; }
-  .viewer .vlike.on, .chart-card.tall .reactions .like.on { background: #e0245e;
-    color: #fff; }
+  .viewer .vlike { color: #e0245e; }
+  .viewer .vlike.on { background: #e0245e; color: #fff; }
   .viewer .vbar button:disabled { opacity: 1; }
   .viewer .close { position: fixed; top: 12px; right: 12px; z-index: 61;
     width: 40px; height: 40px; border-radius: 999px; border: 0;
