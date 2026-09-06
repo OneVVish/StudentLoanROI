@@ -446,7 +446,7 @@ SITE_CSS = """  :root {
     overflow: auto; -webkit-overflow-scrolling: touch; }
   @media (prefers-color-scheme: light) {
     .viewer { background: #ffffff; }
-    .viewer .close, .viewer .zoom, .viewer .vbar button {
+    .viewer .close, .viewer .vbar button {
       background: #111210; color: #f2f2f0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
     .viewer .vlike { color: #e0245e; }
   }
@@ -476,12 +476,10 @@ SITE_CSS = """  :root {
   .viewer .vlike { color: #e0245e; }
   .viewer .vlike.on { background: #e0245e; color: #fff; }
   .viewer .vbar button:disabled { opacity: 1; }
-  .viewer .close, .viewer .zoom { position: fixed; top: 12px; z-index: 61;
+  .viewer .close { position: fixed; top: 12px; right: 12px; z-index: 61;
     width: 40px; height: 40px; border-radius: 999px; border: 0;
     background: rgba(255,255,255,.92); color: #0b0b0b; font-size: 18px;
     cursor: pointer; }
-  .viewer .close { right: 12px; }
-  .viewer .zoom { left: 12px; }
   [hidden] { display: none !important; }"""
 
 
@@ -1840,7 +1838,6 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 
 <div id="viewer" class="viewer" hidden>
   <button class="close" type="button" aria-label="Close">&#10005;</button>
-  <button class="zoom" type="button" aria-label="Zoom">&#128269;</button>
   <img alt="">
   <div class="vbar">
     <button class="vlike" type="button" aria-label="Helpful">&#9829;</button>
@@ -1994,8 +1991,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
         viewerImg.alt = shot.getAttribute("aria-label") || "";
         // OPENS FITTED TO THE SCREEN. It opened at twice the width, and a
         // phone reader had no visible way back out: pinching zooms the page
-        // under a fixed overlay, and the tap-to-toggle was undiscoverable.
-        // Fit first, a zoom button beside close, and a tap still toggles.
+        // under a fixed overlay. Fit first; a tap on the picture toggles.
         viewer.classList.add("fit");
         viewer.hidden = false; viewer.scrollTop = 0; viewer.scrollLeft = 0;
         document.body.style.overflow = "hidden";
@@ -2011,9 +2007,10 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
       if (current) current.querySelector(".reactions .share").click();
     }});
     viewer.querySelector(".close").addEventListener("click", closeViewer);
-    function toggleZoom() {{ viewer.classList.toggle("fit"); viewer.scrollLeft = 0; }}
-    viewer.querySelector(".zoom").addEventListener("click", toggleZoom);
-    viewerImg.addEventListener("click", toggleZoom);
+    // A tap on the picture toggles fit and double width; no button for it.
+    viewerImg.addEventListener("click", function () {{
+      viewer.classList.toggle("fit"); viewer.scrollLeft = 0;
+    }});
     document.addEventListener("keydown", function (e) {{
       if (e.key === "Escape" && !viewer.hidden) closeViewer();
     }});
