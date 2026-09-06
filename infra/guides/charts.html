@@ -277,6 +277,31 @@
     .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
+    /* ===== THE GALLERY IS A FEED ON A PHONE =====
+       Twenty-five dense pictures in a one-column grid is a long scroll of
+       cropped thumbnails. On a phone each card becomes one screen and the
+       page snaps card to card, the shape people already know from short
+       video: the whole picture uncropped (the <picture> source swaps the
+       16:9 crop for the square-padded landing image), the title, a clamped
+       summary, and the Helpful and Share bar pinned at the bottom of the
+       screen. A tap on the picture still opens it full size. Pure CSS: no
+       script, no new page, no new logging name, and the desktop grid is
+       untouched. The intro block is a snap point too, or a mandatory snap
+       would jump straight past it on load. */
+    html:has(.post-grid .chart-card) { scroll-snap-type: y mandatory; }
+    .guides-band, .post-head { scroll-snap-align: start; }
+    .post-grid:has(.chart-card) { gap: 0; }
+    .chart-card { scroll-snap-align: start; scroll-snap-stop: always;
+      min-height: 100vh; min-height: 100dvh; box-sizing: border-box;
+      border-radius: 0; border-left: 0; border-right: 0; }
+    .chart-card .shot { aspect-ratio: auto; height: 56vh; height: 56dvh;
+      display: flex; align-items: center; justify-content: center; }
+    .chart-card .shot img { object-fit: contain; object-position: center;
+      max-height: 100%; }
+    .chart-card span.sum { display: -webkit-box; -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical; overflow: hidden; }
+    .chart-card .src { display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; overflow: hidden; }
   }
 
   article { max-width: 68ch; margin: 0 auto; }
@@ -420,8 +445,10 @@
   <div class="chart-card" id="best-career-by-year">
     <a class="shot" href="/app/static/info-best-career-by-year.jpg?v=8563782f" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: The best-paid career depends on when you ask">
-      <img src="/app/static/card-info-best-career-by-year.jpg?v=ecc24d3a" alt="Where each career ranks by that year's pay among the 825 occupations the calculator models, at years 1, 5, 10 and 20 after a bachelor's degree, for every career that is ever in the top 20. At year 1 the best-paid career is Nurse Anesthetists; by year 10 it is Pediatric Surgeons, and 17 of the year-20 top 20 earned nothing at year 1."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-best-career-by-year.jpg?v=099f5d55">
+        <img src="/app/static/card-info-best-career-by-year.jpg?v=ecc24d3a" alt="Where each career ranks by that year's pay among the 825 occupations the calculator models, at years 1, 5, 10 and 20 after a bachelor's degree, for every career that is ever in the top 20. At year 1 the best-paid career is Nurse Anesthetists; by year 10 it is Pediatric Surgeons, and 17 of the year-20 top 20 earned nothing at year 1."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>The best-paid career depends on when you ask</b>
     <span class="sum">At year 1 the best-paid career is Nurse Anesthetists. By year 10 it is Pediatric Surgeons. Only 3 of the 20 best-paid careers at year 1 are still in the top 20 at year 20, and 17 of that later top 20 were in medical school at year 1.</span>
     <p class="src">BLS OEWS national medians and percentiles (May 2025), the CPS ASEC graduate age profile, and the training structure the calculator carries for each professional path, ranked by the calculator's own earnings curve</p>
@@ -435,8 +462,10 @@
   <div class="chart-card" id="federal-money-map">
     <a class="shot" href="/app/static/info-federal-money-map.jpg?v=e79bf8b7" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Where four years costs more than the government will lend">
-      <img src="/app/static/card-info-federal-money-map.jpg?v=b63b9207" alt="One dot per bachelor's-granting college at its own address, coloured by whether four years of in-state sticker cost of attendance fits under the $92,000 a dependent student's family can borrow from the federal government in all, sized by admission rate. 84 percent of colleges in the Northeast sit above the line, 63 percent in the West."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-federal-money-map.jpg?v=09b5ccac">
+        <img src="/app/static/card-info-federal-money-map.jpg?v=b63b9207" alt="One dot per bachelor's-granting college at its own address, coloured by whether four years of in-state sticker cost of attendance fits under the $92,000 a dependent student's family can borrow from the federal government in all, sized by admission rate. 84 percent of colleges in the Northeast sit above the line, 63 percent in the West."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Where four years costs more than the government will lend</b>
     <span class="sum">The dot matrix, put on the map. The blue is the public systems of the interior and the South; the orange is the two coasts and the Northeast corridor, where 84 percent of colleges cost more over four years than a family can borrow federally.</span>
     <p class="src">College Scorecard institution file (data year 2024, release of June 10, 2026), coordinates from the IPEDS directory file (HD2023), state outlines from the Census cartographic boundary file; borrowing limits are the calculator's own federal_direct_cap and parent_plus_cap over four financed years under the One Big Beautiful Bill Act</p>
@@ -450,8 +479,10 @@
   <div class="chart-card" id="federal-money-runs-out">
     <a class="shot" href="/app/static/info-federal-money-runs-out.jpg?v=f155f64e" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: At 1,644 of 2,235 colleges, four years costs more than the government will lend">
-      <img src="/app/static/card-info-federal-money-runs-out.jpg?v=df778787" alt="One dot per bachelor's-granting college, grouped by sector and sorted by four years of its in-state sticker cost of attendance, coloured by whether that total fits under the $92,000 a dependent student's family can borrow from the federal government in all. The student's own $27,000 covers four years at one college. Dot size is selectivity: of the 88 colleges that admit a quarter or fewer of applicants, 85 sit above the line."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-federal-money-runs-out.jpg?v=70617e32">
+        <img src="/app/static/card-info-federal-money-runs-out.jpg?v=df778787" alt="One dot per bachelor's-granting college, grouped by sector and sorted by four years of its in-state sticker cost of attendance, coloured by whether that total fits under the $92,000 a dependent student's family can borrow from the federal government in all. The student's own $27,000 covers four years at one college. Dot size is selectivity: of the 88 colleges that admit a quarter or fewer of applicants, 85 sit above the line."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>At 1,644 of 2,235 colleges, four years costs more than the government will lend</b>
     <span class="sum">A dependent student can borrow $27,000 in their own name and their parents $65,000 more. At 1,644 of 2,235 bachelor's-granting colleges, four years of sticker price runs past that, and the gap is cash, private credit, or a different school.</span>
     <p class="src">College Scorecard institution file (data year 2024, release of June 10, 2026), every institution with a published in-state cost of attendance that offers a bachelor's program; borrowing limits are the calculator's own federal_direct_cap and parent_plus_cap over four financed years under the One Big Beautiful Bill Act</p>
@@ -465,8 +496,10 @@
   <div class="chart-card" id="forgiveness-map-pair">
     <a class="shot" href="/app/static/info-forgiveness-map-pair.jpg?v=7cba8526" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Ride forgiveness or pay it off?">
-      <img src="/app/static/card-info-forgiveness-map-pair.jpg?v=2dc0fe75" alt="Whether riding an income-driven plan to a taxed discharge costs less than paying the loan off in ten years, by balance and adjusted gross income, under IBR and under the 2026 RAP plan."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-forgiveness-map-pair.jpg?v=1873187f">
+        <img src="/app/static/card-info-forgiveness-map-pair.jpg?v=2dc0fe75" alt="Whether riding an income-driven plan to a taxed discharge costs less than paying the loan off in ten years, by balance and adjusted gross income, under IBR and under the 2026 RAP plan."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Ride forgiveness or pay it off?</b>
     <span class="sum">The answer turns on what you owe, what your AGI is, and which plan your loans are on. Under IBR there is one line. Under RAP the losing region is a band, and neither plan is simply better than the other.</span>
     <p class="src">Modeled with this site's own repayment simulator; IBR payment ceiling per 34 CFR 685.209(f)(2) and plan eligibility per 34 CFR 685.209(d)(5); RAP payment bands as published by Federal Student Aid</p>
@@ -480,8 +513,10 @@
   <div class="chart-card" id="plan-change-by-major">
     <a class="shot" href="/app/static/info-plan-change-by-major.jpg?v=929ef04c" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: The 2026 plan cut the payment for 52 majors and raised it for 21">
-      <img src="/app/static/card-info-plan-change-by-major.jpg?v=00cf0354" alt="First-year monthly payment on the median bachelor's federal debt under IBR, the income-driven plan an older loan can use, and under RAP, the plan a loan made from July 2026 gets, one line per NY Fed major at its early-career median pay."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-plan-change-by-major.jpg?v=ce6050e9">
+        <img src="/app/static/card-info-plan-change-by-major.jpg?v=00cf0354" alt="First-year monthly payment on the median bachelor's federal debt under IBR, the income-driven plan an older loan can use, and under RAP, the plan a loan made from July 2026 gets, one line per NY Fed major at its early-career median pay."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>The 2026 plan cut the payment for 52 majors and raised it for 21</b>
     <span class="sum">The line is $60,000 of income. Below it RAP asks less than IBR; above it, more, because IBR is capped at the 10-year Standard payment and RAP is not. Computer Engineering goes from $264 a month to $565.</span>
     <p class="src">Modeled with this site's own repayment functions; IBR ceiling per 34 CFR 685.209(f)(2), plan eligibility per 685.209(d)(5), RAP bands as published by Federal Student Aid; balance from the College Scorecard field-of-study release, pay from the NY Fed Labor Market for Recent College Graduates</p>
@@ -495,8 +530,10 @@
   <div class="chart-card" id="what-degree-holders-earn-by-age">
     <a class="shot" href="/app/static/info-what-degree-holders-earn-by-age.jpg?v=f746e57f" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: A degree is not worth one number">
-      <img src="/app/static/card-info-what-degree-holders-earn-by-age.jpg?v=45c4a10d" alt="The median pay of full-time year-round workers with a bachelor's degree or higher against workers with a high school diploma and no college, by age, with the years the high school side earns alone."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-what-degree-holders-earn-by-age.jpg?v=b3e718c4">
+        <img src="/app/static/card-info-what-degree-holders-earn-by-age.jpg?v=45c4a10d" alt="The median pay of full-time year-round workers with a bachelor's degree or higher against workers with a high school diploma and no college, by age, with the years the high school side earns alone."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>A degree is not worth one number</b>
     <span class="sum">Degree holders earn $14,000 more a year at 21 and $49,000 more at 41. That gap only begins after $93,000 the other side had already banked, and this is a cross section rather than a lifetime.</span>
     <p class="src">Census Bureau Current Population Survey, Annual Social and Economic Supplement, income year 2024; medians computed by this site's build_hs_age_profile.py</p>
@@ -510,8 +547,10 @@
   <div class="chart-card" id="what-the-aid-formula-expects-ca">
     <a class="shot" href="/app/static/info-what-the-aid-formula-expects-ca.jpg?v=10d7105f" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: In California, too rich for aid by the government's own math">
-      <img src="/app/static/card-info-what-the-aid-formula-expects-ca.jpg?v=866d8dff" alt="The Student Aid Index for a two-parent family of four at $100,000 to $300,000 of income, against the median CSU, UC and California private nonprofit cost of attendance."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-what-the-aid-formula-expects-ca.jpg?v=145bbabe">
+        <img src="/app/static/card-info-what-the-aid-formula-expects-ca.jpg?v=866d8dff" alt="The Student Aid Index for a two-parent family of four at $100,000 to $300,000 of income, against the median CSU, UC and California private nonprofit cost of attendance."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>In California, too rich for aid by the government's own math</b>
     <span class="sum">At $150,000 the formula covers a CSU's whole cost; at $200,000 a UC's. A quarter of California families earn $200,000 or more, and below $100,000 a UC charges no tuition.</span>
     <p class="src">2027-28 Federal SAI worksheet (Formula A), computed by the calculator; College Scorecard 2024 cost data; Census ACS 2024 B19101</p>
@@ -525,8 +564,10 @@
   <div class="chart-card" id="what-the-aid-formula-expects">
     <a class="shot" href="/app/static/info-what-the-aid-formula-expects.jpg?v=14d08efd" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Too rich for aid, by the government's own math">
-      <img src="/app/static/card-info-what-the-aid-formula-expects.jpg?v=58aacd3d" alt="The Student Aid Index for a two-parent family of four at $150,000 to $300,000 of income, against the median public and private nonprofit cost of attendance."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-what-the-aid-formula-expects.jpg?v=768a4bbe">
+        <img src="/app/static/card-info-what-the-aid-formula-expects.jpg?v=58aacd3d" alt="The Student Aid Index for a two-parent family of four at $150,000 to $300,000 of income, against the median public and private nonprofit cost of attendance."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Too rich for aid, by the government's own math</b>
     <span class="sum">At $150,000 the formula already covers the median public's whole cost. At $250,000 expect to pay $58,000 a year, per child in college, with zero assets counted. About one family in seven earns $250,000 or more.</span>
     <p class="src">2027-28 Federal Student Aid SAI worksheet (Formula A), computed by the calculator; College Scorecard 2024 cost data</p>
@@ -540,8 +581,10 @@
   <div class="chart-card" id="transfer-path">
     <a class="shot" href="/app/static/info-transfer-path.jpg?v=1ffd9edf" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Transferring to a UC saves about $76,700">
-      <img src="/app/static/card-info-transfer-path.jpg?v=3ad125b1" alt="Two years at a California community college and two at a public university, against four years at the university. At a UC that is about $81,900 against $158,600. At a CSU it is about $45,900 against $86,600. Tuition and housing on both sides, at resident prices."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-transfer-path.jpg?v=95abe907">
+        <img src="/app/static/card-info-transfer-path.jpg?v=3ad125b1" alt="Two years at a California community college and two at a public university, against four years at the university. At a UC that is about $81,900 against $158,600. At a CSU it is about $45,900 against $86,600. Tuition and housing on both sides, at resident prices."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Transferring to a UC saves about $76,700</b>
     <span class="sum">The same diploma, from the same university, at about half the price. Most of the saving is rent rather than tuition.</span>
     <p class="src">IPEDS 2023 tuition and fees, in-district at public two-year colleges and in-state by university system, with cost of attendance from the College Scorecard release of June 2026 (data year 2024), median per system. Every price is what a California resident pays</p>
@@ -555,8 +598,10 @@
   <div class="chart-card" id="community-college-both-careers">
     <a class="shot" href="/app/static/info-community-college-both-careers.jpg?v=78552a0f" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: What the extra year of California community college buys">
-      <img src="/app/static/card-info-community-college-both-careers.jpg?v=34e39b39" alt="The two credentials a California community college awards, side by side and to the same scale. Two years and about $2,576 for an associate's degree, against one year and about $1,288 for a certificate, measured by total pay over the first ten years of work."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-community-college-both-careers.jpg?v=3ff80e5b">
+        <img src="/app/static/card-info-community-college-both-careers.jpg?v=34e39b39" alt="The two credentials a California community college awards, side by side and to the same scale. Two years and about $2,576 for an associate's degree, against one year and about $1,288 for a certificate, measured by total pay over the first ten years of work."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>What the extra year of California community college buys</b>
     <span class="sum">Eight of the two-year careers out-earn the median bachelor's-level one. Two of the one-year careers do. The extra year is doing real work.</span>
     <p class="src">BLS OEWS California state medians (May 2025) and the BLS Employment Projections occupation matrix, priced with IPEDS 2023 tuition and fees: in-district at public two-year colleges, in-state by university system. Both panels share one horizontal scale, so the bars are comparable across the pair</p>
@@ -570,8 +615,10 @@
   <div class="chart-card" id="community-college-careers">
     <a class="shot" href="/app/static/info-community-college-careers.jpg?v=7887e54f" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Two years of California community college costs $2,576">
-      <img src="/app/static/card-info-community-college-careers.jpg?v=905e6b42" alt="Careers BLS says need an associate's degree, at California wages, by total pay over ten years. Two years in-district is about $2,576 against about $30,408 for four years of in-state tuition at a CSU campus, or $58,240 at a UC campus. Tuition and fees on both sides."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-community-college-careers.jpg?v=312c2cbb">
+        <img src="/app/static/card-info-community-college-careers.jpg?v=905e6b42" alt="Careers BLS says need an associate's degree, at California wages, by total pay over ten years. Two years in-district is about $2,576 against about $30,408 for four years of in-state tuition at a CSU campus, or $58,240 at a UC campus. Tuition and fees on both sides."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Two years of California community college costs $2,576</b>
     <span class="sum">Eight two-year careers out-earn the median bachelor's-level one in California. Most are health technology, and the degree alone is not what does it.</span>
     <p class="src">BLS OEWS California state medians (May 2025) and the BLS Employment Projections occupation matrix, priced with IPEDS 2023 tuition and fees: in-district at public two-year colleges, in-state by university system. Community colleges that award a bachelor's degree are filed by IPEDS as four-year institutions and are excluded from the four-year figures</p>
@@ -585,8 +632,10 @@
   <div class="chart-card" id="community-college-certificate-careers">
     <a class="shot" href="/app/static/info-community-college-certificate-careers.jpg?v=969edf6b" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: A year of California community college costs $1,288">
-      <img src="/app/static/card-info-community-college-certificate-careers.jpg?v=c29de46b" alt="Careers BLS says need a certificate rather than a degree, at California wages, by total pay over ten years. A year in-district is about $1,288 against about $30,408 for four years of in-state tuition at a CSU campus, or $58,240 at a UC campus. Tuition and fees on both sides. These programmes run from a few weeks to two years, so the total depends on the programme."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-community-college-certificate-careers.jpg?v=f881e3db">
+        <img src="/app/static/card-info-community-college-certificate-careers.jpg?v=c29de46b" alt="Careers BLS says need a certificate rather than a degree, at California wages, by total pay over ten years. A year in-district is about $1,288 against about $30,408 for four years of in-state tuition at a CSU campus, or $58,240 at a UC campus. Tuition and fees on both sides. These programmes run from a few weeks to two years, so the total depends on the programme."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>A year of California community college costs $1,288</b>
     <span class="sum">Two certificate careers out-earn the median bachelor's-level one in California, against eight on the two-year chart. The extra year is doing real work.</span>
     <p class="src">BLS OEWS California state medians (May 2025) and the BLS Employment Projections occupation matrix, priced with IPEDS 2023 tuition and fees: in-district at public two-year colleges, in-state by university system. Community colleges that award a bachelor's degree are filed by IPEDS as four-year institutions and are excluded from the four-year figures</p>
@@ -600,8 +649,10 @@
   <div class="chart-card" id="professional-debt-versus-pay">
     <a class="shot" href="/app/static/info-professional-debt-versus-pay.jpg?v=27c953a9" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: The degree sets the debt, the specialty sets the pay">
-      <img src="/app/static/card-info-professional-debt-versus-pay.jpg?v=f208d2d5" alt="Every professional degree the calculator models, against 30 years of pay. Debt runs from $130,000 to $279,900, a spread of 2.2 times. Pay runs from $1.8M to $12.0M, a spread of 6.6 times."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-professional-debt-versus-pay.jpg?v=bd4423bb">
+        <img src="/app/static/card-info-professional-debt-versus-pay.jpg?v=f208d2d5" alt="Every professional degree the calculator models, against 30 years of pay. Debt runs from $130,000 to $279,900, a spread of 2.2 times. Pay runs from $1.8M to $12.0M, a spread of 6.6 times."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>The degree sets the debt, the specialty sets the pay</b>
     <span class="sum">Thirty-one careers, eight debt figures. What you borrow varies about twice over. What it earns you varies more than six times.</span>
     <p class="src">College Scorecard field-of-study release (June 2026), AAMC/ADEA/ABA averages, and BLS OEWS national medians (May 2025)</p>
@@ -615,8 +666,10 @@
   <div class="chart-card" id="borrow-the-federal-maximum">
     <a class="shot" href="/app/static/info-borrow-the-federal-maximum.jpg?v=076c931e" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Borrow the federal maximum for a bachelor's and the plan barely matters">
-      <img src="/app/static/card-info-borrow-the-federal-maximum.jpg?v=fab0e924" alt="$31,000 is the most a dependent undergraduate can borrow federally. On a $61,000 salary, income-driven, Standard and 2026 RAP all clear it inside a decade, and the whole spread between them is $984."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-borrow-the-federal-maximum.jpg?v=1267055f">
+        <img src="/app/static/card-info-borrow-the-federal-maximum.jpg?v=fab0e924" alt="$31,000 is the most a dependent undergraduate can borrow federally. On a $61,000 salary, income-driven, Standard and 2026 RAP all clear it inside a decade, and the whole spread between them is $984."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Borrow the federal maximum for a bachelor's and the plan barely matters</b>
     <span class="sum">At the federal undergraduate cap on a median salary, the cheapest and the dearest repayment plans finish $984 apart.</span>
     <p class="src">Modeled with the calculator, at the federal Direct rate, against the median of 825 BLS occupational medians</p>
@@ -630,8 +683,10 @@
   <div class="chart-card" id="careers-without-a-bachelors">
     <a class="shot" href="/app/static/info-careers-without-a-bachelors.jpg?v=bf67c9d8" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: The 20 best-paid careers that need less than four years of school">
-      <img src="/app/static/card-info-careers-without-a-bachelors.jpg?v=9917654d" alt="Total pay over the first ten years of work for the highest-paying occupations BLS says need less than a bachelor's degree. All twenty beat the median bachelor's-level career, and ten of them need no college at all."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-careers-without-a-bachelors.jpg?v=d99eb065">
+        <img src="/app/static/card-info-careers-without-a-bachelors.jpg?v=9917654d" alt="Total pay over the first ten years of work for the highest-paying occupations BLS says need less than a bachelor's degree. All twenty beat the median bachelor's-level career, and ten of them need no college at all."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>The 20 best-paid careers that need less than four years of school</b>
     <span class="sum">Ten of the twenty need no college at all. Only 31 of the 535 short-path careers actually beat the bachelor's median.</span>
     <p class="src">BLS OEWS national release (May 2025), with BLS typical entry-level education by occupation</p>
@@ -645,8 +700,10 @@
   <div class="chart-card" id="rent-versus-the-raise">
     <a class="shot" href="/app/static/info-rent-versus-the-raise.jpg?v=2ac3c003" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Everyone says the rent eats the raise">
-      <img src="/app/static/card-info-rent-versus-the-raise.jpg?v=4015e076" alt="San Francisco wages against the national median for the same job, discounted by what it costs to live there. It is still ahead in all nine occupations."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-rent-versus-the-raise.jpg?v=301e635c">
+        <img src="/app/static/card-info-rent-versus-the-raise.jpg?v=4015e076" alt="San Francisco wages against the national median for the same job, discounted by what it costs to live there. It is still ahead in all nine occupations."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Everyone says the rent eats the raise</b>
     <span class="sum">The expensive city usually still wins, by 9% to 62%. With one caveat about which prices the index actually measures.</span>
     <p class="src">BLS OEWS wages with BEA Regional Price Parities</p>
@@ -660,8 +717,10 @@
   <div class="chart-card" id="same-degree-different-debt">
     <a class="shot" href="/app/static/info-same-degree-different-debt.jpg?v=175ae258" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Same degree, seven times the debt">
-      <img src="/app/static/card-info-same-degree-different-debt.jpg?v=bfe904e8" alt="Median debt at graduation for the same professional degree runs from $37,167 to $439,325 depending only on which school you attend."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-same-degree-different-debt.jpg?v=136b2d55">
+        <img src="/app/static/card-info-same-degree-different-debt.jpg?v=bfe904e8" alt="Median debt at graduation for the same professional degree runs from $37,167 to $439,325 depending only on which school you attend."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Same degree, seven times the debt</b>
     <span class="sum">Same credential, same license, same job. Pharmacy runs seven times cheaper at one school than another.</span>
     <p class="src">College Scorecard field-of-study release, June 2026</p>
@@ -675,8 +734,10 @@
   <div class="chart-card" id="the-family-maximum">
     <a class="shot" href="/app/static/info-the-family-maximum.jpg?v=50c74353" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: The family maximum is $92,000 and $65,000 of it is your parents'">
-      <img src="/app/static/card-info-the-family-maximum.jpg?v=97f40546" alt="Everything the government will lend for four years of a dependent undergraduate is $27,000 in the student's name and $65,000 in a parent's. Parent PLUS sits outside every income-driven plan, so 71% of the debt never moves with the repayment choice."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-the-family-maximum.jpg?v=1d730a41">
+        <img src="/app/static/card-info-the-family-maximum.jpg?v=97f40546" alt="Everything the government will lend for four years of a dependent undergraduate is $27,000 in the student's name and $65,000 in a parent's. Parent PLUS sits outside every income-driven plan, so 71% of the debt never moves with the repayment choice."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>The family maximum is $92,000 and $65,000 of it is your parents'</b>
     <span class="sum">Borrow every federal dollar available for four years and three quarters of it lands in a parent's name, on a fixed schedule no plan can change.</span>
     <p class="src">Modeled with the calculator, from the class-standing Direct limits and the OBBBA Parent PLUS aggregate</p>
@@ -690,8 +751,10 @@
   <div class="chart-card" id="top-earning-careers">
     <a class="shot" href="/app/static/info-top-earning-careers.jpg?v=f9f659d8" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: The 20 careers that earn most in 30 years, and 16 are health care">
-      <img src="/app/static/card-info-top-earning-careers.jpg?v=f2f356a6" alt="Everything earned in the 30 years after a bachelor's degree, capped at each occupation's own published 90th percentile. Twelve of the twenty are physicians, and only three are reachable on a bachelor's degree alone. Each row also carries how many people BLS counts doing the job, which separates a well-paid career from a large one."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-top-earning-careers.jpg?v=1a2923d0">
+        <img src="/app/static/card-info-top-earning-careers.jpg?v=f2f356a6" alt="Everything earned in the 30 years after a bachelor's degree, capped at each occupation's own published 90th percentile. Twelve of the twenty are physicians, and only three are reachable on a bachelor's degree alone. Each row also carries how many people BLS counts doing the job, which separates a well-paid career from a large one."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>The 20 careers that earn most in 30 years, and 16 are health care</b>
     <span class="sum">Twelve physicians, three dentists, one nurse anesthetist, and three careers you can reach without graduate school.</span>
     <p class="src">BLS OEWS national release (May 2025), grown and capped by the calculator's own earnings model. Employment is OEWS TOT_EMP from the same release, which surveys establishments and therefore excludes the self-employed</p>
@@ -705,8 +768,10 @@
   <div class="chart-card" id="what-the-loan-really-costs">
     <a class="shot" href="/app/static/info-what-the-loan-really-costs.jpg?v=a1b56d14" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: You asked for $20,000. You pay back $31,070">
-      <img src="/app/static/card-info-what-the-loan-really-costs.jpg?v=cd013b46" alt="Every federal loan is billed for more than it hands over, because the origination fee comes off at disbursement. On Parent PLUS you sign for $20,883 to receive $20,000."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-what-the-loan-really-costs.jpg?v=4c2e671f">
+        <img src="/app/static/card-info-what-the-loan-really-costs.jpg?v=cd013b46" alt="Every federal loan is billed for more than it hands over, because the origination fee comes off at disbursement. On Parent PLUS you sign for $20,883 to receive $20,000."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>You asked for $20,000. You pay back $31,070</b>
     <span class="sum">The fee comes off before you see the money, and the ten-year floor is 1.55 times what reached your account.</span>
     <p class="src">Rates and origination fees from studentaid.gov, as modeled by the calculator</p>
@@ -720,8 +785,10 @@
   <div class="chart-card" id="best-major-by-the-data">
     <a class="shot" href="/app/static/info-best-major-by-the-data.jpg?v=72210cff" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: What the data says is the best major">
-      <img src="/app/static/card-info-best-major-by-the-data.jpg?v=501abc11" alt="The ten majors with the highest early-career pay, shown beside their unemployment and underemployment rates."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-best-major-by-the-data.jpg?v=4e6d8c0e">
+        <img src="/app/static/card-info-best-major-by-the-data.jpg?v=501abc11" alt="The ten majors with the highest early-career pay, shown beside their unemployment and underemployment rates."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>What the data says is the best major</b>
     <span class="sum">Ranked by early-career pay, with the two rates that decide whether the pay is actually reachable.</span>
     <p class="src">New York Fed, Labor Market for Recent College Graduates</p>
@@ -735,8 +802,10 @@
   <div class="chart-card" id="business-majors-tier-list">
     <a class="shot" href="/app/static/info-business-majors-tier-list.jpg?v=f99c0b7d" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: Business majors, ranked by what they actually pay">
-      <img src="/app/static/card-info-business-majors-tier-list.jpg?v=c22fe1b7" alt="Every business degree tiered by early-career pay and by the share of graduates working in jobs that do not require the degree."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-business-majors-tier-list.jpg?v=cfba54c3">
+        <img src="/app/static/card-info-business-majors-tier-list.jpg?v=c22fe1b7" alt="Every business degree tiered by early-career pay and by the share of graduates working in jobs that do not require the degree."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>Business majors, ranked by what they actually pay</b>
     <span class="sum">The pattern is that specific beats general. Every degree with Business in its name is above 30% underemployment.</span>
     <p class="src">New York Fed, Labor Market for Recent College Graduates</p>
@@ -750,8 +819,10 @@
   <div class="chart-card" id="majors-tier-list">
     <a class="shot" href="/app/static/info-majors-tier-list.jpg?v=27cc69a2" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: College majors, ranked by the job market">
-      <img src="/app/static/card-info-majors-tier-list.jpg?v=5a953302" alt="A tier list of college majors built from early-career pay, unemployment and underemployment rather than reputation."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-majors-tier-list.jpg?v=0540b1bc">
+        <img src="/app/static/card-info-majors-tier-list.jpg?v=5a953302" alt="A tier list of college majors built from early-career pay, unemployment and underemployment rather than reputation."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>College majors, ranked by the job market</b>
     <span class="sum">The tiers come from three published numbers, not from vibes. Some of the surprises are in the D row.</span>
     <p class="src">New York Fed, Labor Market for Recent College Graduates</p>
@@ -765,8 +836,10 @@
   <div class="chart-card" id="student-vs-parent-debt">
     <a class="shot" href="/app/static/info-student-vs-parent-debt.jpg?v=b90e2905" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: The federal cap is doing the flattening">
-      <img src="/app/static/card-info-student-vs-parent-debt.jpg?v=bc4c52d1" alt="Median federal debt at graduation by field, students against parents, showing how the Parent PLUS cap compresses what a family can borrow."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-student-vs-parent-debt.jpg?v=abbf06ce">
+        <img src="/app/static/card-info-student-vs-parent-debt.jpg?v=bc4c52d1" alt="Median federal debt at graduation by field, students against parents, showing how the Parent PLUS cap compresses what a family can borrow."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>The federal cap is doing the flattening</b>
     <span class="sum">Student borrowing barely moves across fields. Parent borrowing is what varies, and the 2026 cap is what changed.</span>
     <p class="src">College Scorecard field-of-study release, June 2026</p>
@@ -780,8 +853,10 @@
   <div class="chart-card" id="world-tuition">
     <a class="shot" href="/app/static/info-world-tuition.jpg?v=a7c10e31" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: What a top university charges around the world">
-      <img src="/app/static/card-info-world-tuition.jpg?v=61f7f29e" alt="Annual tuition for domestic undergraduates at each country's highest-ranked university, converted to U.S. dollars."
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/land-info-world-tuition.jpg?v=91936f34">
+        <img src="/app/static/card-info-world-tuition.jpg?v=61f7f29e" alt="Annual tuition for domestic undergraduates at each country's highest-ranked university, converted to U.S. dollars."
+             loading="lazy" width="720" height="405"></picture></a>
     <b>What a top university charges around the world</b>
     <span class="sum">Harvard charges $59,320. The top university in France charges about $200. Tuition is also only two thirds of the American number.</span>
     <p class="src">University fee schedules, 2025-26 published rates</p>
