@@ -310,6 +310,16 @@
     overflow: auto; -webkit-overflow-scrolling: touch; }
   .viewer img { display: block; width: 200vw; max-width: none; }
   .viewer.fit img { width: 100vw; }
+  /* Helpful lower left, Share lower right, floating over the picture. The
+     bar itself passes touches through so the picture stays scrollable. */
+  .viewer .vbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61;
+    display: flex; justify-content: space-between; pointer-events: none;
+    padding: 14px 16px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .viewer .vbar button { pointer-events: auto; font: inherit; font-size: 15px;
+    font-weight: 600; cursor: pointer; border: 0; border-radius: 999px;
+    padding: 10px 16px; background: rgba(255,255,255,.92); color: #0b0b0b;
+    box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+  .viewer .vbar button:disabled { color: #555; }
   .viewer .close { position: fixed; top: 12px; right: 12px; z-index: 61;
     width: 40px; height: 40px; border-radius: 999px; border: 0;
     background: rgba(255,255,255,.92); color: #0b0b0b; font-size: 18px;
@@ -884,6 +894,10 @@
 <div id="viewer" class="viewer" hidden>
   <button class="close" type="button" aria-label="Close">&#10005;</button>
   <img alt="">
+  <div class="vbar">
+    <button class="vlike" type="button">&#9829; Helpful</button>
+    <button class="vshare" type="button">&#128279; Share</button>
+  </div>
 </div>
 <div class="cta" style="padding:34px 0">
   <a class="btn big" href="/?go=1&amp;from=charts">Run your own numbers, free</a>
@@ -1016,20 +1030,41 @@
   var viewer = document.getElementById("viewer");
   var viewerImg = viewer && viewer.querySelector("img");
   var phone = window.matchMedia("(max-width: 720px)");
+  var current = null;   // the card whose picture the viewer is showing
   function closeViewer() {
-    viewer.hidden = true; viewerImg.src = ""; document.body.style.overflow = "";
+    viewer.hidden = true; viewerImg.src = ""; current = null;
+    document.body.style.overflow = "";
+  }
+  // The viewer's own Helpful and Share are PROXIES for the card's buttons:
+  // they click them and mirror their state, so there is one like path, one
+  // share path, one localStorage key and one row shape, not two of each.
+  function mirror() {
+    if (!current) return;
+    var like = current.querySelector(".reactions .like");
+    var vlike = viewer.querySelector(".vlike");
+    vlike.textContent = like.textContent; vlike.disabled = like.disabled;
   }
   if (viewer) {
     document.querySelectorAll(".chart-card .shot").forEach(function (shot) {
       shot.addEventListener("click", function (e) {
         if (!phone.matches) return;
         e.preventDefault();
+        current = shot.closest(".chart-card");
         viewerImg.src = shot.getAttribute("href");
         viewerImg.alt = shot.getAttribute("aria-label") || "";
         viewer.classList.remove("fit");
         viewer.hidden = false; viewer.scrollTop = 0; viewer.scrollLeft = 0;
         document.body.style.overflow = "hidden";
+        mirror();
       });
+    });
+    viewer.querySelector(".vlike").addEventListener("click", function () {
+      if (!current) return;
+      current.querySelector(".reactions .like").click();
+      setTimeout(mirror, 0);
+    });
+    viewer.querySelector(".vshare").addEventListener("click", function () {
+      if (current) current.querySelector(".reactions .share").click();
     });
     viewer.querySelector(".close").addEventListener("click", closeViewer);
     viewerImg.addEventListener("click", function () { viewer.classList.toggle("fit"); });
