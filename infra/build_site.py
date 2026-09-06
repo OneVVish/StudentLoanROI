@@ -386,6 +386,31 @@ SITE_CSS = """  :root {
     .guides { grid-template-columns: 1fr; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
+    /* ===== THE GALLERY IS A FEED ON A PHONE =====
+       Twenty-five dense pictures in a one-column grid is a long scroll of
+       cropped thumbnails. On a phone each card becomes one screen and the
+       page snaps card to card, the shape people already know from short
+       video: the whole picture uncropped (the <picture> source swaps the
+       16:9 crop for the square-padded landing image), the title, a clamped
+       summary, and the Helpful and Share bar pinned at the bottom of the
+       screen. A tap on the picture still opens it full size. Pure CSS: no
+       script, no new page, no new logging name, and the desktop grid is
+       untouched. The intro block is a snap point too, or a mandatory snap
+       would jump straight past it on load. */
+    html:has(.post-grid .chart-card) { scroll-snap-type: y mandatory; }
+    .guides-band, .post-head { scroll-snap-align: start; }
+    .post-grid:has(.chart-card) { gap: 0; }
+    .chart-card { scroll-snap-align: start; scroll-snap-stop: always;
+      min-height: 100vh; min-height: 100dvh; box-sizing: border-box;
+      border-radius: 0; border-left: 0; border-right: 0; }
+    .chart-card .shot { aspect-ratio: auto; height: 56vh; height: 56dvh;
+      display: flex; align-items: center; justify-content: center; }
+    .chart-card .shot img { object-fit: contain; object-position: center;
+      max-height: 100%; }
+    .chart-card span.sum { display: -webkit-box; -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical; overflow: hidden; }
+    .chart-card .src { display: -webkit-box; -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical; overflow: hidden; }
   }"""
 
 
@@ -1649,8 +1674,10 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
         cards.append(f'''  <div class="chart-card" id="{c["slug"]}">
     <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: {_attr(c["title"])}">
-      <img src="/app/static/{c["card_url"]}" alt="{_attr(c["description"])}"
-           loading="lazy" width="720" height="405"></a>
+      <picture>
+        <source media="(max-width: 720px)" srcset="/app/static/{c["land_url"]}">
+        <img src="/app/static/{c["card_url"]}" alt="{_attr(c["description"])}"
+             loading="lazy" width="720" height="405"></picture></a>
     <b>{_attr(c["title"])}</b>
     <span class="sum">{_attr(c["summary"])}</span>
     <p class="src">{_attr(c.get("source", ""))}</p>
