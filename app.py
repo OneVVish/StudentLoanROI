@@ -5689,6 +5689,26 @@ def get_traffic_source() -> str:
 # Adding a tool here gives it the action, the traffic split and the admin
 # breakdown for free. What it does NOT give it is a renderer -- see the
 # standalone block in section 5.
+def inline_lockup_svg(width: int = 250) -> str:
+    """The horizontal lockup as inline SVG whose wordmark is currentColor.
+
+    The brand/ SVGs pick their ink with a prefers-color-scheme media query,
+    which is the DEVICE's setting, not the page's. Inline, `currentColor`
+    inherits Streamlit's text colour for whichever theme it is actually
+    rendering, so the same markup is right on both. The mark's own colours
+    are fixed and pass through untouched. Width is a CSS width; the SVG keeps
+    its 461x64 viewBox and scales.
+    """
+    with open("brand/logo-horizontal-auto.svg", encoding="utf-8") as fh:
+        svg = fh.read()
+    svg = re.sub(r"<style>.*?</style>",
+                 "<style>.ink { fill: currentColor; } .muted { fill: currentColor; opacity: .55; }</style>",
+                 svg, flags=re.S)
+    svg = re.sub(r'\swidth="461"\sheight="64"', "", svg, count=1)
+    return (f'<div style="width:{width}px;max-width:100%;margin:0 0 6px 0;'
+            f'line-height:0">{svg}</div>')
+
+
 STANDALONE_TOOLS = {
     "repayment": {
         "action": "pageview_repayment",
@@ -5752,7 +5772,7 @@ STANDALONE_TOOLS = {
         # and cross-links for free, and a phone hides the sidebar entirely.
         "action": "pageview_start",
         "title": "🧭 Start Here: Six Questions",
-        "caption": "**Free · anonymous · no sign-up.** Answer five "
+        "caption": "**Free · anonymous · no sign-up.** Answer six "
                    "questions and open the calculator already filled in. "
                    "Nothing you type here is stored.",
         "label": "Start with six questions",
@@ -24481,7 +24501,15 @@ if active_tool:
     # brands every other page renders into a display:none container here and
     # the tool pages shipped unbranded. Verified by loading ?tool=repayment,
     # not by reasoning about where st.logo "should" appear.
-    st.image("brand/logo-horizontal-auto.svg", width=250)
+    # INLINE, IN THE PAGE'S OWN INK. As an <img> the auto SVG chose its ink by
+    # the PHONE's dark/light setting while the page is themed by Streamlit,
+    # and when the two disagreed (dark phone, light page) the wordmark was
+    # light on light and vanished, leaving the bare mark. Reported from the
+    # wizard on a phone. st.context.theme.type would pick the right file but
+    # is documented as unreliable on a session's first load, which is exactly
+    # when this draws. Inlined, the wordmark is currentColor, the page's own
+    # text colour, correct on both themes with nothing to detect.
+    st.markdown(inline_lockup_svg(250), unsafe_allow_html=True)
     st.title(STANDALONE_TOOLS[active_tool]["title"])
     st.caption(STANDALONE_TOOLS[active_tool]["caption"])
 else:
