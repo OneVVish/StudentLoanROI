@@ -1955,6 +1955,16 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
   var viewer = document.getElementById("viewer");
   var viewerImg = viewer && viewer.querySelector("img");
   var phone = window.matchMedia("(max-width: 720px)");
+  // THE DESKTOP LINK FOLLOWS THE SCHEME TOO. On a desktop the picture is a
+  // plain link that opens the full-size file in a new tab, and the file it
+  // named was always the dark one; a light-mode reader clicked a white card
+  // and got a black page. Where a day version exists, the link is retargeted
+  // at load time to match the scheme, so the tab shows what the card showed.
+  if (window.matchMedia("(prefers-color-scheme: light)").matches) {{
+    document.querySelectorAll(".chart-card .shot[data-light]").forEach(function (shot) {{
+      shot.setAttribute("href", shot.getAttribute("data-light"));
+    }});
+  }}
   var current = null;   // the card whose picture the viewer is showing
   function closeViewer() {{
     viewer.hidden = true; viewerImg.src = ""; current = null;
