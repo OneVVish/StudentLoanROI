@@ -2471,6 +2471,12 @@ end $$;
 --     added.
 --   * wizard_offer (2026-09-05, earlier the same day) now fires only for
 --     phones that reached the calculator WITH a scenario in the URL.
+--   * wizard_step:n=<1..5> (added 2026-09-06, no DDL): one row per step a
+--     session reaches, once per session whatever Back does. With
+--     pageview_start, wizard_done and nav:from=start:to=calculator it is the
+--     funnel the admin page shows. The skip link and the finishing button
+--     write the SAME nav row, so "skipped" is navigations minus wizard_done
+--     and a floor. No step rows exist before this date.
 
 
 -- 2026-09-06  SEAM: an infographic's src tag is <channel>-<code>.

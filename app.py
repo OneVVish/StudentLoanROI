@@ -24148,6 +24148,34 @@ def render_admin_dashboard() -> None:
         st.markdown("**Where visits came from**")
         st.caption("No navigation between pages recorded yet.")
 
+    # The six-question wizard, as a funnel. Every row here is already in
+    # usage_logs under its own action; this only lines them up. "Skipped"
+    # is a subtraction (start->main navigations minus finishes), so it is an
+    # estimate the same way "Arrived cold" is, and for the same reason.
+    if _have_actions:
+        _acts = usage_df["action"].astype(str)
+        _saw = int((_acts == STANDALONE_TOOLS["start"]["action"]).sum())
+        _done = int(_acts.str.startswith("wizard_done").sum())
+        _to_calc = int((_acts == nav_action("start", NAV_CALCULATOR)).sum())
+        _steps = _acts.str.extract(r"^wizard_step:n=(\d)$")[0].dropna().astype(int)
+        _rows = [{"Stage": "Saw the wizard", "Sessions": _saw}]
+        _rows += [{"Stage": f"Answered question {n}", "Sessions": int((_steps == n).sum())}
+                  for n in range(1, 6)]
+        _rows += [{"Stage": "Finished all six", "Sessions": _done},
+                  {"Stage": "Opened the calculator from it", "Sessions": _to_calc},
+                  {"Stage": "Skipped straight to the calculator",
+                   "Sessions": max(_to_calc - _done, 0)}]
+        st.markdown("**The six-question wizard**")
+        render_centered_table(pd.DataFrame(_rows))
+        st.caption(
+            "**Saw** is the `pageview_start` row a phone's bare arrival "
+            "writes. Each **question** row is the session reaching the next "
+            "step, once per session whatever Back does. **Opened** counts "
+            "`nav:from=start:to=calculator`, which the skip link and the finishing "
+            "button both write, so **Skipped** is their difference and a "
+            "floor. Question rows only exist from 2026-09-06."
+        )
+
     st.caption(
         "**Pageviews** is the total of the landing row above -- the calculator "
         "plus every standalone tool. Each is logged under its own action because "
@@ -26718,6 +26746,13 @@ def render_start_wizard(always_open: bool = False) -> None:
         if nxt.button("Next", key=f"wizard_next_{i}", type="primary",
                       disabled=not ready):
             st.session_state.wizard_step = i + 1
+            # Once per step per session, so a Back-and-Next loop cannot
+            # inflate the funnel. Answers ride nowhere: the step number is
+            # the whole row, and wizard_done carries the shape at the end.
+            reached = st.session_state.setdefault("wizard_steps_logged", set())
+            if i + 1 not in reached:
+                reached.add(i + 1)
+                log_usage_event(f"wizard_step:n={i + 1}")
             st.rerun()
 
     q_who = "Who is going to school?"
@@ -26876,7 +26911,8 @@ def render_start_wizard(always_open: bool = False) -> None:
                             f":school={int(bool(answers.get('school')))}"
                             f":returning={int(bool(answers.get('returning')))}")
         if st.button("Start over", key="wizard_reset"):
-            for k in ("wizard_answers", "wizard_step", "wizard_logged"):
+            for k in ("wizard_answers", "wizard_step", "wizard_logged",
+                      "wizard_steps_logged"):
                 st.session_state.pop(k, None)
             st.rerun()
 
