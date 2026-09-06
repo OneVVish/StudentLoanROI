@@ -340,6 +340,10 @@ SITE_CSS = """  :root {
   .chart-card .reactions .count { color: var(--muted); font-size: 13px; }
   .chart-card .reactions .sharelink { font-size: 12.5px; color: var(--muted);
     word-break: break-all; }
+  .chart-card .reactions .thread { font-size: 14px; color: var(--deep);
+    text-decoration: none; border: 1px solid var(--rule); border-radius: 999px;
+    padding: 7px 14px; }
+  .chart-card .reactions .thread:hover { border-color: var(--blue); color: var(--blue); }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
   /* ===== ONE CARD, TWO COLOURS =====
      The landing page holds two kinds of card: a tool is something you use, a
@@ -433,6 +437,13 @@ SITE_CSS = """  :root {
       box-shadow: 0 2px 10px rgba(0,0,0,.35); }
     .chart-card.tall .reactions .like { color: #e0245e; }
     .chart-card.tall .reactions .like.on { background: #e0245e; color: #fff; }
+    .chart-card.tall .reactions .thread { pointer-events: auto; font-size: 0;
+      width: 48px; height: 48px; border: 0; border-radius: 999px;
+      background: rgba(255,255,255,.92); color: #0b0b0b; display: flex;
+      align-items: center; justify-content: center;
+      box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+    .chart-card.tall .reactions .thread::before { content: "r/"; font-size: 16px;
+      font-weight: 700; }
     .chart-card.tall .reactions .like::before { content: "♥"; font-size: 22px; }
     .chart-card.tall .reactions .share::before { content: "🔗"; font-size: 22px; }
     .chart-card.tall .reactions .sharelink { pointer-events: none; order: 1;
@@ -1268,10 +1279,11 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
   var out = document.getElementById("likecount");
   var slug = btn.dataset.slug;
   var key = "liked:" + slug;
+  // The number rides IN the button ("\u2665 12"), the same as the gallery.
   function render(n) {{
-    out.textContent = n === null ? "" :
-      (n === 0 ? "" :
-       n === 1 ? "1 person found this helpful" : n + " people found this helpful");
+    out.textContent = "";
+    if (n === null || n === 0) return;
+    btn.textContent = "\u2665 " + n;
   }}
   // The count is a nicety, not the point: if it never arrives the button still
   // works and the article is unaffected.
@@ -1789,6 +1801,11 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
         else:
             light_srcs_card = ""
         light_full = f' data-light="/app/static/{c["light_url"]}"' if c.get("light_url") else ""
+        # A chart that was posted to Reddit names the thread in its manifest
+        # (`reddit: <url>`); the card then carries a link to it. External, so
+        # CARRY_QS_JS leaves it alone and no tag leaks to Reddit.
+        thread = (f'\n      <a class="thread" href="{_attr(c["reddit"])}" rel="noopener"'
+                  f' target="_blank">r/ thread</a>' if c.get("reddit") else "")
         cards.append(f'''  <div class="chart-card{tall}" id="{c["slug"]}">
     <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"{light_full}
        aria-label="Open the full-size infographic: {_attr(c["title"])}">
@@ -1801,7 +1818,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     <div class="reactions" data-slug="{c["slug"]}" data-title="{_attr(c["title"])}">
       <button class="like" type="button">&#9829; Helpful</button>
       <span class="count">&nbsp;</span>
-      <button class="share" type="button">&#128279; Share</button>
+      <button class="share" type="button">&#128279; Share</button>{thread}
       <span class="sharelink" hidden></span>
     </div>
   </div>''')
@@ -1871,10 +1888,12 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     var key   = "liked:chart:" + slug;
 
     if (like.disabled) like.classList.add("on");
+    // The number rides IN the button ("\u2665 12"); the sentence it replaced
+    // ("12 people found this helpful") took a line the card did not have.
     function render(n) {{
-      out.textContent = n === null ? "" :
-        (n === 0 ? "" :
-         n === 1 ? "1 person found this helpful" : n + " people found this helpful");
+      out.textContent = "";
+      if (n === null || n === 0) return;
+      like.textContent = "\u2665 " + n;
     }}
     // The count is a nicety. If it never arrives the buttons still work.
     fetch("/api/likes?slug=" + encodeURIComponent(slug) + "&kind=chart")
@@ -1960,9 +1979,16 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
   // named was always the dark one; a light-mode reader clicked a white card
   // and got a black page. Where a day version exists, the link is retargeted
   // at load time to match the scheme, so the tab shows what the card showed.
+  // CARRY_QS_JS has ALREADY run on this page, so the href carries the
+  // visitor's test= and src=; the retarget keeps them by re-appending the
+  // query, or a light-mode click dropped both. Reported as "test=1 is not
+  // being carried when I click on the individual infographic".
   if (window.matchMedia("(prefers-color-scheme: light)").matches) {{
+    var qs = location.search.replace(/^\?/, "");
     document.querySelectorAll(".chart-card .shot[data-light]").forEach(function (shot) {{
-      shot.setAttribute("href", shot.getAttribute("data-light"));
+      var href = shot.getAttribute("data-light");
+      if (qs) href += (href.indexOf("?") === -1 ? "?" : "&") + qs;
+      shot.setAttribute("href", href);
     }});
   }}
   var current = null;   // the card whose picture the viewer is showing
