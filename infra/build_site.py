@@ -411,6 +411,27 @@ SITE_CSS = """  :root {
       -webkit-box-orient: vertical; overflow: hidden; }
     .chart-card .src { display: -webkit-box; -webkit-line-clamp: 2;
       -webkit-box-orient: vertical; overflow: hidden; }
+    /* A card with a phone render IS the picture: the headline, the caveat
+       and the source are in the frame, so the card's own text is hidden and
+       the picture fills the screen with the two icons floating at the foot. */
+    .chart-card.tall { position: relative; background: #0b0b0b; }
+    .chart-card.tall .shot { height: 100vh; height: 100dvh; background: #0b0b0b; }
+    .chart-card.tall b, .chart-card.tall span.sum, .chart-card.tall .src,
+    .chart-card.tall .reactions .count { display: none; }
+    .chart-card.tall .reactions { position: absolute; left: 0; right: 0; bottom: 0;
+      margin: 0; justify-content: space-between; pointer-events: none;
+      padding: 14px 16px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+    /* font-size 0 hides the button's own words; the glyph rides ::before as
+       the literal character, because inside this Python literal a CSS escape
+       like \\2665 is read as an OCTAL escape and comes out as garbage.
+       !important because the shared disc rule below the media block sets
+       22px at the same specificity and would win on order. */
+    .chart-card.tall .reactions button { font-size: 0 !important; }
+    .chart-card.tall .reactions .like::before { content: "♥"; font-size: 22px; }
+    .chart-card.tall .reactions .share::before { content: "🔗"; font-size: 22px; }
+    .chart-card.tall .reactions .sharelink { pointer-events: none; order: 1;
+      align-self: center; color: #fff; background: rgba(0,0,0,.6);
+      border-radius: 999px; padding: 6px 10px; word-break: normal; }
   }
   /* The on-page picture viewer the feed opens on a phone. Twice the screen's
      width by default so a chart's text is legible, scrollable both ways,
@@ -424,11 +445,16 @@ SITE_CSS = """  :root {
   .viewer .vbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61;
     display: flex; justify-content: space-between; pointer-events: none;
     padding: 14px 16px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
-  .viewer .vbar button { pointer-events: auto; font: inherit; font-size: 15px;
-    font-weight: 600; cursor: pointer; border: 0; border-radius: 999px;
-    padding: 10px 16px; background: rgba(255,255,255,.92); color: #0b0b0b;
+  /* Icon only: a red heart and the chain, in white discs. */
+  .viewer .vbar button, .chart-card.tall .reactions button { pointer-events: auto;
+    font: inherit; font-size: 22px; line-height: 1; cursor: pointer; border: 0;
+    border-radius: 999px; width: 48px; height: 48px; padding: 0;
+    background: rgba(255,255,255,.92); color: #0b0b0b;
     box-shadow: 0 2px 10px rgba(0,0,0,.35); }
-  .viewer .vbar button:disabled { color: #555; }
+  .viewer .vlike, .chart-card.tall .reactions .like { color: #e0245e; }
+  .viewer .vlike.on, .chart-card.tall .reactions .like.on { background: #e0245e;
+    color: #fff; }
+  .viewer .vbar button:disabled { opacity: 1; }
   .viewer .close { position: fixed; top: 12px; right: 12px; z-index: 61;
     width: 40px; height: 40px; border-radius: 999px; border: 0;
     background: rgba(255,255,255,.92); color: #0b0b0b; font-size: 18px;
@@ -1456,6 +1482,10 @@ def card_thumb(source: str) -> str:
 # The /charts gallery. Sources live OUTSIDE static/ and outside git.
 CHART_DIR = ROOT / "marketing" / "infographics"
 CHART_FULL_WIDTH = 1400        # the picture on the gallery page itself
+# 810px is 390 CSS px at a phone's 2x, so a tall render stays sharp at about
+# 200 KB instead of the 360 KB the full 1080 costs. The feed lazy-loads them,
+# but a swipe should not wait on the next one.
+CHART_PHONE_WIDTH = 810
 CHART_CARD_W, CHART_CARD_H = 720, 405     # 16:9, matching the guide cards
 # The LANDING band shows the whole picture instead, padded to a square rather
 # than cropped to 16:9. Two different jobs, so two different files: the gallery
@@ -1589,6 +1619,16 @@ def load_charts() -> list:
         # against a name that had quietly changed meaning.
         for key in ("full", "card", "land"):
             meta[f"{key}_url"] = meta[key] + cache_bust(meta[key])
+        # THE PHONE VARIANT IS OPTIONAL. A chart script's --phone mode writes
+        # phone-<image>.png beside the gallery source, a 1080x1920 frame laid
+        # out for a tall screen. Where it exists the feed shows it full-screen
+        # instead of the desktop picture; where it does not, the feed shows
+        # the desktop picture at width, as before. Same missing-source rule
+        # as the three above: absent source with a committed output is fine.
+        meta["phone"] = f"phone-info-{meta['slug']}.jpg"
+        meta["has_phone"] = _chart_jpeg("phone-" + meta["image"], meta["phone"], CHART_PHONE_WIDTH)
+        meta["phone_url"] = (meta["phone"] + cache_bust(meta["phone"])
+                             if meta["has_phone"] else None)
         charts.append(meta)
     return sorted(charts, key=lambda m: m["date"], reverse=True)
 
@@ -1693,11 +1733,12 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
             # an image nobody has. missing_static() would fail the build on the
             # second case anyway; this keeps the page honest in the meantime.
             continue
-        cards.append(f'''  <div class="chart-card" id="{c["slug"]}">
+        tall = " tall" if c.get("has_phone") else ""
+        cards.append(f'''  <div class="chart-card{tall}" id="{c["slug"]}">
     <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: {_attr(c["title"])}">
       <picture>
-        <source media="(max-width: 720px)" srcset="/app/static/{c["full_url"]}">
+        <source media="(max-width: 720px)" srcset="/app/static/{c["phone_url"] or c["full_url"]}">
         <img src="/app/static/{c["card_url"]}" alt="{_attr(c["description"])}"
              loading="lazy" width="720" height="405"></picture></a>
     <b>{_attr(c["title"])}</b>
@@ -1745,8 +1786,8 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
   <button class="close" type="button" aria-label="Close">&#10005;</button>
   <img alt="">
   <div class="vbar">
-    <button class="vlike" type="button">&#9829; Helpful</button>
-    <button class="vshare" type="button">&#128279; Share</button>
+    <button class="vlike" type="button" aria-label="Helpful">&#9829;</button>
+    <button class="vshare" type="button" aria-label="Share">&#128279;</button>
   </div>
 </div>
 <div class="cta" style="padding:34px 0">
@@ -1775,6 +1816,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     var link  = bar.querySelector(".sharelink");
     var key   = "liked:chart:" + slug;
 
+    if (like.disabled) like.classList.add("on");
     function render(n) {{
       out.textContent = n === null ? "" :
         (n === 0 ? "" :
@@ -1789,7 +1831,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 
     like.addEventListener("click", function () {{
       if (like.disabled) return;
-      like.disabled = true; like.textContent = "\\u2665 Thanks";
+      like.disabled = true; like.textContent = "\\u2665 Thanks"; like.classList.add("on");
       try {{ localStorage.setItem(key, "1"); }} catch (e) {{}}
       // location.search rides along for the reason the guide version gives:
       // ?src= is the recruitment tag and ?test=1 / ?src=selftest are what let
@@ -1871,7 +1913,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     if (!current) return;
     var like = current.querySelector(".reactions .like");
     var vlike = viewer.querySelector(".vlike");
-    vlike.textContent = like.textContent; vlike.disabled = like.disabled;
+    vlike.classList.toggle("on", like.disabled); vlike.disabled = like.disabled;
   }}
   if (viewer) {{
     document.querySelectorAll(".chart-card .shot").forEach(function (shot) {{
