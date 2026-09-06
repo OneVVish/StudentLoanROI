@@ -45,6 +45,15 @@ income-driven repayment or forgiveness that federal loans carry.
 That is the real cost of the senior-year cliff. It is not only that the money
 is harder to find. It is that the money you find is worse money.
 
+One more thing can shorten the runway, and it is about the student's own loan
+rather than the parent's. Schools measure year in school by accumulated
+credits, and AP credits count toward that total whether or not they satisfy
+the degree. A student who arrives with a semester's worth of AP credit can be
+counted a year further along than the classes they still need, and under the
+2026 rules the funded years run by standing, not by classes left. The last
+real year of a degree can fall outside them. Ask the aid office how it counts
+standing before the senior year, not during it.
+
 ## The number to actually plan with
 
 If Parent PLUS is part of how you are paying for a four-year degree, the
