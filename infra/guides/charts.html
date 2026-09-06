@@ -329,6 +329,12 @@
      pinchable because the viewport allows scaling; .fit shows it whole. */
   .viewer { position: fixed; inset: 0; z-index: 60; background: #0b0b0b;
     overflow: auto; -webkit-overflow-scrolling: touch; }
+  @media (prefers-color-scheme: light) {
+    .viewer, .chart-card.tall, .chart-card.tall .shot { background: #ffffff; }
+    .viewer .close, .viewer .vbar button, .chart-card.tall .reactions button {
+      background: #111210; color: #f2f2f0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+    .viewer .vlike, .chart-card.tall .reactions .like { color: #e0245e; }
+  }
   .viewer img { display: block; width: 200vw; max-width: none; }
   .viewer.fit img { width: 100vw; }
   /* Helpful lower left, Share lower right, floating over the picture. The
@@ -491,10 +497,12 @@
 </div>
 <div class="post-grid">
   <div class="chart-card tall" id="best-career-by-year">
-    <a class="shot" href="/app/static/info-best-career-by-year.jpg?v=8563782f" target="_blank" rel="noopener"
+    <a class="shot" href="/app/static/info-best-career-by-year.jpg?v=8563782f" target="_blank" rel="noopener" data-light="/app/static/light-info-best-career-by-year.jpg?v=aae175a7"
        aria-label="Open the full-size infographic: The best-paid career depends on when you ask">
       <picture>
+        <source media="(max-width: 720px) and (prefers-color-scheme: light)" srcset="/app/static/light-phone-info-best-career-by-year.jpg?v=245d1f6b">
         <source media="(max-width: 720px)" srcset="/app/static/phone-info-best-career-by-year.jpg?v=a82a4a6a">
+        <source media="(prefers-color-scheme: light)" srcset="/app/static/light-card-info-best-career-by-year.jpg?v=f7ec27bf">
         <img src="/app/static/card-info-best-career-by-year.jpg?v=ecc24d3a" alt="Where each career ranks by that year's pay among the 825 occupations the calculator models, at years 1, 5, 10 and 20 after a bachelor's degree, for every career that is ever in the top 20. At year 1 the best-paid career is Nurse Anesthetists; by year 10 it is Pediatric Surgeons, and 17 of the year-20 top 20 earned nothing at year 1."
              loading="lazy" width="720" height="405"></picture></a>
     <b>The best-paid career depends on when you ask</b>
@@ -508,10 +516,12 @@
     </div>
   </div>
   <div class="chart-card tall" id="federal-money-map">
-    <a class="shot" href="/app/static/info-federal-money-map.jpg?v=e79bf8b7" target="_blank" rel="noopener"
+    <a class="shot" href="/app/static/info-federal-money-map.jpg?v=e79bf8b7" target="_blank" rel="noopener" data-light="/app/static/light-info-federal-money-map.jpg?v=306b37e1"
        aria-label="Open the full-size infographic: Where four years costs more than the government will lend">
       <picture>
+        <source media="(max-width: 720px) and (prefers-color-scheme: light)" srcset="/app/static/light-phone-info-federal-money-map.jpg?v=e8e38b7c">
         <source media="(max-width: 720px)" srcset="/app/static/phone-info-federal-money-map.jpg?v=48655bfa">
+        <source media="(prefers-color-scheme: light)" srcset="/app/static/light-card-info-federal-money-map.jpg?v=c5cc627f">
         <img src="/app/static/card-info-federal-money-map.jpg?v=b63b9207" alt="One dot per bachelor's-granting college at its own address, coloured by whether four years of in-state sticker cost of attendance fits under the $92,000 a dependent student's family can borrow from the federal government in all, sized by admission rate. 84 percent of colleges in the Northeast sit above the line, 63 percent in the West."
              loading="lazy" width="720" height="405"></picture></a>
     <b>Where four years costs more than the government will lend</b>
@@ -525,10 +535,12 @@
     </div>
   </div>
   <div class="chart-card tall" id="federal-money-runs-out">
-    <a class="shot" href="/app/static/info-federal-money-runs-out.jpg?v=f155f64e" target="_blank" rel="noopener"
+    <a class="shot" href="/app/static/info-federal-money-runs-out.jpg?v=f155f64e" target="_blank" rel="noopener" data-light="/app/static/light-info-federal-money-runs-out.jpg?v=ad164788"
        aria-label="Open the full-size infographic: At 1,644 of 2,235 colleges, four years costs more than the government will lend">
       <picture>
+        <source media="(max-width: 720px) and (prefers-color-scheme: light)" srcset="/app/static/light-phone-info-federal-money-runs-out.jpg?v=69c19e29">
         <source media="(max-width: 720px)" srcset="/app/static/phone-info-federal-money-runs-out.jpg?v=291ff8c4">
+        <source media="(prefers-color-scheme: light)" srcset="/app/static/light-card-info-federal-money-runs-out.jpg?v=054e4669">
         <img src="/app/static/card-info-federal-money-runs-out.jpg?v=df778787" alt="One dot per bachelor's-granting college, grouped by sector and sorted by four years of its in-state sticker cost of attendance, coloured by whether that total fits under the $92,000 a dependent student's family can borrow from the federal government in all. The student's own $27,000 covers four years at one college. Dot size is selectivity: of the 88 colleges that admit a quarter or fewer of applicants, 85 sit above the line."
              loading="lazy" width="720" height="405"></picture></a>
     <b>At 1,644 of 2,235 colleges, four years costs more than the government will lend</b>
@@ -559,10 +571,12 @@
     </div>
   </div>
   <div class="chart-card tall" id="plan-change-by-major">
-    <a class="shot" href="/app/static/info-plan-change-by-major.jpg?v=929ef04c" target="_blank" rel="noopener"
+    <a class="shot" href="/app/static/info-plan-change-by-major.jpg?v=929ef04c" target="_blank" rel="noopener" data-light="/app/static/light-info-plan-change-by-major.jpg?v=f836ca68"
        aria-label="Open the full-size infographic: The 2026 plan cut the payment for 52 majors and raised it for 21">
       <picture>
+        <source media="(max-width: 720px) and (prefers-color-scheme: light)" srcset="/app/static/light-phone-info-plan-change-by-major.jpg?v=30b2ba72">
         <source media="(max-width: 720px)" srcset="/app/static/phone-info-plan-change-by-major.jpg?v=4e43212a">
+        <source media="(prefers-color-scheme: light)" srcset="/app/static/light-card-info-plan-change-by-major.jpg?v=9f7fb3bd">
         <img src="/app/static/card-info-plan-change-by-major.jpg?v=00cf0354" alt="First-year monthly payment on the median bachelor's federal debt under IBR, the income-driven plan an older loan can use, and under RAP, the plan a loan made from July 2026 gets, one line per NY Fed major at its early-career median pay."
              loading="lazy" width="720" height="405"></picture></a>
     <b>The 2026 plan cut the payment for 52 majors and raised it for 21</b>
@@ -1077,7 +1091,9 @@
         if (!phone.matches) return;
         e.preventDefault();
         current = shot.closest(".chart-card");
-        viewerImg.src = shot.getAttribute("href");
+        var light = shot.getAttribute("data-light");
+        viewerImg.src = (light && window.matchMedia("(prefers-color-scheme: light)").matches)
+          ? light : shot.getAttribute("href");
         viewerImg.alt = shot.getAttribute("aria-label") || "";
         viewer.classList.remove("fit");
         viewer.hidden = false; viewer.scrollTop = 0; viewer.scrollLeft = 0;

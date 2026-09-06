@@ -329,6 +329,12 @@
      pinchable because the viewport allows scaling; .fit shows it whole. */
   .viewer { position: fixed; inset: 0; z-index: 60; background: #0b0b0b;
     overflow: auto; -webkit-overflow-scrolling: touch; }
+  @media (prefers-color-scheme: light) {
+    .viewer, .chart-card.tall, .chart-card.tall .shot { background: #ffffff; }
+    .viewer .close, .viewer .vbar button, .chart-card.tall .reactions button {
+      background: #111210; color: #f2f2f0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+    .viewer .vlike, .chart-card.tall .reactions .like { color: #e0245e; }
+  }
   .viewer img { display: block; width: 200vw; max-width: none; }
   .viewer.fit img { width: 100vw; }
   /* Helpful lower left, Share lower right, floating over the picture. The

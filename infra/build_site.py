@@ -438,6 +438,12 @@ SITE_CSS = """  :root {
      pinchable because the viewport allows scaling; .fit shows it whole. */
   .viewer { position: fixed; inset: 0; z-index: 60; background: #0b0b0b;
     overflow: auto; -webkit-overflow-scrolling: touch; }
+  @media (prefers-color-scheme: light) {
+    .viewer, .chart-card.tall, .chart-card.tall .shot { background: #ffffff; }
+    .viewer .close, .viewer .vbar button, .chart-card.tall .reactions button {
+      background: #111210; color: #f2f2f0; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+    .viewer .vlike, .chart-card.tall .reactions .like { color: #e0245e; }
+  }
   .viewer img { display: block; width: 200vw; max-width: none; }
   .viewer.fit img { width: 100vw; }
   /* Helpful lower left, Share lower right, floating over the picture. The
@@ -1629,6 +1635,24 @@ def load_charts() -> list:
         meta["has_phone"] = _chart_jpeg("phone-" + meta["image"], meta["phone"], CHART_PHONE_WIDTH)
         meta["phone_url"] = (meta["phone"] + cache_bust(meta["phone"])
                              if meta["has_phone"] else None)
+        # THE DAY VERSION, equally optional: a script's --light writes
+        # light-<image>.png (and light-phone-<image>.png). Served through the
+        # <picture> element on prefers-color-scheme: light, for the full
+        # picture, the card crop and the phone frame. The landing square stays
+        # the dark one: it sits on the landing's own light band by design.
+        meta["light"] = f"light-info-{meta['slug']}.jpg"
+        meta["light_card"] = f"light-card-info-{meta['slug']}.jpg"
+        meta["light_phone"] = f"light-phone-info-{meta['slug']}.jpg"
+        has_light = (_chart_jpeg("light-" + meta["image"], meta["light"], CHART_FULL_WIDTH)
+                     and _chart_jpeg("light-" + meta["image"], meta["light_card"], 0,
+                                     box=(CHART_CARD_W, CHART_CARD_H)))
+        has_light_phone = _chart_jpeg("light-phone-" + meta["image"], meta["light_phone"],
+                                      CHART_PHONE_WIDTH)
+        meta["light_url"] = meta["light"] + cache_bust(meta["light"]) if has_light else None
+        meta["light_card_url"] = (meta["light_card"] + cache_bust(meta["light_card"])
+                                  if has_light else None)
+        meta["light_phone_url"] = (meta["light_phone"] + cache_bust(meta["light_phone"])
+                                   if has_light_phone else None)
         charts.append(meta)
     return sorted(charts, key=lambda m: m["date"], reverse=True)
 
@@ -1734,11 +1758,26 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
             # second case anyway; this keeps the page honest in the meantime.
             continue
         tall = " tall" if c.get("has_phone") else ""
+        # Sources in order of specificity: the browser takes the FIRST whose
+        # media query matches, so day+phone comes before phone, and day
+        # before the default. A chart with no day version simply has no
+        # light sources and every viewer gets the dark picture.
+        light_srcs = ""
+        if c.get("light_phone_url"):
+            light_srcs += (f'\n        <source media="(max-width: 720px) and (prefers-color-scheme: light)"'
+                           f' srcset="/app/static/{c["light_phone_url"]}">')
+        phone_src = (f'\n        <source media="(max-width: 720px)"'
+                     f' srcset="/app/static/{c["phone_url"] or c["full_url"]}">')
+        if c.get("light_card_url"):
+            light_srcs_card = (f'\n        <source media="(prefers-color-scheme: light)"'
+                               f' srcset="/app/static/{c["light_card_url"]}">')
+        else:
+            light_srcs_card = ""
+        light_full = f' data-light="/app/static/{c["light_url"]}"' if c.get("light_url") else ""
         cards.append(f'''  <div class="chart-card{tall}" id="{c["slug"]}">
-    <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"
+    <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"{light_full}
        aria-label="Open the full-size infographic: {_attr(c["title"])}">
-      <picture>
-        <source media="(max-width: 720px)" srcset="/app/static/{c["phone_url"] or c["full_url"]}">
+      <picture>{light_srcs}{phone_src}{light_srcs_card}
         <img src="/app/static/{c["card_url"]}" alt="{_attr(c["description"])}"
              loading="lazy" width="720" height="405"></picture></a>
     <b>{_attr(c["title"])}</b>
@@ -1921,7 +1960,9 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
         if (!phone.matches) return;
         e.preventDefault();
         current = shot.closest(".chart-card");
-        viewerImg.src = shot.getAttribute("href");
+        var light = shot.getAttribute("data-light");
+        viewerImg.src = (light && window.matchMedia("(prefers-color-scheme: light)").matches)
+          ? light : shot.getAttribute("href");
         viewerImg.alt = shot.getAttribute("aria-label") || "";
         viewer.classList.remove("fit");
         viewer.hidden = false; viewer.scrollTop = 0; viewer.scrollLeft = 0;
