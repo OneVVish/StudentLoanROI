@@ -403,7 +403,7 @@ SITE_CSS = """  :root {
     .chart-card { scroll-snap-align: start; scroll-snap-stop: always;
       min-height: 100vh; min-height: 100dvh; box-sizing: border-box;
       border-radius: 0; border-left: 0; border-right: 0; }
-    .chart-card .shot { aspect-ratio: auto; height: 56vh; height: 56dvh;
+    .chart-card .shot { aspect-ratio: auto; height: 62vh; height: 62dvh;
       display: flex; align-items: center; justify-content: center; }
     .chart-card .shot img { object-fit: contain; object-position: center;
       max-height: 100%; }
@@ -411,7 +411,19 @@ SITE_CSS = """  :root {
       -webkit-box-orient: vertical; overflow: hidden; }
     .chart-card .src { display: -webkit-box; -webkit-line-clamp: 2;
       -webkit-box-orient: vertical; overflow: hidden; }
-  }"""
+  }
+  /* The on-page picture viewer the feed opens on a phone. Twice the screen's
+     width by default so a chart's text is legible, scrollable both ways,
+     pinchable because the viewport allows scaling; .fit shows it whole. */
+  .viewer { position: fixed; inset: 0; z-index: 60; background: #0b0b0b;
+    overflow: auto; -webkit-overflow-scrolling: touch; }
+  .viewer img { display: block; width: 200vw; max-width: none; }
+  .viewer.fit img { width: 100vw; }
+  .viewer .close { position: fixed; top: 12px; right: 12px; z-index: 61;
+    width: 40px; height: 40px; border-radius: 999px; border: 0;
+    background: rgba(255,255,255,.92); color: #0b0b0b; font-size: 18px;
+    cursor: pointer; }
+  [hidden] { display: none !important; }"""
 
 
 POST_DIR = ROOT / "content" / "posts"
@@ -1675,7 +1687,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
     <a class="shot" href="/app/static/{c["full_url"]}" target="_blank" rel="noopener"
        aria-label="Open the full-size infographic: {_attr(c["title"])}">
       <picture>
-        <source media="(max-width: 720px)" srcset="/app/static/{c["land_url"]}">
+        <source media="(max-width: 720px)" srcset="/app/static/{c["full_url"]}">
         <img src="/app/static/{c["card_url"]}" alt="{_attr(c["description"])}"
              loading="lazy" width="720" height="405"></picture></a>
     <b>{_attr(c["title"])}</b>
@@ -1719,6 +1731,10 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 {cards}
 </div>
 
+<div id="viewer" class="viewer" hidden>
+  <button class="close" type="button" aria-label="Close">&#10005;</button>
+  <img alt="">
+</div>
 <div class="cta" style="padding:34px 0">
   <a class="btn big" href="/?go=1&amp;from=charts">Run your own numbers, free</a>
   <div class="trust">Free · anonymous · no sign-up</div>
@@ -1819,6 +1835,37 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
       copy();
     }});
   }});
+
+  // THE VIEWER. On a phone a tap on a picture opens it here, on the page,
+  // at twice the screen's width so the chart's text is readable, scrollable
+  // in both directions and pinchable. It used to open the JPEG in a new tab,
+  // which a phone treats as a file: Android downloads it, iOS shows it with
+  // no way back but the browser's own. Desktop keeps the new tab. A second
+  // tap on the picture toggles between fit-to-width and readable width.
+  var viewer = document.getElementById("viewer");
+  var viewerImg = viewer && viewer.querySelector("img");
+  var phone = window.matchMedia("(max-width: 720px)");
+  function closeViewer() {{
+    viewer.hidden = true; viewerImg.src = ""; document.body.style.overflow = "";
+  }}
+  if (viewer) {{
+    document.querySelectorAll(".chart-card .shot").forEach(function (shot) {{
+      shot.addEventListener("click", function (e) {{
+        if (!phone.matches) return;
+        e.preventDefault();
+        viewerImg.src = shot.getAttribute("href");
+        viewerImg.alt = shot.getAttribute("aria-label") || "";
+        viewer.classList.remove("fit");
+        viewer.hidden = false; viewer.scrollTop = 0; viewer.scrollLeft = 0;
+        document.body.style.overflow = "hidden";
+      }});
+    }});
+    viewer.querySelector(".close").addEventListener("click", closeViewer);
+    viewerImg.addEventListener("click", function () {{ viewer.classList.toggle("fit"); }});
+    document.addEventListener("keydown", function (e) {{
+      if (e.key === "Escape" && !viewer.hidden) closeViewer();
+    }});
+  }}
 }})();
 </script>
 </body>
