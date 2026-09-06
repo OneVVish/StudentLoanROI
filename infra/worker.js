@@ -878,7 +878,15 @@ export default {
       const page = new Response(LANDING, {
         headers: edgeHeaders({
           "content-type": "text/html; charset=utf-8",
-          "cache-control": "public, max-age=3600",
+          // PAGES REVALIDATE ON EVERY LOAD. They carried max-age=3600, so a
+          // browser that had opened the gallery in the hour before a deploy
+          // kept running the old page's script for the rest of that hour:
+          // the Share button handed out the pre-deploy link while the deploy
+          // list said 100%. A page is ~50 KB and a Worker constant; the cost
+          // of refetching it is nothing next to a stale script. The static
+          // assets under /static keep their day-long cache; they are
+          // content-hashed or cache-busted, which pages are not.
+          "cache-control": "no-cache",
           "link": `<${CANON}/>; rel="canonical"`,
         }, cspFor("/")),
       });
@@ -903,7 +911,7 @@ export default {
       return new Response(guide, {
         headers: edgeHeaders({
           "content-type": "text/html; charset=utf-8",
-          "cache-control": "public, max-age=3600",
+          "cache-control": "no-cache",   // see the landing response above
           "link": `<${CANON}${url.pathname.replace(/\/$/, "")}>; rel="canonical"`,
         }, cspFor(guidePath)),
       });
