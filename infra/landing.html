@@ -308,7 +308,7 @@
     .chart-card { scroll-snap-align: start; scroll-snap-stop: always;
       min-height: 100vh; min-height: 100dvh; box-sizing: border-box;
       border-radius: 0; border-left: 0; border-right: 0; }
-    .chart-card .shot { aspect-ratio: auto; height: 56vh; height: 56dvh;
+    .chart-card .shot { aspect-ratio: auto; height: 62vh; height: 62dvh;
       display: flex; align-items: center; justify-content: center; }
     .chart-card .shot img { object-fit: contain; object-position: center;
       max-height: 100%; }
@@ -317,6 +317,18 @@
     .chart-card .src { display: -webkit-box; -webkit-line-clamp: 2;
       -webkit-box-orient: vertical; overflow: hidden; }
   }
+  /* The on-page picture viewer the feed opens on a phone. Twice the screen's
+     width by default so a chart's text is legible, scrollable both ways,
+     pinchable because the viewport allows scaling; .fit shows it whole. */
+  .viewer { position: fixed; inset: 0; z-index: 60; background: #0b0b0b;
+    overflow: auto; -webkit-overflow-scrolling: touch; }
+  .viewer img { display: block; width: 200vw; max-width: none; }
+  .viewer.fit img { width: 100vw; }
+  .viewer .close { position: fixed; top: 12px; right: 12px; z-index: 61;
+    width: 40px; height: 40px; border-radius: 999px; border: 0;
+    background: rgba(255,255,255,.92); color: #0b0b0b; font-size: 18px;
+    cursor: pointer; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
