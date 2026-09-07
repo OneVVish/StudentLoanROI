@@ -10,7 +10,7 @@ Borrow a federal student loan on or after July 1, 2026 and the list of repayment
 
 Most coverage of the change stops at the shorter list. The list is the least interesting part. Underneath it the arithmetic that decides an income-driven payment was rewritten, and the rewrite moves money in a pattern that is not obvious from either plan's description: the new plan charges more at the bottom of the income range, less through the middle, and more again at the top.
 
-Dollar amounts here are rounded for readability. The exact figures are the ones set in law or published by the Department: the $10 minimum monthly payment, the $50 per dependent reduction, the $20,000 and $65,000 Parent PLUS caps, and the dates. Every other number comes from the same model that runs the calculator, at the 6.5 percent federal rate the tool uses.
+Dollar amounts here are rounded for readability. The exact figures are the ones set in law or published by the Department: the $10 minimum monthly payment, the $50 per dependent reduction, the $20,000 and $65,000 Parent PLUS caps, the auto pay rate reduction, and the dates. Every other number comes from the same model that runs the calculator, at the 6.5 percent federal rate the tool uses.
 
 ## The formula, which is the actual change
 
@@ -67,6 +67,8 @@ This only happens when the payment is smaller than the month's interest, which t
 The effect is easiest to see at low income, where the waiver actually bites. On that same $27,000 balance at an income of $30,000, RAP waives roughly $5,600 of interest across the life of the loan and the balance is repaid in about 25 years with nothing forgiven. The IBR row on the same numbers reaches its 20-year mark still owing, and roughly $25,400 is written off.
 
 Two plans, two ways of arriving at a finish line, and the totals land closer together than the mechanisms suggest: about $43,800 handed over on RAP against about $36,600 on IBR, before any tax. Which is the better outcome depends on something outside the loan, and that something is the next section.
+
+One change to the rate itself has a deadline. Enrolling in auto pay has always taken 0.25 percentage points off a federal loan's interest rate. From July 1, 2026 the Department of Education adds a temporary 0.75 points on top, a full point in all, on Direct Loans disbursed on or after July 1, 2012, and it runs through June 30, 2028. Anyone already on auto pay gets it without doing anything. Anyone who is not has until September 30, 2026 to enroll with their servicer, and after that date the extra 0.75 points is gone. On the $27,000 balance above, a point off the rate is roughly $150 a year of interest at the start, and it applies whichever plan you are on.
 
 ## Forgiveness moved, and it is taxed
 
