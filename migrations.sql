@@ -2477,6 +2477,11 @@ end $$;
 --     funnel the admin page shows. The skip link and the finishing button
 --     write the SAME nav row, so "skipped" is navigations minus wizard_done
 --     and a floor. No step rows exist before this date.
+--   * From 2026-09-06 the routing is ONCE PER BROWSER: the wizard's final
+--     screen sets a one-year cookie (wmd_wizard=1) and a phone carrying it
+--     is the calculator on its next bare arrival, logged as pageview. So
+--     pageview_start undercounts repeat phones from this date, and the
+--     funnel's "saw the wizard" row is first-time phones only.
 --   * wizard_done carries find=<0|1> from 2026-09-06: the visitor asked to
 --     be handed to the school search instead of naming a school. That
 --     hand-off is a nav:from=start:to=schools row, and the search's own

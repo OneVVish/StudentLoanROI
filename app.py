@@ -5901,8 +5901,10 @@ def requested_tool() -> str:
     # Anything in the URL beyond the session flags (a shared scenario, a
     # from=, a src=) means the visitor was sent somewhere specific and gets
     # it; the wizard's own "skip" link carries from=start for that reason.
-    # Recorded as a seam in migrations.sql.
-    if is_mobile_visit() and bare_arrival():
+    # Recorded as a seam in migrations.sql. Once per browser: a phone that
+    # has finished the wizard before goes straight to the calculator, where
+    # the offer banner still links back to it.
+    if is_mobile_visit() and bare_arrival() and not wizard_done_before():
         return "start"
     return ""
 
@@ -7388,6 +7390,29 @@ def is_mobile_visit() -> bool:
             st.session_state.is_mobile = ua_is_mobile(
                 st.context.headers.get("User-Agent", ""))
         return bool(st.session_state.is_mobile)
+    except Exception:
+        return False
+
+
+WIZARD_DONE_COOKIE = "wmd_wizard"
+
+
+def wizard_done_before() -> bool:
+    """Whether THIS BROWSER has finished the six questions on an earlier visit.
+
+    A phone's bare arrival is routed to the wizard, and without this it would
+    be routed there on every later visit too, since each is a new session. The
+    wizard's final screen sets a one-year cookie from the page (see
+    render_start_wizard); this reads it off the request and latches it, the
+    is_mobile_visit pattern, so AppTest can drive the routing by setting
+    session_state["wizard_seen"] the way it sets "is_mobile". Outside a
+    runtime it is False.
+    """
+    try:
+        if "wizard_seen" not in st.session_state:
+            st.session_state.wizard_seen = (
+                st.context.cookies.get(WIZARD_DONE_COOKIE, "") == "1")
+        return bool(st.session_state.wizard_seen)
     except Exception:
         return False
 
@@ -26701,6 +26726,11 @@ def render_sai_worksheet(always_open: bool = False) -> None:
 
 WIZARD_FIND_SCHOOL = -1
 
+# Both final-screen bubbles end with this, so they cannot say it two ways.
+WIZARD_SIDEBAR_NOTE = ("Any of these choices can be changed in the calculator's "
+                       "sidebar, behind the red « Inputs pill at the top left, "
+                       "and the results update instantly.")
+
 
 @st.cache_data
 def wizard_school_options() -> tuple:
@@ -26939,7 +26969,7 @@ def render_start_wizard(always_open: bool = False) -> None:
                             "; pick the field of study there")
                          + ", priced at your home state's rate. Choose one and "
                          "\"Use this school\" opens the calculator with all of "
-                         "these answers.")
+                         "these answers. " + WIZARD_SIDEBAR_NOTE)
                 st.link_button("Find a school within your budget",
                                internal_tool_url("schools") + "&" + urlencode(params),
                                type="primary")
@@ -26950,9 +26980,21 @@ def render_start_wizard(always_open: bool = False) -> None:
                          "and show the ten-year result against "
                          + ("your own pay today" if answers.get("returning")
                             else "not going at all")
-                         + "; every answer here can be changed in its sidebar.")
+                         + ". " + WIZARD_SIDEBAR_NOTE)
                 st.link_button("Open the calculator with these answers", url,
                                type="primary")
+        # Remember, in this browser, that the questions were answered, so the
+        # next bare arrival is the calculator (wizard_done_before). Set on
+        # window.top: components.html renders in an iframe, and on Community
+        # Cloud a second wrapper frame sits between it and the page. Secure
+        # only over https, or localhost refuses the cookie.
+        components.html(
+            f"""<script>
+            var d = window.top.document;
+            d.cookie = "{WIZARD_DONE_COOKIE}=1; max-age=31536000; path=/; SameSite=Lax"
+                       + (window.top.location.protocol === "https:" ? "; Secure" : "");
+            </script>""",
+            height=0)
         if not st.session_state.get("wizard_logged"):
             st.session_state.wizard_logged = True
             log_usage_event(f"wizard_done:mode={answers['mode']}"
