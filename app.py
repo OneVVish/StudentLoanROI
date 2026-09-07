@@ -5935,7 +5935,7 @@ def bare_arrival() -> bool:
         return False
 
 
-def internal_tool_url(tool: str = "") -> str:
+def internal_tool_url(tool: str = "", extra: dict = None) -> str:
     """A link from one page of this app to another, carrying the params that
     describe THIS VISIT. Pass "" for the calculator.
 
@@ -5961,11 +5961,33 @@ def internal_tool_url(tool: str = "") -> str:
 
     admin and research stay out, as they do everywhere else: both fail safe
     when dropped.
+
+    AND THE PROFILE (2026-09-06). The scenario the sidebar holds -- who is
+    going, major, school, city, loan, plan -- rides too, as the same share
+    params a "Share Scenario" link carries, read from
+    session_state["_profile_params"], which section 5 stamps once the sidebar
+    has resolved. Without it every cross-link was a new session on the default
+    scenario, so a visitor who set up their profile and opened the school
+    search came back to UC Berkeley and Computer Science. The sidebar executes
+    on tool pages and seeds itself from these, so the profile survives the
+    round trip. `extra` overrides the profile: the wizard hands off answers
+    that replace it. Session flags come last and always win.
     """
-    params = dict(session_query_params())
+    params = {}
+    try:
+        params.update(st.session_state.get("_profile_params") or {})
+    except Exception:
+        pass
+    params.update(extra or {})
+    # Nothing a profile or an override says may name a page or a flag: those
+    # are decided below, from the session, or not at all.
+    for key in ("tool", "from", "admin", "research", "test", "src"):
+        params.pop(key, None)
+    params.update(session_query_params())
     src = get_traffic_source()
     if src:
         params["src"] = src
+    params.pop("tool", None)
     if tool:
         params["tool"] = tool
     # Where this link is being clicked FROM, so the landing on the other side
@@ -26954,7 +26976,7 @@ def render_start_wizard(always_open: bool = False) -> None:
         # A REAL NAVIGATION, so the calculator seeds itself from these params
         # the way it seeds from a share link. internal_tool_url carries test
         # and src and stamps from=start, so the arrival is logged as a nav.
-        url = internal_tool_url() + "&" + urlencode(params)
+        url = internal_tool_url(extra=params)
         find = bool(answers.get("find_school"))
         with st.chat_message("assistant"):
             if find:
@@ -26972,7 +26994,7 @@ def render_start_wizard(always_open: bool = False) -> None:
                          "\"Use this school\" opens the calculator with all of "
                          "these answers. " + WIZARD_SIDEBAR_NOTE)
                 st.link_button("Find a school within your budget",
-                               internal_tool_url("schools") + "&" + urlencode(params),
+                               internal_tool_url("schools", extra=params),
                                type="primary")
                 st.link_button("Open the calculator without one", url)
             else:
@@ -27008,6 +27030,28 @@ def render_start_wizard(always_open: bool = False) -> None:
                 st.session_state.pop(k, None)
             st.rerun()
 
+
+# The profile every internal link carries (internal_tool_url). Stamped HERE,
+# after the sidebar has resolved everything and before any tool page renders
+# its links: the same share params the Share button emits, so a link between
+# tools cannot describe a different scenario than a share would.
+# The Scenario B names exist only inside the compare branch of section 4.
+_profile_b = dict(
+    major_b=major_b, school_name_b=school_name_b, in_state_b=in_state_b,
+    coa_per_year_b=coa_per_year_b,
+    personal_contribution_per_year_b=personal_contribution_per_year_b,
+    grants_per_year_b=grants_per_year_b, interest_rate_b=interest_rate_b,
+    repayment_strategy_b=repayment_strategy_b, start_year_b=start_year_b,
+    cc_mode_b=cc_mode_b, cc_state_b=cc_state_key_b, cc_coa_per_year_b=cc_coa_per_year_b,
+) if compare_mode else {}
+st.session_state["_profile_params"] = build_share_params(
+    career_data_source, major, city, school_name_a, in_state_a,
+    coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
+    interest_rate, repayment_strategy, compare_mode,
+    start_year_a=start_year_a, roi_horizon_years=roi_horizon_years,
+    cc_mode_a=cc_mode_a, cc_state_a=cc_state_key_a, cc_coa_per_year_a=cc_coa_per_year_a,
+    cc_in_district_a=cc_in_district_a, **_profile_b,
+)
 
 # Everything below this point is the college calculator. On a ?tool= page we
 # render that tool instead and stop -- the sidebar is already hidden above, so

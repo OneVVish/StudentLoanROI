@@ -2542,3 +2542,22 @@ end $$;
 -- The meaning is unchanged: the second is the returning-student baseline
 -- (earnings_premium against baseline_salary_now). ?smode= carries
 -- first/returning rather than the label, so shared links are unaffected.
+
+
+-- 2026-09-06  SEAM: every internal link carries the visitor's scenario.
+--
+-- No DDL. internal_tool_url now appends the same share params a "Share
+-- Scenario" link carries (session_state["_profile_params"]), so a visitor
+-- who set up a profile and opened another tool arrives there, and back on
+-- the calculator, with that profile intact. Before this a cross-link was a
+-- new session on the DEFAULT scenario. Consequences for the data:
+--   * A cross-link arrival now carries ?compare= like a share arrival, so
+--     its arm and initial state are pinned by the URL rather than the
+--     randomiser, and such sessions sit OUTSIDE the H2 sample the way share
+--     arrivals always have. Identify them as before: a session whose first
+--     pageview URL carried a scenario param. Rows with nav:from=<page> and
+--     a scenario are this seam; before it they had none.
+--   * scenario_events on a tool page now describe the carried profile
+--     rather than UC Berkeley / Computer Science defaults, so a "default
+--     scenario" landing count falls from this date for internal arrivals.
+

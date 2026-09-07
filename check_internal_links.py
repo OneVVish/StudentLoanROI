@@ -243,14 +243,16 @@ def main() -> int:
     st = ns["st"]
     tools = list(ns["STANDALONE_TOOLS"])
 
-    def url_for(params, tool=""):
+    def url_for(params, tool="", profile=None, extra=None):
         # A fresh session per case: these links are cross-SESSION by nature, so
         # reusing state between cases would test something that cannot happen.
         st.session_state = {}
         st.query_params = FakeQueryParams(params)
         ns["get_traffic_source"]()          # latch, as a real render does
         st.session_state["test_mode"] = params.get("test") == "1"
-        return ns["internal_tool_url"](tool)
+        if profile is not None:
+            st.session_state["_profile_params"] = profile
+        return ns["internal_tool_url"](tool, extra=extra)
 
     problems, checked = [], 0
     worker = (ROOT / "infra" / "worker.js").read_text()
@@ -308,6 +310,31 @@ def main() -> int:
         check(f"admin/research excluded -> {tool}",
               url_for({"admin": "1", "research": "1", "src": "x"}, tool),
               ["src", "tool"], ["admin", "research"])
+
+    # 5b. THE PROFILE RIDES EVERY LINK, and cannot smuggle a flag. The scenario
+    #     the sidebar holds is stamped into session_state["_profile_params"]
+    #     and every cross-link carries it; before 2026-09-06 a tool link was a
+    #     new session on the default scenario. Session flags outrank it, an
+    #     `extra` (the wizard's answers) overrides it, and a profile can never
+    #     carry admin, research, or a tool of its own.
+    profile = {"major": "Nursing", "city": "Austin, TX", "school": "Rice University",
+               "tool": "repayment", "admin": "1", "research": "1", "test": "0"}
+    for tool in tools + [""]:
+        url = url_for({"test": "1"}, tool, profile=profile)
+        q = parse_qs(urlparse(url).query)
+        check(f"profile rides -> {tool or 'calculator'}", url,
+              ["major", "city", "school", "test"], ["admin", "research"])
+        checked += 1
+        if q.get("test") != ["1"] or q.get("tool", [""])[0] != tool:
+            problems.append(f"  profile outranked a session flag or the tool\n      {url}")
+    url = url_for({}, "", profile=profile, extra={"major": "Physics", "compare": "0"})
+    q = parse_qs(urlparse(url).query)
+    checked += 1
+    if q.get("major") != ["Physics"] or q.get("compare") != ["0"] or q.get("city") != ["Austin, TX"]:
+        problems.append(f"  extra did not override the profile\n      {url}")
+    checked += 1
+    if "major" in parse_qs(urlparse(url_for({}, "schools")).query):
+        problems.append("  a link with no profile invented one")
 
     # 6. The VALUE must survive, not merely the key. A tag mangled in transit
     #    is as useless as one dropped, and far more confusing in the data.
