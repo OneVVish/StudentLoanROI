@@ -19625,12 +19625,10 @@ dataset_mode = _sb_study.radio(
          "Career: what people already doing a specific job earn (BLS, 836 "
          "occupations) -- richer, but it assumes you get that job.",
 )
-if dataset_mode == DATASET_MODE_MAJOR:
-    _sb_study.caption(
-        "Salaries reflect everyone who studied this, including the "
-        f"{UNDEREMPLOYMENT_OVERALL_PCT:.0f}% of graduates who end up in jobs that don't need a degree."
-    )
-else:
+# Major mode gets no caption here: the underemployment share is already in
+# the radio's help text and in the results' own disclosure, and a third copy
+# under the control was one more line between the visitor and the dropdown.
+if dataset_mode != DATASET_MODE_MAJOR:
     _sb_study.caption(
         "Salaries assume you land this job. Switch to **Major** to see what "
         "everyone who studied a subject earns, not just those working in it."
