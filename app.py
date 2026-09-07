@@ -27522,6 +27522,11 @@ def render_salary_flow_charts(rows, key_prefix: str, columns: bool = True) -> No
     entries = [(label, figs) for _heading, cols in rows for label, figs in cols]
     if not entries:
         return
+    # Its own section. Without a break the bars ran straight on from the
+    # stage table above and read as more of it; this is one renderer for
+    # both branches, so the break is on both arms by construction.
+    st.divider()
+    st.markdown("##### 💵 Where each paycheck goes")
     st.caption(salary_flow_caption([figs["monthly_payment"]
                                     for _label, figs in entries]))
     # Beside the thing it relabels rather than in the sidebar: it changes how
