@@ -4258,6 +4258,11 @@ def fmt_money_md(value) -> str:
 
 
 def fmt_money(value):
+    # Sign OUTSIDE the dollar sign: "-$50,892", never "$-50,892". An ASCII
+    # hyphen rather than U+2212, because this string reaches reportlab's
+    # Helvetica and matplotlib, and a glyph the font lacks prints as a box.
+    if value < 0:
+        return f"-${-value:,.0f}"
     return f"${value:,.0f}"
 
 
@@ -24600,9 +24605,16 @@ if active_tool:
 else:
     st.title("🎓 Student Loan Payoff & Major ROI Calculator")
     st.caption(
-        "**Free · anonymous · no sign-up.** An educational estimate, not financial "
-        "advice. Salary and cost figures are illustrative."
+        "**Free · anonymous · no sign-up.** Estimates from federal data, not "
+        "financial advice."
     )
+    # The other tools, one line, where a visitor looks first. They used to be
+    # reachable only as collapsed expanders under "More tools" at the foot of
+    # the page, below the survey, and the repayment tool is this site's
+    # second most used surface. Reserved here and FILLED after the profile
+    # is stamped (see _profile_params), so the links carry the scenario the
+    # sidebar resolves further down; internal_tool_url reads it at call time.
+    tools_line_container = st.container()
     # On a phone Streamlit collapses the sidebar to a bare ">>" arrow in the
     # corner -- and EVERY input lives in that sidebar, so a mobile visitor sees
     # a calculator with no visible way to change anything. Dress the collapsed
@@ -27083,6 +27095,12 @@ st.session_state["_profile_params"] = build_share_params(
     cc_in_district_a=cc_in_district_a, **_profile_b,
 )
 
+if not active_tool:
+    with tools_line_container:
+        st.caption("Tools: " + " · ".join(
+            f"[{t['label']}]({internal_tool_url(key)})"
+            for key, t in STANDALONE_TOOLS.items() if key != "start"))
+
 # Everything below this point is the college calculator. On a ?tool= page we
 # render that tool instead and stop -- the sidebar is already hidden above, so
 # the page is that tool and nothing else.
@@ -27964,7 +27982,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
                            current_age: int = None,
                            loan_source: str = None, default_loan=None,
                            reported_debt=None, school_name: str = None,
-                           simplified_scale: float = 1.0, coa_match=None):
+                           simplified_scale: float = 1.0, coa_match=None,
+                           investment_captions: bool = True) -> dict:
     """Render one scenario's metric cards, break-even and underemployment note
     into a layout column. Used twice by Compare Mode (Scenario A / Scenario B)
     so their markup can't drift apart from being hand-copied -- this is the
@@ -27989,8 +28008,13 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         panel_heading(f"Scenario {label}: {scenario['major']}, {scenario['strategy_label']}")
         render_cc_path_note(cc_mode, scenario["major"])
 
-        for caption in get_investment_captions(scenario):
-            st.caption(caption)
+        # investment_captions=False when the compare branch prints them ONCE
+        # below the columns: with one school and one basis the two columns
+        # printed the same 60-word paragraph twice, at full width, side by
+        # side. The render_wage_distribution(caption=False) move.
+        if investment_captions:
+            for caption in get_investment_captions(scenario):
+                st.caption(caption)
 
         repayment_result = scenario["repayment_result"]
         roi_result = scenario["roi_result"]
@@ -28123,6 +28147,34 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         render_wage_geography_note(scenario["major"])
         render_graduate_salary_disclosure(scenario.get("typical_education"),
                                            scenario.get("major"))
+    # The verdict, so the compare branch can lead the page with both
+    # scenarios' answers (verdict_strip) without computing them a second time.
+    return breakeven
+
+
+def verdict_strip(entries: list) -> str:
+    """One line per scenario for the top of the page: the verdict and the age
+    it comes out ahead, from the same breakeven_summary dict the panel prints
+    in full. `entries` is [(name, breakeven), ...]; a scenario whose verdict is
+    suppressed (headline None) gets no line.
+
+    Compare Mode used to leave the top banner EMPTY: the first thing on that
+    screen was three orange buttons and then a 25-year chart, and the answer
+    sat inside the comparison card below it, in the arm half of all visitors
+    are randomised into. Same words as the panel, so the strip cannot
+    disagree with the card it summarises."""
+    lines = []
+    for name, be in entries:
+        if not be or not be.get("headline"):
+            continue
+        ahead = next((v for k, v in (be.get("points") or [])
+                      if k.startswith("Comes out ahead")), "")
+        mark = "✅" if be.get("positive") else "⚠️"
+        line = f"{mark} **{name}:** {be['headline']}."
+        if ahead:
+            line += f" Comes out ahead at {ahead}."
+        lines.append(line.replace("$", r"\$"))
+    return "\n\n".join(lines)
 
 
 def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
@@ -28260,8 +28312,13 @@ if compare_mode:
         _wage_slots = max(wage_distribution_rows(scenario_a["major"]),
                            wage_distribution_rows(scenario_b["major"]))
 
+        # One school, one basis: the loan-basis captions are word-for-word the
+        # same for A and B, so they print once below the columns instead of
+        # twice beside each other. Different captions stay in their panels.
+        _shared_captions = (get_investment_captions(scenario_a)
+                            == get_investment_captions(scenario_b))
         col_a, col_b = st.columns(2)
-        render_scenario_panel(
+        _be_a = render_scenario_panel(
             col_a, scenario_a, "A", roi_horizon_years,
             loan_amount, interest_rate, repayment_strategy,
             city_info["col_index"], career_data_source,
@@ -28273,8 +28330,9 @@ if compare_mode:
             loan_source=loan_source_a, default_loan=default_loan_a,
             reported_debt=reported_debt_a, school_name=school_name_a,
             simplified_scale=simplified_scale_a, coa_match=coa_match_a,
+            investment_captions=not _shared_captions,
         )
-        render_scenario_panel(
+        _be_b = render_scenario_panel(
             col_b, scenario_b, "B", roi_horizon_years,
             loan_amount_b, interest_rate_b, repayment_strategy_b,
             city_info["col_index"], career_data_source,
@@ -28286,7 +28344,19 @@ if compare_mode:
             loan_source=loan_source_b, default_loan=default_loan_b,
             reported_debt=reported_debt_b, school_name=school_name_b,
             simplified_scale=simplified_scale_b, coa_match=coa_match_b,
+            investment_captions=not _shared_captions,
         )
+        if _shared_captions:
+            for _caption in get_investment_captions(scenario_a):
+                st.caption(_caption)
+        # The answer leads the page in this arm too. The single branch fills
+        # the same container with its full verdict box; here it is one line
+        # per scenario, in the order the columns sit.
+        _strip = verdict_strip([(f"A: {scenario_a['major']}", _be_a),
+                                (f"B: {scenario_b['major']}", _be_b)])
+        if _strip:
+            with breakeven_banner_container:
+                st.markdown("**🎯 Is this debt worth it?**\n\n" + _strip)
 
         # Career mode's underemployment text is national and identical for both
         # scenarios, so it renders once here rather than twice inside the panels.
