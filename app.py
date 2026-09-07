@@ -27140,7 +27140,10 @@ st.session_state["_profile_params"] = build_share_params(
     cc_in_district_a=cc_in_district_a, **_profile_b,
 )
 
-if not active_tool:
+# Not on a phone: at 390px the line wraps to three, and a phone reached
+# this page through the wizard, whose skip link and offer banner already
+# route it. The bottom "More tools" expanders still render there.
+if not active_tool and not is_mobile_visit():
     with tools_line_container:
         st.caption("Tools: " + " · ".join(
             f"[{t['label']}]({internal_tool_url(key)})"
