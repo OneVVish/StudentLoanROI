@@ -13217,6 +13217,52 @@ def payment_varies(result: dict) -> bool:
     return isinstance(result, dict) and "monthly_payment" not in result
 
 
+def monthly_payment_display(result: dict) -> tuple:
+    """(value, note) for the Monthly Payment cell, on screen and in print.
+
+    A fixed plan is one figure and no note. An income-driven plan used to
+    print the words "Varies (IDR)", which a visitor read as the app not
+    knowing; the first month IS known, so it prints, with a note saying it
+    rises. Reads month 1 through get_monthly_payment_for_stage, the same
+    reader the take-home stages use, so the two cannot disagree about what
+    the first payment is.
+    """
+    if not payment_varies(result):
+        return fmt_money(result["monthly_payment"]), None
+    return fmt_money(get_monthly_payment_for_stage(result, 1)), "to start, rises with income"
+
+
+def facts_table(title: str, rows: list) -> str:
+    """A compact two-column markdown table for figures that are the WORKING
+    rather than the answer: label on the left, figure on the right. Replaces
+    a column of same-sized st.metric blocks, where nine numbers at one weight
+    left the premium and the crossover age competing with the loan's interest
+    total. Money is escaped for markdown here, so callers pass raw strings."""
+    body = "\n".join(f"| {k} | {v} |" for k, v in rows)
+    return (f"| {title} | |\n|:--|--:|\n{body}").replace("$", r"\$")
+
+
+def loan_facts_rows(shown: dict) -> list:
+    """The loan mechanics as table rows, shared by both result branches so the
+    single and compare arms show the same set in the same order."""
+    value, note = monthly_payment_display(shown)
+    rows = [("Monthly payment", value + (f" ({note})" if note else "")),
+            ("Payoff timeline", f"{shown['payoff_years']:.1f} yrs"),
+            ("Total interest paid", fmt_money(shown["total_interest"]))]
+    if (shown.get("forgiven_amount", 0) or 0) > 0:
+        rows.append(("Loan forgiven (taxable that year)", fmt_money(shown["forgiven_amount"])))
+    return rows
+
+
+def position_facts_rows(roi_result: dict, roi_window_years: int, major: str) -> list:
+    """The two absolute positions the premium is the difference of."""
+    cf = counterfactual_vocab()
+    return [(f"{cf['metric_label']}, {roi_window_years}-yr net position{cf['no_loan_suffix']}",
+             fmt_money(roi_result["hs_net_position"])),
+            (f"{major}, {roi_window_years}-yr net position",
+             fmt_money(roi_result["major_net_position"]))]
+
+
 def render_payment_chart(result: dict, label: str, container=None) -> bool:
     """The payment-over-time chart, drawn only when the payment varies.
 
@@ -16338,13 +16384,13 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         # about whether this scenario has any.
         _pdf_table(full_width=True, rows=(
             [["Monthly Payment", "Payoff Timeline", "Total Interest Paid", "Loan Forgiven"],
-             [fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+             [" ".join(x for x in monthly_payment_display(repayment_result) if x),
               f"{repayment_result['payoff_years']:.1f} yrs",
               fmt_money(repayment_result["total_interest"]),
               fmt_money(repayment_result["forgiven_amount"])]]
             if (repayment_result.get("forgiven_amount", 0) or 0) > 0 else
             [["Monthly Payment", "Payoff Timeline", "Total Interest Paid"],
-             [fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+             [" ".join(x for x in monthly_payment_display(repayment_result) if x),
               f"{repayment_result['payoff_years']:.1f} yrs",
               fmt_money(repayment_result["total_interest"])]]
         )),
@@ -16962,7 +17008,7 @@ def _pdf_scenario_metrics_table(scenario: dict, roi_window_years: int,
          f"{roi_window_years}-Yr Earnings Premium (COL-Adj.)"],
         [
             fmt_money(scenario["effective_principal"]),
-            fmt_money(repayment_result["monthly_payment"]) if "monthly_payment" in repayment_result else "Varies (IDR)",
+            " ".join(x for x in monthly_payment_display(repayment_result) if x),
             f"{repayment_result['payoff_years']:.1f} yrs",
             crossover_phrase(crossover),
             fmt_money(repayment_result["total_interest"]),
@@ -27760,11 +27806,10 @@ def _render_takehome_stage(figs: dict, major_name: str, verbose: bool = True) ->
         "Take-Home Pay (annual, after tax)", fmt_money(take_home["net_take_home"]),
         delta=fmt_pct(take_home["effective_tax_rate"] * 100) + " effective tax rate" if gross > 0 else None,
     )
-    st.metric("Monthly Disposable Income", fmt_money(figs["disposable_nominal"]))
-    st.metric(
-        "COL-Adjusted Disposable Income", fmt_money(figs["disposable_col_adjusted"]),
-        help="Normalized to national-average purchasing power, so cities are comparable",
-    )
+    st.markdown(facts_table("Each month, after the loan", [
+        ("Disposable income", fmt_money(figs["disposable_nominal"])),
+        ("Same, in national purchasing power", fmt_money(figs["disposable_col_adjusted"])),
+    ]))
 
     if not take_home["state_modeled"]:
         st.caption("State tax: N/A (National Average city has no specific state to model)")
@@ -28045,19 +28090,11 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # when they are free includes any existing balance. It EQUALS
         # repayment_result when there is none, so this needs no conditional.
         shown = scenario.get("combined_repayment") or repayment_result
-        st.metric(
-            "Monthly Payment",
-            fmt_money(shown["monthly_payment"]) if "monthly_payment" in shown else "Varies (IDR)",
-        )
-        st.metric("Payoff Timeline", f"{shown['payoff_years']:.1f} yrs")
+        # The loan's mechanics as one small table, not four metrics: the
+        # premium below is the answer and these are its working. Same rows
+        # as the single branch, from loan_facts_rows.
+        st.markdown(facts_table("How the loan plays out", loan_facts_rows(shown)))
         render_payoff_age(scenario, current_age, program_years)
-        st.metric("Total Interest Paid", fmt_money(shown["total_interest"]))
-        # Same gate as the single branch -- an asymmetry between the two is an
-        # H2 confound, not a cosmetic difference.
-        if (shown.get("forgiven_amount", 0) or 0) > 0:
-            st.metric("Loan Forgiven", fmt_money(shown["forgiven_amount"]),
-                      help="Balance written off at the end of the term. Taxable as "
-                           "income that year; that tax is not modeled here.")
         if scenario.get("existing_debt"):
             st.caption(
                 f"Includes {fmt_money(scenario['existing_debt'])} of student debt you "
@@ -28075,12 +28112,9 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         # than st.columns: this panel already sits inside Compare Mode's A/B
         # split, and Streamlit allows one level of column nesting.
         _cf = counterfactual_vocab()
-        st.metric(
-            f"{_cf['metric_label']}: {roi_window_years}-Yr Net Position{_cf['no_loan_suffix']}",
-            fmt_money(roi_result["hs_net_position"]),
-        )
-        st.metric(f"{scenario['major']}: {roi_window_years}-Yr Net Position",
-                  fmt_money(roi_result["major_net_position"]))
+        st.markdown(facts_table(f"Where you stand after {roi_window_years} years",
+                                position_facts_rows(roi_result, roi_window_years,
+                                                    scenario["major"])))
         st.metric(
             f"{roi_window_years}-Year Earnings Premium (COL-Adjusted)",
             fmt_money(roi_result["earnings_premium"]),
@@ -28700,21 +28734,9 @@ else:
         # "Forgiven: $0" would read as a plan feature that failed rather than one
         # that never applied -- and under Standard or Tiered Standard nothing is
         # forgivable at all, so the metric would be meaningless there.
-        _forgiven = _shown.get("forgiven_amount", 0) or 0
-        loan_metric_cols = st.columns(4 if _forgiven > 0 else 3)
-        loan_metric_cols[0].metric(
-            "Monthly Payment",
-            fmt_money(_shown["monthly_payment"]) if "monthly_payment" in _shown else "Varies (IDR)",
-        )
-        loan_metric_cols[1].metric("Payoff Timeline", f"{_shown['payoff_years']:.1f} yrs")
-        loan_metric_cols[2].metric("Total Interest Paid", fmt_money(_shown["total_interest"]))
-        if _forgiven > 0:
-            loan_metric_cols[3].metric(
-                "Loan Forgiven", fmt_money(_forgiven),
-                help="Balance written off at the end of the plan's term. Taxable as "
-                     "ordinary income in the year it is discharged (since January 1, "
-                     "2026), and that tax is not included in any figure here.",
-            )
+        # One small table, the same rows the compare panel shows
+        # (loan_facts_rows), in place of a row of same-sized metrics.
+        st.markdown(facts_table("How the loan plays out", loan_facts_rows(_shown)))
         render_payoff_age(scenario, st.session_state.get("current_age") if is_returning else None,
                            program_years_a)
         if scenario.get("existing_debt"):
@@ -28824,13 +28846,9 @@ else:
         if investment_caption:
             st.caption(investment_caption)
 
-        position_cols = st.columns(3)
-        position_cols[0].metric(
-            f"{_cf['metric_label']}: {roi_horizon_years}-Yr Net Position{_cf['no_loan_suffix']}",
-            fmt_money(roi_result["hs_net_position"]),
-        )
-        position_cols[1].metric(f"{major}: {roi_horizon_years}-Yr Net Position", fmt_money(roi_result["major_net_position"]))
-        position_cols[2].metric(
+        st.markdown(facts_table(f"Where you stand after {roi_horizon_years} years",
+                                position_facts_rows(roi_result, roi_horizon_years, major)))
+        st.metric(
             "Earnings Premium (COL-Adjusted)",
             fmt_money(roi_result["earnings_premium"]),
             delta=fmt_roi_delta(roi_result["roi_pct"]),
