@@ -24564,6 +24564,12 @@ else:
             box-shadow:0 2px 8px rgba(0,0,0,0.25);
         }
         button[data-testid='stExpandSidebarButton'] span{color:#fff;}
+        /* Streamlit's icon is a double arrow pointing RIGHT, away from the
+           drawer it opens. Mirror it so the pill points at the inputs. */
+        button[data-testid='stExpandSidebarButton'] svg,
+        button[data-testid='stExpandSidebarButton'] span[data-testid='stIconMaterial']{
+            transform:scaleX(-1); display:inline-block;
+        }
         button[data-testid='stExpandSidebarButton']::after{
             content:"Inputs"; color:#fff; font-weight:600; font-size:0.9rem;
         }
@@ -27012,7 +27018,7 @@ if is_mobile_visit() and get_shared_default("from", "") != "start":
         "📱 On a phone? "
         f"[Answer six questions]({internal_tool_url('start')}) and the "
         "calculator opens filled in. Every setting is also in the sidebar, "
-        "behind the » at the top left."
+        "behind the « at the top left."
     )
     if not st.session_state.get("wizard_offered"):
         st.session_state.wizard_offered = True
@@ -27029,7 +27035,14 @@ if is_mobile_visit() and get_shared_default("from", "") != "start":
 # lines of orientation (title, disclaimer, the banner above) and everything
 # else was either a hover-only help= tooltip -- invisible on a phone -- or
 # 4,000 words of Methodology at the very bottom of the page.
-with st.expander("❓ New here? Start with this"):
+#
+# Not on a phone. A bare phone arrival has been through the six-question
+# wizard, which is the orientation, and everything below describes a layout
+# a phone does not show: "work down the sidebar", "More tools at the bottom
+# of the page". Outside both result branches, so device is the only thing it
+# varies on, never the arm.
+if not is_mobile_visit():
+  with st.expander("❓ New here? Start with this"):
     st.markdown((
         f"""
 This is a free, anonymous calculator for one of the biggest money decisions
@@ -27073,13 +27086,21 @@ financially" isn't the same as "worth it to you." Sources are in
 # One line, a caption rather than a boxed st.info: the page below IS the
 # pitch, and a stack of boxes above it was pushing the first real number
 # below the fold. Placed AFTER the New-here guide -- read top to bottom the
-# page now goes what-this-is, then where-to-act. The mobile sentence must
-# survive any rewrite: it is the only pointer a phone visitor gets to the
-# collapsed sidebar.
-st.caption(
-    "👈 **Set up your scenario in the sidebar.** Everything updates instantly, "
-    "no button to press. On a phone, tap the red **» Inputs** pill at the top left."
-)
+# page now goes what-this-is, then where-to-act. The phone branch is the
+# only pointer a phone visitor gets to the collapsed sidebar and must
+# survive any rewrite. The desktop sentence keeps its phone clause: a narrow
+# desktop window collapses the sidebar too, and iPad Safari reports as a
+# desktop (ua_is_mobile).
+if is_mobile_visit():
+    st.caption(
+        "👆 **Tap the red « Inputs pill at the top left to set up your "
+        "scenario.** Everything updates instantly, no button to press."
+    )
+else:
+    st.caption(
+        "👈 **Set up your scenario in the sidebar.** Everything updates instantly, "
+        "no button to press. On a phone, tap the red **« Inputs** pill at the top left."
+    )
 
 # The break-even verdict, anchored high on the page via a position-anchored
 # st.container(): it's the one output a student can act on -- "is this debt
