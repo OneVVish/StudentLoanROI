@@ -28081,10 +28081,12 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             _panel_label, _panel_value = total_loan_metric(
                 scenario, loan_amount, loan_basis, program_years, cost_years)
             st.metric(_panel_label, fmt_money(_panel_value))
-            # The same what-this-figure-is prose the single branch shows.
-            render_loan_basis_disclosure(loan_basis, loan_source, default_loan,
-                                         reported_debt, school_name,
-                                         program_years, simplified_scale)
+            # The same what-this-figure-is prose the single branch shows,
+            # unless the compare branch prints it once for both columns.
+            if investment_captions:
+                render_loan_basis_disclosure(loan_basis, loan_source, default_loan,
+                                             reported_debt, school_name,
+                                             program_years, simplified_scale)
         # combined_repayment, not repayment_result: what the visitor pays and
         # when they are free includes any existing balance. It EQUALS
         # repayment_result when there is none, so this needs no conditional.
@@ -28104,7 +28106,8 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
         render_financing_note(scenario.get("financing"))
         # Same helper the single branch calls: a disclosure in one arm only
         # is an H2 confound, not a cosmetic gap.
-        render_parent_plus_note(coa_match)
+        if investment_captions:
+            render_parent_plus_note(coa_match)
         # The two ABSOLUTE positions, not just their difference. The single
         # branch shows all three side by side; the contrast arm used to see
         # the absolutes only as chart lines, never as numbers. Stacked rather
@@ -28348,8 +28351,19 @@ if compare_mode:
         # One school, one basis: the loan-basis captions are word-for-word the
         # same for A and B, so they print once below the columns instead of
         # twice beside each other. Different captions stay in their panels.
+        # Everything the flag covers: the investment captions, the loan-basis
+        # disclosure (which renders from these seven arguments) and the
+        # Parent PLUS note (which renders from the school). Same school and
+        # same basis means the same text under both columns, at full width.
+        _basis_a = (loan_basis_a, loan_source_a, default_loan_a, reported_debt_a,
+                    school_name_a, program_years_a, simplified_scale_a)
+        _basis_b = (loan_basis_b, loan_source_b, default_loan_b, reported_debt_b,
+                    school_name_b, program_years_b, simplified_scale_b)
+        _same_school = (coa_match_a is not None and coa_match_b is not None
+                        and coa_match_a.get("UNITID") == coa_match_b.get("UNITID"))
         _shared_captions = (get_investment_captions(scenario_a)
-                            == get_investment_captions(scenario_b))
+                            == get_investment_captions(scenario_b)
+                            and _basis_a == _basis_b and _same_school)
         col_a, col_b = st.columns(2)
         _be_a = render_scenario_panel(
             col_a, scenario_a, "A", roi_horizon_years,
@@ -28380,8 +28394,11 @@ if compare_mode:
             investment_captions=not _shared_captions,
         )
         if _shared_captions:
+            st.caption("Both scenarios borrow the same way, so this is said once.")
             for _caption in get_investment_captions(scenario_a):
                 st.caption(_caption)
+            render_loan_basis_disclosure(*_basis_a)
+            render_parent_plus_note(coa_match_a)
         # The answer leads the page in this arm too. The single branch fills
         # the same container with its full verdict box; here it is one line
         # per scenario, in the order the columns sit.
