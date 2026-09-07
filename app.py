@@ -4002,8 +4002,14 @@ def resolve_shared_strategy(shared_value, options) -> str:
 # These sit in section 1, not beside their radio in section 4, because
 # counterfactual_vocab() below names the baseline in prose and has to know
 # which one is in play -- and section 2 is the half analyze_model.py execs.
-STUDENT_MODE_FIRST = "Straight from high school"
-STUDENT_MODE_RETURNING = "Going back to school"
+# RENAMED 2026-09-06 from "Straight from high school" / "Going back to
+# school": "Who is going to school?" read as asking for a person, and the
+# choices described a situation. The labels are WRITTEN to Supabase as
+# student_mode, so the old spellings are folded on read (migrations.sql);
+# ?smode= carries first/returning and never the label, so shares are unmoved.
+STUDENT_MODE_FIRST = "Starting college after high school"
+STUDENT_MODE_RETURNING = "Already working, going back to school"
+STUDENT_MODE_QUESTION = "Which describes you?"
 STUDENT_MODE_OPTIONS = [STUDENT_MODE_FIRST, STUDENT_MODE_RETURNING]
 RETURNING_STOP_WORK = "No, I'll study full-time"
 RETURNING_KEEP_WORKING = "Yes, evenings, online or part-time"
@@ -19526,11 +19532,11 @@ if not MAJOR_DATA:
 # in returning mode the comparison is against the visitor's own salary, not a
 # high school graduate's.
 _sb_who.radio(
-    "Who is going to school?", STUDENT_MODE_OPTIONS, key="student_mode_radio",
+    STUDENT_MODE_QUESTION, STUDENT_MODE_OPTIONS, key="student_mode_radio",
     on_change=lambda: mark_interaction("student_mode_radio"),
-    help="Straight from high school compares against a debt-free high school "
-          "graduate. Going back to school compares against your own current "
-          "pay -- which is the honest question if you already have a job.",
+    help="Starting after high school compares the degree against a debt-free "
+          "high school graduate. Already working compares it against your own "
+          "pay today, which is the honest question if you have a job.",
 )
 
 if is_returning:
@@ -26810,7 +26816,7 @@ def render_start_wizard(always_open: bool = False) -> None:
                 log_usage_event(f"wizard_step:n={i + 1}")
             st.rerun()
 
-    q_who = "Who is going to school?"
+    q_who = STUDENT_MODE_QUESTION
     q_mode = "Are you choosing a major to study, or a career to aim for?"
     q_pick = {DATASET_MODE_MAJOR: "Which major?", DATASET_MODE_CAREER: "Which career?"}
     q_school = "Do you have a school in mind? Start typing its name, or skip this."
@@ -26838,11 +26844,11 @@ def render_start_wizard(always_open: bool = False) -> None:
         with st.chat_message("assistant"):
             who = st.radio(q_who, STUDENT_MODE_OPTIONS, key="wizard_who",
                            horizontal=True,
-                           help="Straight from high school measures the degree "
-                                "against a debt-free high school graduate. Going "
-                                "back to school measures it against your own "
+                           help="Starting after high school measures the degree "
+                                "against a debt-free high school graduate. "
+                                "Already working measures it against your own "
                                 "pay today, which is the honest comparison if "
-                                "you already have a job.")
+                                "you have a job.")
             answers["who"] = who
             answers["returning"] = who == STUDENT_MODE_RETURNING
             if answers["returning"]:
@@ -29583,7 +29589,8 @@ simply doesn't appear there.
 #### What if you skip college? The high school graduate baseline
 
 This section
-describes the *Straight from high school* mode. In *Going back to school* the
+describes the *Starting college after high school* mode. In *Already working,
+going back to school* the
 baseline is not this figure at all. It's the two salaries you enter yourself
 (now, and in ten years without the degree), interpolated between, because
 someone returning at 49 was never choosing against a teenager. Everything

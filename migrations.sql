@@ -2530,3 +2530,15 @@ end $$;
 --     and the (organic) bucket falls by the same amount.
 -- reddit, poster and img keep their meaning; they predate this scheme and
 -- are not of its shape.
+
+
+-- 2026-09-06  SEAM: student_mode labels renamed.
+--
+-- No DDL. The About-you radio's question and choices were reworded for
+-- clarity, and the CHOICE LABEL is what every scenario table stores in
+-- student_mode. Fold on read:
+--     'Straight from high school'  ->  'Starting college after high school'
+--     'Going back to school'       ->  'Already working, going back to school'
+-- The meaning is unchanged: the second is the returning-student baseline
+-- (earnings_premium against baseline_salary_now). ?smode= carries
+-- first/returning rather than the label, so shared links are unaffected.

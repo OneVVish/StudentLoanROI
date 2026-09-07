@@ -61,9 +61,10 @@ button to press.
 
 ### Start with who is going
 
-Under **About you**, answer **Who is going to school?** Leave it on *Straight
-from high school* for a graduating senior. If you are the one going back, pick
-*Going back to school*, and the whole comparison changes underneath you: instead
+Under **About you**, answer **Which describes you?** Leave it on *Starting
+college after high school* for a graduating senior. If you are the one going
+back, pick *Already working, going back to school*, and the whole comparison
+changes underneath you: instead
 of measuring against a high school graduate, it measures against your own
 current salary, which is the honest comparison for an adult with a job.
 
