@@ -2477,6 +2477,11 @@ end $$;
 --     funnel the admin page shows. The skip link and the finishing button
 --     write the SAME nav row, so "skipped" is navigations minus wizard_done
 --     and a floor. No step rows exist before this date.
+--   * wizard_done carries find=<0|1> from 2026-09-06: the visitor asked to
+--     be handed to the school search instead of naming a school. That
+--     hand-off is a nav:from=start:to=schools row, and the search's own
+--     apply then writes school_search_apply and
+--     nav:from=schools:to=calculator:inpage=1 as it always has.
 
 
 -- 2026-09-06  SEAM: an infographic's src tag is <channel>-<code>.

@@ -24157,12 +24157,14 @@ def render_admin_dashboard() -> None:
         _saw = int((_acts == STANDALONE_TOOLS["start"]["action"]).sum())
         _done = int(_acts.str.startswith("wizard_done").sum())
         _to_calc = int((_acts == nav_action("start", NAV_CALCULATOR)).sum())
+        _to_search = int((_acts == nav_action("start", "schools")).sum())
         _steps = _acts.str.extract(r"^wizard_step:n=(\d)$")[0].dropna().astype(int)
         _rows = [{"Stage": "Saw the wizard", "Sessions": _saw}]
         _rows += [{"Stage": f"Answered question {n}", "Sessions": int((_steps == n).sum())}
                   for n in range(1, 6)]
         _rows += [{"Stage": "Finished all six", "Sessions": _done},
                   {"Stage": "Opened the calculator from it", "Sessions": _to_calc},
+                  {"Stage": "Sent to the school search instead", "Sessions": _to_search},
                   {"Stage": "Skipped straight to the calculator",
                    "Sessions": max(_to_calc - _done, 0)}]
         st.markdown("**The six-question wizard**")
@@ -25721,6 +25723,12 @@ def render_school_search(always_open: bool = False) -> None:
     # tool should not have to click to reach it. Same treatment as
     # render_existing_loan_comparison.
     with st.expander("🔎 Find schools that fit a budget", expanded=always_open):
+        if always_open and get_shared_default("from", "") == "start":
+            st.caption(
+                "Your major and city came from the six questions. Pick a "
+                "school below and **Use this school** opens the calculator "
+                "with all of it filled in."
+            )
         if not always_open:
             st.caption(
                 "Searching by budget is a question of its own: "
@@ -26229,6 +26237,11 @@ def render_school_search(always_open: bool = False) -> None:
                 _src = get_traffic_source()
                 if _src:
                     _handoff["src"] = _src
+                # from= too: a phone sent here by the wizard would otherwise
+                # land on the calculator's "answer six questions" offer.
+                _origin = get_shared_default("from", "")
+                if _origin:
+                    _handoff["from"] = _origin
                 st.query_params.from_dict(_handoff)
                 # A real schools -> calculator transition that produces NO new
                 # pageview, because it is a rerun rather than a navigation.
@@ -26680,6 +26693,9 @@ def render_sai_worksheet(always_open: bool = False) -> None:
             )
 
 
+WIZARD_FIND_SCHOOL = -1
+
+
 @st.cache_data
 def wizard_school_options() -> tuple:
     """(ids, labels, names) for the wizard's school list, built ONCE.
@@ -26688,8 +26704,11 @@ def wizard_school_options() -> tuple:
     format_func once per option per rerun: 5,036 lookups on every click,
     measured at 3.7 seconds a step. Cached, the labels are a dict read."""
     coa = load_coa_dataset().sort_values("INSTNM")
-    ids = [0] + coa["UNITID"].tolist()
-    labels = {0: "Not yet, skip this"}
+    # 0 and -1 are the two non-school answers: skip, or be handed to the
+    # school search with the wizard's answers already filled in.
+    ids = [0, WIZARD_FIND_SCHOOL] + coa["UNITID"].tolist()
+    labels = {0: "Not yet, skip this",
+              WIZARD_FIND_SCHOOL: "Help me find one within a budget"}
     labels.update({int(u): school_option_label(u, coa) for u in coa["UNITID"]})
     names = {int(u): str(n) for u, n in zip(coa["UNITID"], coa["INSTNM"])}
     return ids, labels, names
@@ -26847,11 +26866,14 @@ def render_start_wizard(always_open: bool = False) -> None:
                 help="Naming a school fills in its published yearly cost, "
                      "which is what the loan estimate is built from. Click "
                      "the box and type to search.")
-            if picked:
+            answers["find_school"] = picked == WIZARD_FIND_SCHOOL
+            if picked and picked != WIZARD_FIND_SCHOOL:
                 answers["school"] = names[int(picked)]
             else:
                 answers["school"] = None
-                st.caption("Skipping keeps the calculator's default school; "
+                st.caption("The school search will already know your major "
+                           "and city." if answers["find_school"] else
+                           "Skipping keeps the calculator's default school; "
                            "you can change it in the sidebar.")
             nav(3)
     elif step == 4:
@@ -26896,19 +26918,40 @@ def render_start_wizard(always_open: bool = False) -> None:
         # the way it seeds from a share link. internal_tool_url carries test
         # and src and stamps from=start, so the arrival is logged as a nav.
         url = internal_tool_url() + "&" + urlencode(params)
+        find = bool(answers.get("find_school"))
         with st.chat_message("assistant"):
-            st.write("That is everything the calculator needs to start. It "
-                     "will fill in the loan from the school's published costs "
-                     "and show the ten-year result against "
-                     + ("your own pay today" if answers.get("returning")
-                        else "not going at all")
-                     + "; every answer here can be changed in its sidebar.")
-            st.link_button("Open the calculator with these answers", url,
-                           type="primary")
+            if find:
+                # The search is not a second wizard: it is a short form whose
+                # field prefills from the major (Major mode only; there is no
+                # occupation-to-field crosswalk, by design) and whose home
+                # state prefills from the city. The sidebar runs on that page
+                # too and seeds itself from these same params, so "Use this
+                # school" lands on a calculator that already has everything.
+                st.write("The school search will list what fits a budget"
+                         + (" in your field of study" if
+                            answers["mode"] == DATASET_MODE_MAJOR else
+                            "; pick the field of study there")
+                         + ", priced at your home state's rate. Choose one and "
+                         "\"Use this school\" opens the calculator with all of "
+                         "these answers.")
+                st.link_button("Find a school within your budget",
+                               internal_tool_url("schools") + "&" + urlencode(params),
+                               type="primary")
+                st.link_button("Open the calculator without one", url)
+            else:
+                st.write("That is everything the calculator needs to start. It "
+                         "will fill in the loan from the school's published costs "
+                         "and show the ten-year result against "
+                         + ("your own pay today" if answers.get("returning")
+                            else "not going at all")
+                         + "; every answer here can be changed in its sidebar.")
+                st.link_button("Open the calculator with these answers", url,
+                               type="primary")
         if not st.session_state.get("wizard_logged"):
             st.session_state.wizard_logged = True
             log_usage_event(f"wizard_done:mode={answers['mode']}"
                             f":school={int(bool(answers.get('school')))}"
+                            f":find={int(find)}"
                             f":returning={int(bool(answers.get('returning')))}")
         if st.button("Start over", key="wizard_reset"):
             for k in ("wizard_answers", "wizard_step", "wizard_logged",
