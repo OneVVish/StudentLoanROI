@@ -244,6 +244,20 @@ PROMPTS = {
         "Documentary photography, muted natural colour, unposed. No text "
         "anywhere.",
         20260906, 4),
+    "college-money-calendar": (
+        # Tenth prompt. The guide is a calendar of federal dates ending in
+        # the aid letter, and a calendar cannot be drawn without numbers, so
+        # the picture is the letters instead: a porch in early spring with
+        # the day's mail on the step. No kitchen, no gate, no road, no
+        # screen, nothing to read.
+        "A suburban front porch in early spring morning light, a small "
+        "stack of thick white envelopes resting on the top step beside the "
+        "door, a bare tree casting long shadows across the painted boards, "
+        "a bicycle leaning against the railing, the door closed. Seen from "
+        "the walkway at a slight angle. No people, no faces, no lettering "
+        "on the envelopes or the door. Wide letterbox frame. Documentary "
+        "photography, muted natural colour, unposed. No text anywhere.",
+        20260908, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
