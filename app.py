@@ -24569,7 +24569,11 @@ if active_tool:
     # when this draws. Inlined, the wordmark is currentColor, the page's own
     # text colour, correct on both themes with nothing to detect.
     st.markdown(inline_lockup_svg(250), unsafe_allow_html=True)
-    st.title(STANDALONE_TOOLS[active_tool]["title"])
+    # The wizard has no title: on a phone it wrapped to two lines and cost
+    # the one screen the questions are built to fit. Its caption says what
+    # the page is; the registry keeps the title for the admin and nav labels.
+    if active_tool != "start":
+        st.title(STANDALONE_TOOLS[active_tool]["title"])
     st.caption(STANDALONE_TOOLS[active_tool]["caption"])
 else:
     st.title("🎓 Student Loan Payoff & Major ROI Calculator")
