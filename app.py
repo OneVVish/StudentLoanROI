@@ -18162,7 +18162,8 @@ for _presurvey_flag in ("presurvey_answered", "presurvey_skipped", "presurvey_sh
 # 4. SIDEBAR — USER INPUTS
 # ============================================================
 
-st.sidebar.header("🎓 Your Profile")
+# No "Your Profile" header: the four section headers below ARE the profile,
+# and a header on a header cost the phone's sidebar a row for nothing.
 
 # The four slots below fix the sidebar's VISUAL order without touching its
 # EXECUTION order. Everything still executes exactly as before -- Financing
@@ -18600,9 +18601,6 @@ else:
         key="school_search_a", max_chars=SCHOOL_NAME_MAX_CHARS,
         on_change=lambda: (mark_interaction("school_a"),
                             _autofill_coa("school_search_a", "school_pick_a", "in_state_a", "coa_per_year_a")),
-        help="Type a school name to auto-fill Cost of Attendance below from "
-             "real government data, if we have it on file. If your school "
-             "isn't found, just enter Cost of Attendance yourself.",
     )
     matching_schools_a = find_matching_schools(school_search_a, load_coa_dataset())
     if len(matching_schools_a) >= 2:
@@ -19751,9 +19749,6 @@ st.session_state["major_select_a_mode"] = dataset_mode
 major = _sb_study.selectbox(
     SELECTION_LABEL[dataset_mode], major_options, key="major_select_a",
     on_change=lambda: (mark_interaction("major"), mark_major_explicitly_selected()),
-    help="Pick what you're evaluating -- this determines the salary numbers "
-         "used everywhere else in the app. Instead of scrolling, click the "
-         "box and type part of the name to jump straight to it.",
 )
 # Career mode only: the visitor scrolling 836 occupations may not have one in
 # mind at all, and that question is upstream of this tool. The Interest
@@ -22637,8 +22632,11 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         seed_repayment_from_share()
     # Open by default on its own page: a visitor who followed a link TO this
     # tool should not have to click to reach it.
-    with st.expander("💸 Already have loans? Compare repayment plans",
-                     expanded=always_open):
+    # On its own page the tool IS the page: an expander there repeats the
+    # title and offers a collapse control nobody should press. Inside the
+    # calculator it stays one expander among several.
+    with (st.container() if always_open else
+          st.expander("💸 Already have loans? Compare repayment plans")):
         # The three-sentence preamble that used to sit here was removed on
         # 2026-08-18. The expander's own title already says "Already have
         # loans?", and on the standalone page STANDALONE_TOOLS' caption says
@@ -22649,84 +22647,6 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "Comparing plans is a question of its own: "
                 f"[open this as its own page]({internal_tool_url('repayment')})."
             )
-        # Three subsections: who you are, then the FEDERAL plans the page
-        # compares, then the private balance that is not one of them -- it
-        # rides along unchanged in every row. Grouping makes that structural
-        # rather than something a visitor has to infer from the captions.
-        # Personal facts first: they read once and apply to everything below,
-        # whereas the loan grids are the part a visitor iterates on.
-        st.markdown("**Personal info**")
-        p1, p2, p3, p4 = st.columns(4)
-        income = p1.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
-                                  step=1_000, key="existing_income",
-                                  help="Adjusted gross income. The income-driven plans "
-                                       "size their payment from it; the fixed plans ignore it.")
-        deps = p2.number_input("Dependent children", min_value=0, max_value=10, step=1,
-                                key="existing_dependents",
-                                help="RAP lowers the payment by $50/month each.")
-        # 0 means "not answered", the same convention every optional number in
-        # this form uses. Asked because "payoff 16.8 yrs" and "you'd be 43"
-        # land very differently, and only the visitor knows which one decides.
-        age = p3.number_input(
-            "Your age (optional)", min_value=0, max_value=80, step=1,
-            key="existing_age",
-            help="Only used to say how old you'd be when each plan ends. "
-                 "Leave at 0 to skip.")
-
-        # WHAT YOU PAY TODAY. Blank and zero are DIFFERENT answers here, which
-        # is why this is the one number in this form that is not defaulted to 0
-        # the way age and unpaid interest are. A borrower on SAVE answers zero
-        # -- the plan has been in forbearance with no payment required -- and
-        # zero is the single commonest true answer to this question. Defaulting
-        # to it would tell every visitor who never touched the box that their
-        # payment is about to jump from nothing, and reading it back with
-        # `or` would tell the SAVE borrower nothing at all. st.number_input
-        # returns None for an empty box, and BOTH None and 0 are falsy, so
-        # every reader of this value tests `is None`.
-        st.session_state.setdefault("existing_current_payment", None)
-        current_payment = p4.number_input(
-            "Paying now, a month ($)", min_value=0, max_value=50_000, step=50,
-            value=None, placeholder="Leave blank if unsure",
-            key="existing_current_payment",
-            help="What you actually hand over each month right now, across "
-                 "your federal loans. On SAVE that is $0: the plan is in "
-                 "forbearance, so interest has been running since August 2025 "
-                 "but no payment is due. Enter 0 rather than leaving this "
-                 "blank. It is a real answer and the page uses it. Leave it "
-                 "blank only if you do not know.")
-
-        # HOUSEHOLD. Until 2026-08 the income-driven plans sheltered a flat
-        # $22,000 and every caption had to apologise for it. Real IBR shelters
-        # 150% of the HHS poverty guideline for the household, which is
-        # $23,940 for one person and $49,500 for four, so the flat figure
-        # overstated the payment for anyone with a family.
-        h1, h2, h3 = st.columns(3)
-        family_size = h1.number_input(
-            "People in your household", min_value=MIN_FAMILY_SIZE,
-            max_value=MAX_FAMILY_SIZE, step=1, key="existing_family_size",
-            help="You, your spouse if you have one, and anyone you claim. "
-                 f"Income-driven plans shelter 150% of the {POVERTY_GUIDELINE_YEAR} "
-                 "poverty guideline for this many people before charging a "
-                 "percentage of the rest.")
-        filing_status = h2.selectbox(
-            "Tax filing status", FILING_STATUSES, key="existing_filing_status",
-            help="Filing jointly counts your spouse's income in the payment. "
-                 "Filing separately does not, though your spouse still counts "
-                 "toward household size.")
-        spouse_income = h3.number_input(
-            "Spouse's annual income ($)", min_value=0, max_value=2_000_000,
-            step=1_000, key="existing_spouse_income",
-            disabled=st.session_state.get("existing_filing_status") != FILING_JOINT,
-            help="Only used when you file jointly. Greyed out otherwise, "
-                 "because filing separately leaves it out of the payment by "
-                 "law rather than by choice.")
-        # Disabling a widget does NOT clear what it holds, so a stored spouse
-        # income would keep moving the payment from behind a greyed control --
-        # the private-loan opt-in records the same trap. Read the status, not
-        # the box.
-        if st.session_state.get("existing_filing_status") != FILING_JOINT:
-            spouse_income = 0
-
         st.markdown("**Federal loans**")
         # One row per loan, add/delete built in. The data is OWNED by our own
         # session key (a list of row dicts): st.data_editor's widget key
@@ -22918,6 +22838,84 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # what was typed.
             priv_loans = []
             private_extra = 0
+
+        # Three subsections: the FEDERAL loans the page compares, then the
+        # private balance that is not one of them (it rides along unchanged
+        # in every row), then who you are. Loans FIRST: a visitor arrives to
+        # compare plans on a balance, and the balance is the thing they know;
+        # income and household matter to the income-driven rows only, which
+        # the caption under the grid says. Personal info used to lead.
+        st.markdown("**Personal info**")
+        p1, p2, p3, p4 = st.columns(4)
+        income = p1.number_input("Your annual income ($)", min_value=0, max_value=2_000_000,
+                                  step=1_000, key="existing_income",
+                                  help="Adjusted gross income. The income-driven plans "
+                                       "size their payment from it; the fixed plans ignore it.")
+        deps = p2.number_input("Dependent children", min_value=0, max_value=10, step=1,
+                                key="existing_dependents",
+                                help="RAP lowers the payment by $50/month each.")
+        # 0 means "not answered", the same convention every optional number in
+        # this form uses. Asked because "payoff 16.8 yrs" and "you'd be 43"
+        # land very differently, and only the visitor knows which one decides.
+        age = p3.number_input(
+            "Your age (optional)", min_value=0, max_value=80, step=1,
+            key="existing_age",
+            help="Only used to say how old you'd be when each plan ends. "
+                 "Leave at 0 to skip.")
+
+        # WHAT YOU PAY TODAY. Blank and zero are DIFFERENT answers here, which
+        # is why this is the one number in this form that is not defaulted to 0
+        # the way age and unpaid interest are. A borrower on SAVE answers zero
+        # -- the plan has been in forbearance with no payment required -- and
+        # zero is the single commonest true answer to this question. Defaulting
+        # to it would tell every visitor who never touched the box that their
+        # payment is about to jump from nothing, and reading it back with
+        # `or` would tell the SAVE borrower nothing at all. st.number_input
+        # returns None for an empty box, and BOTH None and 0 are falsy, so
+        # every reader of this value tests `is None`.
+        st.session_state.setdefault("existing_current_payment", None)
+        current_payment = p4.number_input(
+            "Paying now, a month ($)", min_value=0, max_value=50_000, step=50,
+            value=None, placeholder="Leave blank if unsure",
+            key="existing_current_payment",
+            help="What you actually hand over each month right now, across "
+                 "your federal loans. On SAVE that is $0: the plan is in "
+                 "forbearance, so interest has been running since August 2025 "
+                 "but no payment is due. Enter 0 rather than leaving this "
+                 "blank. It is a real answer and the page uses it. Leave it "
+                 "blank only if you do not know.")
+
+        # HOUSEHOLD. Until 2026-08 the income-driven plans sheltered a flat
+        # $22,000 and every caption had to apologise for it. Real IBR shelters
+        # 150% of the HHS poverty guideline for the household, which is
+        # $23,940 for one person and $49,500 for four, so the flat figure
+        # overstated the payment for anyone with a family.
+        h1, h2, h3 = st.columns(3)
+        family_size = h1.number_input(
+            "People in your household", min_value=MIN_FAMILY_SIZE,
+            max_value=MAX_FAMILY_SIZE, step=1, key="existing_family_size",
+            help="You, your spouse if you have one, and anyone you claim. "
+                 f"Income-driven plans shelter 150% of the {POVERTY_GUIDELINE_YEAR} "
+                 "poverty guideline for this many people before charging a "
+                 "percentage of the rest.")
+        filing_status = h2.selectbox(
+            "Tax filing status", FILING_STATUSES, key="existing_filing_status",
+            help="Filing jointly counts your spouse's income in the payment. "
+                 "Filing separately does not, though your spouse still counts "
+                 "toward household size.")
+        spouse_income = h3.number_input(
+            "Spouse's annual income ($)", min_value=0, max_value=2_000_000,
+            step=1_000, key="existing_spouse_income",
+            disabled=st.session_state.get("existing_filing_status") != FILING_JOINT,
+            help="Only used when you file jointly. Greyed out otherwise, "
+                 "because filing separately leaves it out of the payment by "
+                 "law rather than by choice.")
+        # Disabling a widget does NOT clear what it holds, so a stored spouse
+        # income would keep moving the payment from behind a greyed control --
+        # the private-loan opt-in records the same trap. Read the status, not
+        # the box.
+        if st.session_state.get("existing_filing_status") != FILING_JOINT:
+            spouse_income = 0
 
         if not fed_loans:
             st.info("Add at least one federal loan, with a balance and its "
@@ -24641,6 +24639,12 @@ if active_tool:
     # is documented as unreliable on a session's first load, which is exactly
     # when this draws. Inlined, the wordmark is currentColor, the page's own
     # text colour, correct on both themes with nothing to detect.
+    # Streamlit pads the page 6rem from the top, which on a phone is a blank
+    # band the height of two questions before the lockup. Every tool page
+    # gives most of it back. Version-specific selector (Streamlit 1.58,
+    # pinned), like the sidebar-pill CSS.
+    st.markdown("<style>.block-container{padding-top:2.5rem}</style>",
+                unsafe_allow_html=True)
     st.markdown(inline_lockup_svg(250), unsafe_allow_html=True)
     # The wizard has no title: on a phone it wrapped to two lines and cost
     # the one screen the questions are built to fit. Its caption says what
@@ -25577,8 +25581,8 @@ def render_graduate_school_search(always_open: bool = False) -> None:
     if coa_df.empty:
         return
 
-    with st.expander("🎓 Find graduate schools that fit a budget",
-                      expanded=always_open):
+    with (st.container() if always_open else
+          st.expander("🎓 Find graduate schools that fit a budget")):
         if not always_open:
             st.caption(
                 "Graduate cost is its own question: "
@@ -25841,7 +25845,8 @@ def render_school_search(always_open: bool = False) -> None:
     # Open by default on its own page: a visitor who followed a link TO this
     # tool should not have to click to reach it. Same treatment as
     # render_existing_loan_comparison.
-    with st.expander("🔎 Find schools that fit a budget", expanded=always_open):
+    with (st.container() if always_open else
+          st.expander("🔎 Find schools that fit a budget")):
         if always_open and get_shared_default("from", "") == "start":
             st.caption(
                 "Your major and city came from the six questions. Pick a "
@@ -26885,12 +26890,6 @@ def render_start_wizard(always_open: bool = False) -> None:
     conversation it is pretending to be. A "Back" button pops one answer.
     """
     del always_open  # the page is the wizard; there is nothing to open
-    # Streamlit pads the page 6rem from the top, which on a 390px phone is a
-    # blank band the height of two questions before the lockup. This page is
-    # built for that screen, so it gives most of it back. Version-specific
-    # selector (Streamlit 1.58, pinned), like the sidebar-pill CSS.
-    st.markdown("<style>.block-container{padding-top:2.5rem}</style>",
-                unsafe_allow_html=True)
     if is_mobile_visit() and bare_arrival():
         # This phone was routed here from the bare calculator URL. The link
         # carries from=start, so the arrival is not bare and is the calculator.
