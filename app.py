@@ -26784,6 +26784,12 @@ def render_start_wizard(always_open: bool = False) -> None:
     conversation it is pretending to be. A "Back" button pops one answer.
     """
     del always_open  # the page is the wizard; there is nothing to open
+    # Streamlit pads the page 6rem from the top, which on a 390px phone is a
+    # blank band the height of two questions before the lockup. This page is
+    # built for that screen, so it gives most of it back. Version-specific
+    # selector (Streamlit 1.58, pinned), like the sidebar-pill CSS.
+    st.markdown("<style>.block-container{padding-top:2.5rem}</style>",
+                unsafe_allow_html=True)
     if is_mobile_visit() and bare_arrival():
         # This phone was routed here from the bare calculator URL. The link
         # carries from=start, so the arrival is not bare and is the calculator.
@@ -26791,18 +26797,14 @@ def render_start_wizard(always_open: bool = False) -> None:
     answers = st.session_state.setdefault("wizard_answers", {})
     step = st.session_state.setdefault("wizard_step", 0)
 
-    def said(question: str, answer: str) -> None:
-        with st.chat_message("assistant"):
-            st.write(question)
-        with st.chat_message("user"):
-            st.write(answer)
-
     def nav(i: int, ready: bool = True) -> None:
-        back, nxt, _ = st.columns([1, 1, 5])
-        if i > 0 and back.button("Back", key=f"wizard_back_{i}"):
+        # horizontal=True, not st.columns: columns STACK below 640px, so on a
+        # phone Back sat above Next and cost the screen a row.
+        row = st.container(horizontal=True)
+        if i > 0 and row.button("Back", key=f"wizard_back_{i}"):
             st.session_state.wizard_step = i - 1
             st.rerun()
-        if nxt.button("Next", key=f"wizard_next_{i}", type="primary",
+        if row.button("Next", key=f"wizard_next_{i}", type="primary",
                       disabled=not ready):
             st.session_state.wizard_step = i + 1
             # Once per step per session, so a Back-and-Next loop cannot
@@ -26821,22 +26823,13 @@ def render_start_wizard(always_open: bool = False) -> None:
     q_state = "Will you pay the in-state price there?"
     q_city = "Where do you expect to live and work after?"
 
-    if step > 0:
-        who = answers["who"]
-        if answers.get("returning"):
-            who += (f" (age {answers['age']}, {fmt_money(answers['cur_sal'])} now, "
-                    f"{fmt_money(answers['sal10'])} in ten years without it)")
-        said(q_who, who)
-    if step > 1:
-        said(q_mode, answers["mode_label"])
-    if step > 2:
-        said(q_pick[answers["mode"]], answers["major"])
-    if step > 3:
-        said(q_school, answers.get("school") or "Not yet")
-    if step > 4 and answers.get("school"):
-        said(q_state, "Yes" if answers.get("in_state") else "No")
-    if step > 5:
-        said(q_city, answers["city"])
+    # ONE QUESTION ON SCREEN AT A TIME. The first version kept every answered
+    # step above the live one as chat bubbles, and on a 390px phone that put
+    # the live question below the fold by the third step, reported as the
+    # questions "getting cut off". Back is how an earlier answer is revisited;
+    # the answers themselves are in session_state, not on the page.
+    if step < 6:
+        st.caption(f"Question {step + 1} of 6")
 
     if step == 0:
         with st.chat_message("assistant"):
