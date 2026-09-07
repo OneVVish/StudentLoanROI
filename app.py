@@ -26764,7 +26764,7 @@ WIZARD_SIDEBAR_NOTE = ("Any of these choices can be changed in the calculator's 
 
 @st.cache_data
 def wizard_school_options() -> tuple:
-    """(ids, labels, names) for the wizard's school list, built ONCE.
+    """(ids, labels, names, states) for the wizard's school list, built ONCE.
 
     school_option_label does a frame lookup per call, and a selectbox calls
     format_func once per option per rerun: 5,036 lookups on every click,
@@ -26777,7 +26777,24 @@ def wizard_school_options() -> tuple:
               WIZARD_FIND_SCHOOL: "Help me find one within a budget"}
     labels.update({int(u): school_option_label(u, coa) for u in coa["UNITID"]})
     names = {int(u): str(n) for u, n in zip(coa["UNITID"], coa["INSTNM"])}
-    return ids, labels, names
+    states = {int(u): (str(st_) if isinstance(st_, str) else None)
+              for u, st_ in zip(coa["UNITID"], coa["STABBR"])}
+    return ids, labels, names, states
+
+
+def wizard_city_for_state(state) -> str:
+    """The metro to offer first for a school's state, or None.
+
+    metro_for_school's rule where the state holds exactly one metro; where it
+    holds several (CA, TX, OH) the FIRST in CITY_DATA, because a guess in the
+    right state beats National Average and the caption says it is a guess.
+    """
+    if not state or state not in US_STATES:
+        return None
+    single = SINGLE_METRO_BY_STATE.get(state)
+    if single:
+        return single
+    return next((c for c, d in CITY_DATA.items() if d.get("state_key") == state), None)
 
 
 @st.cache_data
@@ -26919,7 +26936,7 @@ def render_start_wizard(always_open: bool = False) -> None:
             # A selectbox filters as you type and cannot be skipped past.
             # Options are UNITIDs with the sidebar's own labels, so two
             # schools sharing a name stay distinguishable; 0 is "not yet".
-            ids, labels, names = wizard_school_options()
+            ids, labels, names, states = wizard_school_options()
             picked = st.selectbox(
                 q_school, ids, key="wizard_school", format_func=labels.get,
                 help="Naming a school fills in its published yearly cost, "
@@ -26928,8 +26945,10 @@ def render_start_wizard(always_open: bool = False) -> None:
             answers["find_school"] = picked == WIZARD_FIND_SCHOOL
             if picked and picked != WIZARD_FIND_SCHOOL:
                 answers["school"] = names[int(picked)]
+                answers["school_state"] = states.get(int(picked))
             else:
                 answers["school"] = None
+                answers["school_state"] = None
                 st.caption("The school search will already know your major "
                            "and city." if answers["find_school"] else
                            "Skipping keeps the calculator's default school; "
@@ -26950,11 +26969,22 @@ def render_start_wizard(always_open: bool = False) -> None:
     elif step == 5:
         with st.chat_message("assistant"):
             cities = list(CITY_DATA)
+            # Offer the school's own region first. Re-seeded whenever the
+            # guess changes (Back, a different school), never over a value
+            # the visitor chose against the same guess: the _city_inferred
+            # pattern from the sidebar.
+            guess = wizard_city_for_state(answers.get("school_state"))
+            if guess and st.session_state.get("_wizard_city_guess") != guess:
+                st.session_state["wizard_city"] = guess
+                st.session_state["_wizard_city_guess"] = guess
             answers["city"] = st.selectbox(
                 q_city, cities, key="wizard_city",
                 help="Sets the cost of living, and for a career the local "
                      "pay as well. Not sure yet? National Average is a fair "
                      "default.")
+            if guess and answers["city"] == guess:
+                st.caption("Guessed from your school's state. Change it if "
+                           "you expect to work somewhere else.")
             nav(5)
     else:
         # compare=0 is deliberate. Without it the arrival is randomised into
