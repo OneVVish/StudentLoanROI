@@ -27093,7 +27093,7 @@ financially" isn't the same as "worth it to you." Sources are in
 # desktop (ua_is_mobile).
 if is_mobile_visit():
     st.caption(
-        "👆 **Tap the red « Inputs pill at the top left to set up your "
+        "👆 **Tap the red « Inputs pill at the top left to update your "
         "scenario.** Everything updates instantly, no button to press."
     )
 else:
