@@ -66,7 +66,9 @@ The term is 10 years on a balance under $25,000, 15 years from $25,000, 20 years
 | $40,000 | 15 years | ~$390 | ~$30,900 |
 | $65,000, the cap | 20 years | ~$560 | ~$70,400 |
 
-Borrowing to the cap therefore means a twenty-year loan, and a parent of a high school senior who takes it out is scheduled to make the last payment in the year the student turns 38. The longer term is what makes the monthly figure fit, and it fits by adding interest: the capped loan costs more than twice the interest of one held under $25,000. Paying more than the schedule asks is allowed and shortens it. Repayment also starts while the student is still enrolled unless the parent asks for a deferment, and interest runs through the deferment either way.
+The balance that sets the term is the total of the parent's Direct Loans at the moment a loan enters repayment, and each year's PLUS loan is its own loan. A parent who defers repayment until the student leaves school has all four enter repayment together, on the whole balance, so every one of them gets the term the total earns. A parent who starts repaying each loan as it is disbursed sees the freshman loan measured against a small balance and a short term, and each later loan measured against everything still owed, and a longer one. The term is a ceiling, not a floor: paying more than the schedule asks is allowed on any of them.
+
+Borrowing to the cap and deferring therefore means a twenty-year loan, and a parent of a high school senior who takes it out is scheduled to make the last payment in the year the student turns 38. The longer term is what makes the monthly figure fit, and it fits by adding interest: the capped loan costs more than twice the interest of one held under $25,000. Repayment also starts while the student is still enrolled unless the parent asks for a deferment, and interest runs through the deferment either way.
 
 The 10-year Standard and 25-year Extended plans that older Parent PLUS loans use are not open to a loan made from July 1, 2026. A family already repaying an older PLUS loan keeps them for that loan.
 
