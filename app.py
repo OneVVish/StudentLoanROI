@@ -6070,7 +6070,7 @@ def repayment_section_guide(key: str) -> str:
     if not entry:
         return ""
     slug, blurb = entry
-    return f"📖 [Further reading]({guides_url(slug)}) — {blurb}."
+    return f"📖 [Further reading]({guides_url(slug)}): {blurb}."
 
 
 def guides_url(slug: str = "") -> str:
@@ -22914,7 +22914,7 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
         # be where the decision is.
         st.warning(
             "**That link contains the numbers you entered**: your balance, "
-            "interest rate, income, dependants and payment count. Anyone you "
+            "interest rate, income, dependents and payment count. Anyone you "
             "send it to, and anyone they forward it to, can read them. Send it "
             "the way you would send a screenshot of this page."
         )
@@ -23133,7 +23133,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "federal system entirely, so the income-driven rows are hidden.")
 
         st.caption(
-            "Your income and dependants change the **income-driven** rows only, "
+            "Your income and dependents change the **income-driven** rows only, "
             "because RAP and IBR size their payment from them. The fixed-payment "
             "plans ignore both, and so does any private balance below."
         )
