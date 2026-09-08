@@ -336,6 +336,34 @@ def main() -> int:
     if "major" in parse_qs(urlparse(url_for({}, "schools")).query):
         problems.append("  a link with no profile invented one")
 
+    # 5c. THE APP'S OWN LOGO carries the session flags to the landing page.
+    #     st.logo linked to the bare APP_URL until 2026-09-07: a developer on
+    #     ?test=1 who clicked it came back as a live session, and a tagged
+    #     visit lost its src. landing_url() is the fix; the logo must use it.
+    def landing_for(params):
+        st.session_state = {}
+        st.query_params = FakeQueryParams(params)
+        ns["get_traffic_source"]()
+        st.session_state["test_mode"] = params.get("test") == "1"
+        return ns["landing_url"]()
+    for params, must_have, must_not in (
+            ({"test": "1", "src": "pi-fmm"}, ["test", "src"], ["admin", "from"]),
+            ({"admin": "1", "research": "1"}, [], ["admin", "research", "test", "src"]),
+            ({}, [], ["test", "src"])):
+        url = landing_for(params)
+        checked += 1
+        q = parse_qs(urlparse(url).query)
+        if not urlparse(url).path.endswith("/welcome"):
+            problems.append(f"  landing_url does not point at /welcome\n      {url}")
+        missing = [k for k in must_have if k not in q]
+        leaked = [k for k in must_not if k in q]
+        if missing or leaked:
+            problems.append(f"  landing_url missing {missing} leaked {leaked}\n      {url}")
+    checked += 1
+    if "link=landing_url()" not in src:
+        problems.append("  st.logo does not link through landing_url(); a bare "
+                        "APP_URL drops test and src on the click")
+
     # 6. The VALUE must survive, not merely the key. A tag mangled in transit
     #    is as useless as one dropped, and far more confusing in the data.
     #    These are real tag shapes: a word, an all-caps college abbreviation,
