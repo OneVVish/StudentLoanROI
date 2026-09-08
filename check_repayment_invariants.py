@@ -1091,6 +1091,51 @@ def main() -> int:
     if _unsub_std["total_interest"] <= _plain["total_interest"] + 1_000:
         problems.append("  negative control: the same loan UNsubsidized must accrue in school")
 
+    # The private restructure (2026-09-08). An offer at the note's own rate and
+    # term IS the note; an interest-only stretch pays exactly the interest,
+    # shortens the amortisation that follows, and moves the payoff not at all.
+    # Anchored on independent recomputation, never on the function's own
+    # fields agreeing with each other.
+    _pl = [{"balance": 59_000.0, "rate": 11.0, "term": 10, "actual": 0}]
+    _same = ns["private_restructure"](_pl, offer_rate=11.0, offer_term=10)
+    checked += 1
+    if (abs(_same["offers"][0]["monthly_payment"] - _same["current"]["monthly_payment"]) > 0.01
+            or abs(_same["offers"][0]["total_interest"] - _same["current"]["total_interest"]) > TOLERANCE):
+        problems.append("  private_restructure: an offer at the note's own rate and "
+                        "term must reproduce the note to the cent")
+    _io = ns["private_restructure"](_pl, io_months=12)["interest_only"]
+    _after = ns["calculate_standard_repayment"](59_000.0, 11.0, 9)
+    checked += 1
+    if (abs(_io["io_payment"] - 59_000.0 * 11.0 / 1200.0) > 0.01
+            or abs(_io["after_payment"] - _after["monthly_payment"]) > 0.01
+            or abs(_io["total_interest"] - (_io["io_payment"] * 12 + _after["total_interest"])) > TOLERANCE
+            or _io["interest_change"] <= 0
+            or abs(_io["payoff_years"] - 10.0) > 1 / 12):
+        problems.append(
+            f"  private_restructure: a 12-month interest-only stretch on $59,000 at 11% "
+            f"must pay ${59_000 * 11 / 1200:,.2f} a month, then the 9-year payment "
+            f"${_after['monthly_payment']:,.2f}, cost more in total and still pay off at "
+            f"10 years; got {_io}")
+    # Negative control: a version that forgot to shorten the remaining term
+    # would resume at the plain 10-year payment, which is LOWER. The check
+    # above must be able to tell the two apart.
+    checked += 1
+    if not _io["after_payment"] > ns["calculate_standard_repayment"](59_000.0, 11.0, 10)["monthly_payment"] + 1:
+        problems.append("  negative control: the post-stretch payment must exceed the "
+                        "plain 10-year payment, or the check cannot see a stretch "
+                        "that forgot to shorten the term")
+    # The lifted private tranche must be the plan builder's private row.
+    _rows = ns["compare_existing_loan_plans"](
+        0, 0, 60_000.0, 0, True, 0.0, False, 0,
+        federal_loans=[{"balance": 30_000.0, "rate": 6.0}], private_loans=_pl)
+    _prow = next(r for l, r, _ in _rows if l == ns["PRIVATE_ROW_LABEL"])
+    _direct = ns["private_tranche_result"](_pl)
+    checked += 1
+    if any(abs(_prow[k] - _direct[k]) > 0.01
+           for k in ("monthly_payment", "total_interest", "payoff_years")):
+        problems.append("  private_tranche_result disagrees with the private row "
+                        "compare_existing_loan_plans returns for the same notes")
+
     if problems:
         print(f"repayment invariants: {len(problems)} violation(s) across {checked} cases\n")
         print("\n\n".join(problems))
