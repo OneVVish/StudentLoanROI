@@ -301,6 +301,20 @@ PROMPTS = {
         "text, no numbers, no letters, no logos, no people. Wide letterbox "
         "frame.",
         20260913, 4),
+    "private-student-loan-after-you-sign": (
+        # A private loan is a contract, and the guide is about what the
+        # contract lacks. A signed document with two signature lines and a
+        # pen, a small stack of coins beside it. No words on the page.
+        "Flat vector infographic illustration on a pale off-white "
+        "background: a single sheet of paper lying flat on a plain wooden "
+        "desk, seen from directly above, the sheet carrying only plain "
+        "horizontal lines standing in for text and two short signature "
+        "lines at the bottom each with a looping scribble, a fountain pen "
+        "resting across the lower corner, a short stack of gold coins at "
+        "the upper right of the sheet. Clean bold outlines, soft green and "
+        "navy accents, subtle shadows, generous margins. No text, no "
+        "numbers, no letters, no logos, no people. Wide letterbox frame.",
+        20260920, 4),
     "when-the-federal-minimum-comes-back": (
         # The SAVE forbearance ends and a federal payment comes due beside a
         # bigger private one. The picture is the decision, not the plans: two
