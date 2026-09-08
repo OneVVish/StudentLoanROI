@@ -274,8 +274,26 @@ PROMPTS = {
         "unposed. No text anywhere.",
         20260910, 4),
     "class-of-2027-money-cheat-sheet": (
-        # Twelfth prompt, second attempt. The first was a blank sheet under a
-        # fridge magnet. Asked for, instead, a flat illustration in the
+        # Twelfth prompt, third attempt. A blank sheet under a magnet, then
+        # the four jars, which now belong to the senior-year guide. This one
+        # is the sheet itself as an object: a clipboard with a ticked
+        # checklist drawn as boxes and lines only, a mortarboard and a small
+        # stack of coins beside it. No letters, no numbers.
+        "Flat vector infographic illustration on a pale off-white "
+        "background: a clipboard lying flat, holding a sheet with a column "
+        "of five small square checkboxes, four of them ticked, each beside "
+        "a plain horizontal line standing in for a line of text, a black "
+        "graduation mortarboard cap resting at the top left corner of the "
+        "clipboard, a short stack of gold coins at the bottom right, a "
+        "pencil alongside. Seen from directly above. Clean bold outlines, "
+        "soft green and navy accents, subtle shadows, generous margins. No "
+        "text, no numbers, no letters, no logos, no people. Wide letterbox "
+        "frame.",
+        20260913, 4),
+    "parent-plus-senior-year": (
+        # Generated as the cheat sheet's second hero (2026-09-08) and MOVED
+        # here the same day: the picture is the senior-year cliff. Replaces
+        # this guide's original photographic hero. A flat illustration in the
         # style of a money infographic: four jars, left to right, each
         # emptier than the last and the fourth tipped over, the four years
         # of a degree running the federal money down. No words, no numbers,
