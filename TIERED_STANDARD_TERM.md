@@ -66,19 +66,30 @@ For contrast, the same $65,000 on the plans an OLDER loan keeps: 10-year
 Standard ~$810 a month and ~$31,700 of interest; 25-year Extended ~$520 and
 ~$92,000.
 
-## What the app assumes, and the gap
+## What the tools model (since 2026-09-08)
 
-- **The repayment tool** sets the Tiered term from the TOTAL federal balance
-  entered (CLAUDE.md, "the Tiered term keys on the TOTAL balance"). That is
-  the defer-and-enter-together case. It does not model four loans entering
-  repayment in four different years with four different terms.
-- **The calculator** amortises the PLUS/private tranche as one balance from
-  the end of enrolment, the same assumption.
-- **Modelling the as-you-go case** would need a per-loan entry date on the
-  federal grid, the term figured per loan against the balance outstanding on
-  that date, and the chained schedules `combine_repayment_results` already
-  builds for fixed plans. Not built; the guide states the rule in words
-  instead.
+- **The repayment tool takes two months per federal loan**: `disbursed`
+  (months until the money arrives, 0 = already owed) and `entry` (months
+  until the first payment), plus a `subsidized` tick. `tiered_terms_at_entry`
+  (section 2, beside `calculate_tiered_standard_term`) sets each loan's term
+  from everything owed on the day it enters: earlier loans at the balance left
+  on their own schedule, disbursed-but-deferred loans at principal plus
+  accrual, undisbursed loans at nothing. `entry_deferment` grows and shifts
+  each loan through `in_school_deferment` / `apply_in_school_deferment`, and
+  the fixed rows chain the results. A loan with every field at 0 is exactly
+  the old behaviour, one term from the total.
+- **Deferment accrual is SIMPLE interest, capitalised once at entry**, per
+  685.202(b)(2). `in_school_deferment` compounded monthly until 2026-09-08 and
+  overstated a 4.5-year deferment by about 5 percent; the calculator's
+  professional-path deferments moved down by that much with the fix.
+- **The income-driven rows still treat every loan as owed and in repayment
+  today.** A loan joining a pooled income-driven balance later is a different
+  simulator, and the case this exists for (Parent PLUS) has no income-driven
+  rows. `ENTRY_MONTHS_NOTE` says so on screen and in the PDF.
+- **The guide's three roads are prefilled links** (`rb`, `rr`, `rdis`, `re`,
+  `rf=0`) and `check_plan_switching.check_entry_terms` holds them as
+  fixtures: 20/20/20/20 deferred, 10/15/15/20 as you go, with a negative
+  control that reads today's total for every loan.
 
 ## Where it is written for readers
 
@@ -87,7 +98,7 @@ parent's job, on one fixed plan" (#286, #287), and the whole of
 `content/posts/parent-plus-slow-road-fast-road.md`: the deferred road
 (~$104,900 of interest, last payment 24 and a half years after the freshman
 fall), the 10-year-pace road (~$31,700, 13 years) and the as-you-go road
-(~$50,600, 23 years), with the age at the last payment against a retirement
+(~$52,300, 23 years, entering two months after each disbursement), with the age at the last payment against a retirement
 age of 65. The deferral accrual there is simple interest from each fall's
 disbursement, capitalized once when the deferment ends: the parent deferment
 in 685.204(b)(2) runs through enrollment AND the six-month post-enrollment

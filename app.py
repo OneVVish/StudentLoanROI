@@ -9673,8 +9673,8 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
 def in_school_deferment(principal: float, subsidized_principal: float,
                          annual_rate_pct: float, months: int) -> dict:
     """What a balance does while the borrower is still enrolled: nothing is
-    paid, and everything except the subsidized share accrues interest that
-    capitalises at the end.
+    paid, and everything except the subsidized share accrues simple interest
+    that capitalises at the end.
 
     Returns {"principal", "capitalized", "rows"} -- the balance repayment
     actually begins on, the interest added getting there, and the schedule rows
@@ -9709,12 +9709,17 @@ def in_school_deferment(principal: float, subsidized_principal: float,
     exempt = min(max(float(subsidized_principal or 0.0), 0.0), principal)
     accruing = principal - exempt
     monthly_rate = annual_rate_pct / 100 / 12
+    # SIMPLE interest, capitalised once at the end. Unpaid interest on a
+    # federal loan is not added to principal until the deferment expires
+    # (34 CFR 685.202(b)(2)), so it does not earn interest on itself while
+    # the borrower is enrolled. This compounded monthly until 2026-09-08 and
+    # overstated a four-and-a-half-year deferment by about 5 percent.
     rows = []
     for month in range(1, months + 1):
-        accruing *= (1 + monthly_rate)
         rows.append({"month": month, "year": month / 12,
-                     "balance": accruing + exempt, "payment": 0.0})
-    grown = accruing + exempt
+                     "balance": accruing * (1 + monthly_rate * month) + exempt,
+                     "payment": 0.0})
+    grown = accruing * (1 + monthly_rate * months) + exempt
     return {"principal": grown, "capitalized": grown - principal, "rows": rows}
 
 
@@ -9982,6 +9987,112 @@ def calculate_tiered_standard_term(principal: float) -> int:
     if principal < 100000:
         return 20
     return 25
+
+
+MAX_ENTRY_MONTHS = 120
+
+# One sentence, the screen and the PDF, for a grid with a loan not yet in
+# repayment. The fixed rows honour the entry month per loan; the income-driven
+# rows cannot, because they pool every federal loan into one balance from
+# month 1, and a loan joining a pool later is a different simulator.
+ENTRY_MONTHS_NOTE = (
+    "A loan with months until its first payment is shifted that far on the "
+    "fixed plans, grown by the interest that accrues between disbursement and "
+    "that day unless it is subsidized, and given its 2026 Tiered Standard term "
+    "from everything owed on the day it enters repayment. The income-driven "
+    "rows treat every loan as owed and in repayment today."
+)
+
+
+def entry_deferment(loan: dict) -> dict:
+    """The months before one federal loan's first payment, as the deferment
+    dict apply_in_school_deferment consumes: {"principal", "capitalized",
+    "rows"}, rows covering months 1..entry.
+
+    Two clocks per loan. `disbursed` is the month the money arrives (0 = it
+    is already owed); `entry` is the month of the first payment. Interest
+    accrues between the two unless the loan is subsidized, and capitalises at
+    entry. Before `disbursed` the loan does not exist, so those rows carry a
+    zero balance and the balance chart starts the loan where it starts.
+    """
+    balance = float(loan["balance"])
+    rate = float(loan.get("rate") or 0.0)
+    disbursed = max(int(loan.get("disbursed") or 0), 0)
+    entry = max(int(loan.get("entry") or 0), disbursed)
+    exempt = balance if loan.get("subsidized") else 0.0
+    accrual = in_school_deferment(balance, exempt, rate, entry - disbursed)
+    rows = [{"month": m, "year": m / 12, "balance": 0.0, "payment": 0.0}
+            for m in range(1, disbursed + 1)]
+    rows += [{**r, "month": r["month"] + disbursed, "year": (r["month"] + disbursed) / 12}
+             for r in accrual["rows"]]
+    if disbursed and entry == disbursed:
+        # Disbursed and repaying at once: nothing accrues, but the shift
+        # still needs its rows, or apply_in_school_deferment treats it as
+        # no deferment at all and the loan appears to be owed today.
+        rows[-1] = {**rows[-1], "balance": balance}
+    return {"principal": accrual["principal"], "capitalized": accrual["capitalized"],
+            "rows": rows, "entry": entry, "disbursed": disbursed}
+
+
+def balance_at_month(loan: dict, month: int) -> float:
+    """What one not-yet-repaying federal loan counts for at `month`: nothing
+    before it is disbursed, its principal plus accrual to date after."""
+    disbursed = max(int(loan.get("disbursed") or 0), 0)
+    if month < disbursed:
+        return 0.0
+    balance = float(loan["balance"])
+    exempt = balance if loan.get("subsidized") else 0.0
+    return in_school_deferment(balance, exempt, float(loan.get("rate") or 0.0),
+                               month - disbursed)["principal"]
+
+
+def tiered_terms_at_entry(loans: list) -> list:
+    """The 2026 Tiered Standard term of EACH federal loan, set the way 34 CFR
+    685.208(c)(1)(iii) sets it: by "the total amount of Direct Loans at the
+    time the borrower is entering repayment" on THAT loan.
+
+    Each loan carries `disbursed` and `entry`, months from today (0 = now).
+    At loan i's entry month the total is: its own balance grown to that
+    month; every loan that entered EARLIER at the balance still owed on its
+    own schedule that month; every other loan that has been DISBURSED by
+    then at its principal plus the accrual it has run up; and nothing for a
+    loan not yet disbursed. The band lookup on that total is the term. Loans
+    are resolved in entry order, because an earlier loan's remaining balance
+    depends on the term it was given.
+
+    With every entry at 0 this is calculate_tiered_standard_term(total) for
+    every loan, which is what the tool always did. The reason it exists is
+    the Parent PLUS senior-year cliff: four $16,250 loans deferred through
+    school enter together at ~$81,600 and all get 20 years, while the same
+    four entering as they are disbursed get 10, 15, 15 and 20. Returns terms
+    in the loans' original order.
+    """
+    loans = list(loans or [])
+    if not loans:
+        return []
+    order = sorted(range(len(loans)), key=lambda i: int(loans[i].get("entry") or 0))
+    terms = [None] * len(loans)
+    schedules = {}                      # index -> unshifted schedule of a resolved loan
+    for i in order:
+        entry_i = max(int(loans[i].get("entry") or 0), int(loans[i].get("disbursed") or 0))
+        total = balance_at_month(loans[i], entry_i)
+        for j in range(len(loans)):
+            if j == i:
+                continue
+            entry_j = max(int(loans[j].get("entry") or 0), int(loans[j].get("disbursed") or 0))
+            if j in schedules and entry_j <= entry_i:
+                since = entry_i - entry_j
+                sched = schedules[j]
+                later = sched[sched["month"] >= since] if since > 0 else sched
+                total += (float(later.iloc[0]["balance"]) if since > 0 and not later.empty
+                          else balance_at_month(loans[j], entry_j) if since == 0 else 0.0)
+            else:
+                total += balance_at_month(loans[j], entry_i)
+        terms[i] = calculate_tiered_standard_term(total)
+        schedules[i] = calculate_standard_repayment(
+            balance_at_month(loans[i], entry_i), float(loans[i].get("rate") or 0.0),
+            terms[i])["schedule"]
+    return terms
 
 
 def calculate_rap_payment(agi: float, dependents: int = 0) -> dict:
@@ -16735,6 +16846,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         "For a balance already owed. An educational estimate from this app's own "
         "formulas -- not your servicer's figures, and not financial advice.",
         styles["body"]))
+    if any(loan.get("entry") for loan in fed_list):
+        story.append(Paragraph(ENTRY_MONTHS_NOTE, styles["caption"]))
     story.append(Spacer(1, 10))
 
     inputs = [["Your figures", ""]]
@@ -21036,7 +21149,9 @@ MAX_SHARED_LOANS = 50
 # from its NumberColumn config, applied when the link is read.
 REPAYMENT_LOAN_LIST_PARAMS = (
     ("existing_federal_loans",
-     (("balance", "rb", int, (0, 2_000_000)), ("rate", "rr", float, (0.0, 20.0)))),
+     (("balance", "rb", int, (0, 2_000_000)), ("rate", "rr", float, (0.0, 20.0)),
+      ("disbursed", "rdis", int, (0, MAX_ENTRY_MONTHS)),
+      ("entry", "re", int, (0, MAX_ENTRY_MONTHS)), ("subsidized", "rsub", int, (0, 1)))),
     ("existing_private_loans",
      (("balance", "rpb", int, (0, 2_000_000)), ("rate", "rpr", float, (0.0, 30.0)),
       ("term", "rpt", int, (1, 30)), ("actual", "rpa", int, (0, 50_000)))),
@@ -21194,6 +21309,15 @@ def sanitize_loan_rows(loans, private: bool = False) -> list:
         if private:
             entry["term"] = int(_num(row.get("term"), PRIVATE_TERM_YEARS)) or PRIVATE_TERM_YEARS
             entry["actual"] = _num(row.get("actual"))
+        else:
+            # Months until this loan's first payment (0 = repaying now), and
+            # whether it is a Direct Subsidized loan, which accrues nothing
+            # until then. Both default to the pre-column meaning.
+            entry["disbursed"] = min(int(_num(row.get("disbursed"))), MAX_ENTRY_MONTHS)
+            entry["entry"] = max(min(int(_num(row.get("entry"))), MAX_ENTRY_MONTHS),
+                                 entry["disbursed"])
+            sub = row.get("subsidized")
+            entry["subsidized"] = bool(sub) and str(sub).lower() not in ("0", "false", "nan")
         clean.append(entry)
     return clean
 
@@ -21424,21 +21548,31 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
         combined["federal_only"] = federal_result
         return combined
 
-    def fixed_over(term_years: int) -> dict:
+    def fixed_over(term_years: int, per_loan_terms: list = None) -> dict:
         """One fixed plan across every federal loan: each note amortises at
         its OWN rate over the plan's term and the bills add, chained through
         combine_repayment_results -- the same summing a servicer's per-loan
         billing does. The income-driven rows below are the opposite shape:
         one pooled simulation, because one payment covers every federal loan.
+        `per_loan_terms` is the Tiered row's list from tiered_terms_at_entry,
+        one term per loan; the other fixed rows share one term.
         """
         if not fed_loans:
             return calculate_standard_repayment(0.0, 0.0, term_years)
-        result = calculate_standard_repayment(
-            fed_loans[0]["balance"], fed_loans[0]["rate"], term_years)
-        for loan in fed_loans[1:]:
-            result = combine_repayment_results(
-                result,
-                calculate_standard_repayment(loan["balance"], loan["rate"], term_years))
+
+        def _one(loan: dict, term: int) -> dict:
+            # A loan not yet in repayment: shifted by its entry months and,
+            # unless subsidized, grown by the interest that accrues until
+            # then. The same in_school_deferment / apply_in_school_deferment
+            # pair the calculator uses for a professional path's school years.
+            deferment = entry_deferment(loan)
+            result = calculate_standard_repayment(deferment["principal"], loan["rate"], term)
+            return apply_in_school_deferment(result, deferment, deferment["entry"])
+
+        terms = per_loan_terms or [term_years] * len(fed_loans)
+        result = _one(fed_loans[0], terms[0])
+        for loan, term in zip(fed_loans[1:], terms[1:]):
+            result = combine_repayment_results(result, _one(loan, term))
         return result
 
     rows = []
@@ -21459,9 +21593,15 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", with_private(ext),
                  "Does NOT qualify for PSLF." if pslf else
                  "Fixed payment stretched out. No forgiveness, more interest."))
-    tiered_term = calculate_tiered_standard_term(total_fed)
-    tiered = fixed_over(tiered_term)
-    rows.append((f"2026 Tiered Standard ({tiered_term}-year)", with_private(tiered),
+    # Per loan, set at each loan's entry to repayment (tiered_terms_at_entry).
+    # With every loan in repayment today this is one term from the total.
+    tiered_terms = tiered_terms_at_entry(fed_loans) or [calculate_tiered_standard_term(total_fed)]
+    tiered = fixed_over(max(tiered_terms), per_loan_terms=tiered_terms)
+    tiered_term = max(tiered_terms)
+    tiered_label = (f"2026 Tiered Standard ({tiered_term}-year)"
+                    if len(set(tiered_terms)) == 1 else
+                    f"2026 Tiered Standard ({min(tiered_terms)} to {tiered_term}-year)")
+    rows.append((tiered_label, with_private(tiered),
                  "Does NOT qualify for PSLF, or even for TEPSLF." if pslf else
                  "Fixed payment over a term set by your balance."))
     # HOUSEHOLD, resolved once for both income-driven plans so they cannot
@@ -22687,11 +22827,23 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 [{"balance": int(_legacy_bal),
                   "rate": float(st.session_state.get("existing_rate") or 0.0)}]
                 if _legacy_bal else [{"balance": 0, "rate": 0.0}])
+        # Rows seeded from a link or an older session lack the two newer
+        # columns, and a CheckboxColumn wants a real bool, not a 1.
+        for _row in st.session_state["existing_federal_loans"]:
+            _row.setdefault("disbursed", 0)
+            _row.setdefault("entry", 0)
+            _row["subsidized"] = bool(_row.get("subsidized")) and str(_row.get("subsidized")).lower() not in ("0", "false")
+        # The subsidized column only makes sense for the student's own
+        # Direct loans; a Parent PLUS loan is never subsidized, so the
+        # parent's view (the box below unticked) hides it. Read through the
+        # session key because the checkbox renders below the grid.
+        _own_direct = bool(st.session_state.get("existing_forgivable", True))
+        _fed_order = ["balance", "rate", "disbursed", "entry"] + (["subsidized"] if _own_direct else [])
         _fed_edited = st.data_editor(
             pd.DataFrame(st.session_state["existing_federal_loans"],
-                         columns=["balance", "rate"]),
+                         columns=["balance", "rate", "disbursed", "entry", "subsidized"]),
             num_rows="dynamic", hide_index=True, use_container_width=True,
-            key="existing_federal_editor",
+            key="existing_federal_editor", column_order=_fed_order,
             column_config={
                 "balance": st.column_config.NumberColumn(
                     "Balance ($)", min_value=0, max_value=2_000_000,
@@ -22704,8 +22856,38 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     "Rate (%)", min_value=0.0, max_value=20.0, step=0.01,
                     format="%.2f",
                     help="This loan's interest rate."),
+                "disbursed": st.column_config.NumberColumn(
+                    "Disbursed in (months)", min_value=0,
+                    max_value=MAX_ENTRY_MONTHS, step=1, format="%d",
+                    help="0 for money you already owe. For a loan you will take "
+                         "later, the months until it is paid out: a sophomore "
+                         "year loan is about 12, a senior year loan about 36. "
+                         "It does not exist, accrue or count until then."),
+                "entry": st.column_config.NumberColumn(
+                    "First payment in (months)", min_value=0,
+                    max_value=MAX_ENTRY_MONTHS, step=1, format="%d",
+                    help="0 for a loan you are paying now. Otherwise the months "
+                         "until its first payment: through school and the "
+                         "grace period if you defer, or about two months after "
+                         "disbursement if you do not. The fixed plans set that "
+                         "loan's term from everything owed on that day."),
+                "subsidized": st.column_config.CheckboxColumn(
+                    "Subsidized",
+                    help="Tick for a Direct Subsidized loan: no interest accrues "
+                         "while you are enrolled at least half time or during "
+                         "the six-month grace period. Unsubsidized, graduate and "
+                         "PLUS loans accrue from the day they are disbursed, and "
+                         "the interest is added to the balance when repayment "
+                         "starts. A loan in forbearance accrues either way; "
+                         "leave this unticked for one."),
             })
-        st.session_state["existing_federal_loans"] = _fed_edited.to_dict("records")
+        _edited_rows = _fed_edited.to_dict("records")
+        if not _own_direct:
+            # The hidden column would otherwise vanish from the rows; a
+            # PLUS loan is unsubsidized, so False is the true value.
+            for _row in _edited_rows:
+                _row["subsidized"] = False
+        st.session_state["existing_federal_loans"] = _edited_rows
         fed_loans = sanitize_loan_rows(st.session_state["existing_federal_loans"])
         balance = sum(loan["balance"] for loan in fed_loans)
         rate = (sum(loan["balance"] * loan["rate"] for loan in fed_loans) / balance
@@ -22717,6 +22899,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 "as one balance with one payment, and the fixed plans bill "
                 "each on its own schedule."
             ))
+        if any(loan.get("entry") for loan in fed_loans):
+            st.caption(ENTRY_MONTHS_NOTE)
         c1, c2 = st.columns([2, 1])
         accrued = c1.number_input(
             "of which unpaid interest ($)", min_value=0, max_value=2_000_000, step=1_000,

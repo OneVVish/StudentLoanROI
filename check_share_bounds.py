@@ -131,6 +131,10 @@ def grid_bounds(tree, names) -> dict:
                     and _func_name(v) == "NumberColumn":
                 cols[k.value] = tuple(_const(_kw(v, a), names)
                                       for a in ("min_value", "max_value"))
+            elif isinstance(k, ast.Constant) and isinstance(v, ast.Call) \
+                    and _func_name(v) == "CheckboxColumn":
+                # A tick rides the link as 0/1, so its bounds are those.
+                cols[k.value] = (0, 1)
         if cols:
             out[frozenset(cols)] = cols
     return out
