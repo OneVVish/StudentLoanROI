@@ -10,7 +10,7 @@ these numbers move.
 from PIL import Image
 
 SRC = "static/guide-hero-parent-plus-senior-year-parts-klein4b.png"
-OUT = "static/guide-hero-parent-plus-senior-year-cliff-klein4b.png"
+OUT = "static/guide-hero-parent-plus-senior-year-quarter-klein4b.png"
 OG = "static/guide-og-parent-plus-senior-year.png"
 FULL = (420, 0, 760, 448)     # the full jar with its shadow; stops above the bottom rule
 EMPTY = (860, 0, 1180, 448)   # the quarter-full jar
