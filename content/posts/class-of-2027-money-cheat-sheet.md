@@ -3,7 +3,7 @@ title: Class of 2027: the money cheat sheet
 description: The first class to apply, borrow and repay entirely under the 2026 federal rules. Every cap, plan, formula and date on one page, with the tool that answers each.
 summary: High school seniors graduating in 2027 are the first class whose whole college run falls under the loan rules that took effect July 1, 2026. This is every number that governs it on one page, exact where the law is exact, with the tool that runs each one.
 date: 2026-09-08
-hero: guide-hero-class-of-2027-money-cheat-sheet-klein4b.png
+hero: guide-hero-class-of-2027-money-cheat-sheet-jars-klein4b.png
 ---
 
 A student graduating from high school in 2027 starts college in the fall of 2027, borrows under caps that took effect July 1, 2026, files a FAFSA that opens October 1, 2026, and repays under plans that did not exist two years ago. Every earlier class had at least one foot in the old rules. This one has none.
