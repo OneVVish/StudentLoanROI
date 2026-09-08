@@ -123,6 +123,15 @@ SHARE_EXEMPT = {
     "existing_private_extra": "repayment tool; rides ?rpx=. The PRIVATE-side "
                              "surplus, distinct from ?rx= (federal) and from "
                              "?rpa= (one note's own payment)",
+    "existing_private_refi_rate": "repayment tool; rides ?rpo=. A refinance rate "
+                                  "offered on the PRIVATE balance, an input never "
+                                  "a modelled figure.",
+    "existing_private_refi_cosigner_rate": "repayment tool; rides ?rpoc=. The same "
+                                           "offer with a cosigner.",
+    "existing_private_refi_term": "repayment tool; rides ?rpot=. 0 means the "
+                                  "current term.",
+    "existing_private_io_months": "repayment tool; rides ?rpio=. An interest-only "
+                                  "stretch a lender offered, in months.",
     "existing_current_payment": "repayment tool; rides ?rcp=, and is the one "
                                 "repayment param whose 0 must RIDE rather "
                                 "than be skipped as an untouched control -- "

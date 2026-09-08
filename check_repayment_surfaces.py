@@ -37,6 +37,7 @@ import pandas as pd
 EXEMPT = {
     "render_existing_loan_comparison": "the renderer itself; driven by AppTest below",
     "_repayment_actions": "renders download/share buttons; needs a script run",
+    "_render_private_restructure": "renders the restructure inputs; its analysis and sentences run above",
     "render_rap_subsidy_answer": "st.info only; driven by AppTest below",
     "build_repayment_share_params": "reads st.session_state; covered by check_share_coverage",
     "seed_repayment_from_share": "writes st.session_state before widgets exist",
@@ -294,6 +295,15 @@ def main() -> int:
         # The one honest exemption is Parent PLUS with nothing spare: no
         # income-driven row exists, so there is no plan to compare against.
         has_idr = any("RAP" in l or l.startswith("IBR") for l, _, _ in rows)
+        if priv:
+            # The restructure block under the private row: offers alone and
+            # with a cosigner, a stretch, and the sentences both surfaces read.
+            _restr = use("private_restructure")(priv, 7.0, 0, 12, 5.0)
+            checked += 1
+            if not _restr or len(use("private_restructure_sentences")(_restr)) < 4:
+                problems.append(f"  [{label}] private_restructure returned too few "
+                                f"sentences for a portfolio with private notes")
+            use("private_row_note")(priv)
         spare = bool(priv) or bool(spec.get("private_extra"))
         if analysis is None:
             if has_idr or spare:

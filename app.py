@@ -9606,7 +9606,10 @@ def calculate_standard_repayment(principal: float, annual_rate_pct: float,
         }
 
     monthly_rate = annual_rate_pct / 100 / 12
-    n_months = term_years * 12
+    # Rounded to whole months so a term expressed in years and a fraction (the
+    # remaining term after an interest-only stretch) amortises; integer years
+    # are unchanged.
+    n_months = int(round(term_years * 12))
 
     if monthly_rate == 0:
         monthly_payment = principal / n_months
@@ -16813,7 +16816,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   private_loans: list = None,
                                   strategy: dict = None,
                                   old_ibr: bool = False,
-                                  affordability: dict = None) -> bytes:
+                                  affordability: dict = None,
+                                  private_restructure: dict = None) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -16954,6 +16958,12 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         if _pace_text:
             story.append(Paragraph(
                 _pace_text.replace("**", ""), styles["caption"]))
+        # The restructure sentences the screen shows, from the same analysis
+        # (chart-twin rule): fmt_money_md's escaped dollar signs are markdown,
+        # which reportlab has none of.
+        for _line in private_restructure_sentences(private_restructure):
+            story.append(Paragraph(
+                _line.replace("**", "").replace("\\$", "$"), styles["caption"]))
         story.append(Spacer(1, 8))
         story.append(Paragraph("Combined -- what you actually pay",
                                styles["section"]))
@@ -21120,6 +21130,10 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_extra_monthly", "rx", int, (0, 50_000)),
     ("existing_current_payment", "rcp", int, (0, 50_000)),
     ("existing_private_extra", "rpx", int, (0, 50_000)),
+    ("existing_private_refi_rate", "rpo", float, (0.0, 30.0)),
+    ("existing_private_refi_cosigner_rate", "rpoc", float, (0.0, 30.0)),
+    ("existing_private_refi_term", "rpot", int, (0, 30)),
+    ("existing_private_io_months", "rpio", int, (0, 60)),
     ("existing_old_ibr", "rob", int, None),
 )
 
@@ -21322,6 +21336,274 @@ def sanitize_loan_rows(loans, private: bool = False) -> list:
     return clean
 
 
+def private_tranche_result(priv_loans: list, private_extra: float = 0.0) -> dict:
+    """The private side of the repayment tool as ONE result: every note
+    amortised on its own terms and chained, with the required-pace pair, the
+    per-loan detail and the roll-down attached. Lifted out of
+    compare_existing_loan_plans unchanged so a borrower holding ONLY private
+    loans can be priced without inventing a federal one. `priv_loans` is
+    already sanitized. None when there is nothing to price.
+    """
+    if not priv_loans:
+        return None
+    # THE EXTRA IS MONEY THE BORROWER SAYS THEY PAY, so it belongs in the
+    # row. It used to sit outside: enter $130 and the private row still
+    # read $498/mo and the combined table -- headed "what you actually
+    # pay" -- still read $736, when the answer was $866. A table that
+    # ignores an amount the visitor typed is describing somebody else.
+    #
+    # Allocated to the HIGHEST-RATE note, which is what the field's own
+    # help text promises and what the caption beside it recommends. NOT
+    # cascaded: rolling a cleared note's payment onto the next is a
+    # BEHAVIOUR the borrower has to choose, and it stays where it was, in
+    # the roll-down charts. That split is also the honest answer to "why
+    # has my term not moved" -- see below.
+    _extra_target = max(range(len(priv_loans)),
+                        key=lambda i: priv_loans[i]["rate"]) if private_extra else None
+
+    def _private_sim(loan: dict, with_override: bool, index: int = -1) -> dict:
+        override = (loan["actual"] or None) if with_override else None
+        if with_override and index == _extra_target:
+            required = calculate_standard_repayment(
+                loan["balance"], loan["rate"], loan["term"])["monthly_payment"]
+            override = max(override or 0.0, required) + float(private_extra)
+        return calculate_standard_repayment(
+            loan["balance"], loan["rate"], loan["term"],
+            monthly_payment_override=override)
+
+    _per_results = [_private_sim(loan, True, i)
+                    for i, loan in enumerate(priv_loans)]
+    private_result = _per_results[0]
+    for _r in _per_results[1:]:
+        private_result = combine_repayment_results(private_result, _r)
+    # Per-loan detail, carried for the PDF's breakdown table -- the
+    # combined PRIVATE_ROW_LABEL row cannot tell a multi-loan borrower
+    # which loan is which.
+    private_result["per_loan"] = [
+        {**loan, "monthly_payment": result["monthly_payment"],
+         "payoff_years": result["payoff_years"],
+         "total_interest": result["total_interest"],
+         # The note's own balance curve. Carried so the balance chart can
+         # STACK the notes instead of drawing their sum as one line: with
+         # four private loans that single line hides which loan dies when,
+         # which is the only thing the picture was being read for.
+         "schedule": result["schedule"]}
+        for loan, result in zip(priv_loans, _per_results)]
+    if any(loan["actual"] for loan in priv_loans) or private_extra:
+        # The required-pace figures, attached to the row like `countback`
+        # is: computed HERE so the renderer and the PDF read one
+        # precomputed set instead of re-running simulators each on their
+        # own basis. Combined across loans, matching the combined row the
+        # caption sits under.
+        _required = _private_sim(priv_loans[0], False)
+        for loan in priv_loans[1:]:
+            _required = combine_repayment_results(
+                _required, _private_sim(loan, False))
+        private_result["required_pace"] = {
+            "monthly_payment": _required["monthly_payment"],
+            "payoff_years": _required["payoff_years"],
+            "total_interest": _required["total_interest"],
+        }
+
+    # THE ROLL-DOWN, as a SEPARATE figure rather than a new basis for the
+    # row above. Each note here is amortised on its own and the results are
+    # chained, so a cleared note's payment simply stops -- which is what
+    # happens if the borrower spends it. Rolling it onto the next highest
+    # rate instead is a different behaviour, not a different calculation,
+    # and it is worth real money: on a reader's four private notes it was
+    # $894 and 14 months against the same $130 a month.
+    #
+    # ADDITIVE ON PURPOSE. It does not touch private_result's own numbers,
+    # so every existing share link, PDF and caption reproduces exactly what
+    # it did before, and deleting this block removes the feature whole.
+    # It also avoids a cliff: routing the row itself through the avalanche
+    # only when an extra was entered would make $1 of extra jump the payoff
+    # by years.
+    _avalanche = simulate_fixed_avalanche(
+        priv_loans, PRIVATE_TERM_YEARS, per_loan_terms=True,
+        extra_payments=((1, float(private_extra)),) if private_extra else ())
+    # Only worth showing when it actually differs from what the row says.
+    # With equal terms and no extra there is nothing to roll forward and
+    # the two agree to the cent, which is the common case.
+    if (private_result["payoff_years"] - _avalanche["payoff_years"] > 1 / 12
+            or private_result["total_interest"]
+               - _avalanche["total_interest"] > 1.0):
+        private_result["avalanche"] = {
+            # The per-note curves, so the roll-down gets its own stacked
+            # chart rather than only a payoff number. Zipped with the
+            # loans in INPUT order, which is what the simulator aligns to.
+            "per_loan": [{**loan, "schedule": sched} for loan, sched in
+                         zip(priv_loans,
+                             _avalanche["per_loan_schedules"])],
+            # What the borrower hands the private side each month under the
+            # roll-down: every note's required payment plus the extra. It
+            # is what FREES UP when the last private loan clears, which is
+            # the pivot panel's whole premise.
+            "monthly_payment": _avalanche["monthly_payment"],
+            # The COMBINED roll-down curve. The chart reads its money and
+            # time axes off whatever frame it is handed, so handing it one
+            # note's schedule scaled the y-axis to that note: a stack
+            # reaching $24,600 drawn against ticks that stopped at $10k.
+            "schedule": _avalanche["schedule"],
+            "payoff_years": _avalanche["payoff_years"],
+            "total_interest": _avalanche["total_interest"],
+            "extra": float(private_extra),
+            "interest_saved": (private_result["total_interest"]
+                               - _avalanche["total_interest"]),
+            "months_saved": round((private_result["payoff_years"]
+                                   - _avalanche["payoff_years"]) * 12),
+            # The wording branches on this: with ONE note there is no next
+            # loan to roll onto, so the whole saving is the extra payment
+            # and calling it a roll-down would describe something that
+            # cannot happen. Caught by rendering, not by the arithmetic,
+            # which is correct in both cases.
+            "notes": len(priv_loans),
+        }
+    return private_result
+
+
+def private_row_note(priv_loans: list) -> str:
+    """The private row's "What it is" cell, shared by the plan builder and the
+    private-only path so the two cannot describe the same loan differently."""
+    if len(priv_loans) == 1:
+        return (f"Repaid in full over {priv_loans[0]['term']} years. "
+                "Not federal: no plan forgives it, and nothing about "
+                "it changes with your income or your plan.")
+    return (f"{len(priv_loans)} loans, each repaid in full on its "
+            "own term. Not federal: no plan forgives them, and "
+            "nothing about them changes with your income or plan.")
+
+
+def private_restructure(priv_loans: list, offer_rate: float = 0.0,
+                        offer_term: int = 0, io_months: int = 0,
+                        cosigner_rate: float = 0.0) -> dict:
+    """Price three things a private lender can offer, against the notes as
+    they stand. Plain amortisation through calculate_standard_repayment, no
+    lender data, so THE RATES ARE INPUTS AND STAY INPUTS -- the
+    refinance_comparison rule.
+
+      - A refinance of the whole private balance at `offer_rate` over
+        `offer_term` years (0 means the longest current term). Single
+        crossing: a lower rate at the same term is cheaper every month and
+        in total; a longer term is cheaper monthly and may cost more in
+        total, and the sentence says which.
+      - The same at `cosigner_rate`, so the difference between the two offers
+        is what a cosigner's signature is worth in dollars.
+      - `io_months` of interest-only payments, then the unchanged balance
+        amortised over the remaining term. Both directions: the payment
+        falls, the total rises, and the payment afterwards is higher.
+
+    "Current" is the REQUIRED pace on each note, not any actual payment, so
+    the offers are compared like for like. None when there is nothing to
+    price; an analysis with no offers and no stretch renders no sentences.
+    """
+    loans = [l for l in sanitize_loan_rows(priv_loans or [], private=True)
+             if l["balance"] > 0]
+    if not loans:
+        return None
+    total = sum(l["balance"] for l in loans)
+    current = None
+    for l in loans:
+        r = calculate_standard_repayment(l["balance"], l["rate"], l["term"])
+        current = r if current is None else combine_repayment_results(current, r)
+    cur_term = max(int(l["term"]) for l in loans)
+    out = {
+        "total": total,
+        "current": {"monthly_payment": float(current["monthly_payment"]),
+                    "total_interest": float(current["total_interest"]),
+                    "payoff_years": float(current["payoff_years"]),
+                    "term": cur_term},
+        "offers": [],
+        "interest_only": None,
+    }
+    term = int(offer_term) if offer_term and int(offer_term) > 0 else cur_term
+    for who, rate in (("alone", offer_rate), ("with a cosigner", cosigner_rate)):
+        rate = float(rate or 0.0)
+        if rate <= 0:
+            continue
+        r = calculate_standard_repayment(total, rate, term)
+        out["offers"].append({
+            "who": who, "rate": rate, "term": term,
+            "monthly_payment": float(r["monthly_payment"]),
+            "total_interest": float(r["total_interest"]),
+            "monthly_change": float(r["monthly_payment"]) - out["current"]["monthly_payment"],
+            "interest_change": float(r["total_interest"]) - out["current"]["total_interest"],
+        })
+    io = int(io_months or 0)
+    if io > 0:
+        io_payment = sum(l["balance"] * l["rate"] / 1200.0 for l in loans)
+        after = None
+        for l in loans:
+            # At least a year of amortisation is left after the stretch, so a
+            # stretch longer than the note cannot produce a zero-month term.
+            months = max(int(l["term"]) * 12 - io, 12)
+            r = calculate_standard_repayment(l["balance"], l["rate"], months / 12.0)
+            after = r if after is None else combine_repayment_results(after, r)
+        io_total = io_payment * io + float(after["total_interest"])
+        out["interest_only"] = {
+            "months": io,
+            "io_payment": io_payment,
+            "after_payment": float(after["monthly_payment"]),
+            "total_interest": io_total,
+            "interest_change": io_total - out["current"]["total_interest"],
+            "payoff_years": io / 12.0 + float(after["payoff_years"]),
+        }
+    return out
+
+
+def private_restructure_sentences(analysis: dict) -> list:
+    """The restructure comparison in words, or []. Shared by the screen and
+    the PDF. LEADS ON THE MONTHLY, then the total, and names which direction
+    each offer moves, because the twenty-year stretch that lowers the payment
+    and doubles the interest is the offer a borrower asking for "a lower
+    payment" is most often handed."""
+    if not analysis or (not analysis["offers"] and not analysis["interest_only"]):
+        return []
+    cur = analysis["current"]
+    out = []
+    for o in analysis["offers"]:
+        who = ", with a cosigner," if o["who"] != "alone" else ""
+        line = (f"Refinancing the {fmt_money_md(analysis['total'])} at "
+                f"{o['rate']:g} percent over {o['term']} years{who} is "
+                f"{fmt_money_md(o['monthly_payment'])} a month against "
+                f"{fmt_money_md(cur['monthly_payment'])} now, and "
+                f"{fmt_money_md(o['total_interest'])} of interest against "
+                f"{fmt_money_md(cur['total_interest'])}.")
+        if abs(o["monthly_change"]) < 0.5 and abs(o["interest_change"]) < 1.0:
+            line += " That is the loan you already have."
+        elif o["monthly_change"] < 0 and o["interest_change"] > 0:
+            line += (" The lower payment comes from the longer term, and it "
+                     f"costs {fmt_money_md(o['interest_change'])} more over the loan.")
+        elif o["monthly_change"] <= 0 and o["interest_change"] <= 0:
+            line += " Lower every month and lower in total."
+        else:
+            line += (" A higher payment: a shorter term or a higher rate, "
+                     "and the total says which is doing it.")
+        out.append(line)
+    if len(analysis["offers"]) == 2:
+        alone, co = analysis["offers"]
+        out.append(
+            f"The cosigner's signature is worth "
+            f"{fmt_money_md(abs(alone['monthly_payment'] - co['monthly_payment']))} "
+            f"a month and "
+            f"{fmt_money_md(abs(alone['total_interest'] - co['total_interest']))} "
+            "over the loan. The cosigner owes the whole balance if you stop "
+            "paying, and it sits on their credit report until it is gone.")
+    io = analysis["interest_only"]
+    if io:
+        out.append(
+            f"{io['months']} months of interest-only payments is "
+            f"{fmt_money_md(io['io_payment'])} a month against "
+            f"{fmt_money_md(cur['monthly_payment'])} now. The balance does not "
+            f"move, the payment afterward is {fmt_money_md(io['after_payment'])}, "
+            f"and the stretch adds {fmt_money_md(io['interest_change'])} of "
+            "interest over the loan.")
+    out.append("The rates and months are yours to enter: this page models no "
+               "typical private rate, and it prices no hardship plan, "
+               "settlement or discharge.")
+    return out
+
+
 def compare_existing_loan_plans(balance: float, rate: float, annual_income: float,
                                  dependents: int = 0, forgivable: bool = True,
                                  starting_interest: float = 0.0,
@@ -21423,121 +21705,7 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     # subsidy or forgiveness arithmetic to interact with, so paying more is
     # honest math, whereas extra on the income-driven federal side changes
     # waiver and discharge behaviour and is deliberately not modelled here.
-    private_result = None
-    if priv_loans:
-        # THE EXTRA IS MONEY THE BORROWER SAYS THEY PAY, so it belongs in the
-        # row. It used to sit outside: enter $130 and the private row still
-        # read $498/mo and the combined table -- headed "what you actually
-        # pay" -- still read $736, when the answer was $866. A table that
-        # ignores an amount the visitor typed is describing somebody else.
-        #
-        # Allocated to the HIGHEST-RATE note, which is what the field's own
-        # help text promises and what the caption beside it recommends. NOT
-        # cascaded: rolling a cleared note's payment onto the next is a
-        # BEHAVIOUR the borrower has to choose, and it stays where it was, in
-        # the roll-down charts. That split is also the honest answer to "why
-        # has my term not moved" -- see below.
-        _extra_target = max(range(len(priv_loans)),
-                            key=lambda i: priv_loans[i]["rate"]) if private_extra else None
-
-        def _private_sim(loan: dict, with_override: bool, index: int = -1) -> dict:
-            override = (loan["actual"] or None) if with_override else None
-            if with_override and index == _extra_target:
-                required = calculate_standard_repayment(
-                    loan["balance"], loan["rate"], loan["term"])["monthly_payment"]
-                override = max(override or 0.0, required) + float(private_extra)
-            return calculate_standard_repayment(
-                loan["balance"], loan["rate"], loan["term"],
-                monthly_payment_override=override)
-
-        _per_results = [_private_sim(loan, True, i)
-                        for i, loan in enumerate(priv_loans)]
-        private_result = _per_results[0]
-        for _r in _per_results[1:]:
-            private_result = combine_repayment_results(private_result, _r)
-        # Per-loan detail, carried for the PDF's breakdown table -- the
-        # combined PRIVATE_ROW_LABEL row cannot tell a multi-loan borrower
-        # which loan is which.
-        private_result["per_loan"] = [
-            {**loan, "monthly_payment": result["monthly_payment"],
-             "payoff_years": result["payoff_years"],
-             "total_interest": result["total_interest"],
-             # The note's own balance curve. Carried so the balance chart can
-             # STACK the notes instead of drawing their sum as one line: with
-             # four private loans that single line hides which loan dies when,
-             # which is the only thing the picture was being read for.
-             "schedule": result["schedule"]}
-            for loan, result in zip(priv_loans, _per_results)]
-        if any(loan["actual"] for loan in priv_loans) or private_extra:
-            # The required-pace figures, attached to the row like `countback`
-            # is: computed HERE so the renderer and the PDF read one
-            # precomputed set instead of re-running simulators each on their
-            # own basis. Combined across loans, matching the combined row the
-            # caption sits under.
-            _required = _private_sim(priv_loans[0], False)
-            for loan in priv_loans[1:]:
-                _required = combine_repayment_results(
-                    _required, _private_sim(loan, False))
-            private_result["required_pace"] = {
-                "monthly_payment": _required["monthly_payment"],
-                "payoff_years": _required["payoff_years"],
-                "total_interest": _required["total_interest"],
-            }
-
-        # THE ROLL-DOWN, as a SEPARATE figure rather than a new basis for the
-        # row above. Each note here is amortised on its own and the results are
-        # chained, so a cleared note's payment simply stops -- which is what
-        # happens if the borrower spends it. Rolling it onto the next highest
-        # rate instead is a different behaviour, not a different calculation,
-        # and it is worth real money: on a reader's four private notes it was
-        # $894 and 14 months against the same $130 a month.
-        #
-        # ADDITIVE ON PURPOSE. It does not touch private_result's own numbers,
-        # so every existing share link, PDF and caption reproduces exactly what
-        # it did before, and deleting this block removes the feature whole.
-        # It also avoids a cliff: routing the row itself through the avalanche
-        # only when an extra was entered would make $1 of extra jump the payoff
-        # by years.
-        _avalanche = simulate_fixed_avalanche(
-            priv_loans, PRIVATE_TERM_YEARS, per_loan_terms=True,
-            extra_payments=((1, float(private_extra)),) if private_extra else ())
-        # Only worth showing when it actually differs from what the row says.
-        # With equal terms and no extra there is nothing to roll forward and
-        # the two agree to the cent, which is the common case.
-        if (private_result["payoff_years"] - _avalanche["payoff_years"] > 1 / 12
-                or private_result["total_interest"]
-                   - _avalanche["total_interest"] > 1.0):
-            private_result["avalanche"] = {
-                # The per-note curves, so the roll-down gets its own stacked
-                # chart rather than only a payoff number. Zipped with the
-                # loans in INPUT order, which is what the simulator aligns to.
-                "per_loan": [{**loan, "schedule": sched} for loan, sched in
-                             zip(priv_loans,
-                                 _avalanche["per_loan_schedules"])],
-                # What the borrower hands the private side each month under the
-                # roll-down: every note's required payment plus the extra. It
-                # is what FREES UP when the last private loan clears, which is
-                # the pivot panel's whole premise.
-                "monthly_payment": _avalanche["monthly_payment"],
-                # The COMBINED roll-down curve. The chart reads its money and
-                # time axes off whatever frame it is handed, so handing it one
-                # note's schedule scaled the y-axis to that note: a stack
-                # reaching $24,600 drawn against ticks that stopped at $10k.
-                "schedule": _avalanche["schedule"],
-                "payoff_years": _avalanche["payoff_years"],
-                "total_interest": _avalanche["total_interest"],
-                "extra": float(private_extra),
-                "interest_saved": (private_result["total_interest"]
-                                   - _avalanche["total_interest"]),
-                "months_saved": round((private_result["payoff_years"]
-                                       - _avalanche["payoff_years"]) * 12),
-                # The wording branches on this: with ONE note there is no next
-                # loan to roll onto, so the whole saving is the extra payment
-                # and calling it a roll-down would describe something that
-                # cannot happen. Caught by rendering, not by the arithmetic,
-                # which is correct in both cases.
-                "notes": len(priv_loans),
-            }
+    private_result = private_tranche_result(priv_loans, private_extra)
 
     def with_private(federal_result: dict) -> dict:
         combined = combine_repayment_results(federal_result, private_result)
@@ -21681,14 +21849,7 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     # once rather than as a row per plan -- which is also the clearest
     # statement of the fact that no federal plan touches it.
     if private_result is not None:
-        if len(priv_loans) == 1:
-            _priv_note = (f"Repaid in full over {priv_loans[0]['term']} years. "
-                          "Not federal: no plan forgives it, and nothing about "
-                          "it changes with your income or your plan.")
-        else:
-            _priv_note = (f"{len(priv_loans)} loans, each repaid in full on its "
-                          "own term. Not federal: no plan forgives them, and "
-                          "nothing about them changes with your income or plan.")
+        _priv_note = private_row_note(priv_loans)
         rows.append((PRIVATE_ROW_LABEL, private_result, _priv_note))
     return rows
 
@@ -22675,7 +22836,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        age: int = 0,
                        strategy: dict = None,
                        old_ibr: bool = False,
-                       affordability: dict = None) -> None:
+                       affordability: dict = None,
+                       private_restructure: dict = None) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
     Only on the standalone page (`enabled`). Inside the calculator this module
@@ -22712,7 +22874,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                 forgivable, pslf, chart_label=chart_label,
                 federal_loans=federal_loans, private_loans=private_loans,
                 age=age, strategy=strategy, old_ibr=old_ibr,
-                affordability=affordability)),
+                affordability=affordability,
+                private_restructure=private_restructure)),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -22784,7 +22947,54 @@ def _repayment_table(rows: list, federal_only: bool = False) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def _render_private_restructure(priv_loans: list) -> dict:
+    """The restructure inputs and their sentences, under the private row.
+    Widgets first, then the analysis from their values, so the PDF built
+    further down the same run reads what the reader just typed."""
+    st.markdown("**Restructuring the private loan"
+                + ("s" if len(priv_loans) > 1 else "") + "**, priced")
+    st.caption("An offer you have in hand, or an interest-only stretch a "
+               "lender has mentioned. Plain amortization on the balances "
+               "above; nothing here changes the rows.")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.number_input(
+        "Refinance rate offered (%), 0 if none",
+        min_value=0.0, max_value=30.0, step=0.1,
+        key="existing_private_refi_rate",
+        help="The rate a lender actually quoted you for the whole private "
+             "balance. This page models no typical private rate.")
+    c2.number_input(
+        "Rate with a cosigner (%), 0 if none",
+        min_value=0.0, max_value=30.0, step=0.1,
+        key="existing_private_refi_cosigner_rate",
+        help="The same offer with a cosigner, if you were quoted one. The "
+             "difference is what the signature is worth in dollars.")
+    c3.number_input(
+        "Refinance term (years), 0 for the current term",
+        min_value=0, max_value=30, step=1,
+        key="existing_private_refi_term",
+        help="A longer term lowers the payment and raises the total; the "
+             "sentence below says by how much.")
+    c4.number_input(
+        "Interest-only months offered",
+        min_value=0, max_value=60, step=1,
+        key="existing_private_io_months",
+        help="Some lenders let a borrower pay interest only for a stretch. "
+             "The balance does not move during it and the payment after it "
+             "is higher; this prices both.")
+    analysis = private_restructure(
+        priv_loans,
+        offer_rate=st.session_state.get("existing_private_refi_rate") or 0.0,
+        offer_term=st.session_state.get("existing_private_refi_term") or 0,
+        io_months=st.session_state.get("existing_private_io_months") or 0,
+        cosigner_rate=st.session_state.get("existing_private_refi_cosigner_rate") or 0.0)
+    for _line in private_restructure_sentences(analysis):
+        st.markdown(_line)
+    return analysis
+
+
 def render_existing_loan_comparison(always_open: bool = False) -> None:
+
     """Plan comparison for someone already in repayment.
 
     A different question from the rest of the app, which asks whether a degree
@@ -23134,8 +23344,44 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             spouse_income = 0
 
         if not fed_loans:
-            st.info("Add at least one federal loan, with a balance and its "
-                    "rate, to compare plans.")
+            if not priv_loans:
+                st.info("Add at least one federal loan, with a balance and its "
+                        "rate, to compare plans, or tick the private-loan box "
+                        "to price a private loan on its own.")
+                return
+            # PRIVATE ONLY. A borrower holding no federal loans has nothing to
+            # compare plans across, and used to get the sentence above and
+            # nothing else. The private side needs no federal input: its row,
+            # its pace, the restructure block and its balance chart. No plan
+            # table, no strategy panel and no PDF, because every one of those
+            # is about the federal choice.
+            mark_interaction("module_repayment_comparison")
+            _pr = private_tranche_result(priv_loans, private_extra)
+            _prow = (PRIVATE_ROW_LABEL, _pr, private_row_note(priv_loans))
+            st.markdown("**Private / non-federal loan"
+                        + ("s" if len(priv_loans) > 1 else "")
+                        + "**, on its own terms")
+            st.dataframe(_repayment_table([_prow]),
+                         hide_index=True, use_container_width=True)
+            st.caption(repayment_section_guide("private_loans"))
+            _pace_text = private_pace_sentence(_pr)
+            if _pace_text:
+                st.caption(_pace_text)
+            _render_private_restructure(priv_loans)
+            _stack, _stack_labels, _stack_colors, _stack_by = \
+                repayment_balance_stack(PRIVATE_ROW_LABEL, _pr, [_prow])
+            st.plotly_chart(
+                build_balance_chart(
+                    _pr["schedule"], PRIVATE_ROW_LABEL,
+                    tranches=_stack, labels=_stack_labels or TRANCHE_LABELS,
+                    colors=_stack_colors, stack_by=_stack_by,
+                    marker=private_payoff_marker(_pr)),
+                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                key="existing_balance_chart")
+            st.caption("No federal plan applies to a private loan, so there is "
+                       "nothing to compare it against. Add a federal loan above "
+                       "to compare plans, price the two sides together and "
+                       "download a report.")
             return
 
         # A payment count that has already reached a plan's term means the
@@ -23175,6 +23421,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                             old_ibr=old_ibr and forgivable)
         plan_rows = [t for t in rows if t[0] != PRIVATE_ROW_LABEL]
         private_row = next((t for t in rows if t[0] == PRIVATE_ROW_LABEL), None)
+        _restr = None
 
         if private_row is None:
             # No private tranche: one table, and no headings to imply a split
@@ -23212,6 +23459,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             _pace_text = private_pace_sentence(private_row[1])
             if _pace_text:
                 st.caption(_pace_text)
+            _restr = _render_private_restructure(priv_loans)
 
             st.markdown("**Combined**, what you actually pay")
             st.dataframe(_repayment_table(plan_rows),
@@ -23509,7 +23757,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            federal_loans=fed_loans, private_loans=priv_loans,
                            age=age, strategy=strategy_analysis,
                            old_ibr=old_ibr and forgivable,
-                           affordability=affordability)
+                           affordability=affordability,
+                           private_restructure=_restr)
         # STACK THE PRIVATE NOTES INDIVIDUALLY when that row is selected. It
         # used to draw their sum as one line, on the reasoning -- written into
         # the comment below before the loan grids existed -- that "the private
