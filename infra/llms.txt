@@ -76,6 +76,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [A private student loan, after you have signed](https://worthmydegree.com/guides/private-student-loan-after-you-sign):
+  Why the payment is what it is, what interest-only and refinancing
+  change, what a cosigner is worth, and what this site cannot price
+  when the payment cannot be made.
 - [Parent PLUS: the slow road and the fast road](https://worthmydegree.com/guides/parent-plus-slow-road-fast-road):
   A new Parent PLUS loan has one repayment plan and the balance sets
   its length. Two ways to carry the capped $65,000, priced with the
