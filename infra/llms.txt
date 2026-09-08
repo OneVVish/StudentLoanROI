@@ -76,6 +76,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [Parent PLUS: the slow road and the fast road](https://worthmydegree.com/guides/parent-plus-slow-road-fast-road):
+  A new Parent PLUS loan has one repayment plan and the balance sets
+  its length. Two ways to carry the capped $65,000, priced to the
+  dollar, and the age you make the last payment.
 - [The college money calendar](https://worthmydegree.com/guides/college-money-calendar):
   Every money deadline in the college year, in the order it arrives,
   with what to do at each one and the tool that answers it. The aid
