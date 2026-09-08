@@ -3,7 +3,7 @@
 Three prompts for "four jars, the first three identical" all came back as a
 decline: the model reads four jars as a sequence. So build_ai_hero.py draws
 TWO jars (slug parent-plus-senior-year-parts) and this lays them out as
-three copies of the full one and the empty one: $20,000 three times, then
+three copies of the full one and the quarter-full one: $20,000 three times, then
 $5,000. Crops are by pixel on the recorded seed; regenerate the parts and
 these numbers move.
 """
@@ -12,8 +12,8 @@ from PIL import Image
 SRC = "static/guide-hero-parent-plus-senior-year-parts-klein4b.png"
 OUT = "static/guide-hero-parent-plus-senior-year-cliff-klein4b.png"
 OG = "static/guide-og-parent-plus-senior-year.png"
-FULL = (380, 0, 740, 448)     # the full jar, with its shadow; stops above the source's bottom rule
-EMPTY = (860, 0, 1200, 448)   # the near-empty jar
+FULL = (420, 0, 760, 448)     # the full jar with its shadow; stops above the bottom rule
+EMPTY = (860, 0, 1180, 448)   # the quarter-full jar
 
 src = Image.open(SRC).convert("RGB")
 bg = src.getpixel((10, 10))

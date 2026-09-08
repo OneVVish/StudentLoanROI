@@ -320,21 +320,23 @@ PROMPTS = {
         "Wide letterbox frame.",
         20260912, 4),
     "parent-plus-senior-year-parts": (
-        # Source parts for the senior-year hero, composed afterwards. Three
-        # prompts for "four jars, the first three identical" all came back
-        # as a decline; the model reads four jars as a sequence. So: two
-        # jars only, and the hero is built from them (three copies of the
-        # full one, then the empty one) in brand/compose_jars.py.
+        # Source parts for the senior-year hero, composed afterwards by
+        # brand/compose_jars.py. Three prompts for "four jars, the first
+        # three identical" all came back as a decline; the model reads four
+        # jars as a sequence. So: two jars only, three copies of the full
+        # one then the other. Second version (2026-09-08): the right jar is
+        # a QUARTER full, not empty. The cliff is $5,000 against $20,000,
+        # money left rather than none.
         "Flat vector infographic illustration on a pale off-white "
         "background: exactly two identical glass jars side by side on one "
         "simple baseline with a wide gap between them. The left jar is "
         "three quarters full of a neat stack of gold coins topped by a few "
-        "folded green banknotes. The right jar is upright and nearly empty, "
-        "with only three coins lying on its floor. Clean bold outlines, "
-        "soft green and muted red accents, subtle shadows, generous "
-        "margins. No text, no numbers, no letters, no labels, no arrows, "
-        "no people. Wide letterbox frame.",
-        20260917, 4),
+        "folded green banknotes. The right jar is upright and only one "
+        "quarter full, a short neat stack of gold coins on its floor and "
+        "nothing above them. Clean bold outlines, soft green and muted red "
+        "accents, subtle shadows, generous margins. No text, no numbers, "
+        "no letters, no labels, no arrows, no people. Wide letterbox frame.",
+        20260918, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
