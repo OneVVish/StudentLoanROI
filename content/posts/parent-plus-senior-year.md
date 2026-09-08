@@ -54,6 +54,22 @@ counted a year further along than the classes they still need, and under the
 real year of a degree can fall outside them. Ask the aid office how it counts
 standing before the senior year, not during it.
 
+## Repaying it is the parent's job, on fixed terms
+
+The loan is in the parent's name, and so is the bill. That has always been true. What changed on July 1, 2026 is what the bill can look like. A Parent PLUS loan taken from that date cannot be repaid under any income-driven plan: not under RAP, which is for the student's own Direct loans, and not under the older plans, which are closing. There is no forgiveness at the end of it and no payment that scales with income. The choice is between fixed schedules, and the only lever is the length.
+
+Here is the capped $65,000 on each of them, at the 8.5 percent rate the calculator assumes for Parent PLUS. Figures are rounded.
+
+| Plan | Term | Monthly payment | Total interest |
+| --- | --- | --- | --- |
+| Standard | 10 years | ~$810 | ~$31,700 |
+| 2026 Tiered Standard | 20 years | ~$560 | ~$70,400 |
+| Extended Standard | 25 years | ~$520 | ~$92,000 |
+
+The longer schedules exist to make the monthly figure fit, and each one fits by adding interest. The Extended plan halves the payment and more than doubles what the loan costs. Repayment also starts while the student is still enrolled unless the parent asks for a deferment, and interest runs through the deferment either way.
+
+None of this is a reason not to borrow. It is a reason to know the monthly figure before the letter arrives rather than after. [The repayment tool](/?tool=repayment&from=guide&rb=65000&rr=8.5&rf=0) prices every fixed plan on the actual balance and rate; unticking "These are my own federal Direct loans" is what tells it the loan is a parent's, so it shows only the plans a parent can use.
+
 ## The number to actually plan with
 
 If Parent PLUS is part of how you are paying for a four-year degree, the
