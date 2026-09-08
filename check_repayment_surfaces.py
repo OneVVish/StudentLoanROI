@@ -142,6 +142,15 @@ PORTFOLIOS = {
     "Parent PLUS (no income-driven rows)": dict(
         fed=[{"balance": 40_000.0, "rate": 7.5}], priv=[], income=70_000.0,
         forgivable=False),
+    "Parent PLUS, four loans entering repayment in four different months": dict(
+        fed=[{"balance": 16_250.0, "rate": 8.5, "disbursed": d, "entry": d + 2}
+             for d in (0, 12, 24, 36)],
+        priv=[], income=70_000.0, forgivable=False),
+    "a subsidized loan still in school beside one in repayment": dict(
+        fed=[{"balance": 5_500.0, "rate": 6.5, "disbursed": 0, "entry": 54,
+              "subsidized": True},
+             {"balance": 12_000.0, "rate": 6.5}],
+        priv=[], income=45_000.0),
     "PSLF, low income": dict(
         fed=[{"balance": 60_000.0, "rate": 6.5}], priv=[], income=32_000.0,
         pslf=True),

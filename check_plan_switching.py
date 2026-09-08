@@ -469,11 +469,89 @@ def check_plan_availability_note(ns):
     return problems
 
 
+def check_entry_terms(ns) -> list:
+    """The 2026 Tiered Standard term is set PER LOAN, at each loan's entry to
+    repayment, from everything owed that day: 34 CFR 685.208(c)(1)(iii), read
+    off the eCFR on 2026-09-07 (TIERED_STANDARD_TERM.md has the text).
+
+    Fixture: the Parent PLUS senior-year cliff, four $16,250 loans at 8.5
+    percent disbursed a year apart. Deferred through school and the six-month
+    grace, all four enter together at month 54 on ~$81,600 and every one gets
+    20 years. Entering two months after each disbursement instead, the first
+    enters against $16,250 (10 years), the second against ~$31,000 (15), the
+    third ~$46,000 (15), the fourth ~$60,000 (20). The expectations are
+    LITERAL band lookups on longhand simple-interest arithmetic, never read
+    back off the constants under test.
+
+    Negative control: a term rule that reads today's total for every loan
+    gives 20/20/20/20 on the as-you-go road and must fail this check.
+    """
+    problems = []
+    terms_at_entry = ns["tiered_terms_at_entry"]
+    compare = ns["compare_existing_loan_plans"]
+
+    def loans(spec):
+        return [{"balance": 16_250.0, "rate": 8.5, "disbursed": d, "entry": e,
+                 "subsidized": False} for d, e in spec]
+    slow = loans([(0, 54), (12, 54), (24, 54), (36, 54)])
+    as_you_go = loans([(0, 2), (12, 14), (24, 26), (36, 38)])
+
+    # Longhand: simple interest from disbursement to entry, capitalised once.
+    accrued = sum(16_250.0 * 0.085 * m / 12 for m in (54, 42, 30, 18))
+    entering = 65_000.0 + accrued
+    if not (81_000 < entering < 82_000):
+        problems.append(f"  fixture arithmetic drifted: {entering:,.0f} entering")
+    if terms_at_entry(slow) != [20, 20, 20, 20]:
+        problems.append(f"  slow road: expected every loan in the 20-year band "
+                        f"(~${entering:,.0f} enters together), got {terms_at_entry(slow)}")
+    if terms_at_entry(as_you_go) != [10, 15, 15, 20]:
+        problems.append(f"  as-you-go: expected 10/15/15/20 (each loan against "
+                        f"what is owed the day it enters), got {terms_at_entry(as_you_go)}")
+    # Every loan in repayment today collapses to one band from the total.
+    now = loans([(0, 0)] * 4)
+    if terms_at_entry(now) != [20] * 4:
+        problems.append(f"  four loans owed today must all take the total's band, got {terms_at_entry(now)}")
+
+    # The rows carry it: a per-loan Tiered term shows in the label, the
+    # deferred road pays for ~4.5 years of accrual, and the payoff is the
+    # entry plus the term.
+    for name, rows_in, want_label, want_payoff in (
+            ("slow", slow, "2026 Tiered Standard (20-year)", 54 / 12 + 20),
+            ("as-you-go", as_you_go, "2026 Tiered Standard (10 to 20-year)", 38 / 12 + 20)):
+        rows = compare(0, 0, 70_000.0, 0, False, 0.0, False, 0, federal_loans=rows_in)
+        label, result, _ = row(rows, "Tiered")
+        if label != want_label:
+            problems.append(f"  {name}: Tiered row labelled {label!r}, wanted {want_label!r}")
+        if result is None or abs(result["payoff_years"] - want_payoff) > 0.1:
+            problems.append(f"  {name}: Tiered payoff {result and result['payoff_years']:.2f} years, "
+                            f"wanted {want_payoff:.2f} (entry plus term)")
+    slow_rows = compare(0, 0, 70_000.0, 0, False, 0.0, False, 0, federal_loans=slow)
+    _, slow_t, _ = row(slow_rows, "Tiered")
+    if slow_t is not None and not (accrued + 80_000 < slow_t["total_interest"] < accrued + 95_000):
+        problems.append(f"  slow road total interest {slow_t['total_interest']:,.0f} does not "
+                        f"include ~${accrued:,.0f} of deferment accrual on top of ~$85,000 to "
+                        f"$95,000 of 20-year interest")
+
+    # Negative control, asserted to have fired.
+    real = ns["tiered_terms_at_entry"]
+    ns["tiered_terms_at_entry"] = lambda ls: [ns["calculate_tiered_standard_term"](
+        sum(l["balance"] for l in ls))] * len(ls)
+    broken = ns["tiered_terms_at_entry"](as_you_go)
+    ns["tiered_terms_at_entry"] = real
+    if broken != [20, 20, 20, 20]:
+        problems.append("  negative control did not apply (today's-total rule should give 20/20/20/20)")
+    return problems
+
+
 def main() -> int:
     ns = load()
     compare = ns["compare_existing_loan_plans"]
     counting = ns["rap_months_counting_back"]
     problems, checked = [], 0
+
+    # The Tiered term per loan, at entry. See check_entry_terms.
+    problems.extend(check_entry_terms(ns))
+    checked += 8
 
     # Household and filing status, checked against the published HHS table.
     household = check_household(ns)

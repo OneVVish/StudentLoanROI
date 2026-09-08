@@ -1058,6 +1058,39 @@ def main() -> int:
         problems += check("multi-loan RAP combined (pooled federal + 2 private)",
                           105_000.0, _rap_multi)
 
+    # Loans not yet in repayment: the fixed rows shift each loan by its entry
+    # month and grow it by the accrual until then (unless subsidized). The
+    # identity must hold with that accrual counted in total_interest -- the
+    # same books check_in_school_deferment keeps for the calculator.
+    _entry_loans = [{"balance": 16_250.0, "rate": 8.5, "disbursed": d, "entry": e}
+                    for d, e in ((0, 54), (12, 54), (24, 54), (36, 54))]
+    _entry_rows = ns["compare_existing_loan_plans"](
+        0, 0, 70_000.0, 0, False, 0.0, False, 0, federal_loans=_entry_loans)
+    for _label, _r, _ in _entry_rows:
+        if _label.startswith(("Standard", "Extended", "2026 Tiered")):
+            checked += 1
+            problems += check(f"deferred entry, {_label}", 65_000.0, _r)
+    # A subsidized loan enters repayment on its original principal.
+    _sub = ns["compare_existing_loan_plans"](
+        0, 0, 45_000.0, 0, True, 0.0, False, 0,
+        federal_loans=[{"balance": 5_500.0, "rate": 6.5, "disbursed": 0, "entry": 54,
+                        "subsidized": True}])
+    _sub_std = next(r for label, r, _ in _sub if label.startswith("Standard"))
+    _plain = ns["calculate_standard_repayment"](5_500.0, 6.5)
+    checked += 1
+    if abs(_sub_std["total_interest"] - _plain["total_interest"]) > TOLERANCE:
+        problems.append(
+            f"  a subsidized $5,500 loan entering repayment after 54 months paid "
+            f"${_sub_std['total_interest']:,.2f} of interest against ${_plain['total_interest']:,.2f} "
+            f"with no deferment; nothing may accrue on a subsidized loan in school")
+    _unsub = ns["compare_existing_loan_plans"](
+        0, 0, 45_000.0, 0, True, 0.0, False, 0,
+        federal_loans=[{"balance": 5_500.0, "rate": 6.5, "disbursed": 0, "entry": 54}])
+    _unsub_std = next(r for label, r, _ in _unsub if label.startswith("Standard"))
+    checked += 1
+    if _unsub_std["total_interest"] <= _plain["total_interest"] + 1_000:
+        problems.append("  negative control: the same loan UNsubsidized must accrue in school")
+
     if problems:
         print(f"repayment invariants: {len(problems)} violation(s) across {checked} cases\n")
         print("\n\n".join(problems))

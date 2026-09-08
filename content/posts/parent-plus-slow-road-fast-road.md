@@ -55,11 +55,11 @@ There is a third road, and it says something useful about the first two. A paren
 
 | Paying as you go, at the assigned pace | Figure |
 | --- | --- |
-| Peak monthly payment | ~$660, in the senior year |
-| Total interest | ~$50,600 |
+| Peak monthly payment | ~$670, in the senior year |
+| Total interest | ~$52,300 |
 | Last payment | 23 years after the freshman fall |
 
-That road ends almost as late as the slow one but costs about half the interest. The difference between it and the slow road is entirely the deferral: not deferring saves roughly ~$54,000 of interest before any prepayment at all. Deferral buys the lowest payment during school, which is nothing, and a higher one after it: the slow road's ~$710 is above this road's ~$660 peak, because of the interest that was added to the balance. The difference between it and the fast road is the prepayment, which buys the other ~$19,000 and ten years.
+That road ends almost as late as the slow one but costs about half the interest. The difference between it and the slow road is entirely the deferral: not deferring saves roughly ~$52,600 of interest before any prepayment at all. Deferral buys the lowest payment during school, which is nothing, and a higher one after it: the slow road's ~$710 is above this road's ~$670 peak, because of the interest that was added to the balance. The difference between it and the fast road is the prepayment, which buys the other ~$20,600 and ten years.
 
 ## The age at the last payment
 
@@ -87,4 +87,4 @@ It leaves out the origination fee. Every PLUS disbursement carries a 4.228 perce
 
 ## Run your own road
 
-[The repayment tool](/?tool=repayment&from=guide&rb=65000&rr=8.5&rf=0) prices the fixed plans on your balance and rate. Untick "These are my own federal Direct loans" so it knows the loan is a parent's, enter your age, and it says how old you will be at the last payment on the plan you select. To see whether the degree the loan is buying pays it back, [the calculator](/?from=guide) takes the school, the major and the loan and measures the result against not going at all.
+The repayment tool now takes each loan with the month it is disbursed and the month of its first payment, sets each loan's term the way the rule does, and adds the interest that accrues in between. The three roads above are prefilled: [the slow road](/?tool=repayment&from=guide&rb=16250,16250,16250,16250&rr=8.5,8.5,8.5,8.5&rdis=0,12,24,36&re=54,54,54,54&rf=0), [paying as you go](/?tool=repayment&from=guide&rb=16250,16250,16250,16250&rr=8.5,8.5,8.5,8.5&rdis=0,12,24,36&re=2,14,26,38&rf=0), and for the fast road the same as-you-go grid, where the Standard (10-year) row is the payment at that pace. Change the balances, the rate and the months to your own, enter your age, and it says how old you will be at the last payment on the plan you select. To see whether the degree the loan is buying pays it back, [the calculator](/?from=guide) takes the school, the major and the loan and measures the result against not going at all.

@@ -117,7 +117,7 @@ def check_no_payment_while_enrolled(ns, paid_by_year=None):
 
 
 def check_capitalisation(ns):
-    """Deferment is not a discount. The balance must GROW by compound interest
+    """Deferment is not a discount. The balance must GROW by simple interest
     on everything except the subsidized share, and the growth is checked against
     arithmetic written out here rather than against the helper's own return."""
     problems = []
@@ -127,7 +127,7 @@ def check_capitalisation(ns):
     for principal, subsidized, rate, months in cases:
         got = ns["in_school_deferment"](principal, subsidized, rate, months)
         exempt = min(subsidized, principal)
-        want = (principal - exempt) * (1 + rate / 100 / 12) ** months + exempt
+        want = (principal - exempt) * (1 + rate / 100 / 12 * months) + exempt
         if abs(got["principal"] - want) > TOLERANCE:
             problems.append(
                 f"  ${principal:,.0f} ({months}mo @ {rate}%, ${exempt:,.0f} "
@@ -158,7 +158,7 @@ def check_subsidized_is_exempt(ns):
     principal, rate, months = 100_000.0, 6.5, 48
     none = ns["in_school_deferment"](principal, 0.0, rate, months)
     some = ns["in_school_deferment"](principal, 19_000.0, rate, months)
-    want = 19_000.0 * ((1 + rate / 100 / 12) ** months - 1)
+    want = 19_000.0 * (rate / 100 / 12 * months)
     if abs((none["capitalized"] - some["capitalized"]) - want) > TOLERANCE:
         problems.append(
             f"  exempting $19,000 changed the capitalised interest by "
