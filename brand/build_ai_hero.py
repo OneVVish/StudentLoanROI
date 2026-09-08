@@ -301,6 +301,21 @@ PROMPTS = {
         "text, no numbers, no letters, no logos, no people. Wide letterbox "
         "frame.",
         20260913, 4),
+    "when-the-federal-minimum-comes-back": (
+        # The SAVE forbearance ends and a federal payment comes due beside a
+        # bigger private one. The picture is the decision, not the plans: two
+        # envelopes on a table, one thick and one thin, and a coin jar with
+        # its lid firmly on, the emergency fund that stays shut. No words.
+        "Flat vector infographic illustration on a pale off-white "
+        "background: a plain wooden kitchen table seen from directly above, "
+        "two paper envelopes side by side, the left one large and thick "
+        "with a red wax seal, the right one small and thin, a few gold "
+        "coins resting on the large envelope, and to the right a glass jar "
+        "full of coins with its metal lid screwed on tight. Clean bold "
+        "outlines, soft green and navy accents, subtle shadows, generous "
+        "margins. No text, no numbers, no letters, no logos, no people. "
+        "Wide letterbox frame.",
+        20260919, 4),
     "parent-plus-senior-year": (
         # Generated as the cheat sheet's second hero (2026-09-08) and MOVED
         # here the same day: the picture is the senior-year cliff. Replaces
