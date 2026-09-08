@@ -6003,6 +6003,24 @@ def internal_tool_url(tool: str = "", extra: dict = None) -> str:
     return "./?" + urlencode(params) if params else "./"
 
 
+def landing_url() -> str:
+    """The edge landing page, carrying THIS VISIT's session flags.
+
+    The app's own logo (st.logo) linked to the bare APP_URL, which the Worker
+    serves as the landing page and which carries nothing: a developer on
+    ?test=1 who clicked it came back live, and a tagged visit lost its src.
+    Same flags internal_tool_url carries, same reasoning, minus the scenario
+    (the landing page has no sidebar to seed) and minus from= (the edge
+    pages log their own reads). /welcome rather than "/" because the Worker
+    serves the landing under that name whatever the query carries.
+    """
+    params = dict(session_query_params())
+    src = get_traffic_source()
+    if src:
+        params["src"] = src
+    return f"{APP_URL}/welcome" + ("?" + urlencode(params) if params else "")
+
+
 def repayment_strategy_help() -> str:
     """REPAYMENT_STRATEGY_HELP plus a pointer to the guide on the same subject.
 
@@ -17824,7 +17842,7 @@ st.set_page_config(page_title="Student Loan Payoff & Major ROI Calculator",
 # which is what st.logo's own docs ask for: one image that works on both
 # themes. icon_image is what the collapsed sidebar shows.
 st.logo("brand/logo-horizontal-auto.svg", size="large",
-        link=APP_URL, icon_image="brand/mark-light.svg")
+        link=landing_url(), icon_image="brand/mark-light.svg")
 
 # Global (every page: calculator, ?tool= pages, admin): stack st.columns
 # vertically on phone-width viewports. Streamlit columns only ever SQUEEZE --
