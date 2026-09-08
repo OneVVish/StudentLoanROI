@@ -7122,7 +7122,16 @@ def session_query_params() -> dict:
       shared link -- for opposite reasons, which is worth knowing before
       "simplifying" this.
     """
-    return {"test": "1"} if st.session_state.get("test_mode") else {}
+    # The latch wins once it exists. Before it does (st.logo draws its link
+    # above the section-3 latch, so the first render reads it too early) the
+    # URL is the truth, and a first render that dropped test=1 handed a
+    # developer a live link to click.
+    try:
+        if "test_mode" in st.session_state:
+            return {"test": "1"} if st.session_state.test_mode else {}
+    except Exception:
+        pass
+    return {"test": "1"} if get_shared_default("test", "0") == "1" else {}
 
 
 # The Clipboard API (navigator.clipboard.writeText) silently fails inside
