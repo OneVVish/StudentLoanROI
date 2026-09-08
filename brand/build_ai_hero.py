@@ -273,6 +273,20 @@ PROMPTS = {
         "letterbox frame. Documentary photography, muted natural colour, "
         "unposed. No text anywhere.",
         20260910, 4),
+    "class-of-2027-money-cheat-sheet": (
+        # Twelfth prompt. A cheat sheet is one page pinned where it gets
+        # read, so: a single sheet of paper under a magnet on a plain
+        # refrigerator door, blank, in kitchen morning light, shot close so
+        # the sheet is the picture. No kitchen table (the parents guide has
+        # one), no faces, nothing legible on the page.
+        "A single blank sheet of white paper held to a plain white "
+        "refrigerator door by one round magnet, photographed close and "
+        "straight on in soft morning light from a window to the left, the "
+        "sheet slightly curled at one corner, nothing else on the door. "
+        "The page is blank. No text, no lettering, no photographs on the "
+        "door, no people. Wide letterbox frame. Documentary photography, "
+        "muted natural colour, unposed. No text anywhere.",
+        20260911, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
