@@ -85,10 +85,17 @@ Standard ~$810 a month and ~$31,700 of interest; 25-year Extended ~$520 and
 `content/posts/parent-plus-senior-year.md`, section "Repaying it is the
 parent's job, on one fixed plan" (#286, #287), and the whole of
 `content/posts/parent-plus-slow-road-fast-road.md`: the deferred road
-(~$99,100 of interest, last payment 24 years after the freshman fall), the
-10-year-pace road (~$31,700, 13 years) and the as-you-go road (~$50,600, 23
-years), with the age at the last payment against a retirement age of 65. The
-deferral accrual there is simple interest from each fall's disbursement,
-capitalized once at entry (4, 3, 2 and 1 years on the four loans). The repayment guide's opening
+(~$104,900 of interest, last payment 24 and a half years after the freshman
+fall), the 10-year-pace road (~$31,700, 13 years) and the as-you-go road
+(~$50,600, 23 years), with the age at the last payment against a retirement
+age of 65. The deferral accrual there is simple interest from each fall's
+disbursement, capitalized once when the deferment ends: the parent deferment
+in 685.204(b)(2) runs through enrollment AND the six-month post-enrollment
+period, so 4.5, 3.5, 2.5 and 1.5 years on the four loans (~$16,600, entering
+repayment at ~$81,600). Three more rules the guide states from the eCFR: the
+term counts ALL the parent's Direct Loans (own loans and other children's
+PLUS included); a prepayment advances the due date unless directed to
+principal in writing (685.211(a)(3)); and the loan is discharged on the death
+of the parent or the student, or the parent's total disability (685.212(a)). The repayment guide's opening
 ("the list of repayment plans is two items long") is the same fact from the
 student's side.
