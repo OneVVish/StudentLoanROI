@@ -274,19 +274,22 @@ PROMPTS = {
         "unposed. No text anywhere.",
         20260910, 4),
     "class-of-2027-money-cheat-sheet": (
-        # Twelfth prompt. A cheat sheet is one page pinned where it gets
-        # read, so: a single sheet of paper under a magnet on a plain
-        # refrigerator door, blank, in kitchen morning light, shot close so
-        # the sheet is the picture. No kitchen table (the parents guide has
-        # one), no faces, nothing legible on the page.
-        "A single blank sheet of white paper held to a plain white "
-        "refrigerator door by one round magnet, photographed close and "
-        "straight on in soft morning light from a window to the left, the "
-        "sheet slightly curled at one corner, nothing else on the door. "
-        "The page is blank. No text, no lettering, no photographs on the "
-        "door, no people. Wide letterbox frame. Documentary photography, "
-        "muted natural colour, unposed. No text anywhere.",
-        20260911, 4),
+        # Twelfth prompt, second attempt. The first was a blank sheet under a
+        # fridge magnet. Asked for, instead, a flat illustration in the
+        # style of a money infographic: four jars, left to right, each
+        # emptier than the last and the fourth tipped over, the four years
+        # of a degree running the federal money down. No words, no numbers,
+        # no arrows carrying labels; the picture has to say it alone.
+        "Flat vector infographic illustration on a pale off-white "
+        "background: four identical glass jars in a row, left to right, "
+        "the first packed full of green banknotes and gold coins, the "
+        "second two-thirds full, the third one-third full, the fourth "
+        "tipped over on its side and empty with a single coin beside it, "
+        "each jar standing on a simple baseline. Clean bold outlines, soft "
+        "green and muted red accents, subtle shadows, generous margins. "
+        "No text, no numbers, no letters, no labels, no arrows, no people. "
+        "Wide letterbox frame.",
+        20260912, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
