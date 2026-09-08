@@ -2561,3 +2561,22 @@ end $$;
 --     rather than UC Berkeley / Computer Science defaults, so a "default
 --     scenario" landing count falls from this date for internal arrivals.
 
+
+
+-- 2026-09-08  SEAM: in-school deferment accrues simple interest.
+--
+-- No DDL. in_school_deferment() compounded unpaid interest monthly during the
+-- enrolled years; it now accrues SIMPLE interest on the disbursed principal
+-- and capitalizes once at entry, which is how Direct Loan interest accrues
+-- (simple, never compounded while unpaid) and what the two-roads guide
+-- computed. Every scenario row on a path with unpaid school years (the
+-- professional occupations, plus any graduate path with a deferment) written
+-- before this date carries a HIGHER monthly_payment, total_interest and
+-- lifetime cost than the same inputs produce now. Size: over 54 months at
+-- 8.5 percent the compounded accrual was 21 percent above the simple one
+-- (46.4 against 38.3 percent of principal), which on the guide's slow road
+-- was $110,330 of lifetime interest against $104,902, about 5 percent. It
+-- grows with rate and deferment length. Paths with no deferment are
+-- bit-identical. The repayment tool's fixed rows gained per-loan
+-- disbursed/entry/subsidized inputs the same day (usage_logs only; the tool
+-- writes no scenario table), so no column changes meaning there.
