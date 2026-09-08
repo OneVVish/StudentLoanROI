@@ -22727,8 +22727,13 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                  "federal balance as a whole. It changes how "
                  "payments are applied and is shown separately on the balance chart. "
                  "Leave at 0 if you only know one number.")
+        # setdefault rather than value=: a share link seeds this key (rf=)
+        # before the widget renders, and a widget carrying both a default
+        # and a session-state write is the conflict Streamlit warns about on
+        # every such arrival. Same conversion in_state_a needed.
+        st.session_state.setdefault("existing_forgivable", True)
         forgivable = c2.checkbox(
-            "These are my own federal Direct loans", value=True, key="existing_forgivable",
+            "These are my own federal Direct loans", key="existing_forgivable",
             help="Untick for Parent PLUS or private loans. Parent PLUS is not "
                  "eligible for RAP or IBR, and private loans are outside the "
                  "federal system entirely, so the income-driven rows are hidden.")
