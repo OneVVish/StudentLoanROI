@@ -359,6 +359,15 @@ def main() -> int:
         leaked = [k for k in must_not if k in q]
         if missing or leaked:
             problems.append(f"  landing_url missing {missing} leaked {leaked}\n      {url}")
+    # The first render: the logo draws ABOVE the section-3 latch, so the
+    # helper must read test=1 off the URL when nothing has latched it yet.
+    st.session_state = {}
+    st.query_params = FakeQueryParams({"test": "1"})
+    ns["get_traffic_source"]()
+    checked += 1
+    if "test" not in parse_qs(urlparse(ns["landing_url"]()).query):
+        problems.append("  landing_url drops test=1 before the latch exists "
+                        "(the first render, where st.logo draws)")
     checked += 1
     if "link=landing_url()" not in src:
         problems.append("  st.logo does not link through landing_url(); a bare "
