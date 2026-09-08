@@ -141,10 +141,21 @@ PROMPTS = {
         "unposed. No text, no charts, no screens showing content.",
         20260812, 4),
     "parent-plus-senior-year": (
-        "An empty kitchen table at dusk with a single envelope and a mug, soft "
-        "window light, quiet and still, documentary photography, muted natural "
-        "colour. No text, no charts, no visible screens.",
-        20260811, 4),
+        # Third attempt at the jars (2026-09-08). Even decline, then a
+        # decline that still sloped; the model reads "four jars" as a
+        # sequence. So the first three are stated as one drawing repeated
+        # three times, and the fourth is the only different one. The
+        # senior-year cliff: $20,000 three times, then $5,000.
+        "Flat vector infographic illustration on a pale off-white "
+        "background: four identical glass jars standing on one simple "
+        "baseline. The first three jars are exact copies of each other, "
+        "each filled to the very same three-quarters line with the same "
+        "neat stack of gold coins topped by a few folded green banknotes. "
+        "The fourth jar is upright and nearly empty, only three coins lying "
+        "on its floor. Clean bold outlines, soft green and muted red "
+        "accents, subtle shadows, generous margins. No text, no numbers, "
+        "no letters, no labels, no arrows, no people. Wide letterbox frame.",
+        20260916, 4),
     "community-college-first": (
         "A community college walkway on an ordinary weekday morning, a student "
         "with a backpack walking toward a low plain building, seen from behind "
@@ -245,20 +256,20 @@ PROMPTS = {
         "anywhere.",
         20260906, 4),
     "college-money-calendar": (
-        # Tenth prompt, second attempt. The first was a porch with a bicycle
-        # and a stack of envelopes on the step; the bicycle took the frame
-        # and the mail was a smudge. Same idea, one object: the mailbox at
-        # the end of the driveway, door open, the day's letter inside. No
-        # kitchen, no gate, no road into town, no screen, nothing to read.
-        "A single residential mailbox on a wooden post at the end of a "
-        "gravel driveway in early spring, its door open, one thick white "
-        "envelope resting inside, bare trees and a pale sky behind, soft "
-        "morning light from the side. Seen at eye level from the road, the "
-        "mailbox off center, the driveway falling away behind it. No "
-        "people, no numbers or lettering on the mailbox, no flag raised. "
-        "Wide letterbox frame. Documentary photography, muted natural "
-        "colour, unposed. No text anywhere.",
-        20260909, 4),
+        # Third hero (2026-09-08). The porch and the mailbox were
+        # photographs; asked for an illustration, and a dorm room: the
+        # place the calendar is about arriving at. A wall calendar hangs in
+        # it as a blank grid, no month name, no numbers.
+        "Flat vector illustration of a small college dorm room seen from "
+        "the doorway: a single bed with a plain blanket, a wooden desk with "
+        "a closed laptop and a mug, a window with a view of a brick "
+        "building, a shelf with a few books, a backpack on the floor, and "
+        "on the wall above the desk a blank wall calendar drawn as an empty "
+        "grid of squares with no writing. Warm afternoon light through the "
+        "window. Clean bold outlines, soft green and navy accents, subtle "
+        "shadows, generous margins. No text, no numbers, no letters, no "
+        "posters with words, no people. Wide letterbox frame.",
+        20260915, 4),
     "parent-plus-slow-road-fast-road": (
         # Eleventh prompt. The guide is two roads, and the federal-money
         # hero already owns a single road into a town. So: a fork in a
@@ -308,6 +319,22 @@ PROMPTS = {
         "No text, no numbers, no letters, no labels, no arrows, no people. "
         "Wide letterbox frame.",
         20260912, 4),
+    "parent-plus-senior-year-parts": (
+        # Source parts for the senior-year hero, composed afterwards. Three
+        # prompts for "four jars, the first three identical" all came back
+        # as a decline; the model reads four jars as a sequence. So: two
+        # jars only, and the hero is built from them (three copies of the
+        # full one, then the empty one) in brand/compose_jars.py.
+        "Flat vector infographic illustration on a pale off-white "
+        "background: exactly two identical glass jars side by side on one "
+        "simple baseline with a wide gap between them. The left jar is "
+        "three quarters full of a neat stack of gold coins topped by a few "
+        "folded green banknotes. The right jar is upright and nearly empty, "
+        "with only three coins lying on its floor. Clean bold outlines, "
+        "soft green and muted red accents, subtle shadows, generous "
+        "margins. No text, no numbers, no letters, no labels, no arrows, "
+        "no people. Wide letterbox frame.",
+        20260917, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "
