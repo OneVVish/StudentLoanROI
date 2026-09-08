@@ -245,19 +245,20 @@ PROMPTS = {
         "anywhere.",
         20260906, 4),
     "college-money-calendar": (
-        # Tenth prompt. The guide is a calendar of federal dates ending in
-        # the aid letter, and a calendar cannot be drawn without numbers, so
-        # the picture is the letters instead: a porch in early spring with
-        # the day's mail on the step. No kitchen, no gate, no road, no
-        # screen, nothing to read.
-        "A suburban front porch in early spring morning light, a small "
-        "stack of thick white envelopes resting on the top step beside the "
-        "door, a bare tree casting long shadows across the painted boards, "
-        "a bicycle leaning against the railing, the door closed. Seen from "
-        "the walkway at a slight angle. No people, no faces, no lettering "
-        "on the envelopes or the door. Wide letterbox frame. Documentary "
-        "photography, muted natural colour, unposed. No text anywhere.",
-        20260908, 4),
+        # Tenth prompt, second attempt. The first was a porch with a bicycle
+        # and a stack of envelopes on the step; the bicycle took the frame
+        # and the mail was a smudge. Same idea, one object: the mailbox at
+        # the end of the driveway, door open, the day's letter inside. No
+        # kitchen, no gate, no road into town, no screen, nothing to read.
+        "A single residential mailbox on a wooden post at the end of a "
+        "gravel driveway in early spring, its door open, one thick white "
+        "envelope resting inside, bare trees and a pale sky behind, soft "
+        "morning light from the side. Seen at eye level from the road, the "
+        "mailbox off center, the driveway falling away behind it. No "
+        "people, no numbers or lettering on the mailbox, no flag raised. "
+        "Wide letterbox frame. Documentary photography, muted natural "
+        "colour, unposed. No text anywhere.",
+        20260909, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "

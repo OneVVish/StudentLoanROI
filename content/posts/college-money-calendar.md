@@ -3,7 +3,7 @@ title: The college money calendar
 description: Every money deadline in the college year, in the order it arrives, with what to do at each one and the tool that answers it. The aid letter should be the last surprise, not the first.
 summary: The admissions calendar is well known. The money has a calendar too, set by Congress and the Department of Education rather than by any school, and nobody writes it down. Here it is, month by month, with the tool that answers each date before it arrives.
 date: 2026-09-08
-hero: guide-hero-college-money-calendar-klein4b.png
+hero: guide-hero-college-money-calendar-mailbox-klein4b.png
 ---
 
 The admissions calendar is written down everywhere: test dates, essay drafts, early deadlines, decision day. The money has a calendar too, and it is the one that decides what the degree costs. Its dates are set by Congress and the Department of Education, not by any school, so they are the same for every family in the country. They are also spread across the year in an order that makes the most expensive surprise, the aid letter, arrive last, after the list is built and the applications are in.
