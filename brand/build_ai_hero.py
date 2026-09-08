@@ -259,6 +259,20 @@ PROMPTS = {
         "Wide letterbox frame. Documentary photography, muted natural "
         "colour, unposed. No text anywhere.",
         20260909, 4),
+    "parent-plus-slow-road-fast-road": (
+        # Eleventh prompt. The guide is two roads, and the federal-money
+        # hero already owns a single road into a town. So: a fork in a
+        # country lane, two ways, no signpost, seen from the fork itself.
+        # No campus, no porch, no mailbox, no screen, nothing to read.
+        "A quiet fork in a narrow country lane in late summer, the road "
+        "splitting into two ways between hedgerows and open fields, one "
+        "way rising gently to the left and one running flat to the right, "
+        "long afternoon light, a wooden fence post at the fork with no "
+        "sign on it, wide sky. Seen from low in the middle of the road at "
+        "the fork. No signposts, no lettering, no cars, no people. Wide "
+        "letterbox frame. Documentary photography, muted natural colour, "
+        "unposed. No text anywhere.",
+        20260910, 4),
     "repayment-plans-2026-what-changed": (
         "Two nearly identical printed forms lying side by side on a plain desk "
         "in flat window light, one slightly out of alignment with the other, a "

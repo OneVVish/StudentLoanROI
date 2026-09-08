@@ -83,6 +83,12 @@ Standard ~$810 a month and ~$31,700 of interest; 25-year Extended ~$520 and
 ## Where it is written for readers
 
 `content/posts/parent-plus-senior-year.md`, section "Repaying it is the
-parent's job, on one fixed plan" (#286, #287). The repayment guide's opening
+parent's job, on one fixed plan" (#286, #287), and the whole of
+`content/posts/parent-plus-slow-road-fast-road.md`: the deferred road
+(~$99,100 of interest, last payment 24 years after the freshman fall), the
+10-year-pace road (~$31,700, 13 years) and the as-you-go road (~$50,600, 23
+years), with the age at the last payment against a retirement age of 65. The
+deferral accrual there is simple interest from each fall's disbursement,
+capitalized once at entry (4, 3, 2 and 1 years on the four loans). The repayment guide's opening
 ("the list of repayment plans is two items long") is the same fact from the
 student's side.
