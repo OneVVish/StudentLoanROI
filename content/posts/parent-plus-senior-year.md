@@ -54,21 +54,23 @@ counted a year further along than the classes they still need, and under the
 real year of a degree can fall outside them. Ask the aid office how it counts
 standing before the senior year, not during it.
 
-## Repaying it is the parent's job, on fixed terms
+## Repaying it is the parent's job, on one fixed plan
 
-The loan is in the parent's name, and so is the bill. That has always been true. What changed on July 1, 2026 is what the bill can look like. A Parent PLUS loan taken from that date cannot be repaid under any income-driven plan: not under RAP, which is for the student's own Direct loans, and not under the older plans, which are closing. There is no forgiveness at the end of it and no payment that scales with income. The choice is between fixed schedules, and the only lever is the length.
+The loan is in the parent's name, and so is the bill. That has always been true. What changed on July 1, 2026 is what the bill can look like. A Parent PLUS loan made from that date cannot be repaid under any income-driven plan: not under RAP, which is for the student's own Direct loans, and not under the older plans, which are closing. There is no forgiveness at the end of it and no payment that scales with income. For a new loan there is exactly one plan, the 2026 Tiered Standard Plan, and the parent does not choose its length. The balance does.
 
-Here is the capped $65,000 on each of them, at the 8.5 percent rate the calculator assumes for Parent PLUS. Figures are rounded.
+The term is 10 years on a balance under $25,000, 15 years from $25,000, 20 years from $50,000 and 25 years from $100,000. Here is what that means at three balances, at the 8.5 percent rate the calculator assumes for Parent PLUS. Figures are rounded.
 
-| Plan | Term | Monthly payment | Total interest |
+| Borrowed in total | Term | Monthly payment | Total interest |
 | --- | --- | --- | --- |
-| Standard | 10 years | ~$810 | ~$31,700 |
-| 2026 Tiered Standard | 20 years | ~$560 | ~$70,400 |
-| Extended Standard | 25 years | ~$520 | ~$92,000 |
+| $20,000 | 10 years | ~$250 | ~$9,800 |
+| $40,000 | 15 years | ~$390 | ~$30,900 |
+| $65,000, the cap | 20 years | ~$560 | ~$70,400 |
 
-The longer schedules exist to make the monthly figure fit, and each one fits by adding interest. The Extended plan halves the payment and more than doubles what the loan costs. Repayment also starts while the student is still enrolled unless the parent asks for a deferment, and interest runs through the deferment either way.
+Borrowing to the cap therefore means a twenty-year loan, and a parent of a high school senior who takes it out is scheduled to make the last payment in the year the student turns 38. The longer term is what makes the monthly figure fit, and it fits by adding interest: the capped loan costs more than twice the interest of one held under $25,000. Paying more than the schedule asks is allowed and shortens it. Repayment also starts while the student is still enrolled unless the parent asks for a deferment, and interest runs through the deferment either way.
 
-None of this is a reason not to borrow. It is a reason to know the monthly figure before the letter arrives rather than after. [The repayment tool](/?tool=repayment&from=guide&rb=65000&rr=8.5&rf=0) prices every fixed plan on the actual balance and rate; unticking "These are my own federal Direct loans" is what tells it the loan is a parent's, so it shows only the plans a parent can use.
+The 10-year Standard and 25-year Extended plans that older Parent PLUS loans use are not open to a loan made from July 1, 2026. A family already repaying an older PLUS loan keeps them for that loan.
+
+None of this is a reason not to borrow. It is a reason to know the monthly figure before the letter arrives rather than after. [The repayment tool](/?tool=repayment&from=guide&rb=65000&rr=8.5&rf=0) prices the fixed plans on the actual balance and rate; unticking "These are my own federal Direct loans" is what tells it the loan is a parent's, so the income-driven rows are hidden, and the Tiered Standard row is the one a new loan gets.
 
 ## The number to actually plan with
 
