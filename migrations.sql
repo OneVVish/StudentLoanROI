@@ -2580,3 +2580,50 @@ end $$;
 -- bit-identical. The repayment tool's fixed rows gained per-loan
 -- disbursed/entry/subsidized inputs the same day (usage_logs only; the tool
 -- writes no scenario table), so no column changes meaning there.
+
+-- ============================================================
+-- 2026-09-09  MACHINE BURSTS EXCLUDED FROM THE LANDING COUNTS
+-- ============================================================
+-- NO DDL, NO DML. The rows stay exactly where they are; what changed is
+-- that the two admin landing panels stopped counting them. Recorded here
+-- because it is a discontinuity in a published number: "untagged landings"
+-- means something different before and after this date.
+--
+-- WHAT HAPPENED. 2026-09-08 at 22:19 America/Los_Angeles, 700 rows of
+-- landing_view:path=root and :path=welcome arrived inside ONE MINUTE,
+-- median gap between them 0.0 seconds, every one with session_id NULL and
+-- traffic_source NULL. scenario_events for that whole day was 4, the
+-- lowest in the window, so nothing used the site: something fetched the
+-- landing page 700 times in a minute. A smaller one on 2026-09-05 at
+-- 23:27 carried 117 rows the same way.
+--
+-- WHAT IT DISTORTED. Those 817 rows were 13% of every landing row and 11%
+-- of every untagged one. In _admin_landing_sources they sat in the
+-- (untagged) row as 817 landings against no app arrivals, which drove that
+-- row's click-through toward zero; in _admin_welcome_destinations they
+-- added 817 phantom non-clickers to "No click (estimated)", which is
+-- derived as landings minus clicks, and deflated every share beside it.
+--
+-- THE RULE. edge_landings() drops landing rows from any minute carrying
+-- more than LANDING_BURST_PER_MINUTE (100) of them, and returns what it
+-- dropped so the panel can say so on screen. The threshold is measured:
+-- across every hour that has ever exceeded 100 rows, the busiest minute of
+-- anything resembling people is 59 (2026-08-23, an hour only 70% landing
+-- rows, so real activity was mixed in), and the two machine bursts are 117
+-- and 700, both 100% landing rows. 100 sits between with margin either
+-- way. Guarded by check_internal_links.check_landing_burst_filter, whose
+-- fixtures are 59 and 117 rather than the constant.
+--
+-- READING ACROSS THE SEAM. A landing count taken before 2026-09-09 includes
+-- both bursts; one taken after does not. Do not compare them. Nothing else
+-- moves: landing_view has never been in PAGEVIEW_ACTIONS, so no
+-- pageview-denominated rate in the dashboard or in analyze_survey.py was
+-- ever affected, and traffic_windows() counts app pageviews rather than
+-- edge rows and is untouched.
+--
+-- WHO IT WAS IS NOT KNOWN. usage_logs stores four columns and none of them
+-- is a user agent or an IP, by design. Cloudflare's own analytics know;
+-- CF_ZONE_TOKEN lacks Analytics:Read for the zone, so the GraphQL query was
+-- refused on 2026-09-09. The Worker's bot exclusion is a user-agent
+-- substring match whose own comment calls it "not a bot defence", and this
+-- is what that sentence looks like in the data.
