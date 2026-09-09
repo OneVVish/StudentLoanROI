@@ -78,7 +78,7 @@ So the honest summary is that switching into RAP is close to a one-way door, and
 
 There is a second asymmetry, and this one is about interest rather than payments. It decides what a detour costs, and it is written into the regulation rather than into anybody's guidance.
 
-Under 34 CFR 685.209(j), RAP, REPAYE, PAYE and ICR all capitalize unpaid interest only under the general rule at 685.202(b). IBR carries an extra trigger the others do not have: the Secretary capitalizes unpaid accrued interest "when a borrower leaves the IBR plan." Leaving IBR is itself the event.
+Under 34 CFR 685.209(j), RAP, REPAYE, PAYE and ICR all capitalize unpaid interest only under the general rule at 685.202(b). IBR carries two triggers the others do not have. The Secretary capitalizes unpaid accrued interest "when a borrower leaves the IBR plan," so leaving is itself the event. And the Secretary capitalizes it when the borrower's payment is the capped amount, meaning the point at which the income-driven calculation would ask for more than the 10-year Standard payment and the plan charges the Standard payment instead. That second trigger has nothing to do with sequence: it fires on a borrower who stays put, and on a small balance beside a decent income it is the ordinary case rather than the exception.
 
 The general rule those other plans point at is now two sentences long, and its only mandatory trigger is the expiration of a deferment. A forbearance is not in it. So leaving SAVE does not capitalize anything, and leaving IBR does.
 
@@ -138,7 +138,7 @@ The third row changes exactly one thing. When the 9.9 percent note clears, its r
 
 The repayment tool on this site models both, and keeps them apart deliberately. Its table holds the extra on one note, because that is what happens if you do nothing else. The roll-down is drawn beside it as its own charts, because rolling a freed payment forward is a thing you decide to do rather than a thing that happens to you.
 
-One practical caution sits under all three rows. They assume the extra actually comes off the principal of the loan you meant, and that is worth arranging in writing rather than assuming. Money paid above the minimum is often applied to the next due date instead, which buys a month off rather than a smaller balance.
+One practical caution sits under all three rows. They assume the extra actually comes off the principal of the loan you meant, and that is worth arranging in writing rather than assuming. A prepayment of at least your monthly payment is applied first to any charges, then to outstanding interest, then to principal, and then the servicer advances your next due date unless you ask it not to (34 CFR 685.211(a)(3)). The balance does move. What the default costs you is the month you are then invited to skip, and the loan you meant to target, because nothing in the rule says which of several loans the money lands on. Name the loan and decline the advanced due date, in writing.
 
 Federal loans do not work like that at all, and that arithmetic surprises people. Several federal loans do not mean several income-driven payments. The plan sizes one payment from your income and that payment covers all of them. Split the $79,000 above across two federal loans at different rates and the RAP payment is still about $160 a month rather than double that. If you have been adding up per-loan estimates from a servicer's website, the total you are dreading may not exist.
 

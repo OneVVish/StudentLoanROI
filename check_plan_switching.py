@@ -543,6 +543,48 @@ def check_entry_terms(ns) -> list:
     return problems
 
 
+def check_extended_floor(ns):
+    """The Extended plan is offered ONLY above $30,000 of Direct Loans.
+
+    34 CFR 685.208(b)(4)(i): "a new borrower with more than $30,000 in
+    outstanding Direct Loans". Below that the plan does not exist, and the row
+    is not a harmless extra: it carries the LOWEST payment in the table, so a
+    borrower reads it as their cheapest option. It shipped ungated, quoted a
+    $13,000 borrower ~$80 a month, and that figure reached a published guide as
+    "the lowest legitimate federal payment" and a book chapter drawn from it.
+
+    The boundary is a LITERAL here, never EXTENDED_STANDARD_MIN_BALANCE read
+    back off app.py: a check that takes its expectation from the constant under
+    test asserts only that the constant equals itself.
+    """
+    problems = []
+
+    def offered(balance):
+        rows = ns["compare_existing_loan_plans"](
+            0, 0, 70_000.0, 0, True, 0.0, False, 0,
+            federal_loans=[{"balance": float(balance), "rate": 5.5}])
+        return any(label.startswith("Extended") for label, _, _ in rows)
+
+    for balance, want in ((13_000, False), (30_000, False), (30_001, True), (60_000, True)):
+        if offered(balance) is not want:
+            problems.append(
+                f"  Extended Standard is {'offered' if not want else 'missing'} at "
+                f"${balance:,} of Direct Loans; 685.208(b)(4)(i) opens it only above "
+                f"$30,000")
+    # Negative control: the row must be the cheapest fixed one where it IS
+    # offered, which is why offering it below the floor was so damaging.
+    rows = ns["compare_existing_loan_plans"](
+        0, 0, 70_000.0, 0, True, 0.0, False, 0,
+        federal_loans=[{"balance": 60_000.0, "rate": 5.5}])
+    fixed = {label: r["monthly_payment"] for label, r, _ in rows
+             if label.startswith(("Standard", "Extended", "2026 Tiered"))}
+    ext = next((v for k, v in fixed.items() if k.startswith("Extended")), None)
+    if ext is None or ext >= min(v for k, v in fixed.items() if not k.startswith("Extended")):
+        problems.append("  at $60,000 the Extended payment is not the lowest fixed "
+                        "payment, so the floor check cannot see the harm it prevents")
+    return problems
+
+
 def main() -> int:
     ns = load()
     compare = ns["compare_existing_loan_plans"]
@@ -569,6 +611,10 @@ def main() -> int:
     # And whether there is a plan left to switch back to.
     problems.extend(check_plan_availability_note(ns))
     checked += 7
+
+    # The Extended plan's $30,000 statutory floor. See check_extended_floor.
+    problems.extend(check_extended_floor(ns))
+    checked += 5
 
     BAL, RATE = 60_000.0, 6.5
 
