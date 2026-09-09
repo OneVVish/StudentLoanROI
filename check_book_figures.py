@@ -39,13 +39,20 @@ FILE FAILS THIS GUARD until someone teaches it to reproduce. That is the
 thing it guards grows is worse than no guard, because the green tick means
 less than it did and nothing says so.
 
-WHAT IT DOES NOT COVER, and this is the honest limit. The ROI half of the
-book, break-even loans and ten-year premiums and crossover ages, needs a
-full `build_major_data` and the chapter's own baseline kwargs, which is a
-setup this guard does not do yet. Those figures are exempted BY NAME in
-TOOL_MARKER_EXEMPT so the gap is visible rather than assumed away, and
-extending the guard to them is the next piece of work. `analyze_model.py`
-and `check_timeline_alignment.py` are what stand behind them today.
+THE ROI HALF GOES THROUGH analyze_model.py, NOT THROUGH A THIRD COPY OF
+THE KWARGS. A break-even or a premium is only the app's number if it is
+computed with the app's baseline: `pre_earnings_years` for the enrollment
+years and `baseline_start_age_for` behind them, both of which
+analyze_model already assembles and documents, having got them wrong once
+and understated every break-even by 15% to 26%. Writing that assembly out
+again here would be the second implementation this repo warns about
+everywhere else, so the guard imports it. It costs about a second to
+build the 836-entry MAJOR_DATA and almost nothing per figure.
+
+Two dimensions still are not covered. Crossover ages are integers rather
+than money and this checks money. And the community-college and Compare
+Mode fixtures in families.md need a scenario the guard does not
+construct. Both are exempted by name.
 
 Rounding rule, two halves. A cited figure like `~$114,400` must sit within
 half its own last significant place of the computed value, so the citation
@@ -63,7 +70,9 @@ Negative controls, all five run on every invocation:
   2. A tool that returns a different number must fail, naming the figure.
   3. A new `(tool: $N)` marker in the fixture file must fail as uncovered.
   4. A citation whose rounding is wrong at its own precision must fail.
-  5. A figure whose exact value is missing from families.md must fail.
+  5. A premium the book calls "behind" that turns positive must fail on the
+     word, not only the number.
+  6. A figure whose exact value is missing from families.md must fail.
 """
 
 import ast
@@ -137,13 +146,24 @@ def money_step(text):
 # records, and every file that quotes it.
 
 class Fig:
-    def __init__(self, key, compute, cite, files, exact=None, note=""):
+    """One figure: how to compute it, how the book writes it, and where.
+
+    `behind` is for a premium the model returns NEGATIVE and the prose
+    writes as a magnitude, "~$70,300 behind". The check then asserts the
+    sign as well as the size, so a path that flips from behind to ahead
+    fails here rather than leaving the word "behind" over a positive
+    number, which is the failure the wording invites.
+    """
+
+    def __init__(self, key, compute, cite, files, exact=None, note="",
+                 behind=False):
         self.key = key
         self.compute = compute
         self.cite = cite
         self.files = files
         self.exact = exact
         self.note = note
+        self.behind = behind
 
 
 # Inputs, quoted from families.md so a reader can see the guard and the
@@ -158,6 +178,12 @@ HALL_PRIVATE = [{"balance": 59_000.0, "rate": 11.0, "term_years": 10}]
 DANA_FED, DANA_FED_RATE = 13_000.0, 5.5
 DANA_PRIV, DANA_PRIV_RATE, DANA_PRIV_TERM = 102_000.0, 11.0, 10
 DANA_INCOME = 70_000.0
+
+# The basis families.md states for every ROI figure: national wages, 6.5
+# percent, Standard, school years counted.
+ROI_RATE = 6.5
+ROI_STRATEGY = "Standard 10-Year"
+KINDERGARTEN = "Kindergarten Teachers, Except Special Education"
 
 
 def _reyes(ns, spec):
@@ -196,6 +222,58 @@ def _offer(ns, rate, term, who="alone", **kw):
     raise AssertionError(f"no {who} offer at {rate}% over {term} years")
 
 
+_ROI = {}
+
+
+def roi_layer():
+    """app.py's model with MAJOR_DATA built, via analyze_model.
+
+    Memoized: the build reads three CSVs and merges the curated entries and
+    the training overlay, which is a second or so, and every ROI figure
+    below wants the same namespace.
+    """
+    if "ns" not in _ROI:
+        import analyze_model
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            _ROI["ns"] = analyze_model.load_model_layer()
+            _ROI["mod"] = analyze_model
+    return _ROI["ns"], _ROI["mod"]
+
+
+def breakeven(title):
+    """(break-even loan, premium at zero undergraduate loan) for one path."""
+    ns, am = roi_layer()
+    if title not in ns["MAJOR_DATA"]:
+        raise AssertionError(f"{title!r} is not in MAJOR_DATA; the fixture "
+                             f"names an occupation the file does not have")
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        return am.find_breakeven_loan(ns, title, ROI_RATE, ROI_STRATEGY)
+
+
+def premium(title, loan, years=10):
+    """The ten-year premium over a debt-free high school graduate.
+
+    Same baseline assembly as the break-even, which is the point of routing
+    through analyze_model rather than calling compute_scenario_results with
+    hand-written kwargs.
+    """
+    ns, am = roi_layer()
+    md = ns["MAJOR_DATA"][title]
+    py = ns["program_years_for_education"](md.get("typical_education"), title)
+    ey = ns["pre_earnings_years"](title, py)
+    ba = am.resolve_baseline_start_age(ns, title, py, ey, False)
+    kw = {"enrollment_years": ey, "baseline_start_age": ba}
+    if years != 10:
+        kw["roi_window_years"] = years
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        return ns["compute_scenario_results"](
+            title, float(loan), ROI_RATE, ROI_STRATEGY,
+            **kw)["roi_result"]["earnings_premium"]
+
+
 def _wage(title, path="cleaned_careers.csv", col="a_median"):
     """Read a wage straight out of the committed dataset.
 
@@ -225,6 +303,7 @@ CH07 = "ch07-the-parents-loan.md"
 CH01 = "ch01-two-questions.md"
 CH08 = "ch08-private-money.md"
 CH12 = "ch12-the-wage-you-will-see.md"
+CH13 = "ch13-long-roads.md"
 CH16 = "ch16-ride-or-pay.md"
 FIX = "families.md"
 
@@ -350,6 +429,41 @@ FIGURES = [
         note="chapter 12 rounds this to ~$84,100; it read ~$84,000 until "
              "2026-09-08"),
 
+    # ---- The ROI half: Sofia's path and the three professional cases.
+    Fig("kindergarten-starting-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][KINDERGARTEN]["starting_salary"],
+        "$52,180", [FIX], exact="$52,180"),
+    Fig("kindergarten-breakeven",
+        lambda ns: breakeven(KINDERGARTEN)["breakeven_loan"],
+        "$4,044", [FIX], exact="$4,044",
+        note="the number chapter 11 turns on"),
+    Fig("kindergarten-premium-at-zero",
+        lambda ns: breakeven(KINDERGARTEN)["premium_at_zero_debt"],
+        "~$5,500", [FIX], exact="$5,511"),
+    Fig("medicine-premium-at-zero",
+        lambda ns: breakeven("Family Medicine Physicians")["premium_at_zero_debt"],
+        "~$70,300", [FIX], exact="$70,306", behind=True),
+    Fig("dentistry-premium-at-zero",
+        lambda ns: breakeven("Dentists, General")["premium_at_zero_debt"],
+        "~$35,000", [FIX], exact="$34,647", behind=True),
+    Fig("law-premium-at-zero",
+        lambda ns: breakeven("Lawyers")["premium_at_zero_debt"],
+        "~$115,300", [FIX], exact="$115,324"),
+    Fig("law-clerk-premium-at-zero",
+        lambda ns: breakeven("Judicial Law Clerks")["premium_at_zero_debt"],
+        "~$316,000", [FIX], exact="$316,191", behind=True,
+        note="the counterweight case: the same degree into a $52,870 job"),
+    # Chapter 13's first table, at the $13,000 undergraduate loan it states.
+    Fig("ch13-medicine-premium",
+        lambda ns: premium("Family Medicine Physicians", 13_000),
+        "~$83,700", [CH13], exact="$83,697", behind=True),
+    Fig("ch13-dentistry-premium",
+        lambda ns: premium("Dentists, General", 13_000),
+        "~$48,000", [CH13], exact="$48,039", behind=True),
+    Fig("ch13-law-premium",
+        lambda ns: premium("Lawyers", 13_000),
+        "~$100,500", [CH13], exact="$100,506"),
+
     # ---- The baseline every case is measured against.
     Fig("hs-grad-salary",
         lambda ns: ns["HS_GRAD_SALARY"],
@@ -359,15 +473,6 @@ FIGURES = [
 # A `(tool: $N)` marker in families.md that no figure above reproduces.
 # Each needs a reason, and the reason is the record of what is not checked.
 TOOL_MARKER_EXEMPT = {
-    "$52,180": "the kindergarten teacher's wage as MAJOR_DATA resolves it, "
-               "which needs a full build_major_data; the raw dataset wage is "
-               "checked above for the chapter 12 occupations instead",
-    "$4,044": "break-even loan: needs build_major_data and the chapter's own "
-              "baseline kwargs. See the docstring's limits.",
-    "$138,462": "ten-year premium, same limit as the break-even",
-    "$34,647": "ten-year premium, same limit as the break-even",
-    "$316,191": "ten-year premium, same limit as the break-even",
-    "$86,362": "ten-year premium, same limit as the break-even",
     "$3,814, 77 against 79": "avalanche against snowball, which families.md "
                              "itself records as an offline simulation on the "
                              "tool's payments rather than a tool call",
@@ -394,6 +499,14 @@ def check_figures(ns, chapters) -> list:
         except Exception as exc:                      # noqa: BLE001
             problems.append(f"  {fig.key}: could not be computed ({exc})")
             continue
+        if fig.behind:
+            if got >= 0:
+                problems.append(
+                    f"  {fig.key}: the book calls this figure \"behind\" and "
+                    f"the model now returns ${got:,.2f}, which is ahead. The "
+                    f"word is wrong, not only the number.")
+                continue
+            got = -got
         want = money_value(fig.cite)
         step = money_step(fig.cite)
         if abs(got - want) > step / 2:
@@ -503,7 +616,21 @@ def negative_controls(ns) -> list:
     finally:
         FIGURES.remove(wrong)
 
-    # 5. An exact value missing from the fixture file.
+    # 5. A "behind" figure that has turned positive. The prose writes these
+    # as magnitudes, so without the sign check the word "behind" would sit
+    # over an ahead number and every size test would still pass.
+    flipped = Fig("control-behind", lambda ns: 70_306.0, "~$70,300", [FIX],
+                  behind=True)
+    FIGURES.append(flipped)
+    try:
+        found = check_figures(ns, base)
+        if not any("control-behind" in f and "ahead" in f for f in found):
+            problems.append("  control 6 did not fire: a premium that turned "
+                            "positive was accepted under a 'behind' citation")
+    finally:
+        FIGURES.remove(flipped)
+
+    # 6. An exact value missing from the fixture file.
     gone = dict(base)
     before = gone[FIX]
     gone[FIX] = before.replace("$38,527", "$00,000")
@@ -534,7 +661,7 @@ def main() -> int:
     problems += check_marker_coverage(chapters)
     problems += negative_controls(ns)
 
-    checked = len(FIGURES) + len(TOOL_MARKER.findall(chapters[FIX])) + 5
+    checked = len(FIGURES) + len(TOOL_MARKER.findall(chapters[FIX])) + 6
     if problems:
         print("check_book_figures FAILED\n")
         print("\n".join(problems))
@@ -542,7 +669,7 @@ def main() -> int:
     print(f"check_book_figures OK: {len(FIGURES)} figures reproduce from the "
           f"tool and are quoted alike across {len(chapters)} files; "
           f"{len(TOOL_MARKER.findall(chapters[FIX]))} tool markers covered or "
-          f"excused; 5 negative controls fired. {checked} checks.")
+          f"excused; 6 negative controls fired. {checked} checks.")
     return 0
 
 
