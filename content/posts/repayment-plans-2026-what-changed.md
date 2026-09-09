@@ -42,7 +42,7 @@ Two things move as the household grows. The point where a payment starts moves r
 
 ## A smaller payment is not a smaller debt
 
-Take a borrower who left with $27,000, which is the aggregate federal limit for a dependent undergraduate, on an income of $45,000. Five plans, one balance, one person:
+Take a borrower who left with $27,000, which is the aggregate federal limit for a dependent undergraduate, on an income of $45,000. Four plans, one balance, one person. The 25-year Extended plan is not among them: it opens only to a borrower with more than $30,000 of Direct loans, so this balance does not reach it, and it is closed to any loan made from July 1, 2026 in any case.
 
 | Plan | First payment | Years | Handed over |
 |---|---|---|---|
@@ -50,9 +50,8 @@ Take a borrower who left with $27,000, which is the aggregate federal limit for 
 | IBR, newer loans | $192 | 13 | $42,000 |
 | 2026 Tiered Standard, 15-year | $235 | 15 | $42,300 |
 | 2026 RAP | $150 | 15 | $43,300 |
-| Extended Standard, 25-year | $182 | 25 | $54,700 |
 
-RAP has the smallest payment in the table and the largest total of the four plans above the last row. The gap against the ten-year plan is about $6,500, which is the price of the lower payment rather than a penalty for choosing badly. Nothing is forgiven on any of these rows, because a $27,000 balance on a $45,000 income clears well inside every forgiveness clock.
+RAP has the smallest payment in the table and the largest total. The gap against the ten-year plan is about $6,500, which is the price of the lower payment rather than a penalty for choosing badly. Nothing is forgiven on any of these rows, because a $27,000 balance on a $45,000 income clears well inside every forgiveness clock.
 
 The comparison is the same one the older plans always invited, and the answer has not changed: read the payment column and the total column together, because they run in opposite directions.
 
