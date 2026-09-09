@@ -98,6 +98,18 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "refusing-to-pay-for-a-major": (
+        # The conversation is over and the arithmetic is still on the table.
+        # NO PAPER: klein4b writes illegible squiggles on any page it draws,
+        # and a squiggle beside a guide about aid forms would read as a
+        # fabricated document. The empty chair carries it instead.
+        "A kitchen table at night under one warm pendant light, a financial "
+        "calculator lying in the foreground in sharp focus, two mugs left "
+        "where they were, one wooden chair pushed back from the table and "
+        "empty, the rest of the room dark. Documentary photography, shallow "
+        "depth of field, muted warm colour, unposed. No paper, no text, no "
+        "screens, no people.",
+        20260917, 4),
     "entry-level-hiring-and-college-roi": (
         # The set is warm interiors and one gate, so this one is a waiting
         # room: the guide is about the first year after graduation, which is
