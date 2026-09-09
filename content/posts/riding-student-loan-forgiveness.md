@@ -22,7 +22,7 @@ Take that borrower: $175,000 at 7 percent, single, a household of one, starting 
 | Standard, 10 years           | ~$244,000 | none       | none      | ~$244,000 |
 | IBR, ride 20 years           | ~$167,000 | ~$253,000  | ~$80,000  | ~$247,000 |
 | RAP, ride 30 years           | ~$369,000 | ~$80,000   | ~$25,000  | ~$394,000 |
-| IBR under PSLF, 120 payments | ~$68,000  | ~$253,000  | none      | ~$68,000  |
+| IBR under PSLF, 120 payments | ~$68,000  | ~$230,000  | none      | ~$68,000  |
 
 
 The last row is the exception that makes the instinct correct. Under Public Service Loan Forgiveness the discharge arrives after 120 qualifying payments and is not taxed, so the same borrower pays about $68,000 and owes nothing afterward. If a government or nonprofit employer is in the picture, that is the row to look at, and the rest of this guide is about the other three.
