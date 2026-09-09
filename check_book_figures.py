@@ -77,6 +77,7 @@ Negative controls, all five run on every invocation:
 
 import ast
 import io
+import os
 import re
 import sys
 from contextlib import redirect_stderr
@@ -647,6 +648,17 @@ def negative_controls(ns) -> list:
 
 
 def main() -> int:
+    # RUN FROM THE REPO, WHATEVER DIRECTORY THIS WAS INVOKED IN. app.py
+    # resolves its datasets through relative paths (CAREERS_CSV_PATH_NATIONAL
+    # is "cleaned_careers.csv", and the professional debt and tuition files
+    # are the same shape), so from anywhere else MAJOR_DATA builds without
+    # its occupations and the professional debt resolves to something else
+    # entirely. Run from marketing/, chapter 13's lawyer read -$61,174
+    # against the +$100,506 it reads here, with no error anywhere. That
+    # matters because marketing/ is the workspace a co-editor opens: the
+    # parent repository gitignores it, so Cursor will not index the
+    # manuscript from the repo root.
+    os.chdir(REPO)
     if not BOOK.exists():
         print("SKIP check_book_figures: marketing/book is not in this "
               "checkout (marketing/ is gitignored and mirrored privately). "
