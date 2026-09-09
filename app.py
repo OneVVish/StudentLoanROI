@@ -1631,6 +1631,16 @@ STANDARD_TERM_YEARS = 10
 # fixed payment available, and leaving it out would make the comparison look
 # like RAP is the only way to a manageable monthly figure.
 EXTENDED_STANDARD_TERM_YEARS = 25
+# AND IT HAS A FLOOR. 34 CFR 685.208(b)(4)(i) opens the Extended plan only to a
+# borrower with MORE THAN $30,000 of outstanding Direct Loans; below that the
+# plan does not exist and the 10-year Standard payment is the lowest fixed one
+# available. The row used to be offered at any balance, which quoted a $13,000
+# borrower an $80 payment they cannot have and made every comparison built on
+# it wrong -- including a published guide's "lowest legitimate federal payment"
+# and the book chapter drawn from it. The plan is also closed outright to any
+# borrower with a Direct Loan made on or after July 1, 2026 (the same
+# paragraph's opening words), which the Tiered Standard row already covers.
+EXTENDED_STANDARD_MIN_BALANCE = 30_000
 
 # Public Service Loan Forgiveness: 120 qualifying monthly payments -- ten years,
 # and they need not be consecutive -- while working full time for a government
@@ -21757,10 +21767,14 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
                  "Qualifies for PSLF, but it also clears the loan in exactly 120 "
                  "payments, so there is nothing left to forgive."
                  if pslf else "Fixed payment. No forgiveness."))
-    ext = fixed_over(EXTENDED_STANDARD_TERM_YEARS)
-    rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", with_private(ext),
-                 "Does NOT qualify for PSLF." if pslf else
-                 "Fixed payment stretched out. No forgiveness, more interest."))
+    # Offered only above the statutory floor. Showing it below that is not a
+    # harmless extra row: it is the LOWEST payment in the table, so a borrower
+    # reads it as their cheapest option and it is not on the menu.
+    if total_fed > EXTENDED_STANDARD_MIN_BALANCE:
+        ext = fixed_over(EXTENDED_STANDARD_TERM_YEARS)
+        rows.append((f"Extended Standard ({EXTENDED_STANDARD_TERM_YEARS}-year)", with_private(ext),
+                     "Does NOT qualify for PSLF." if pslf else
+                     "Fixed payment stretched out. No forgiveness, more interest."))
     # Per loan, set at each loan's entry to repayment (tiered_terms_at_entry).
     # With every loan in repayment today this is one term from the total.
     tiered_terms = tiered_terms_at_entry(fed_loans) or [calculate_tiered_standard_term(total_fed)]

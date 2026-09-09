@@ -36,7 +36,7 @@ The mood matches the data. Handshake's outlook for the class of 2026 reports tha
 
 Read the Stanford finding closely and it compares young workers in AI-exposed occupations against young workers in less exposed occupations. It does not compare people who went to college against people who did not. That distinction decides what the number can be used for: it says some fields became harder to enter, and it does not say a degree stopped paying, because the people on both sides of it mostly hold one.
 
-The question this site asks is a different one. Every figure in the calculator measures a career against a debt-free high school graduate who never enrolled, over ten years, after loan payments and taxes. Nothing in the entry-level evidence answers that comparison, in either direction.
+The question this site asks is a different one. Every figure in the calculator measures a career against a debt-free high school graduate who never enrolled, over ten years, after loan payments. Nothing in the entry-level evidence answers that comparison, in either direction.
 
 There is a second gap between that study and this calculator, and it runs the useful way. The calculator prices what a career pays, and pay is not where the adjustment has shown up so far. So the finding leaves the salary figures here standing. What it puts pressure on is the assumption sitting underneath them, which is that the job starts on schedule.
 
@@ -47,14 +47,14 @@ The calculator carries an optional AI exposure band for every career, taken from
 
 | AI exposure band | Careers | Typical pay |
 | ---------------- | ------- | ----------- |
-| High             | 36      | ~$81,000    |
+| High             | 35      | ~$81,000    |
 | Medium           | 190     | ~$96,000    |
-| Low              | 67      | ~$115,000   |
+| Low              | 65      | ~$115,000   |
 
 
 Note: Figures computed from this site's own datasets are rounded and marked with a tilde, in this table and in the others on this page.
 
-The high band is narrower than the conversation suggests, and it is specific: 28 of those 36 careers are business and financial operations, six are legal, two are office support. The low band is mostly hands-on health care, 49 of its 67 careers, plus 15 in community and social service.
+The high band is narrower than the conversation suggests, and it is specific: 28 of those 35 careers are business and financial operations, five are legal, two are office support. The low band is mostly hands-on health care, 47 of its 65 careers, plus 15 in community and social service.
 
 Two warnings about that table, because it is the kind of table people screenshot. The bands measure how much of a job's task content overlaps with what current AI tools do, which is not the same as the odds of losing the job. And the pay column describes what these careers pay today, not what the exposure will do to them. Low exposure and high pay landing in the same row is a fact about the present, not a strategy.
 
