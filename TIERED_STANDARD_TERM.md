@@ -64,7 +64,10 @@ percent `DEFAULT_GAP_RATE` the calculator assumes for Parent PLUS:
 
 For contrast, the same $65,000 on the plans an OLDER loan keeps: 10-year
 Standard ~$810 a month and ~$31,700 of interest; 25-year Extended ~$520 and
-~$92,000.
+~$92,000. Both figures are at 8.5%, matching the table above. Extended also
+carries its own floor: 685.208(b)(4)(i) opens it only above $30,000
+outstanding, which is why the repayment tool withholds that row below the
+line (#304, #306).
 
 ## What the tools model (since 2026-09-08)
 
@@ -96,17 +99,20 @@ Standard ~$810 a month and ~$31,700 of interest; 25-year Extended ~$520 and
 `content/posts/parent-plus-senior-year.md`, section "Repaying it is the
 parent's job, on one fixed plan" (#286, #287), and the whole of
 `content/posts/parent-plus-slow-road-fast-road.md`: the deferred road
-(~$104,900 of interest, last payment 24 and a half years after the freshman
-fall), the 10-year-pace road (~$31,700, 13 years) and the as-you-go road
-(~$52,300, 23 years, entering two months after each disbursement), with the age at the last payment against a retirement
+(~$114,400 of interest at the published 9.07% rate, last payment 24 and a half years after the freshman
+fall), the 10-year-pace road (~$34,100, 13 years) and the as-you-go road
+(~$56,400, 23 years, entering two months after each disbursement), with the age at the last payment against a retirement
 age of 65. The deferral accrual there is simple interest from each fall's
 disbursement, capitalized once when the deferment ends: the parent deferment
-in 685.204(b)(2) runs through enrollment AND the six-month post-enrollment
-period, so 4.5, 3.5, 2.5 and 1.5 years on the four loans (~$16,600, entering
-repayment at ~$81,600). Three more rules the guide states from the eCFR: the
+in 685.204(c)(2)(i) covers enrollment and 685.204(c)(2)(ii) covers the
+six-month post-enrollment period, as TWO deferments each granted on the
+borrower's request, so a parent who asks for one and not the other starts
+paying in the grace period. Requesting both gives 4.5, 3.5, 2.5 and 1.5 years
+of accrual on the four loans (~$17,700 at 9.07%, entering repayment at
+~$82,700; ~$16,600 and ~$81,600 at the calculator's 8.5% assumption). Three more rules the guide states from the eCFR: the
 term counts ALL the parent's Direct Loans (own loans and other children's
 PLUS included); a prepayment advances the due date unless directed to
 principal in writing (685.211(a)(3)); and the loan is discharged on the death
-of the parent or the student, or the parent's total disability (685.212(a)). The repayment guide's opening
+of the parent or the student, or the parent's total disability (685.212(a) and (b)). The repayment guide's opening
 ("the list of repayment plans is two items long") is the same fact from the
 student's side.
