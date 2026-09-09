@@ -76,6 +76,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [What refusing to pay for a major actually changes](https://worthmydegree.com/guides/refusing-to-pay-for-a-major):
+  The aid formula keeps counting the income, the student's $27,000
+  limit does not move, and one federal regulation names a parent's
+  refusal and rules it out.
 - [A private student loan, after you have signed](https://worthmydegree.com/guides/private-student-loan-after-you-sign):
   Why the payment is what it is, what interest-only and refinancing
   change, what a cosigner is worth, and what this site cannot price
