@@ -6170,6 +6170,77 @@ def traffic_report_dates(usage_df, tz: str = TRAFFIC_REPORT_TZ):
     return parsed.dt.tz_convert(tz).dt.date
 
 
+LANDING_BURST_PER_MINUTE = 100
+
+
+def edge_landings(usage_df, tz: str = TRAFFIC_REPORT_TZ):
+    """The edge Worker's landing rows, with machine bursts removed.
+
+    Returns (rows, dropped), where `dropped` is a list of
+    {minute, rows, sources} describing exactly what was taken out, because a
+    gap nobody knows about is worse than one that is recorded and this data
+    cannot tell a quiet hour from a filtered one.
+
+    WHY. On 2026-09-08 at 22:19 Pacific, 700 landing rows arrived inside one
+    minute, median gap between them 0.0 seconds, every one of them a fetch of
+    `/` or `/welcome` with no session and no src, and `scenario_events` for
+    that whole day was 4. Nothing used the site; something fetched the
+    landing page 700 times in a minute. Left in, that single minute was 11%
+    of every untagged landing ever recorded, it sat in the click-through
+    table as 700 landings against no arrivals, and it added 700 phantom
+    non-clickers to the welcome page's "No click" estimate, which is derived
+    as landings minus clicks.
+
+    THE THRESHOLD IS MEASURED, not chosen. Across every hour that has ever
+    carried more than 100 rows, the busiest minute of anything that looks
+    like people is 59 (2026-08-23, and that hour was only 70% landing rows,
+    so real activity was mixed into it). The two machine bursts are 117
+    (2026-09-05) and 700 (2026-09-08), both 100% landing rows across three
+    to five minutes. 100 sits between them with margin on both sides.
+
+    It is per minute and blind to the tag, because a tagged burst at this
+    rate is not a campaign either. It is deliberately NOT a bot defence: the
+    Worker's user-agent filter is that, and its own comment already says it
+    is "enough to stop the count being mostly Googlebot, and not a bot
+    defence". This is the reporting half, so a number on the dashboard
+    describes people.
+    """
+    empty = usage_df.iloc[0:0] if usage_df is not None else None
+    if usage_df is None or usage_df.empty or "action" not in usage_df.columns:
+        return empty, []
+    rows = usage_df[usage_df["action"].astype(str)
+                    .str.startswith(LANDING_ACTION_PREFIX)]
+    if rows.empty or "timestamp" not in rows.columns:
+        return rows, []
+    minute = (pd.to_datetime(rows["timestamp"], utc=True, errors="coerce")
+              .dt.tz_convert(tz).dt.floor("min"))
+    counts = minute.value_counts()
+    busts = counts[counts > LANDING_BURST_PER_MINUTE]
+    if busts.empty:
+        return rows, []
+    dropped = []
+    for when, n in busts.sort_index().items():
+        block = rows[minute == when]
+        src = (block.get("traffic_source") if "traffic_source" in block else None)
+        tags = (sorted({str(v) for v in src.dropna().unique()}) if src is not None
+                else [])
+        dropped.append({"minute": when, "rows": int(n),
+                        "sources": tags or ["(untagged)"]})
+    return rows[~minute.isin(busts.index)], dropped
+
+
+def edge_landing_note(dropped) -> str:
+    """One sentence naming what edge_landings took out, or "" if nothing."""
+    if not dropped:
+        return ""
+    total = sum(d["rows"] for d in dropped)
+    when = ", ".join(d["minute"].strftime("%b %-d %H:%M") for d in dropped[:3])
+    more = f" and {len(dropped) - 3} more" if len(dropped) > 3 else ""
+    return (f"{total:,} landing row(s) excluded as machine traffic: more than "
+            f"{LANDING_BURST_PER_MINUTE} in a single minute at {when}{more}. "
+            f"The rows are still in the table; only these counts skip them.")
+
+
 def traffic_windows(usage_df, tz: str = TRAFFIC_REPORT_TZ, asof=None,
                     days: int = 7) -> dict:
     """Everything the daily digest and the admin trend panels both report.
@@ -24379,8 +24450,7 @@ def _admin_landing_funnel(usage_df: pd.DataFrame) -> pd.DataFrame:
                        .astype("object")
                        .where(frame.get("traffic_source").notna(), "(untagged)")
                        .replace("", "(untagged)"))
-    landings = frame[frame["action"].astype(str)
-                     .str.startswith(LANDING_ACTION_PREFIX)]
+    landings, dropped = edge_landings(frame)
     if landings.empty:
         return pd.DataFrame()
     arrivals = frame[frame["action"].isin(PAGEVIEW_ACTIONS)]
@@ -24396,6 +24466,7 @@ def _admin_landing_funnel(usage_df: pd.DataFrame) -> pd.DataFrame:
     by_path = (landings["action"].astype(str).str.split("path=").str[-1]
                .value_counts())
     table.attrs["by_path"] = by_path.to_dict()
+    table.attrs["excluded"] = edge_landing_note(dropped)
     return table.sort_values(["Landings", "App arrivals"], ascending=False)
 
 
@@ -24415,11 +24486,12 @@ def _admin_welcome_destinations(usage_df: pd.DataFrame) -> pd.DataFrame:
     """
     if usage_df.empty or "action" not in usage_df.columns:
         return pd.DataFrame()
-    actions = usage_df["action"].astype(str)
-    landings = int(actions.str.startswith(LANDING_ACTION_PREFIX).sum())
+    kept, dropped = edge_landings(usage_df)
+    landings = int(len(kept))
     if not landings:
         return pd.DataFrame()
 
+    actions = usage_df["action"].astype(str)
     navs = actions.str.extract(
         rf"^nav:from={NAV_WELCOME}:to=(?P<to>[^:]+)")["to"].dropna()
     labels = {NAV_CALCULATOR: "The calculator"}
@@ -24435,6 +24507,7 @@ def _admin_welcome_destinations(usage_df: pd.DataFrame) -> pd.DataFrame:
         f"{(v / landings * 100):.0f}%" for v in table["Visitors"]]
     table.attrs["landings"] = landings
     table.attrs["clicked"] = clicked
+    table.attrs["excluded"] = edge_landing_note(dropped)
     return table
 
 
@@ -24859,6 +24932,9 @@ def render_admin_dashboard() -> None:
             "channel also sends people straight to the app. `?test=1`, "
             "`src=selftest` and declared crawlers are excluded at the edge."
         )
+        _excluded = _landing.attrs.get("excluded", "")
+        if _excluded:
+            st.caption(f"⚠️ {_excluded}")
         st.dataframe(_landing, use_container_width=True)
 
         _dests = _admin_welcome_destinations(usage_df)

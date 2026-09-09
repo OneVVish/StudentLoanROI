@@ -238,6 +238,86 @@ def check_repayment_section_guides(ns, src):
     return out
 
 
+def check_landing_burst_filter(ns, fail) -> None:
+    """A machine burst is dropped from the landing counts; people are not.
+
+    On 2026-09-08 seven hundred landing rows arrived in one minute, no
+    session and no src on any of them, and `scenario_events` for that day
+    was 4. Left in, that minute was 11% of every untagged landing ever
+    recorded and it added seven hundred phantom non-clickers to the welcome
+    page's "No click" estimate, which is landings minus clicks.
+
+    THE FIXTURES ARE SIZED FROM THE MEASUREMENT, not from the constant under
+    test. The busiest minute of anything that looks like people, across
+    every hour that has ever carried more than a hundred rows, is 59; the
+    two machine bursts are 117 and 700. So a 59-row minute must survive and
+    a 117-row one must not, and a check written against
+    LANDING_BURST_PER_MINUTE itself would only assert the code equals
+    itself.
+
+    Four negative controls, each asserted to have fired: a burst left in, a
+    busy human minute thrown out, a burst dropped SILENTLY, and the whole
+    filter removed.
+    """
+    import pandas as pd
+    edge_landings = ns.get("edge_landings")
+    note = ns.get("edge_landing_note")
+    if not callable(edge_landings) or not callable(note):
+        fail("app.py has no edge_landings()/edge_landing_note(); the landing "
+             "counts are back to counting whatever hits the edge")
+        return
+    prefix = ns["LANDING_ACTION_PREFIX"]
+
+    def rows(minute, n, src=None, action=None):
+        return pd.DataFrame({
+            "timestamp": [f"2026-09-08T{minute}:{i % 60:02d}.000+00:00"
+                          for i in range(n)],
+            "action": [action or f"{prefix}:path=root"] * n,
+            "session_id": [None] * n,
+            "traffic_source": [src] * n,
+        })
+
+    human = rows("12:30", 59)                      # the busiest real minute seen
+    burst = rows("13:15", 117)                     # the smaller of the two bursts
+    other = rows("14:00", 8, src="re")
+    frame = pd.concat([human, burst, other], ignore_index=True)
+
+    kept, dropped = edge_landings(frame)
+    if len(kept) != 67:
+        fail(f"edge_landings kept {len(kept)} of a 59 + 117 + 8 fixture; a "
+             f"59-row minute is the busiest human one ever observed and must "
+             f"survive, a 117-row one is a measured machine burst and must not")
+    if sum(d["rows"] for d in dropped) != 117:
+        fail(f"edge_landings reported {dropped} dropped; it must name the "
+             f"117-row minute, because a filtered count nobody is told about "
+             f"reads exactly like a quiet day")
+    if "117" not in note(dropped):
+        fail("edge_landing_note() does not name how many rows it removed")
+    if note([]):
+        fail("edge_landing_note() speaks when nothing was dropped, which "
+             "would put a warning on every clean dashboard")
+
+    # A non-landing action at burst volume must be untouched: this filter is
+    # about the edge's landing rows and nothing else.
+    pageviews = rows("15:00", 400, action="pageview")
+    kept2, dropped2 = edge_landings(pageviews)
+    if len(kept2) or dropped2:
+        fail("edge_landings touched non-landing rows; it must select on "
+             f"{prefix!r} first and filter second")
+
+    controls = []
+    if len(edge_landings(burst)[0]) != 0:
+        controls.append("a burst on its own survived")
+    if len(edge_landings(human)[0]) != 59:
+        controls.append("a 59-row human minute was thrown out")
+    if not edge_landings(burst)[1]:
+        controls.append("a burst was dropped without being reported")
+    if len(edge_landings(pd.concat([human, other]))[1]) != 0:
+        controls.append("a clean frame reported a drop")
+    if controls:
+        fail("the landing burst filter is not behaving: " + "; ".join(controls))
+
+
 def main() -> int:
     ns = load_app_namespace()
     st = ns["st"]
@@ -571,6 +651,8 @@ def main() -> int:
     check_landing_action_separate(ns, _fail)
     check_landing_ctas_tagged(ns, _fail)
     check_logo_goes_to_welcome(_fail)
+    checked += 6
+    check_landing_burst_filter(ns, _fail)
 
     if problems:
         print(f"internal links: {len(problems)} problem(s) across {checked} checks\n")
