@@ -8200,9 +8200,14 @@ def search_schools_by_budget(cip_family: str, credential: str,
     school sits in that state, out-of-state everywhere else. This cannot be one
     flag for the whole search the way it can for a single named school: a
     result set routinely spans nine or more states and the visitor is resident
-    in exactly one of them. Pricing them all in-state understates 28% of the
-    dataset (every public school; median $7,080/yr, ~$28k over four years) and
-    lets a school clear a budget it does not actually fit.
+    in exactly one of them. Pricing them all in-state understates the 28% of
+    the dataset whose two prices actually differ (1,413 of 5,035 schools;
+    median $7,080/yr, ~$28k over four years) and lets a school clear a budget
+    it does not actually fit. That 28% is NOT the public share, which is 36%:
+    384 publics charge one price to everyone, and no private school in the file
+    has a residency gap at all. Across every public the median gap is $5,610.
+    The two figures were conflated here until 2026-09-08, and the conflation
+    reached a book chapter drawn from this docstring.
 
     `home_state=None` means the visitor did not say, and everything is priced
     out-of-state. That is the conservative direction on purpose: it can only
