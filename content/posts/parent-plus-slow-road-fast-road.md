@@ -41,13 +41,13 @@ One instruction makes it work. A prepayment of at least the monthly amount advan
 
 | The fast road | Figure |
 | --- | --- |
-| Paid during school | ~$205 a month in the freshman year, rising to ~$825 by the senior year |
-| Monthly payment after graduation | ~$825, falling as each loan clears |
+| Paid during school | ~$206 a month in the freshman year, rising to ~$826 by the senior year |
+| Monthly payment after graduation | ~$826, falling as each loan clears |
 | Interest during school | $0, because nothing is deferred |
 | Total interest | ~$34,100 |
 | Last payment | 13 years after the freshman fall |
 
-The fast road costs less than a third of the slow road's interest, ~$34,100 against ~$114,400, and it ends more than eleven years sooner. What it asks in return is real: about ~$825 a month during the senior year and the years right after it, when the household may also be paying a student's own loan, and it asks for money during the four years the family is already paying for college.
+The fast road costs less than a third of the slow road's interest, ~$34,100 against ~$114,400, and it ends more than eleven years sooner. What it asks in return is real: about ~$826 a month during the senior year and the years right after it, when the household may also be paying a student's own loan, and it asks for money during the four years the family is already paying for college.
 
 ## What happens if you neither defer nor prepay
 
