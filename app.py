@@ -3567,6 +3567,48 @@ AI_EXPOSURE_BY_SOC_GROUP = {
            "rationale": "Not covered in detail by the civilian occupational-exposure research this feature is based on."},
 }
 
+# EXPOSURE IS NOT HARM, AND THE GAP HAS BEEN MEASURED. This module used to end
+# each Medium/High band with a "lower-exposure alternative", which is the one
+# thing in it that behaved like advice, and it rested on treating a higher
+# exposure score as a worse outcome. Manning and Aguirre (NBER w34705, 2026)
+# pair THIS SAME Eloundou measure with an index of how well workers could
+# absorb a job loss (savings, age, local labor market density, skill
+# transferability) and find the two POSITIVELY correlated: the most exposed
+# occupations are, on average, held by the people best placed to move.
+#
+# So the steering was pointed at the group least likely to need it, and the
+# concentrated vulnerability their paper finds is somewhere this app does not
+# score at all. Their Table 7 is a complete list of ten occupations, and EIGHT
+# OF THE TEN ARE ENTERED WITH A HIGH SCHOOL DIPLOMA OR NO CREDENTIAL -- which
+# puts them on the counterfactual side of every comparison this app makes,
+# not on the degree side. The two that need a bachelor's are 113,000 workers
+# of 6.1 million.
+#
+# The alternative-major suggestion was deleted for that reason and this note
+# replaces it. It states both halves deliberately: the reassuring one alone
+# reads as a reason to stop worrying, and the alarming one alone reads as a
+# reason to avoid a field. check_ai_exposure.py rejects a version carrying
+# only one.
+AI_EXPOSURE_CAPACITY_NOTE = (
+    "**Exposure is not the same as risk.** Manning and Aguirre (NBER working "
+    "paper 34705, 2026) pair this same exposure measure with an index of how "
+    "well workers could absorb a job loss, built from savings, age, local "
+    "labor market density and how transferable their skills are. The two turn "
+    "out to be positively correlated: of the 37.1 million workers in the most "
+    "exposed quarter of occupations, 26.5 million are also above the median "
+    "for capacity to move. A high band here says a large share of the job's "
+    "tasks overlap with what AI tools do. It does not say the person doing it "
+    "is poorly placed, and on average it says the opposite.\n\n"
+    "**The concentrated vulnerability is mostly not in degree work.** The same "
+    "paper finds 6.1 million workers who are both highly exposed and least "
+    "able to move, and names them: ten occupations, of which eight are entered "
+    "with a high school diploma or no credential at all. The two that need a "
+    "bachelor's degree are 113,000 workers of the 6.1 million. That group "
+    "therefore sits mostly on the other side of this tool's comparison, among "
+    "the high school graduates every path here is measured against, rather "
+    "than among the degrees it prices."
+)
+
 
 @st.cache_data(show_spinner=False)
 def careers_for_major(soc_group: str, csv_path: str, limit: int = 6) -> list:
@@ -5168,22 +5210,6 @@ def get_ai_exposure_for_major(major_name: str) -> dict:
         "label": "Unclassified", "risk_level": "Unknown", "score": None,
         "rationale": "This major/career isn't mapped to a BLS occupation group in this dataset.",
     })
-
-
-def get_lower_risk_alternative_major(major_name: str) -> str:
-    """For a Medium/High AI-exposure major, the closest-starting-salary major
-    in the currently loaded MAJOR_DATA whose SOC major group is Low risk --
-    or None if the dataset has no Low-risk alternative, rather than
-    inventing a plausible-sounding one that isn't actually in the data."""
-    current_salary = MAJOR_DATA[major_name].get("starting_salary", 0)
-    candidates = [
-        (name, data) for name, data in MAJOR_DATA.items()
-        if name != major_name
-        and AI_EXPOSURE_BY_SOC_GROUP.get(data.get("soc_major_group"), {}).get("risk_level") == "Low"
-    ]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda item: abs(item[1].get("starting_salary", 0) - current_salary))[0]
 
 
 # ---- 2b. Usage / Survey Logging (Supabase) -------------------------------
@@ -16445,6 +16471,14 @@ def _pdf_module_sections(module_context: dict, scenario_a: dict = None, major_na
         elements += [
             PageBreak(), Paragraph("AI Employability Risk Analysis", styles["section"]),
             _pdf_table(rows),
+        ]
+        # The chart-twin rule in prose: the screen carries the capacity note
+        # under the bands and the report printed the band alone, which is the
+        # half that reads as a warning. reportlab has no markdown, so the
+        # bold markers come out and each paragraph is its own flowable.
+        elements += [
+            Paragraph(xml_escape(para.replace("**", "")), styles["caption"])
+            for para in AI_EXPOSURE_CAPACITY_NOTE.split("\n\n")
         ]
     return elements
 
@@ -28785,7 +28819,9 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
         "Modeled at the occupation-group level from published AI-exposure "
         "research (Felten, Raj & Seamans; Eloundou et al. 2023), not a "
         "personalized prediction -- \"exposure\" measures task overlap with "
-        "current AI tools, not certainty of job loss. See Methodology."
+        "current AI tools, not certainty of job loss, and the note below the "
+        "bands says what the difference has been measured to be. "
+        "See Methodology."
     )
     if dataset_mode == DATASET_MODE_MAJOR:
         st.caption(
@@ -28804,12 +28840,6 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
             info["risk_level"],
         )
         st.caption(info["rationale"])
-        if info["risk_level"] in ("Medium", "High"):
-            alt = get_lower_risk_alternative_major(name)
-            st.info(
-                f"Lower-exposure alternative in this dataset: **{alt}**" if alt
-                else "No clear lower-exposure alternative found in the current dataset."
-            )
         return info["risk_level"]
 
     if major_name_b:
@@ -28820,8 +28850,13 @@ def render_ai_risk_section(major_name: str, major_name_b: str = None) -> dict:
         with col_b:
             st.caption("Scenario B")
             risk_b = _render_one(major_name_b)
+        # ONCE, below the columns. It is a fact about the measure rather than
+        # about either scenario, and printing it twice in Compare Mode's narrow
+        # columns would bury the bands it exists to qualify.
+        st.markdown(AI_EXPOSURE_CAPACITY_NOTE)
         return {"ai_mode_active": True, "scenario_a_ai_risk_level": risk_a, "scenario_b_ai_risk_level": risk_b}
     risk_a = _render_one(major_name)
+    st.markdown(AI_EXPOSURE_CAPACITY_NOTE)
     return {"ai_mode_active": True, "scenario_a_ai_risk_level": risk_a}
 
 
@@ -31247,9 +31282,27 @@ real cost of a degree and leaving them out flatters every path.
   unique number per major, to avoid implying false precision. **Important:
   "exposure" measures task overlap with current AI tools, not a prediction
   that a job will disappear.** High exposure often means parts of a job get
-  AI-assisted, not that the whole job is automated. Any "lower-exposure
-  alternative" suggested is picked from majors already in this app's own
-  dataset by closest starting salary, never invented. In **Career mode** each
+  AI-assisted, not that the whole job is automated.
+
+  **Exposure is also not the same as risk, and that gap has now been
+  measured.** Until September 2026 this module ended every Medium and High
+  band with a "lower-exposure alternative", a major from its own dataset at a
+  similar starting salary. That suggestion has been removed. Manning and
+  Aguirre ([NBER Working Paper
+  34705](https://www.nber.org/papers/w34705), 2026) pair the same Eloundou
+  measure used here with an index of how well workers could absorb a job
+  loss, built from savings, age, local labor market density and skill
+  transferability, and find the two positively correlated: of the 37.1
+  million workers in the most exposed quarter of occupations, 26.5 million
+  are also above the median for capacity to move. The suggestion was
+  therefore pointed at the group least likely to need it. The 6.1 million
+  workers who are both highly exposed and least able to move are ten
+  occupations, eight of them entered with a high school diploma or no
+  credential, which places them among the high school graduates this whole
+  tool measures a degree against rather than among the degrees it prices.
+  The note printed under the bands says both halves of that.
+
+  In **Career mode** each
   occupation has its own SOC group directly. In **Major mode**, a major isn't an
   occupation, so each major is mapped to the occupation group it most commonly
   leads to (e.g. Accounting → Business & Financial Operations, Mechanical
