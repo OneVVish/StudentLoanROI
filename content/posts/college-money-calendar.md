@@ -57,7 +57,7 @@ One rule for this day: [the private loan that fills a gap is worse money](/guide
 
 Federal student loan rules turn over on July 1. The interest rate for the coming year applies to loans disbursed from that day. The borrowing caps above have applied to new loans since July 1, 2026, the same day the Repayment Assistance Plan became the income-driven plan for new borrowers and Grad PLUS ended. [What RAP charges, and what the plans it replaced charged](/guides/repayment-plans-2026-what-changed), is a guide of its own.
 
-July 1 matters twice more. Families whose Parent PLUS loan was first disbursed before July 1, 2026 keep the old borrowing rules for up to three more academic years for that student, so which side of the date a loan fell on decides whether the caps apply at all. And on July 1, 2028, the PAYE and ICR plans close; borrowers still on them have to have chosen another plan by then. [The plan-switching guide](/guides/switching-repayment-plans-2026) covers what carries across and what does not.
+July 1 matters twice more. Families whose student was enrolled on June 30, 2026 and already had a Direct loan for that same program, in a parent's name or the student's own, keep the old borrowing rules for the lesser of three more academic years or what is left of the program, so which side of the date a loan fell on decides whether the caps apply at all. And on July 1, 2028, the PAYE and ICR plans close; borrowers still on them have to have chosen another plan by then. [The plan-switching guide](/guides/switching-repayment-plans-2026) covers what carries across and what does not.
 
 ## September 30, 2026: the auto pay rate cut
 
