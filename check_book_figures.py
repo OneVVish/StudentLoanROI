@@ -371,6 +371,7 @@ POLICE = "Police and Sheriff's Patrol Officers"
 ASSOC, BACH = "Associate's degree", "Bachelor's degree"
 CH03 = "ch03-what-the-formula-expects.md"
 CH13 = "ch13-long-roads.md"
+CH11 = "ch11-major-or-career.md"
 CH14 = "ch14-short-roads.md"
 CH17 = "ch17-ride-or-pay.md"
 FIX = "families.md"
@@ -537,8 +538,11 @@ FIGURES = [
     # rather than exempted; the pass costs about 1.3 seconds.
     Fig("ch14-associate-median-breakeven",
         lambda ns: level_medians(ASSOC)["breakeven"],
-        "~$102,200", [FIX, CH14], exact="$102,172.86",
-        note="median over the 44 of 48 that have a break-even at all"),
+        "~$102,200", [FIX, CH14, CH11], exact="$102,172.86",
+        note="median over the 44 of 48 that have a break-even at all. CH11 was "
+             "added 2026-09-10 when chapter 11 began setting this figure beside "
+             "Theo's three majors: a figure quoted in a second chapter is a "
+             "second place for it to go stale."),
     Fig("ch14-bachelor-median-breakeven",
         lambda ns: level_medians(BACH)["breakeven"],
         "~$190,700", [FIX, CH14], exact="$190,658.57",
