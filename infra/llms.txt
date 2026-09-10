@@ -269,8 +269,9 @@ anywhere with attribution. One page, so each is addressed by fragment.
   Every business degree tiered by early-career pay and by the share of
   graduates working in jobs that do not require the degree.
 - [College majors, ranked by the job market](https://worthmydegree.com/charts#majors-tier-list):
-  A tier list of college majors built from early-career pay,
-  unemployment and underemployment rather than reputation.
+  All 73 majors the New York Fed publishes, tiered by unemployment
+  plus the share of graduates working in jobs that do not need the
+  degree. Pay is shown on every tile and decides nothing.
 - [The federal cap is doing the flattening](https://worthmydegree.com/charts#student-vs-parent-debt):
   Median federal debt at graduation by field, students against
   parents, showing how the Parent PLUS cap compresses what a family
