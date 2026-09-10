@@ -24,7 +24,7 @@ The federal government lends in two names, the student's and the parents', and b
 
 Grad PLUS, the loan that used to cover graduate study up to the full cost, ended on July 1, 2026. Parent PLUS used to have no ceiling at all. [At three colleges in four that grant a bachelor's, four years costs more than $92,000](/guides/where-the-federal-money-runs-out), and whatever sits above the ceiling is private money: a credit check, a co-signer, a market rate, and none of the protections below. [The school search](/?tool=schools&from=guide) prices every college at the rate a family would actually pay, in-state or out, against those ceilings.
 
-Two things the cap is not. It is not $20,000 a year for four years: $65,000 spread evenly is $16,250 a year, and [borrowing $20,000 for three years leaves $5,000 for the senior year](/guides/parent-plus-senior-year). And it is not softened by the legacy rule that lets families already holding a Parent PLUS loan from before July 1, 2026 keep borrowing under the old terms for a while. A family borrowing for the first time in the fall of 2027 has no such loan.
+Two things the cap is not. It is not $20,000 a year for four years: $65,000 spread evenly is $16,250 a year, and [borrowing $20,000 for three years leaves $5,000 for the senior year](/guides/parent-plus-senior-year). And it is not softened by the legacy rule that lets some families keep borrowing under the old terms for a while. That rule needs a student who was enrolled on June 30, 2026 and already had a Direct loan for that program, in a parent's name or their own. A family borrowing for the first time in the fall of 2027 has neither.
 
 ## How the student's loan is repaid
 
