@@ -563,6 +563,28 @@ def load_bls_careers(csv_path: str) -> dict:
             # occupation had no match, so this never crashes on an
             # older/unregenerated CSV. See SUB_BACHELORS_EDUCATION_LEVELS.
             "typical_education": getattr(row, "typical_education", "") or "",
+            # How many people hold this job, NATIONALLY and always nationally.
+            # data_pipeline has always written tot_emp and app.py never read
+            # it, so until 2026-09-09 an occupation with 220 people in it and
+            # one with 4.3 million were presented identically: same break-even,
+            # same crossover age, nothing on the page distinguishing them.
+            #
+            # THE NAME CARRIES "national" ON PURPOSE. The metro and state
+            # overlays in build_major_data replace the wage pair and the
+            # percentiles and nothing else, on the stated principle that
+            # everything else is a property of the occupation rather than of
+            # where it is done. Employment is NOT such a property, so a field
+            # named tot_emp sitting beside a metro median would be read as
+            # metro employment by the next person to touch it. It stays
+            # national, the disclosure says so, and check_field_size asserts
+            # the overlays cannot move it.
+            #
+            # None rather than 0 on an older CSV that predates the column: 0 is
+            # a real answer meaning nobody does this job, and no occupation in
+            # the file has it.
+            "national_employment": (int(row.tot_emp)
+                                    if getattr(row, "tot_emp", None) == getattr(row, "tot_emp", None)
+                                    and getattr(row, "tot_emp", None) is not None else None),
         }
         for row in careers_df.itertuples()
     }
@@ -1225,6 +1247,68 @@ def underemployment_disclosure(major_name: str = None, for_pdf: bool = False) ->
     if not for_pdf:
         base += f" Switch {bold('Choose by')} to {ital('Major')} for figures that include them."
     return base
+
+
+def field_size_counted() -> int:
+    """How many loaded occupations carry a national employment figure.
+
+    NOT len(MAJOR_DATA). The eleven curated entries are synthetic aggregates
+    with no OEWS row, so the dropdown holds 836 and 825 have a count. Quoting
+    836 beside a median taken over 825 is a denominator that describes a
+    different set from the statistic beside it.
+    """
+    return sum(1 for v in MAJOR_DATA.values() if v.get("national_employment"))
+
+
+def field_size_median() -> int:
+    """Median national employment across the occupations currently loaded.
+
+    Derived, never typed, so it cannot go stale against an OEWS release. 0
+    when nothing in MAJOR_DATA carries a count, which is Major mode.
+    """
+    counts = sorted(v["national_employment"] for v in MAJOR_DATA.values()
+                    if v.get("national_employment"))
+    if not counts:
+        return 0
+    mid = len(counts) // 2
+    return counts[mid] if len(counts) % 2 else (counts[mid - 1] + counts[mid]) // 2
+
+
+def field_size_disclosure(major_name: str, for_pdf: bool = False) -> str:
+    """How many people hold this job, against the median occupation.
+
+    WHY IT IS A COUNT AND NOT A FLAG. Size and pay are close to unrelated
+    across this dataset, so this is genuinely new information rather than a
+    proxy for the wage. But 38% of the dropdown employs under 25,000 people
+    nationally, and the calculator will state a break-even of ~$723,100 for
+    prosthodontists (870 nationally) in the same shape it states one for
+    registered nurses (3.3 million). A threshold would make that a judgment;
+    a number leaves it a fact, which is the line every other disclosure here
+    holds.
+
+    NO VERDICT, NO THRESHOLD, NO COMPARISON WORD. It names two figures and
+    stops. check_field_size.py rejects a version that ranks, warns or advises,
+    for the same reason the AI module's steering was deleted: the moment this
+    says "small" it is telling a seventeen-year-old what to want.
+
+    Returns "" for Major mode and for the curated entries, which are not OEWS
+    occupations and have no count. A missing sentence, never a broken page.
+    """
+    count = (MAJOR_DATA.get(major_name) or {}).get("national_employment")
+    if not count:
+        return ""
+    median = field_size_median()
+    if not median:
+        return ""
+    bold = (lambda t: f"<b>{t}</b>") if for_pdf else (lambda t: f"**{t}**")
+    return (
+        f"BLS counts {bold(f'{count:,}')} people in this occupation nationally, against a "
+        f"median of about {bold(f'{median:,}')} across the {field_size_counted():,} occupations in "
+        f"this tool. It moves nothing above it. It is here because a break-even is a claim "
+        f"about one job, and how many of that job exist does not otherwise appear on this "
+        f"page. Employment is the national count even where the wages above are metro or "
+        f"state figures."
+    )
 
 
 # What the evidence says about earning a bachelor's AT a community college
@@ -15169,7 +15253,8 @@ def _pdf_major_careers_section(underemployment_majors: list, styles: dict) -> li
 
 def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt: bool = False,
                           underemployment_majors: list = None,
-                          uses_community_college: bool = False) -> list:
+                          uses_community_college: bool = False,
+                          career_occupations: list = None) -> list:
     """A "where these numbers come from" section, closing every report.
 
     The app's on-screen Methodology section already carries this, and the
@@ -15259,6 +15344,24 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
             disclosure_paras.append(Paragraph(prefix + text, styles["body"]))
     else:
         disclosure_paras = [Paragraph(underemployment_disclosure(None, for_pdf=True), styles["body"])]
+
+    # Field size, Career mode only, so it rides its OWN list rather than
+    # underemployment_majors: that one is None in Career mode and populated in
+    # Major mode, which is exactly the opposite of when this has a number. Same
+    # (label, name) shape and the same dedupe, so a compare report with one
+    # occupation prints one paragraph.
+    if career_occupations:
+        seen = set()
+        distinct = len({name for _, name in career_occupations})
+        for label, name in career_occupations:
+            if name in seen:
+                continue
+            seen.add(name)
+            text = field_size_disclosure(name, for_pdf=True)
+            if not text:
+                continue
+            prefix = f"<b>{xml_escape(label)}:</b> " if label and distinct > 1 else ""
+            disclosure_paras.append(Paragraph(prefix + text, styles["body"]))
 
     # PDF twin of the on-screen "Careers this major commonly leads to" section
     # (render_major_careers). Major mode only -- built from the same
@@ -16821,6 +16924,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
                                 or MAJOR_DATA.get(major, {}).get("unpaid_training_years")),
         underemployment_majors=([(None, major)] if dataset_mode == DATASET_MODE_MAJOR else None),
         uses_community_college=bool(cc_info_a),
+        career_occupations=(None if dataset_mode == DATASET_MODE_MAJOR else [(None, major)]),
     )
 
     buffer = io.BytesIO()
@@ -17580,6 +17684,10 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
         underemployment_majors=(
             [("Scenario A", major), ("Scenario B", major_b)]
             if dataset_mode == DATASET_MODE_MAJOR else None
+        ),
+        career_occupations=(
+            None if dataset_mode == DATASET_MODE_MAJOR
+            else [("Scenario A", major), ("Scenario B", major_b)]
         ),
         uses_community_college=bool(cc_info_a) or bool(cc_info_b),
     )
@@ -28759,6 +28867,13 @@ def render_scenario_panel(column, scenario: dict, label: str, roi_window_years: 
             # choice -- and the narrow column is where a list helps most.
             st.markdown(render_breakeven_points(breakeven.get("points") or []))
             st.caption(breakeven["detail"].replace("$", r"\$"))
+            # Directly under the break-even, which is the claim it qualifies.
+            # Per-occupation, so A and B carry different numbers and each
+            # column needs its own -- the same reason Major mode's
+            # underemployment rate renders here rather than below.
+            _field_size = field_size_disclosure(scenario["major"])
+            if _field_size:
+                st.caption(_field_size)
 
         # Major mode's underemployment rate is per-major, so A and B carry
         # genuinely different numbers and each column needs its own. Career
@@ -29526,6 +29641,14 @@ else:
                 + render_breakeven_points(breakeven.get("points") or [])
                 + f"\n\n{breakeven['detail']}".replace("$", r"\$")
             )
+            # Outside the box, under it: the box is the verdict and this is a
+            # fact about the option rather than part of it. render_scenario_
+            # panel carries the twin for Compare Mode, which is the only
+            # branch that calls it -- a disclosure in one arm and not the
+            # other is an H2 confound.
+            _field_size = field_size_disclosure(major)
+            if _field_size:
+                st.caption(_field_size)
 
     # Sits directly under the position/premium numbers on purpose: this is the
     # assumption those numbers rest on, and it belongs beside them rather than
