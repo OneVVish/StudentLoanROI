@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="926" viewBox="0 0 900 926" role="img">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #14161a; }
+  .h  { font-size: 34px; font-weight: 700; }
+  .sub{ font-size: 26px; fill: #5c636d; }
+  .lab{ font-size: 27px; }
+  .num{ font-size: 29px; font-weight: 700; }
+  .ax { font-size: 26px; fill: #5c636d; }
+  .key{ font-size: 26px; }
+</style>
+<rect width="900" height="926" fill="#ffffff"/>
+<text class="h" x="40.0" y="52.0">What each career can carry</text>
+<text class="sub" x="40.0" y="96.0">The loan at which ten years of the job equals not going</text>
+<text class="sub" x="40.0" y="132.0">at all. National wages, 6.5%, the ten-year plan.</text>
+<line x1="497.6" y1="188" x2="497.6" y2="718" stroke="#5c636d" stroke-width="3" stroke-dasharray="8 7"/>
+<text class="ax" x="485.6" y="182.0" text-anchor="end">student $27,000</text>
+<line x1="674.8" y1="224" x2="674.8" y2="718" stroke="#eb6834" stroke-width="3" stroke-dasharray="8 7"/>
+<text class="ax" x="662.8" y="218.0" text-anchor="end">family $92,000</text>
+<text class="lab" x="402.0" y="281.0" text-anchor="end">Software Developers</text>
+<rect x="424" y="244" width="326.0" height="56" fill="#2a78d6"/>
+<path d="M750.0 244 L772.0 272.0 L750.0 300 Z" fill="#2a78d6"/>
+<text class="num" x="732.0" y="282.0" text-anchor="end" fill="#ffffff">$456,558</text>
+<text class="lab" x="402.0" y="363.0" text-anchor="end">Registered Nurses</text>
+<rect x="424" y="326" width="326.0" height="56" fill="#2a78d6"/>
+<path d="M750.0 326 L772.0 354.0 L750.0 382 Z" fill="#2a78d6"/>
+<text class="num" x="732.0" y="364.0" text-anchor="end" fill="#ffffff">$231,979</text>
+<text class="lab" x="402.0" y="445.0" text-anchor="end">Lawyers</text>
+<rect x="424" y="408" width="275.8" height="56" fill="#2a78d6"/>
+<text class="num" x="717.8" y="446.0">$101,181</text>
+<text class="lab" x="402.0" y="527.0" text-anchor="end">Elementary School Teachers</text>
+<rect x="424" y="490" width="85.6" height="56" fill="#12335c"/>
+<text class="num" x="527.6" y="528.0">$31,387</text>
+<text class="lab" x="402.0" y="609.0" text-anchor="end">Kindergarten Teachers</text>
+<rect x="424" y="572" width="11.0" height="56" fill="#12335c"/>
+<text class="num" x="453.0" y="610.0">$4,044</text>
+<text class="lab" x="402.0" y="691.0" text-anchor="end">Dentists</text>
+<text class="lab" x="432.0" y="692.0" fill="#eb6834">never, at any loan</text>
+<line x1="40" y1="776" x2="860" y2="776" stroke="#dfe3e8" stroke-width="2"/>
+<text class="lab" x="40.0" y="828.0">A bar short of the student line cannot carry</text>
+<text class="lab" x="40.0" y="866.0">even the loan in the student's own name.</text>
+</svg>

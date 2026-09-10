@@ -64,7 +64,40 @@ def load_app():
         sys.exit("app.py's section 3 banner moved; this reads the prefix above it.")
     ns = {"__name__": "app_prefix"}
     exec(compile(src[:m.start()], str(REPO / "app.py"), "exec"), ns)
+    # Section 2m, the existing-balance repayment comparison, physically sits
+    # BELOW the section 3 banner even though its banner says 2m, so the prefix
+    # cannot reach it. Every repayment guard carries this same AST pass.
+    import ast
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.FunctionDef) and node.name not in ns:
+            exec(compile(ast.Module(body=[node], type_ignores=[]), "app.py", "exec"), ns)
     return ns
+
+
+_MODEL = {}
+
+
+def load_model():
+    """MAJOR_DATA and the rest, through the layer analyze_model already builds.
+
+    Section 4 is where MAJOR_DATA is assembled from load_bls_careers and the
+    curated entries, and section 4 needs a sidebar. analyze_model.py exists to
+    rebuild it without one, and check_book_figures.py already reads the book's
+    money through it, so a figure and a fixture cannot disagree about which
+    model they are drawn from.
+    """
+    if not _MODEL:
+        sys.path.insert(0, str(REPO))
+        import analyze_model
+        _MODEL["ns"] = analyze_model.load_model_layer()
+    return _MODEL["ns"]
+
+
+def find_title(ns, needle):
+    hits = [t for t in ns["MAJOR_DATA"] if needle.lower() in t.lower()]
+    if not hits:
+        sys.exit(f"no occupation matching {needle!r}; the careers file moved.")
+    return sorted(hits, key=len)[0]
 
 
 # Average advance per character at each class size, measured off the rendered
@@ -79,9 +112,13 @@ CHAR_W = {"h": 20.0, "sub": 13.5, "lab": 14.0, "num": 17.0, "ax": 13.5, "key": 1
 def text(cls, x, y, s, anchor="start", fill=None, budget=None):
     """One text element, refusing to emit a line that cannot fit the canvas."""
     width = len(str(s)) * CHAR_W[cls]
-    room = budget if budget is not None else (
-        x - 20 if anchor == "end" else W - x - 20 if anchor == "start"
-        else 2 * min(x - 20, W - x - 20))
+    canvas = (x - 20 if anchor == "end" else W - x - 20 if anchor == "start"
+              else 2 * min(x - 20, W - x - 20))
+    # AN EXPLICIT BUDGET NARROWS, IT NEVER WIDENS. A caller passing a budget
+    # bigger than the room actually on the canvas turns this check off, which
+    # is how "$456,558" ran off the right edge and how two legend items
+    # overlapped: both passed, both were wrong. min() makes that unreachable.
+    room = min(budget, canvas) if budget is not None else canvas
     if width > room:
         sys.exit(f"a {cls} line needs about {width:.0f} units and has {room:.0f}: "
                  f"{s!r}. Cut the copy rather than shrinking the type; an "
@@ -111,7 +148,15 @@ def write(name, height, body, note=None):
         ET.fromstring(out)
     except ET.ParseError as exc:
         sys.exit(f"{name}: refusing to write invalid SVG: {exc}")
+    # THE HEIGHT IS IN THE FILENAME, so changing a figure's height leaves the
+    # old file beside the new one. That is not merely untidy: it is how a
+    # screenshot of the PREVIOUS version gets checked and passed, which
+    # happened once during this work. Sweep the figure's own stale siblings.
     path = OUT_DIR / f"book-{name}-{W}x{height}.svg"
+    for stale in OUT_DIR.glob(f"book-{name}-{W}x*.svg"):
+        if stale != path:
+            stale.unlink()
+            print(f"  swept {stale.name}")
     path.write_text(out)
     print(f"  wrote {path.name}  ({path.stat().st_size:,} bytes)")
     if note:
@@ -369,10 +414,435 @@ def fig_in_state(ns):
                  f"private {money(pm)} over {len(pub):,} publics")
 
 
+# ---------------------------------------------------------------- Ch. 10
+
+ROI_RATE, ROI_STRATEGY = 6.5, "Standard 10-Year"   # check_book_figures.py's own
+BREAKEVEN_CAREERS = ["Dentists, General", "Software Developers", "Lawyers",
+                     "Registered Nurses", "Elementary School Teachers",
+                     "Kindergarten Teachers"]
+
+
+def fig_break_even(ns):
+    """How much debt each career can carry, against what the law will lend.
+
+    The break-even is the loan at which ten years of this career equals ten
+    years of a debt-free high school graduate. Below the line the degree
+    pays for itself inside the window; above it, it does not.
+
+    THE TWO RULES ARE THE POINT. $27,000 is everything a dependent
+    undergraduate may borrow in their own name and $92,000 is that plus the
+    parents' $65,000, so a career whose bar stops short of the first rule
+    cannot carry even the student's own federal loan.
+    """
+    mns = load_model()
+    import analyze_model as am
+    rows = []
+    for needle in BREAKEVEN_CAREERS:
+        title = find_title(mns, needle)
+        # THROUGH analyze_model's WRAPPER, NOT app.py's OWN FUNCTION. The
+        # wrapper assembles hs_wage_index, enrollment_years, working_years
+        # and baseline_start_age together, which is the whole reason it
+        # exists: CLAUDE.md records that omitting any one of them silently
+        # compares against a different baseline. Called directly with a
+        # hand-written argument list, every one of these six came back
+        # "beyond_search_max", still ahead on a $1,000,000 loan, which is
+        # what that failure looks like. check_book_figures.py reproduces the
+        # book's own break-evens through this same call.
+        r = am.find_breakeven_loan(mns, title, ROI_RATE, ROI_STRATEGY)
+        rows.append((title, r["breakeven_loan"], r["premium_at_zero_debt"]))
+    # A career that never breaks even has no bar and must not be dropped:
+    # "no loan is small enough" is the chapter's sharpest row, and leaving it
+    # out would make the picture a survey of the ones that work.
+    rows.sort(key=lambda x: (x[1] is None, -(x[1] or 0)))
+    student = mns["FEDERAL_DIRECT_AGGREGATE_CAP"]["dependent"] - 4000  # see note
+    student = sum(mns["FEDERAL_DIRECT_ANNUAL_LIMITS"]["dependent"].values())
+    family = student + mns["PARENT_PLUS_AGGREGATE_LIMIT"]
+
+    PAD_L, TOP, BAR_H, GAP = 424, 244, 56, 26
+    # THE AXIS IS THE LAW, NOT THE LARGEST BAR. Break-evens here run $4,044 to
+    # $456,558, a range of 113 times, and drawn to the largest the two federal
+    # rules land almost on the origin: the question this figure exists to ask,
+    # can this career carry what the government will lend, becomes unreadable.
+    # So the axis stops just past the family maximum and a bar that runs past
+    # it is cut with an arrow and its own figure. The alternative, a log axis,
+    # asks a reader to do arithmetic in their head to compare two bars.
+    xmax = family * 1.30
+    height = TOP + len(rows) * (BAR_H + GAP) + 190
+
+    def X(v):
+        return PAD_L + (W - PAD_L - 150) * min(v, xmax) / xmax
+
+    b = [text("h", 40, 52, "What each career can carry"),
+         text("sub", 40, 96, "The loan at which ten years of the job equals not going"),
+         text("sub", 40, 132, "at all. National wages, 6.5%, the ten-year plan.")]
+    bottom = TOP + len(rows) * (BAR_H + GAP) - GAP + 8
+    # Staggered, because at this scale the two rules are 65 units apart and
+    # their labels are wider than that. The first draft printed them on one
+    # line and they overlapped each other AND the deck.
+    for v, label, colour, lift in ((student, f"student {money(student)}", MUTED, 62),
+                                   (family, f"family {money(family)}", COST, 26)):
+        b.append(f'<line x1="{X(v):.1f}" y1="{TOP - lift + 6}" x2="{X(v):.1f}" '
+                 f'y2="{bottom}" stroke="{colour}" stroke-width="3" '
+                 f'stroke-dasharray="8 7"/>')
+        b.append(text("ax", X(v) - 12, TOP - lift, label, anchor="end",
+                      budget=X(v) - 60))
+    for i, (title, v, prem) in enumerate(rows):
+        y = TOP + i * (BAR_H + GAP)
+        short = title.split(",")[0]
+        b.append(text("lab", PAD_L - 22, y + BAR_H / 2 + 9, short, anchor="end",
+                      budget=PAD_L - 56))
+        if v is None:
+            b.append(text("lab", PAD_L + 8, y + BAR_H / 2 + 10,
+                          "never, at any loan", fill=COST, budget=W - PAD_L - 60))
+            continue
+        w = max(X(v) - PAD_L, 3)
+        b.append(f'<rect x="{PAD_L}" y="{y}" width="{w:.1f}" height="{BAR_H}" '
+                 f'fill="{GAIN if v >= family else DEEP}"/>')
+        if v > xmax:
+            # THE LABEL GOES INSIDE. A clipped bar already reaches the right
+            # margin, so its figure has nowhere to sit outside it: the first
+            # render ran "$456,558" off the canvas, and it passed the width
+            # check only because an over-generous explicit budget had been
+            # handed to it. An explicit budget must never be wider than the
+            # room actually there.
+            tip = PAD_L + w
+            b.append(f'<path d="M{tip} {y} L{tip + 22} {y + BAR_H / 2} '
+                     f'L{tip} {y + BAR_H} Z" fill="{GAIN}"/>')
+            b.append(f'<text class="num" x="{tip - 18:.1f}" '
+                     f'y="{y + BAR_H / 2 + 10:.1f}" text-anchor="end" '
+                     f'fill="#ffffff">{money(v)}</text>')
+        else:
+            b.append(text("num", PAD_L + w + 18, y + BAR_H / 2 + 10, money(v)))
+    y = TOP + len(rows) * (BAR_H + GAP) + 40
+    b.append(f'<line x1="40" y1="{y}" x2="{W - 40}" y2="{y}" stroke="{RULE}" stroke-width="2"/>')
+    b.append(text("lab", 40, y + 52, "A bar short of the student line cannot carry"))
+    b.append(text("lab", 40, y + 90, "even the loan in the student's own name."))
+    return write("break-even", height, b,
+                 " | ".join(f"{t.split(chr(44))[0]} "
+                            f"{money(v) if v else 'never'}" for t, v, _ in rows))
+
+
+# ---------------------------------------------------------------- Ch. 12
+
+def fig_take_home(ns):
+    """One salary, from gross to what is left after the loan.
+
+    ONE BAR, NOT TWO PIES. app.py made the same move on 2026-08-10 and for
+    the same reason: the loan payment never appeared beside the tax bites it
+    competes with, and a length is comparable where two nested pies are not.
+    The segments come from salary_flow_segments, so this figure and the
+    calculator cannot disagree about what is taken.
+    """
+    gross, payment = 95_000.0, 400.0
+    th = ns["calculate_take_home_pay"](gross, "CA")
+    # salary_flow_segments ALREADY ENDS WITH WHAT IS LEFT. Appending a
+    # remainder row put a duplicate "What is left, $0, 0%" under the real one:
+    # the segments cover the whole salary, which is the invariant the app's
+    # own bar relies on. Read what a function returns before extending it.
+    segs = list(ns["salary_flow_segments"](th, payment))
+    covered = sum(v for _, v, _, _ in segs)
+    if abs(covered - gross) > 1.0:
+        sys.exit(f"the segments cover {money(covered)} of a {money(gross)} "
+                 f"salary; salary_flow_segments changed shape.")
+
+    PAD_L, TOP, BAR_H = 40, 200, 118
+    height = TOP + BAR_H + 96 + len(segs) * 46 + 60
+    b = [text("h", 40, 52, f"Where {money(gross)} goes"),
+         text("sub", 40, 96, "A California salary, and a $400 loan payment"),
+         text("sub", 40, 132, "against the three taxes it competes with")]
+    x = PAD_L
+    for label, v, colour, _ in segs:
+        w = (W - 80) * v / gross
+        b.append(f'<rect x="{x:.1f}" y="{TOP}" width="{w:.1f}" height="{BAR_H}" '
+                 f'fill="{colour}"/>')
+        x += w
+    y = TOP + BAR_H + 76
+    for label, v, colour, _ in segs:
+        b.append(f'<rect x="40" y="{y - 20}" width="26" height="26" fill="{colour}"/>')
+        b.append(text("key", 80, y, label))
+        b.append(text("key", W - 40, y, f"{100 * v / gross:.0f}%", anchor="end",
+                      fill=MUTED, budget=90))
+        b.append(text("key", W - 132, y, money(v), anchor="end", fill=MUTED,
+                      budget=220))
+        y += 46
+    return write("take-home", height, b,
+                 " | ".join(f"{l} {money(v)}" for l, v, _, _ in segs))
+
+
+# ---------------------------------------------------------------- Ch. 8
+
+def fig_interest_only(ns):
+    """A private balance with an interest-only stretch, and without.
+
+    BOTH DIRECTIONS OR IT IS ADVERTISING, which is the rule
+    private_structure_disclosure already holds in the app: the stretch lowers
+    the payment AND raises the total, and a figure showing only the first
+    half is a lender's brochure.
+    """
+    bal, rate, term, stretch = 59_000.0, 11.0, 10, 24
+    plain = ns["calculate_standard_repayment"](bal, rate, term_years=term)
+    # During the stretch only the interest is paid, so the balance is flat and
+    # the amortising term starts later on the same principal.
+    monthly_interest = bal * rate / 100 / 12
+    after = ns["calculate_standard_repayment"](bal, rate, term_years=term)
+    total_plain = plain["monthly_payment"] * term * 12
+    total_stretch = monthly_interest * stretch + after["monthly_payment"] * term * 12
+
+    PAD_L, TOP, BAR_H, GAP = 386, 190, 70, 30
+    rows = [("Pay it as written", plain["monthly_payment"], total_plain, GAIN),
+            (f"{stretch} months interest only", monthly_interest, total_stretch, COST)]
+    height = TOP + len(rows) * (BAR_H + GAP) + 230
+    xmax = max(t for _, _, t, _ in rows) * 1.16
+    b = [text("h", 40, 52, "What an interest-only stretch buys"),
+         text("sub", 40, 96, f"{money(bal)} at {rate}% over {term} years"),
+         text("sub", 40, 132, "The monthly falls and the total rises.")]
+    for i, (label, m, total, colour) in enumerate(rows):
+        y = TOP + i * (BAR_H + GAP)
+        w = (W - PAD_L - 200) * total / xmax
+        b.append(f'<rect x="{PAD_L}" y="{y}" width="{w:.1f}" height="{BAR_H}" fill="{colour}"/>')
+        b.append(text("lab", PAD_L - 22, y + BAR_H / 2 + 9, label, anchor="end",
+                      budget=PAD_L - 56))
+        b.append(text("num", PAD_L + w + 18, y + BAR_H / 2 + 10, money(total), budget=190))
+    y = TOP + len(rows) * (BAR_H + GAP) + 42
+    b.append(f'<line x1="40" y1="{y}" x2="{W - 40}" y2="{y}" stroke="{RULE}" stroke-width="2"/>')
+    b.append(text("lab", 40, y + 52,
+                  f"{money(rows[0][1])} a month becomes {money(rows[1][1])},"))
+    b.append(text("lab", 40, y + 90,
+                  f"and {money(total_stretch - total_plain)} is added to the total."))
+    b.append(text("ax", 40, y + 134, "Bars are what is handed over in all."))
+    return write("interest-only", height, b,
+                 f"plain {money(total_plain)} vs stretch {money(total_stretch)}")
+
+
+# ---------------------------------------------------------------- Ch. 15
+
+def fig_exposure(ns):
+    """Where the exposed work is, by the education its entry needs.
+
+    THE FINDING IS THAT EXPOSURE IS NOT ON THE DEGREE'S SIDE. This book's
+    counterfactual is a debt-free high school graduate, so if the most
+    exposed work sits below a bachelor's then any damage falls on BOTH sides
+    of the comparison, and on the baseline first.
+
+    Exposure here is app.py's own band by SOC major group, which moves no
+    salary anywhere in the model, and the weighting is employment, so the
+    picture is about jobs rather than about occupation titles.
+    """
+    mns = load_model()
+    bands = mns["AI_EXPOSURE_BY_SOC_GROUP"]
+    groups = {"High": COST, "Medium": "#c9b18c", "Low": GAIN}
+    tiers = {"High school diploma or equivalent": "Entry needs no degree",
+             "Bachelor's degree": "Entry needs a bachelor's"}
+    tally = {t: {k: 0.0 for k in groups} for t in tiers.values()}
+    for title, d in mns["MAJOR_DATA"].items():
+        edu = d.get("typical_education")
+        soc = str(d.get("soc_major_group") or "")
+        emp = d.get("national_employment") or 0
+        if edu in tiers and soc in bands and emp:
+            lvl = bands[soc]["risk_level"]
+            if lvl in tally[tiers[edu]]:
+                tally[tiers[edu]][lvl] += float(emp)
+    PAD_L, TOP, BAR_H, GAP = 40, 210, 96, 74
+    height = TOP + len(tally) * (BAR_H + GAP) + 210
+    b = [text("h", 40, 52, "Where the exposed work is"),
+         text("sub", 40, 96, "Employment by the education an entrant needs,"),
+         text("sub", 40, 132, "split by this book's own AI exposure band")]
+    y = TOP
+    for tier, counts in tally.items():
+        total = sum(counts.values()) or 1.0
+        b.append(text("lab", 40, y - 16, f"{tier}, {total / 1e6:,.1f} million jobs"))
+        x = 40
+        for level, colour in groups.items():
+            w = (W - 80) * counts[level] / total
+            b.append(f'<rect x="{x:.1f}" y="{y}" width="{w:.1f}" height="{BAR_H}" '
+                     f'fill="{colour}"/>')
+            if w > 96:
+                b.append(f'<text class="key" x="{x + w / 2:.1f}" y="{y + BAR_H / 2 + 9:.1f}" '
+                         f'text-anchor="middle" fill="#ffffff">{100 * counts[level] / total:.0f}%'
+                         f'</text>')
+            x += w
+        y += BAR_H + GAP
+    # Laid out from the labels rather than on a guessed pitch: "Medium
+    # exposure" is wider than the 224-unit step the first version used, so it
+    # ran into the swatch beside it.
+    lx = 42
+    for level, colour in groups.items():
+        label = f"{level} exposure"
+        b.append(f'<rect x="{lx}" y="{y - 34}" width="26" height="26" fill="{colour}"/>')
+        b.append(text("key", lx + 40, y - 14, label))
+        lx += 40 + len(label) * CHAR_W["key"] + 46
+    b.append(text("lab", 40, y + 52, "The exposure is on both sides of the comparison,"))
+    b.append(text("lab", 40, y + 90, "and the baseline is not the sheltered one."))
+    return write("exposure", height, b,
+                 " | ".join(f"{t}: " + " ".join(f"{k} {v/1e6:.1f}M" for k, v in c.items())
+                            for t, c in tally.items()))
+
+
+# ---------------------------------------------------------------- Ch. 1
+
+def fig_households(ns):
+    """The four households, as the book introduces them."""
+    # CUT TO FIT, which is the rule: an explanatory sentence belongs in the
+    # caption, where it is real text. The first draft ran 918 units into a
+    # 740-unit row and text() refused to write it.
+    cards = [("The Reyes family", "Senior spring. A $31,400 gap, a PLUS letter.",
+              "Ch. 3, 7, 10, 11"),
+             ("The Hall family", "Sophomore year. $59,000 private, at 11%.",
+              "Ch. 8, 15"),
+             ("The Nakamura family", "Junior year. No school, three majors.",
+              "Ch. 4, 11, 14"),
+             ("Dana Whitfield", "Thirty-one. The federal minimum is back.",
+              "Ch. 17, 18")]
+    BOX_H, GAP, TOP = 132, 26, 168
+    height = TOP + len(cards) * (BOX_H + GAP) + 120
+    b = [text("h", 40, 52, "Four households"),
+         text("sub", 40, 96, "Invented families, real numbers, every one from the tool")]
+    for i, (name, line, where) in enumerate(cards):
+        y = TOP + i * (BOX_H + GAP)
+        b.append(f'<rect x="40" y="{y}" width="{W - 80}" height="{BOX_H}" rx="10" '
+                 f'fill="#f7f9fb" stroke="{RULE}" stroke-width="2"/>')
+        b.append(f'<rect x="40" y="{y}" width="8" height="{BOX_H}" rx="4" fill="{DEEP}"/>')
+        b.append(text("lab", 72, y + 46, name))
+        b.append(text("ax", 72, y + 84, line, budget=W - 160))
+        b.append(text("ax", 72, y + 116, where, fill=MUTED, budget=W - 160))
+    b.append(text("ax", 40, height - 48,
+                  "Where a chapter quotes one, the input is on the page."))
+    return write("households", height, b, f"{len(cards)} cards")
+
+
+# ---------------------------------------------------------------- Ch. 9
+
+def fig_the_year(ns):
+    """The college money year, in the order the dates arrive."""
+    stops = [("October 1", "The form opens", "Ch. 3"),
+             ("November", "Binding deadlines land first", "Ch. 4"),
+             ("January", "The numbers underneath reset", "Ch. 3"),
+             ("March, April", "The letter", "Ch. 2"),
+             ("May 1", "The reply date", "Ch. 4"),
+             ("July 1", "The day the rules change", "Ch. 6"),
+             ("September 30", "One form, one point", "Ch. 18"),
+             ("Six months out", "The first payment", "Ch. 17")]
+    TOP, STEP, LX = 176, 78, 300
+    height = TOP + len(stops) * STEP + 130
+    b = [text("h", 40, 52, "The year, in order"),
+         text("sub", 40, 96, "Each date belongs to a chapter that has priced it")]
+    b.append(f'<line x1="{LX}" y1="{TOP - 24}" x2="{LX}" '
+             f'y2="{TOP + (len(stops) - 1) * STEP + 24}" stroke="{RULE}" stroke-width="4"/>')
+    for i, (when, what, ch) in enumerate(stops):
+        y = TOP + i * STEP
+        b.append(f'<circle cx="{LX}" cy="{y}" r="11" fill="{DEEP}"/>')
+        b.append(text("lab", LX - 34, y + 10, when, anchor="end", budget=LX - 70))
+        b.append(text("lab", LX + 34, y + 10, what, budget=W - LX - 160))
+        b.append(text("ax", W - 40, y + 10, ch, anchor="end", fill=MUTED, budget=110))
+    b.append(text("ax", 40, height - 52,
+                  "The order matters more than any single date."))
+    return write("the-year", height, b, f"{len(stops)} stops")
+
+
+# ---------------------------------------------------------------- Ch. 16
+
+def fig_the_order(ns):
+    """The four questions, in the order that makes each one answerable."""
+    steps = [("What will this actually cost us?",
+              "Not the sticker. This family, this school.", "Ch. 3, 4, 5"),
+             ("What is left to borrow, and in whose name?",
+              "$27,000, then $65,000, then a bank.", "Ch. 6, 7, 8"),
+             ("What does the payment look like?",
+              "A monthly figure against a paycheck.", "Ch. 12"),
+             ("Is the whole thing worth it?",
+              "Against not going, over your own horizon.", "Ch. 10, 11")]
+    BOX_H, GAP, TOP = 128, 28, 168
+    height = TOP + len(steps) * (BOX_H + GAP) + 116
+    b = [text("h", 40, 52, "The order to work in"),
+         text("sub", 40, 96, "Each step changes what the next one means")]
+    for i, (q, why, ch) in enumerate(steps):
+        y = TOP + i * (BOX_H + GAP)
+        b.append(f'<rect x="40" y="{y}" width="{W - 80}" height="{BOX_H}" rx="10" '
+                 f'fill="#f7f9fb" stroke="{RULE}" stroke-width="2"/>')
+        b.append(f'<circle cx="86" cy="{y + BOX_H / 2}" r="26" fill="{DEEP}"/>')
+        b.append(f'<text class="num" x="86" y="{y + BOX_H / 2 + 10}" '
+                 f'text-anchor="middle" fill="#ffffff">{i + 1}</text>')
+        b.append(text("lab", 132, y + 50, q, budget=W - 240))
+        b.append(text("ax", 132, y + 88, why, budget=W - 240))
+        b.append(text("ax", W - 68, y + 50, ch, anchor="end", fill=MUTED, budget=150))
+    b.append(text("ax", 40, height - 48,
+                  "Answer them out of order and the answers do not mean much."))
+    return write("the-order", height, b, f"{len(steps)} steps")
+
+
+# ---------------------------------------------------------------- Ch. 18
+
+ROLL_LOANS = [{"balance": 12_000.0, "rate": 12.5},
+              {"balance": 18_000.0, "rate": 9.5},
+              {"balance": 9_000.0,  "rate": 7.0},
+              {"balance": 20_000.0, "rate": 5.5}]
+
+
+def fig_roll_down(ns):
+    """The same budget, with and without rolling a cleared note forward.
+
+    THE BUDGET NEVER SHRINKS, which is the whole mechanism: when a note is
+    paid off its required payment does not go back to the borrower, it goes
+    to the highest-rate note still alive. simulate_fixed_avalanche is what
+    app.py already does this with, so the figure and the repayment tool
+    cannot disagree about the order of attack.
+
+    Drawn as total interest and payoff, because the per-note bands are the
+    chart the app already renders and a book figure has one page.
+    """
+    term, extra = 10, 250.0
+    plain = ns["simulate_fixed_avalanche"](ROLL_LOANS, term)
+    rolled = ns["simulate_fixed_avalanche"](ROLL_LOANS, term,
+                                            extra_payments=((1, extra),))
+    principal = sum(l["balance"] for l in ROLL_LOANS)
+    rows = [("Required payments only", plain, MUTED),
+            (f"Plus {money(extra)}, rolled down", rolled, GAIN)]
+
+    PAD_L, TOP, BAR_H, GAP = 470, 208, 72, 46
+    xmax = max(r["total_interest"] for _, r, _ in rows) * 1.30
+    height = TOP + len(rows) * (BAR_H + GAP) + 250
+    b = [text("h", 40, 52, "What rolling the money down buys"),
+         text("sub", 40, 96, f"Four loans, {money(principal)} in all, "
+                             f"5.5% to 12.5%"),
+         text("sub", 40, 132, "Bars are the interest handed over.")]
+    for i, (label, r, colour) in enumerate(rows):
+        y = TOP + i * (BAR_H + GAP)
+        w = (W - PAD_L - 200) * r["total_interest"] / xmax
+        b.append(f'<rect x="{PAD_L}" y="{y}" width="{max(w, 3):.1f}" '
+                 f'height="{BAR_H}" fill="{colour}"/>')
+        b.append(text("lab", PAD_L - 22, y + BAR_H / 2 + 9, label, anchor="end",
+                      budget=PAD_L - 56))
+        b.append(text("num", PAD_L + w + 18, y + BAR_H / 2 + 10,
+                      money(r["total_interest"])))
+        b.append(text("ax", PAD_L - 22, y + BAR_H / 2 + 42,
+                      f"clear in {r['payoff_years']:.1f} years", anchor="end",
+                      fill=MUTED, budget=PAD_L - 56))
+    y = TOP + len(rows) * (BAR_H + GAP) + 44
+    saved = plain["total_interest"] - rolled["total_interest"]
+    sooner = plain["payoff_years"] - rolled["payoff_years"]
+    b.append(f'<line x1="40" y1="{y}" x2="{W - 40}" y2="{y}" stroke="{RULE}" stroke-width="2"/>')
+    b.append(text("lab", 40, y + 52, f"{money(extra)} a month buys {money(saved)}"))
+    b.append(text("lab", 40, y + 90, f"and {sooner:.1f} years."))
+    b.append(text("ax", 40, y + 136, "The highest rate is attacked first, and a"))
+    b.append(text("ax", 40, y + 172, "cleared note's payment rolls onto the next."))
+    return write("roll-down", height, b,
+                 f"plain {money(plain['total_interest'])} / "
+                 f"{plain['payoff_years']:.1f}y vs rolled "
+                 f"{money(rolled['total_interest'])} / {rolled['payoff_years']:.1f}y")
+
+
 FIGURES = {"three-roads": fig_three_roads,
            "cap-ladder": fig_cap_ladder,
            "extra-dollar": fig_extra_dollar,
-           "in-state": fig_in_state}
+           "in-state": fig_in_state,
+           "break-even": fig_break_even,
+           "take-home": fig_take_home,
+           "interest-only": fig_interest_only,
+           "exposure": fig_exposure,
+           "households": fig_households,
+           "the-year": fig_the_year,
+           "the-order": fig_the_order,
+           "roll-down": fig_roll_down}
 
 
 def main():

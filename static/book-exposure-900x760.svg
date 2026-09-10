@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="760" viewBox="0 0 900 760" role="img">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #14161a; }
+  .h  { font-size: 34px; font-weight: 700; }
+  .sub{ font-size: 26px; fill: #5c636d; }
+  .lab{ font-size: 27px; }
+  .num{ font-size: 29px; font-weight: 700; }
+  .ax { font-size: 26px; fill: #5c636d; }
+  .key{ font-size: 26px; }
+</style>
+<rect width="900" height="760" fill="#ffffff"/>
+<text class="h" x="40.0" y="52.0">Where the exposed work is</text>
+<text class="sub" x="40.0" y="96.0">Employment by the education an entrant needs,</text>
+<text class="sub" x="40.0" y="132.0">split by this book's own AI exposure band</text>
+<text class="lab" x="40.0" y="194.0">Entry needs no degree, 54.7 million jobs</text>
+<rect x="40.0" y="210" width="242.2" height="96" fill="#eb6834"/>
+<text class="key" x="161.1" y="267.0" text-anchor="middle" fill="#ffffff">30%</text>
+<rect x="282.2" y="210" width="95.5" height="96" fill="#c9b18c"/>
+<rect x="377.7" y="210" width="482.3" height="96" fill="#2a78d6"/>
+<text class="key" x="618.9" y="267.0" text-anchor="middle" fill="#ffffff">59%</text>
+<text class="lab" x="40.0" y="364.0">Entry needs a bachelor's, 39.0 million jobs</text>
+<rect x="40.0" y="380" width="213.5" height="96" fill="#eb6834"/>
+<text class="key" x="146.7" y="437.0" text-anchor="middle" fill="#ffffff">26%</text>
+<rect x="253.5" y="380" width="506.0" height="96" fill="#c9b18c"/>
+<text class="key" x="506.5" y="437.0" text-anchor="middle" fill="#ffffff">62%</text>
+<rect x="759.5" y="380" width="100.5" height="96" fill="#2a78d6"/>
+<text class="key" x="809.7" y="437.0" text-anchor="middle" fill="#ffffff">12%</text>
+<rect x="42" y="516" width="26" height="26" fill="#eb6834"/>
+<text class="key" x="82.0" y="536.0">High exposure</text>
+<rect x="303.5" y="516" width="26" height="26" fill="#c9b18c"/>
+<text class="key" x="343.5" y="536.0">Medium exposure</text>
+<rect x="592.0" y="516" width="26" height="26" fill="#2a78d6"/>
+<text class="key" x="632.0" y="536.0">Low exposure</text>
+<text class="lab" x="40.0" y="602.0">The exposure is on both sides of the comparison,</text>
+<text class="lab" x="40.0" y="640.0">and the baseline is not the sheltered one.</text>
+</svg>

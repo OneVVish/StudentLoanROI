@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="920" viewBox="0 0 900 920" role="img">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #14161a; }
+  .h  { font-size: 34px; font-weight: 700; }
+  .sub{ font-size: 26px; fill: #5c636d; }
+  .lab{ font-size: 27px; }
+  .num{ font-size: 29px; font-weight: 700; }
+  .ax { font-size: 26px; fill: #5c636d; }
+  .key{ font-size: 26px; }
+</style>
+<rect width="900" height="920" fill="#ffffff"/>
+<text class="h" x="40.0" y="52.0">Four households</text>
+<text class="sub" x="40.0" y="96.0">Invented families, real numbers, every one from the tool</text>
+<rect x="40" y="168" width="820" height="132" rx="10" fill="#f7f9fb" stroke="#dfe3e8" stroke-width="2"/>
+<rect x="40" y="168" width="8" height="132" rx="4" fill="#12335c"/>
+<text class="lab" x="72.0" y="214.0">The Reyes family</text>
+<text class="ax" x="72.0" y="252.0">Senior spring. A $31,400 gap, a PLUS letter.</text>
+<text class="ax" x="72.0" y="284.0" fill="#5c636d">Ch. 3, 7, 10, 11</text>
+<rect x="40" y="326" width="820" height="132" rx="10" fill="#f7f9fb" stroke="#dfe3e8" stroke-width="2"/>
+<rect x="40" y="326" width="8" height="132" rx="4" fill="#12335c"/>
+<text class="lab" x="72.0" y="372.0">The Hall family</text>
+<text class="ax" x="72.0" y="410.0">Sophomore year. $59,000 private, at 11%.</text>
+<text class="ax" x="72.0" y="442.0" fill="#5c636d">Ch. 8, 15</text>
+<rect x="40" y="484" width="820" height="132" rx="10" fill="#f7f9fb" stroke="#dfe3e8" stroke-width="2"/>
+<rect x="40" y="484" width="8" height="132" rx="4" fill="#12335c"/>
+<text class="lab" x="72.0" y="530.0">The Nakamura family</text>
+<text class="ax" x="72.0" y="568.0">Junior year. No school, three majors.</text>
+<text class="ax" x="72.0" y="600.0" fill="#5c636d">Ch. 4, 11, 14</text>
+<rect x="40" y="642" width="820" height="132" rx="10" fill="#f7f9fb" stroke="#dfe3e8" stroke-width="2"/>
+<rect x="40" y="642" width="8" height="132" rx="4" fill="#12335c"/>
+<text class="lab" x="72.0" y="688.0">Dana Whitfield</text>
+<text class="ax" x="72.0" y="726.0">Thirty-one. The federal minimum is back.</text>
+<text class="ax" x="72.0" y="758.0" fill="#5c636d">Ch. 17, 18</text>
+<text class="ax" x="40.0" y="872.0">Where a chapter quotes one, the input is on the page.</text>
+</svg>
