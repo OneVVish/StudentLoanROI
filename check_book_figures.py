@@ -370,13 +370,67 @@ PRESCHOOL = "Preschool Teachers, Except Special Education"
 POLICE = "Police and Sheriff's Patrol Officers"
 ASSOC, BACH = "Associate's degree", "Bachelor's degree"
 CH03 = "ch03-what-the-formula-expects.md"
+CH04 = "ch04-the-price-you-would-pay.md"
 CH13 = "ch13-long-roads.md"
 CH11 = "ch11-major-or-career.md"
 CH14 = "ch14-short-roads.md"
 CH17 = "ch17-ride-or-pay.md"
 FIX = "families.md"
 
+# ---- The Reyes family against the Forbes twenty, chapter 4. The prices are
+# Scorecard's NPT4x by INCOME BAND, not the NPT4 average the chart draws, and
+# band 5 is $110,001 and up. Read from the raw institution file because the
+# committed CSV keeps the average only; the file is the same release, which is
+# how the debt column was added.
+REYES_AGI, REYES_SIZE = 150_000, 4
+TOP20_IPEDS = [
+    "Massachusetts Institute of Technology", "Princeton University",
+    "Harvard University", "Columbia University in the City of New York",
+    "University of Pennsylvania", "Stanford University",
+    "California Institute of Technology", "Yale University",
+    "University of California-Berkeley", "Vanderbilt University",
+    "Johns Hopkins University", "University of California-Los Angeles",
+    "Duke University", "Cornell University", "Northwestern University",
+    "Rice University", "University of Chicago", "Brown University",
+    "Williams College", "Dartmouth College",
+]
+_BAND5 = {}
+
+
+def _band5(name=None):
+    """Four years at band 5 for one school, or the median across the twenty."""
+    if not _BAND5:
+        # The COMMITTED file, not the 100MB raw download, which is gitignored
+        # and would have failed this guard on CI and on any clone. The bands
+        # are in the cleaned dataset for exactly that reason.
+        import pandas as pd
+        d = pd.read_csv(REPO / "data/college_coa_clean.csv",
+                        usecols=["INSTNM", "net_price_110_plus"])
+        d = d[d.INSTNM.isin(TOP20_IPEDS)]
+        _BAND5.update(dict(zip(d.INSTNM, d.net_price_110_plus * 4)))
+        _BAND5["__median__"] = float(d.net_price_110_plus.median() * 4)
+    return _BAND5["__median__"] if name is None else _BAND5[name]
+
+
+def _reyes_sai(ns):
+    r = ns["compute_student_aid_index"](REYES_AGI, REYES_SIZE, two_parents=True)
+    return r["sai"] if isinstance(r, dict) else r
+
+
 FIGURES = [
+    # ---- Chapter 4's Reyes case against the twenty.
+    Fig("reyes-sai-year", lambda ns: _reyes_sai(ns), "~$25,200", [FIX, CH04], exact="$25,231"),
+    Fig("reyes-sai-four", lambda ns: _reyes_sai(ns) * 4, "~$100,900", [FIX, CH04], exact="$100,924"),
+    Fig("reyes-ucla", lambda ns: _band5("University of California-Los Angeles"),
+        "~$118,700", [FIX, CH04], exact="$118,728"),
+    Fig("reyes-berkeley", lambda ns: _band5("University of California-Berkeley"),
+        "~$138,100", [FIX, CH04], exact="$138,116"),
+    Fig("reyes-princeton", lambda ns: _band5("Princeton University"),
+        "~$144,400", [FIX, CH04], exact="$144,376"),
+    Fig("reyes-top20-median", lambda ns: _band5(),
+        "~$194,600", [FIX, CH04], exact="$194,602"),
+    Fig("reyes-duke", lambda ns: _band5("Duke University"),
+        "~$216,900", [FIX, CH04], exact="$216,920"),
     # ---- The Reyes family's three Parent PLUS roads. Every one of these
     # moved on 2026-09-08 when the published rate replaced the assumption,
     # and chapter 1 was left behind by the first pass.
