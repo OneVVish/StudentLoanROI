@@ -121,6 +121,10 @@ UNPUBLISHED_SCRIPTS = {
     "major_map_chart.py": "its companion, same date and same state. Publish the "
                           "pair together or neither: each one's deck cites the "
                           "other's finding.",
+    "masters_map_chart.py": "the fourth of the same set, built 2026-09-10. The "
+                            "947,602 master's degrees no other panel drew, and the "
+                            "one colored by debt rather than wage: no federal source "
+                            "publishes a wage by field at this level.",
     "professional_map_chart.py": "the third of the same set, same state. The "
                                  "bachelor's map cannot contain a doctor or a "
                                  "lawyer, so this one exists; publish it with "
