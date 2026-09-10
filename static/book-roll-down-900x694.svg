@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="694" viewBox="0 0 900 694" role="img">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #14161a; }
+  .h  { font-size: 34px; font-weight: 700; }
+  .sub{ font-size: 26px; fill: #5c636d; }
+  .lab{ font-size: 27px; }
+  .num{ font-size: 29px; font-weight: 700; }
+  .ax { font-size: 26px; fill: #5c636d; }
+  .key{ font-size: 26px; }
+</style>
+<rect width="900" height="694" fill="#ffffff"/>
+<text class="h" x="40.0" y="52.0">What rolling the money down buys</text>
+<text class="sub" x="40.0" y="96.0">Four loans, $59,000 in all, 5.5% to 12.5%</text>
+<text class="sub" x="40.0" y="132.0">Bars are the interest handed over.</text>
+<rect x="470" y="208" width="176.9" height="72" fill="#5c636d"/>
+<text class="lab" x="448.0" y="253.0" text-anchor="end">Required payments only</text>
+<text class="num" x="664.9" y="254.0">$28,614</text>
+<text class="ax" x="448.0" y="286.0" text-anchor="end" fill="#5c636d">clear in 10.0 years</text>
+<rect x="470" y="326" width="97.0" height="72" fill="#2a78d6"/>
+<text class="lab" x="448.0" y="371.0" text-anchor="end">Plus $250, rolled down</text>
+<text class="num" x="585.0" y="372.0">$15,695</text>
+<text class="ax" x="448.0" y="404.0" text-anchor="end" fill="#5c636d">clear in 6.4 years</text>
+<line x1="40" y1="488" x2="860" y2="488" stroke="#dfe3e8" stroke-width="2"/>
+<text class="lab" x="40.0" y="540.0">$250 a month buys $12,919</text>
+<text class="lab" x="40.0" y="578.0">and 3.6 years.</text>
+<text class="ax" x="40.0" y="624.0">The highest rate is attacked first, and a</text>
+<text class="ax" x="40.0" y="660.0">cleared note's payment rolls onto the next.</text>
+</svg>

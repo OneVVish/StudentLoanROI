@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620" viewBox="0 0 900 620" role="img">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #14161a; }
+  .h  { font-size: 34px; font-weight: 700; }
+  .sub{ font-size: 26px; fill: #5c636d; }
+  .lab{ font-size: 27px; }
+  .num{ font-size: 29px; font-weight: 700; }
+  .ax { font-size: 26px; fill: #5c636d; }
+  .key{ font-size: 26px; }
+</style>
+<rect width="900" height="620" fill="#ffffff"/>
+<text class="h" x="40.0" y="52.0">What an interest-only stretch buys</text>
+<text class="sub" x="40.0" y="96.0">$59,000 at 11.0% over 10 years</text>
+<text class="sub" x="40.0" y="132.0">The monthly falls and the total rises.</text>
+<rect x="386" y="190" width="238.9" height="70" fill="#2a78d6"/>
+<text class="lab" x="364.0" y="234.0" text-anchor="end">Pay it as written</text>
+<text class="num" x="642.9" y="235.0">$97,527</text>
+<rect x="386" y="290" width="270.7" height="70" fill="#eb6834"/>
+<text class="lab" x="364.0" y="334.0" text-anchor="end">24 months interest only</text>
+<text class="num" x="674.7" y="335.0">$110,507</text>
+<line x1="40" y1="432" x2="860" y2="432" stroke="#dfe3e8" stroke-width="2"/>
+<text class="lab" x="40.0" y="484.0">$813 a month becomes $541,</text>
+<text class="lab" x="40.0" y="522.0">and $12,980 is added to the total.</text>
+<text class="ax" x="40.0" y="566.0">Bars are what is handed over in all.</text>
+</svg>
