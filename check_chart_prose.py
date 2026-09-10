@@ -121,6 +121,12 @@ UNPUBLISHED_SCRIPTS = {
     "major_map_chart.py": "its companion, same date and same state. Publish the "
                           "pair together or neither: each one's deck cites the "
                           "other's finding.",
+    "doctorate_map_chart.py": "the fifth and last of the same set, built "
+                              "2026-09-10. Colored on a floor of 10 schools "
+                              "per field, which leaves 42% of it colored: "
+                              "Scorecard's doctoral debt is one school deep "
+                              "in most fields and the suppression rule is "
+                              "not public.",
     "masters_map_chart.py": "the fourth of the same set, built 2026-09-10. The "
                             "947,602 master's degrees no other panel drew, and the "
                             "one colored by debt rather than wage: no federal source "
