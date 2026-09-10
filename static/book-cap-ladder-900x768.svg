@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="768" viewBox="0 0 900 768" role="img">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #14161a; }
+  .h  { font-size: 34px; font-weight: 700; }
+  .sub{ font-size: 26px; fill: #5c636d; }
+  .lab{ font-size: 27px; }
+  .num{ font-size: 29px; font-weight: 700; }
+  .ax { font-size: 26px; fill: #5c636d; }
+  .key{ font-size: 26px; }
+</style>
+<rect width="900" height="768" fill="#ffffff"/>
+<text class="h" x="40.0" y="52.0">The student's four-year ladder</text>
+<text class="sub" x="40.0" y="96.0">What a dependent undergraduate may borrow: $27,000 in all</text>
+<rect x="132.0" y="336.8" width="108" height="131.2" fill="#12335c"/>
+<rect x="132.0" y="261.8" width="108" height="75.0" fill="#2a78d6"/>
+<text class="num" x="186.0" y="245.8" text-anchor="middle">$5,500</text>
+<text class="ax" x="186.0" y="510.0" text-anchor="middle">Year 1</text>
+<rect x="332.0" y="299.2" width="108" height="168.8" fill="#12335c"/>
+<rect x="332.0" y="224.2" width="108" height="75.0" fill="#2a78d6"/>
+<text class="num" x="386.0" y="208.2" text-anchor="middle">$6,500</text>
+<text class="ax" x="386.0" y="510.0" text-anchor="middle">Year 2</text>
+<rect x="532.0" y="261.8" width="108" height="206.2" fill="#12335c"/>
+<rect x="532.0" y="186.8" width="108" height="75.0" fill="#2a78d6"/>
+<text class="num" x="586.0" y="170.8" text-anchor="middle">$7,500</text>
+<text class="ax" x="586.0" y="510.0" text-anchor="middle">Year 3</text>
+<rect x="732.0" y="261.8" width="108" height="206.2" fill="#12335c"/>
+<rect x="732.0" y="186.8" width="108" height="75.0" fill="#2a78d6"/>
+<text class="num" x="786.0" y="170.8" text-anchor="middle">$7,500</text>
+<text class="ax" x="786.0" y="510.0" text-anchor="middle">Year 4</text>
+<rect x="40" y="556" width="26" height="26" fill="#12335c"/>
+<text class="key" x="80.0" y="576.0">Subsidized: no interest while enrolled</text>
+<rect x="40" y="600" width="26" height="26" fill="#2a78d6"/>
+<text class="key" x="80.0" y="620.0">Unsubsidized: interest runs from disbursement</text>
+<line x1="40" y1="670" x2="860" y2="670" stroke="#dfe3e8" stroke-width="2"/>
+<text class="lab" x="40.0" y="718.0">A parent may borrow $65,000 more, at a higher rate.</text>
+</svg>
