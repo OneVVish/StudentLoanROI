@@ -115,6 +115,16 @@ UNPUBLISHED_SCRIPTS = {
     "forgiveness_map_chart.py": "one panel of forgiveness_map_pair.py, never published alone",
     "debt_by_major_chart.py": "withheld, see marketing/rejected-charts/",
     "reel_data.py": "an adapter, draws nothing",
+    "work_map_chart.py": "built 2026-09-09, not yet published: no manifest, no "
+                         "committed jpeg, and the phone render is unbuilt. Give it "
+                         "a chart_code() tag and drop this line when it ships.",
+    "major_map_chart.py": "its companion, same date and same state. Publish the "
+                          "pair together or neither: each one's deck cites the "
+                          "other's finding.",
+    "professional_map_chart.py": "the third of the same set, same state. The "
+                                 "bachelor's map cannot contain a doctor or a "
+                                 "lawyer, so this one exists; publish it with "
+                                 "the other two.",
 }
 
 
