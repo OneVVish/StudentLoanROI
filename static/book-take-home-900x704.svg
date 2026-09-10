@@ -9,32 +9,32 @@
   .key{ font-size: 26px; }
 </style>
 <rect width="900" height="704" fill="#ffffff"/>
-<text class="h" x="40.0" y="52.0">Where $95,000 goes</text>
-<text class="sub" x="40.0" y="96.0">A California salary, and a $400 loan payment</text>
-<text class="sub" x="40.0" y="132.0">against the three taxes it competes with</text>
-<rect x="40.0" y="200" width="110.0" height="118" fill="#a09f99"/>
-<rect x="150.0" y="200" width="42.0" height="118" fill="#bebdb7"/>
-<rect x="191.9" y="200" width="62.7" height="118" fill="#dcdbd6"/>
-<rect x="254.7" y="200" width="41.4" height="118" fill="#eb6834"/>
-<rect x="296.1" y="200" width="563.9" height="118" fill="#2a78d6"/>
+<text class="h" x="40.0" y="52.0">Where a nurse's pay goes</text>
+<text class="sub" x="40.0" y="96.0">San Francisco, $186,600 gross, and the payment on the</text>
+<text class="sub" x="40.0" y="132.0">whole $27,000 federal student loan</text>
+<rect x="40.0" y="200" width="150.8" height="118" fill="#a09f99"/>
+<rect x="190.8" y="200" width="58.8" height="118" fill="#bebdb7"/>
+<rect x="249.6" y="200" width="57.8" height="118" fill="#dcdbd6"/>
+<rect x="307.5" y="200" width="16.2" height="118" fill="#eb6834"/>
+<rect x="323.6" y="200" width="536.4" height="118" fill="#2a78d6"/>
 <rect x="40" y="374" width="26" height="26" fill="#a09f99"/>
 <text class="key" x="80.0" y="394.0">Federal tax</text>
-<text class="key" x="860.0" y="394.0" text-anchor="end" fill="#5c636d">13%</text>
-<text class="key" x="768.0" y="394.0" text-anchor="end" fill="#5c636d">$12,741</text>
+<text class="key" x="860.0" y="394.0" text-anchor="end" fill="#5c636d">18%</text>
+<text class="key" x="768.0" y="394.0" text-anchor="end" fill="#5c636d">$34,322</text>
 <rect x="40" y="420" width="26" height="26" fill="#bebdb7"/>
 <text class="key" x="80.0" y="440.0">State tax</text>
-<text class="key" x="860.0" y="440.0" text-anchor="end" fill="#5c636d">5%</text>
-<text class="key" x="768.0" y="440.0" text-anchor="end" fill="#5c636d">$4,862</text>
+<text class="key" x="860.0" y="440.0" text-anchor="end" fill="#5c636d">7%</text>
+<text class="key" x="768.0" y="440.0" text-anchor="end" fill="#5c636d">$13,381</text>
 <rect x="40" y="466" width="26" height="26" fill="#dcdbd6"/>
 <text class="key" x="80.0" y="486.0">FICA</text>
-<text class="key" x="860.0" y="486.0" text-anchor="end" fill="#5c636d">8%</text>
-<text class="key" x="768.0" y="486.0" text-anchor="end" fill="#5c636d">$7,268</text>
+<text class="key" x="860.0" y="486.0" text-anchor="end" fill="#5c636d">7%</text>
+<text class="key" x="768.0" y="486.0" text-anchor="end" fill="#5c636d">$13,159</text>
 <rect x="40" y="512" width="26" height="26" fill="#eb6834"/>
 <text class="key" x="80.0" y="532.0">Student loan</text>
-<text class="key" x="860.0" y="532.0" text-anchor="end" fill="#5c636d">5%</text>
-<text class="key" x="768.0" y="532.0" text-anchor="end" fill="#5c636d">$4,800</text>
+<text class="key" x="860.0" y="532.0" text-anchor="end" fill="#5c636d">2%</text>
+<text class="key" x="768.0" y="532.0" text-anchor="end" fill="#5c636d">$3,679</text>
 <rect x="40" y="558" width="26" height="26" fill="#2a78d6"/>
 <text class="key" x="80.0" y="578.0">What's left</text>
-<text class="key" x="860.0" y="578.0" text-anchor="end" fill="#5c636d">69%</text>
-<text class="key" x="768.0" y="578.0" text-anchor="end" fill="#5c636d">$65,329</text>
+<text class="key" x="860.0" y="578.0" text-anchor="end" fill="#5c636d">65%</text>
+<text class="key" x="768.0" y="578.0" text-anchor="end" fill="#5c636d">$122,059</text>
 </svg>
