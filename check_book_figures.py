@@ -275,6 +275,19 @@ def premium(title, loan, years=10):
             **kw)["roi_result"]["earnings_premium"]
 
 
+def sai_at(income):
+    """The Student Aid Index for chapter 3's household, at one income.
+
+    Formula A, two parents, four in the household, one in college, nothing
+    else supplied. That is the household chapter 3's table is computed for
+    and the one families.md records, so the guard states it here rather
+    than reading it back off the chapter.
+
+    These are cheap, unlike the ROI figures: the worksheet is a lookup.
+    """
+    return load()["compute_student_aid_index"](float(income), 4)["sai"]
+
+
 _LEVELS = {}
 
 
@@ -356,6 +369,7 @@ VET_TECH = "Veterinary Technologists and Technicians"
 PRESCHOOL = "Preschool Teachers, Except Special Education"
 POLICE = "Police and Sheriff's Patrol Officers"
 ASSOC, BACH = "Associate's degree", "Bachelor's degree"
+CH03 = "ch03-what-the-formula-expects.md"
 CH13 = "ch13-long-roads.md"
 CH14 = "ch14-short-roads.md"
 CH17 = "ch17-ride-or-pay.md"
@@ -599,6 +613,31 @@ FIGURES = [
     Fig("ch14-firefighter-wage",
         lambda ns: roi_layer()[0]["MAJOR_DATA"]["Firefighters"]["median_salary"],
         "$59,280", [FIX, CH14], exact="$59,280"),
+
+    # ---- Chapter 3: the aid ladder, and the band where need-based aid ends.
+    # Rounded to the nearest hundred, which is what the published guide
+    # already used and what the minimum-significant-digits rule requires:
+    # ~$8,000 for $8,396 is a one-digit citation and is refused.
+    Fig("sai-75k", lambda ns: sai_at(75_000), "~$3,300", [FIX, CH03], exact="$3,284"),
+    Fig("sai-100k", lambda ns: sai_at(100_000), "~$8,400", [FIX, CH03], exact="$8,396",
+        note="the book said ~$8,000 and the refusing-to-pay guide said ~$8,400 "
+             "until 2026-09-09; one figure, two surfaces, two roundings"),
+    Fig("sai-150k", lambda ns: sai_at(150_000), "~$25,200", [FIX, CH03], exact="$25,231",
+        note="the Reyes household's own number, and the edge of the band"),
+    Fig("sai-200k", lambda ns: sai_at(200_000), "~$41,800", [FIX, CH03], exact="$41,764"),
+    Fig("sai-250k", lambda ns: sai_at(250_000), "~$58,200", [FIX, CH03], exact="$58,185"),
+    Fig("sai-250k-with-assets",
+        lambda ns: load()["compute_student_aid_index"](
+            250_000.0, 4, parent_assets=150_000.0)["sai"],
+        "~$66,600", [FIX, CH03], exact="$66,645",
+        note="the $0 asset protection allowance, which is the most common "
+             "reason a household lands above an income-only estimate"),
+    Fig("sai-150k-two-children", lambda ns: 2 * sai_at(150_000),
+        "~$50,500", [FIX, CH03], exact="$50,462",
+        note="the 2024-25 FAFSA stopped dividing the parent contribution "
+             "between siblings, so it is the figure twice, not split"),
+    Fig("sai-200k-two-children", lambda ns: 2 * sai_at(200_000),
+        "~$83,500", [FIX, CH03], exact="$83,528"),
 
     # ---- The baseline every case is measured against.
     Fig("hs-grad-salary",
