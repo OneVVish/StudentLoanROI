@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="702" viewBox="0 0 900 702" role="img">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #14161a; }
+  .h  { font-size: 34px; font-weight: 700; }
+  .sub{ font-size: 26px; fill: #5c636d; }
+  .lab{ font-size: 27px; }
+  .num{ font-size: 29px; font-weight: 700; }
+  .ax { font-size: 26px; fill: #5c636d; }
+  .key{ font-size: 26px; }
+</style>
+<rect width="900" height="702" fill="#ffffff"/>
+<text class="h" x="40.0" y="52.0">The same seat, at two prices</text>
+<text class="sub" x="40.0" y="96.0">Median cost of attendance for a year, 1,413 public colleges</text>
+<rect x="348" y="168" width="121.3" height="74" fill="#2a78d6"/>
+<text class="lab" x="324.0" y="215.0" text-anchor="end">Public, in state</text>
+<text class="num" x="489.3" y="215.0">$17,701</text>
+<rect x="348" y="276" width="167.1" height="74" fill="#eb6834"/>
+<text class="lab" x="324.0" y="323.0" text-anchor="end">Public, out of state</text>
+<text class="num" x="535.1" y="323.0">$24,379</text>
+<rect x="348" y="384" width="306.8" height="74" fill="#5c636d"/>
+<text class="lab" x="324.0" y="431.0" text-anchor="end">Private nonprofit</text>
+<text class="num" x="674.8" y="431.0">$44,760</text>
+<line x1="40" y1="538" x2="860" y2="538" stroke="#dfe3e8" stroke-width="2"/>
+<text class="lab" x="40.0" y="592.0">Crossing a state line costs $6,678 a year at the median.</text>
+<text class="ax" x="40.0" y="634.0">The search prices every school at the rate you</text>
+<text class="ax" x="40.0" y="670.0">would pay, which is why it asks where you live.</text>
+</svg>
