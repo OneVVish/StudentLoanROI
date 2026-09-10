@@ -141,8 +141,6 @@ NO_CLAIM = {
     "households": "the four households as the book introduces them, no arithmetic",
     "the-year": "the calendar in order, no arithmetic",
     "the-order": "the four questions in order, no arithmetic",
-    "take-home": "its $95,000 California salary is the figure's own worked "
-                 "example; Ch. 12 prints no such figure to agree with",
     "interest-only": "the balance is the Hall loan but the stretch is the "
                      "figure's own example; Ch. 8 prices no stretch",
     "roll-down": "its four-loan portfolio is invented for the figure; Ch. 18 "
@@ -587,7 +585,18 @@ def fig_take_home(ns):
     The segments come from salary_flow_segments, so this figure and the
     calculator cannot disagree about what is taken.
     """
-    gross, payment = 95_000.0, 400.0
+    # A ROW FROM THE CHAPTER'S OWN TABLE, not a fifth example. The figure
+    # first drew a generic $95,000 California salary and was placed directly
+    # under Ch. 12's table of four named jobs, where it read as a fifth row
+    # nobody could find. Drawing one of the four instead lets the picture be
+    # CHECKED against the prose rather than merely captioned.
+    #
+    # The payment is the one on the whole federal student loan, so it is the
+    # book's own $27,000 rather than a number picked to look reasonable.
+    gross = 186_600.0
+    payment = ns["calculate_standard_repayment"](
+        sum(ns["FEDERAL_DIRECT_ANNUAL_LIMITS"]["dependent"].values()),
+        6.5)["monthly_payment"]
     th = ns["calculate_take_home_pay"](gross, "CA")
     # salary_flow_segments ALREADY ENDS WITH WHAT IS LEFT. Appending a
     # remainder row put a duplicate "What is left, $0, 0%" under the real one:
@@ -601,9 +610,10 @@ def fig_take_home(ns):
 
     PAD_L, TOP, BAR_H = 40, 200, 118
     height = TOP + BAR_H + 96 + len(segs) * 46 + 60
-    b = [text("h", 40, 52, f"Where {money(gross)} goes"),
-         text("sub", 40, 96, "A California salary, and a $400 loan payment"),
-         text("sub", 40, 132, "against the three taxes it competes with")]
+    b = [text("h", 40, 52, "Where a nurse's pay goes"),
+         text("sub", 40, 96, f"San Francisco, {money(gross)} gross, and the "
+                             f"payment on the"),
+         text("sub", 40, 132, "whole $27,000 federal student loan")]
     x = PAD_L
     for label, v, colour, _ in segs:
         w = (W - 80) * v / gross
@@ -619,6 +629,13 @@ def fig_take_home(ns):
         b.append(text("key", W - 132, y, money(v), anchor="end", fill=MUTED,
                       budget=220))
         y += 46
+    # The three taxes are the chapter's own row and are unaffected by the loan
+    # payment, so they are what this figure claims. What is left is NOT
+    # claimed: the chapter's take-home column is before the loan and this
+    # bar's last segment is after it.
+    claim("take-home", "ch12",
+          **{"~$34,300": th["federal_tax"], "~$13,400": th["state_tax"],
+             "~$13,200": th["fica_tax"], "~$186,600": gross})
     return write("take-home", height, b,
                  " | ".join(f"{l} {money(v)}" for l, v, _, _ in segs))
 
