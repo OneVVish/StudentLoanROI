@@ -115,6 +115,9 @@ UNPUBLISHED_SCRIPTS = {
     "forgiveness_map_chart.py": "one panel of forgiveness_map_pair.py, never published alone",
     "debt_by_major_chart.py": "withheld, see marketing/rejected-charts/",
     "reel_data.py": "an adapter, draws nothing",
+    "work_map_chart.py": "built 2026-09-09, not yet published: no manifest, no "
+                         "committed jpeg, and the phone render is unbuilt. Give it "
+                         "a chart_code() tag and drop this line when it ships.",
 }
 
 
