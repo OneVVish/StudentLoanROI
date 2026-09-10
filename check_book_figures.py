@@ -275,6 +275,53 @@ def premium(title, loan, years=10):
             **kw)["roi_result"]["earnings_premium"]
 
 
+_LEVELS = {}
+
+
+def level_medians(level):
+    """Median break-even and premium across every occupation at one level.
+
+    Chapter 14 sets the two-year credential against the four-year one, and
+    its whole argument is four medians, so these are checked rather than
+    exempted. The pass is 225 bisections and about 1.3 seconds, which is
+    worth it: a distribution median is exactly the kind of figure that
+    moves silently under a dataset refresh and that no reader can spot.
+
+    The break-even median is taken over the paths that HAVE one. A path
+    that never breaks even returns None and has no figure to median, which
+    is why families.md states the two counts beside the two medians.
+    """
+    if level not in _LEVELS:
+        ns, am = roi_layer()
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            rows = [am.find_breakeven_loan(ns, t, ROI_RATE, ROI_STRATEGY)
+                    for t, v in ns["MAJOR_DATA"].items()
+                    if v.get("typical_education") == level]
+        be = sorted(r["breakeven_loan"] for r in rows
+                    if r["breakeven_loan"] is not None)
+        pr = sorted(r["premium_at_zero_debt"] for r in rows)
+        _LEVELS[level] = {
+            "n": len(rows),
+            "breakeven": _median(be),
+            "premium": _median(pr),
+        }
+    return _LEVELS[level]
+
+
+def _assoc_wage_median(level):
+    """Median wage across one education level, from MAJOR_DATA."""
+    ns, _ = roi_layer()
+    return _median(sorted(v["median_salary"]
+                          for v in ns["MAJOR_DATA"].values()
+                          if v.get("typical_education") == level))
+
+
+def _median(xs):
+    n = len(xs)
+    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+
+
 def _wage(title, path="cleaned_careers.csv", col="a_median"):
     """Read a wage straight out of the committed dataset.
 
@@ -304,8 +351,14 @@ CH07 = "ch07-the-parents-loan.md"
 CH01 = "ch01-two-questions.md"
 CH08 = "ch08-private-money.md"
 CH12 = "ch12-the-wage-you-will-see.md"
+HR_ASSISTANT = "Human Resources Assistants, Except Payroll and Timekeeping"
+VET_TECH = "Veterinary Technologists and Technicians"
+PRESCHOOL = "Preschool Teachers, Except Special Education"
+POLICE = "Police and Sheriff's Patrol Officers"
+ASSOC, BACH = "Associate's degree", "Bachelor's degree"
 CH13 = "ch13-long-roads.md"
-CH16 = "ch16-ride-or-pay.md"
+CH14 = "ch14-short-roads.md"
+CH17 = "ch17-ride-or-pay.md"
 FIX = "families.md"
 
 FIGURES = [
@@ -379,7 +432,7 @@ FIGURES = [
         "~$3,900", [FIX], exact="$3,930"),
     Fig("dana-standard-monthly",
         lambda ns: _dana_fed(ns, DANA_INCOME)["Standard (10-year)"]["monthly_payment"],
-        "~$141", [FIX, CH16]),
+        "~$141", [FIX, CH17]),
     Fig("dana-rap-70k-interest",
         lambda ns: _dana_fed(ns, DANA_INCOME)[
             ns["RAP_STRATEGY_LABEL"]]["total_interest"],
@@ -387,7 +440,7 @@ FIGURES = [
     Fig("dana-rap-70k-monthly",
         lambda ns: float(_dana_fed(ns, DANA_INCOME)[
             ns["RAP_STRATEGY_LABEL"]]["schedule"]["payment"].iloc[0]),
-        "~$350", [FIX, CH16]),
+        "~$350", [FIX, CH17]),
     Fig("dana-private-required",
         lambda ns: ns["calculate_standard_repayment"](
             DANA_PRIV, DANA_PRIV_RATE, DANA_PRIV_TERM)["monthly_payment"],
@@ -464,6 +517,88 @@ FIGURES = [
     Fig("ch13-law-premium",
         lambda ns: premium("Lawyers", 13_000),
         "~$100,500", [CH13], exact="$100,506"),
+
+    # ---- Chapter 14: the two-year credential against the four-year one.
+    # The four medians are the chapter's argument, so they are computed
+    # rather than exempted; the pass costs about 1.3 seconds.
+    Fig("ch14-associate-median-breakeven",
+        lambda ns: level_medians(ASSOC)["breakeven"],
+        "~$102,200", [FIX, CH14], exact="$102,172.86",
+        note="median over the 44 of 48 that have a break-even at all"),
+    Fig("ch14-bachelor-median-breakeven",
+        lambda ns: level_medians(BACH)["breakeven"],
+        "~$190,700", [FIX, CH14], exact="$190,658.57",
+        note="median over the 147 of 177 that have one"),
+    Fig("ch14-associate-median-premium",
+        lambda ns: level_medians(ASSOC)["premium"],
+        "~$126,300", [FIX, CH14], exact="$126,335.68"),
+    Fig("ch14-bachelor-median-premium",
+        lambda ns: level_medians(BACH)["premium"],
+        "~$177,800", [FIX, CH14], exact="$177,760.64"),
+    Fig("ch14-associate-median-wage",
+        lambda ns: _assoc_wage_median(ASSOC),
+        "~$67,000", [FIX, CH14], exact="$66,985"),
+    Fig("ch14-bachelor-median-wage",
+        lambda ns: _assoc_wage_median(BACH),
+        "~$83,700", [FIX, CH14], exact="$83,680"),
+
+    # The named rows. Wages come out of MAJOR_DATA rather than the CSV so
+    # the curated entries and the overlay are applied, which is the wage
+    # the chapter's own break-even was computed from.
+    Fig("ch14-atc-breakeven",
+        lambda ns: breakeven("Air Traffic Controllers")["breakeven_loan"],
+        "~$557,600", [FIX, CH14], exact="$557,632.45"),
+    Fig("ch14-atc-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"]["Air Traffic Controllers"]["median_salary"],
+        "$148,080", [FIX, CH14], exact="$148,080"),
+    Fig("ch14-hygienist-breakeven",
+        lambda ns: breakeven("Dental Hygienists")["breakeven_loan"],
+        "~$315,800", [FIX, CH14], exact="$315,750.12"),
+    Fig("ch14-hygienist-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"]["Dental Hygienists"]["median_salary"],
+        "$98,100", [FIX, CH14], exact="$98,100"),
+    Fig("ch14-respiratory-breakeven",
+        lambda ns: breakeven("Respiratory Therapists")["breakeven_loan"],
+        "~$227,900", [FIX, CH14], exact="$227,920.53"),
+    Fig("ch14-respiratory-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"]["Respiratory Therapists"]["median_salary"],
+        "$82,280", [FIX, CH14], exact="$82,280"),
+    Fig("ch14-paralegal-breakeven",
+        lambda ns: breakeven("Paralegals and Legal Assistants")["breakeven_loan"],
+        "~$65,100", [FIX, CH14], exact="$65,078.74"),
+    Fig("ch14-paralegal-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"]["Paralegals and Legal Assistants"]["median_salary"],
+        "$62,890", [FIX, CH14], exact="$62,890"),
+    Fig("ch14-hr-assistant-breakeven",
+        lambda ns: breakeven(HR_ASSISTANT)["breakeven_loan"],
+        "$168", [FIX, CH14], exact="$167.85",
+        note="the tie: over ten years $168 is a rounding, and the chapter "
+             "says so rather than counting it as a win"),
+    Fig("ch14-hr-assistant-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][HR_ASSISTANT]["median_salary"],
+        "$50,610", [FIX, CH14], exact="$50,610"),
+    Fig("ch14-agtech-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"]["Agricultural Technicians"]["median_salary"],
+        "$49,630", [FIX, CH14], exact="$49,630"),
+    Fig("ch14-vettech-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][VET_TECH]["median_salary"],
+        "$47,380", [FIX, CH14], exact="$47,380"),
+    Fig("ch14-preschool-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][PRESCHOOL]["median_salary"],
+        "$38,140", [FIX, CH14], exact="$38,140"),
+    Fig("ch14-dietetic-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"]["Dietetic Technicians"]["median_salary"],
+        "$37,640", [FIX, CH14], exact="$37,640"),
+
+    # The counterweight, national on purpose: every other figure in the
+    # chapter is national, and a one-row basis switch to California is the
+    # error check_chart_basis exists to catch.
+    Fig("ch14-police-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][POLICE]["median_salary"],
+        "$76,210", [FIX, CH14], exact="$76,210"),
+    Fig("ch14-firefighter-wage",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"]["Firefighters"]["median_salary"],
+        "$59,280", [FIX, CH14], exact="$59,280"),
 
     # ---- The baseline every case is measured against.
     Fig("hs-grad-salary",
