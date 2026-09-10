@@ -128,6 +128,47 @@ def text(cls, x, y, s, anchor="start", fill=None, budget=None):
     return f'<text class="{cls}" x="{x:.1f}" y="{y:.1f}"{a}{f}>{esc(s)}</text>'
 
 
+# What each figure asserts its chapter says, filled in as a figure is built.
+# check_book_diagrams.py reads it: a figure and the chapter that cites it come
+# from the same model and so cannot drift from IT, but they can drift from
+# EACH OTHER, and until this existed nothing compared them.
+CLAIMS = {}
+
+# Figures that make no claim on a chapter, each with the reason. A figure in
+# neither dict fails the guard: coverage is derived, not listed.
+NO_CLAIM = {
+    "extra-dollar": "a regulation's ordering, no computed figure on it",
+    "households": "the four households as the book introduces them, no arithmetic",
+    "the-year": "the calendar in order, no arithmetic",
+    "the-order": "the four questions in order, no arithmetic",
+    "take-home": "its $95,000 California salary is the figure's own worked "
+                 "example; Ch. 12 prints no such figure to agree with",
+    "interest-only": "the balance is the Hall loan but the stretch is the "
+                     "figure's own example; Ch. 8 prices no stretch",
+    "roll-down": "its four-loan portfolio is invented for the figure; Ch. 18 "
+                 "prices a different one",
+}
+
+
+def claim(name, chapter, exact=(), **cites):
+    """Record what this figure says its chapter says.
+
+    Keys are the string as the chapter writes it, values are what the model
+    produced. The guard checks both halves: that the string is still in the
+    chapter, and that the number behind it is within half of its own last
+    place of what the figure drew.
+
+    `exact` NAMES THE STATUTORY ONES, and it is not a nicety. "$5,500" reads
+    as a figure quoted to the nearest hundred, so the half-place rule accepts
+    $5,506 against it, which is fine for an estimate and wrong for a ceiling
+    written into law. The book's own convention is that rounded money carries
+    a tilde and statutory money does not; naming them here says which is which
+    without asking the guard to infer it from punctuation.
+    """
+    CLAIMS[name] = {"chapter": chapter, "cites": dict(cites),
+                    "exact": set(exact)}
+
+
 def esc(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
@@ -261,6 +302,12 @@ def fig_three_roads(ns):
                  f'fill="{MUTED}">{money(r["interest"])} of interest, '
                  f'{r["last"]:.0f} years</text>')
         y += rows_h
+    slow, asgo, fast = (r for _, _, r in roads)
+    claim("three-roads", "ch07",
+          **{"~$114,400": slow["interest"], "~$56,400": asgo["interest"],
+             "~$34,100": fast["interest"], "~$82,700": max(b for _, b in slow["points"]),
+             "~$750": slow["monthly"], "~$695": asgo["monthly"],
+             "~$826": fast["monthly"]})
     note = (" | ".join(f"{l}: terms {r['terms']}, {money(r['interest'])}, "
                        f"{money(r['monthly'])}/mo peak, {r['last']:.1f}y"
                        for l, _, r in roads))
@@ -317,6 +364,10 @@ def fig_cap_ladder(ns):
              f'stroke="{RULE}" stroke-width="2"/>')
     b.append(text("lab", 40, y + 54, f"A parent may borrow {money(plus)} more, "
                                      f"at a higher rate."))
+    claim("cap-ladder", "ch06",
+          exact=("$5,500", "$6,500", "$7,500", "$27,000", "$65,000"),
+          **{"$5,500": annual[1], "$6,500": annual[2], "$7,500": annual[3],
+             "$27,000": total, "$65,000": plus})
     return write("cap-ladder", height, b,
                  f"{money(total)} student ({money(sum(subsid.values()))} of it "
                  f"subsidized) against {money(plus)} parent")
@@ -409,6 +460,7 @@ def fig_in_state(ns):
                   f"Crossing a state line costs {money(gap)} a year at the median."))
     b.append(text("ax", 40, y + 96, "The search prices every school at the rate you"))
     b.append(text("ax", 40, y + 132, "would pay, which is why it asks where you live."))
+    claim("in-state", "ch04", **{"~$7,000": gap})
     return write("in-state", height, b,
                  f"in {money(ins)} out {money(out)} gap {money(gap)} "
                  f"private {money(pm)} over {len(pub):,} publics")
@@ -517,6 +569,8 @@ def fig_break_even(ns):
     b.append(f'<line x1="40" y1="{y}" x2="{W - 40}" y2="{y}" stroke="{RULE}" stroke-width="2"/>')
     b.append(text("lab", 40, y + 52, "A bar short of the student line cannot carry"))
     b.append(text("lab", 40, y + 90, "even the loan in the student's own name."))
+    kinder = next(v for t, v, _ in rows if "Kindergarten" in t)
+    claim("break-even", "ch10", **{"$4,000": kinder})
     return write("break-even", height, b,
                  " | ".join(f"{t.split(chr(44))[0]} "
                             f"{money(v) if v else 'never'}" for t, v, _ in rows))
@@ -673,6 +727,13 @@ def fig_exposure(ns):
         lx += 40 + len(label) * CHAR_W["key"] + 46
     b.append(text("lab", 40, y + 52, "The exposure is on both sides of the comparison,"))
     b.append(text("lab", 40, y + 90, "and the baseline is not the sheltered one."))
+    no_deg = tally["Entry needs no degree"]
+    bach = tally["Entry needs a bachelor's"]
+    claim("exposure", "ch15",
+          **{"30%": 100 * no_deg["High"] / sum(no_deg.values()),
+             "26%": 100 * bach["High"] / sum(bach.values()),
+             "54.7 million": sum(no_deg.values()) / 1e6,
+             "39.0 million": sum(bach.values()) / 1e6})
     return write("exposure", height, b,
                  " | ".join(f"{t}: " + " ".join(f"{k} {v/1e6:.1f}M" for k, v in c.items())
                             for t, c in tally.items()))
