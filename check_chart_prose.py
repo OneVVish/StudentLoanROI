@@ -118,6 +118,9 @@ UNPUBLISHED_SCRIPTS = {
     "work_map_chart.py": "built 2026-09-09, not yet published: no manifest, no "
                          "committed jpeg, and the phone render is unbuilt. Give it "
                          "a chart_code() tag and drop this line when it ships.",
+    "major_map_chart.py": "its companion, same date and same state. Publish the "
+                          "pair together or neither: each one's deck cites the "
+                          "other's finding.",
 }
 
 
