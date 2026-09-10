@@ -130,6 +130,20 @@ COLUMNS_TO_LOAD = [
     "NPT4_PUB",        # Avg annual net price, public, Title IV aid recipients
     "NPT4_PRIV",       # Avg annual net price, private, same basis
     #
+    # DEBT AT GRADUATION, added 2026-09-10. The app has always had this figure
+    # and only ever through a LIVE Scorecard call (fetch_median_debt), so
+    # nothing offline could reach it: no guard, no chart and no analysis
+    # script could put a school's debt beside its price without a network
+    # round trip and an API key. It is in the same file as everything else
+    # here.
+    #
+    # It is the median for BORROWERS who completed, so it says nothing about
+    # how many borrowed, and at a school where most students borrow nothing
+    # a low median is the aid working rather than the price being small.
+    # Anything displaying it carries that, the way the Parent PLUS column
+    # already does.
+    "DEBT_MDN",        # Median debt at graduation, completers who borrowed
+    #
     # COMPLETION is the assumption the ROI model never states. It charges a
     # full programme and pays out a graduate's salary; a school where 28% of
     # students finish is a different financial proposition from one where 90%
@@ -221,7 +235,7 @@ def load_scorecard_data(csv_path: str) -> pd.DataFrame:
     numeric_columns = ["CONTROL", "COSTT4_A", "COSTT4_P", "TUITIONFEE_IN",
                        "TUITIONFEE_OUT", "UNITID", "CURROPER", "DISTANCEONLY",
                        "ADM_RATE", "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N",
-                       "NPT4_PUB", "NPT4_PRIV", "C150_4", "C150_L4"]
+                       "NPT4_PUB", "NPT4_PRIV", "C150_4", "C150_L4", "DEBT_MDN"]
     for column in numeric_columns:
         # errors="coerce" is a safety net: if any stray non-numeric text
         # slipped past NA_VALUES, it becomes NaN instead of crashing the script.
@@ -310,6 +324,9 @@ def calculate_coa(df: pd.DataFrame) -> pd.DataFrame:
     # -- one rule, in the pipeline, so every reader gets the same answer and
     # the derivation is visible beside the raw columns it came from.
     df["net_price"] = df["NPT4_PUB"].fillna(df["NPT4_PRIV"])
+    # Straight rename, no coalescing: Scorecard publishes one debt column
+    # for every sector.
+    df["debt_median"] = df["DEBT_MDN"]
     df["completion_rate"] = df["C150_4"].fillna(df["C150_L4"])
 
     return df
@@ -352,7 +369,7 @@ def build_clean_dataframe(csv_path: str) -> pd.DataFrame:
         # beside the coalesced value so the derivation can be checked without
         # re-reading a 100MB source file.
         "net_price", "NPT4_PUB", "NPT4_PRIV",
-        "completion_rate", "C150_4", "C150_L4",
+        "debt_median", "completion_rate", "C150_4", "C150_L4",
     ]
     return calculated[final_columns].reset_index(drop=True)
 
