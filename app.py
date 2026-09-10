@@ -4910,6 +4910,16 @@ def render_financing_note(financing: dict) -> None:
     # Gated on the PLUS tranche rather than on the gap: an independent student
     # has no Parent PLUS at all, and printing an approval warning for a loan
     # they cannot take is the same error the "$0 Direct PLUS" line avoids.
+    capitalized = financing.get("undergrad_capitalized", 0) or 0
+    if capitalized > 0:
+        st.caption(
+            (f"Includes **{fmt_money(capitalized)}** of interest that accrues while the "
+             f"student is enrolled and is added to the balance at graduation. Only "
+             f"subsidized federal loans are exempt; unsubsidized Direct, Parent PLUS and "
+             f"private money all accrue from the day they are disbursed. Averaged over "
+             f"{financing.get('undergrad_accrual_years', 0)} years of borrowing, since a "
+             f"dollar lent in the first year accrues longer than one lent in the last."
+             ).replace("$", r"\$"))
     if (financing.get("plus_principal", 0) or 0) > 0:
         st.info(PARENT_PLUS_APPROVAL_NOTE.replace("$", r"\$"))
     if financing.get("gap_share", 0) > 0.4:
@@ -4946,6 +4956,13 @@ def _pdf_financing_flowables(financing: dict, styles: dict) -> list:
     # is the copy that survives the session, and a family reading it in June is
     # further from the aid office than the one reading the screen in March.
     # reportlab has no markdown, so the bold markers come out.
+    capitalized = financing.get("undergrad_capitalized", 0) or 0
+    if capitalized > 0:
+        out.append(Paragraph(xml_escape(
+            f"Includes {fmt_money(capitalized)} of interest that accrues while the student "
+            f"is enrolled and is added to the balance at graduation. Only subsidized "
+            f"federal loans are exempt; unsubsidized Direct, Parent PLUS and private money "
+            f"all accrue from the day they are disbursed."), styles["caption"]))
     if (financing.get("plus_principal", 0) or 0) > 0:
         out.append(Paragraph(xml_escape(PARENT_PLUS_APPROVAL_NOTE.replace("**", "")),
                              styles["caption"]))
@@ -11903,6 +11920,57 @@ def compute_scenario_results(major_name: str, loan_amount: float,
         financing = None
         principal_for_repayment = effective_principal
         rate_for_repayment = interest_rate
+
+    # ---- interest during the UNDERGRADUATE years -----------------------------
+    # THE MODEL CHARGED NONE OF IT UNTIL 2026-09-10. in_school_deferment was
+    # added for the professional paths, where a dental student was being billed
+    # $3,012 a month against $0 of income, and it is driven by
+    # overlay_school_years, which is 0 for an ordinary degree. So an
+    # undergraduate loan sprang into existence at graduation at face value:
+    # four years of accrual on Parent PLUS and private money, which really do
+    # accrue from disbursement, charged at zero. On a $190,000 Detailed
+    # scenario that is about $34,600 the borrower owes and the model did not.
+    #
+    # DETAILED MODE ONLY, and the boundary is what makes this safe rather than
+    # a double count. Detailed builds the loan from cost of attendance, so it
+    # is principal DISBURSED and no interest is in it. Simplified takes the
+    # school's median debt AT GRADUATION, which already contains every dollar
+    # of in-school interest, and adding more would charge it twice. financing
+    # is None in Simplified and in every analyze_model caller, so both are
+    # untouched.
+    #
+    # AND NOT ON A PATH CARRYING PROFESSIONAL DEBT, for the same reason: that
+    # figure is Scorecard's debt at graduation. Those paths already defer their
+    # graduate years through the block below; their bachelor's years are the
+    # one gap this leaves, and it is left deliberately rather than paid for by
+    # double-counting the larger number.
+    #
+    # A DOLLAR LENT IN YEAR k ACCRUES (N - k + 1) YEARS, so across N level
+    # years the average is (N + 1) / 2, not N. Charging the whole principal for
+    # the whole degree treats every dollar as disbursed on day one and roughly
+    # doubles the figure. Costs inflate, so later years borrow more and the
+    # true average is a little under (N + 1) / 2, which leaves this mildly
+    # conservative rather than flattering.
+    #
+    # Simple, not compounded: 34 CFR 685.202(b)(2) capitalises at the end of
+    # deferment rather than monthly, the same rule in_school_deferment follows.
+    _ug_years = max(program_years_for_major(major_name)
+                    - graduate_years_for_major(major_name), 0)
+    _ug_capitalized = 0.0
+    if financing is not None and _ug_years > 0 and not _professional_debt:
+        _avg_years = (_ug_years + 1) / 2
+        _exempt = min(max(float(subsidized_cap or 0.0), 0.0),
+                      financing["federal_principal"])
+        # Per tranche at its own rate. The blended rate would understate,
+        # because taking the subsidized share out leaves a remainder that is
+        # dearer than the blend.
+        _ug_capitalized = _avg_years * (
+            (financing["federal_principal"] - _exempt) * financing["federal_rate"] / 100
+            + financing["gap_principal"] * financing["gap_rate"] / 100)
+        principal_for_repayment += _ug_capitalized
+    if financing is not None:
+        financing["undergrad_capitalized"] = _ug_capitalized
+        financing["undergrad_accrual_years"] = _ug_years
 
     # ---- in-school deferment -------------------------------------------------
     # Repayment starts when ENROLMENT ends, not when the bachelor's does. Derived

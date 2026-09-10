@@ -2627,3 +2627,26 @@ end $$;
 -- refused on 2026-09-09. The Worker's bot exclusion is a user-agent
 -- substring match whose own comment calls it "not a bot defence", and this
 -- is what that sentence looks like in the data.
+
+-- 2026-09-10  IN-SCHOOL INTEREST, DETAILED MODE. A SEAM.
+-- Until today compute_scenario_results charged NO interest for the
+-- undergraduate years. in_school_deferment was written for the professional
+-- paths and keys on overlay_school_years, which is 0 for an ordinary degree,
+-- so a Detailed-mode loan sprang into existence at graduation at face value.
+-- Parent PLUS and private money accrue from disbursement and were being
+-- charged nothing for four years: about $35,300 on a $190,000 scenario.
+--
+-- Detailed mode only. Simplified takes the school's median debt AT
+-- GRADUATION, which already contains in-school interest, so it is untouched
+-- and so is every analyze_model caller (neither passes federal_cap/gap_rate,
+-- so financing is None). The book's 70 fixture figures did not move.
+--
+-- WHAT THIS MEANS FOR THE DATA. Any row whose loan_basis is Detailed AND
+-- whose scenario carried a gap tranche has a LARGER principal, a larger
+-- monthly payment and a SMALLER earnings_premium and roi_pct from this date.
+-- Do not pool Detailed-mode ROI figures across 2026-09-10. Simplified rows,
+-- which are the default and the majority, pool freely.
+--
+-- Not covered, deliberately: a path carrying professional debt. That figure
+-- is Scorecard's debt at graduation and already includes accrual, so
+-- charging its bachelor's years here would double-count the larger number.
