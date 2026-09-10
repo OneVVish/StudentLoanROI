@@ -1787,6 +1787,43 @@ PARENT_PLUS_AGGREGATE_LIMIT = 65000   # per student, across BOTH parents combine
 # Loans first disbursed on or after this date take the new limits.
 PARENT_PLUS_LIMIT_EFFECTIVE_YEAR = 2026
 
+# THE FIGURE ON AN AID LETTER IS AN OFFER, NOT AN AWARD, and until 2026-09-10
+# nothing in this app, the book or nineteen guides said so. We warn at length
+# about the credit check on PRIVATE money and the whole cap-and-gap split
+# treats the $65,000 as capacity a family HAS, when the loan behind it is
+# applied for after the letter and can be refused.
+#
+# 34 CFR 685.200(c)(2)(viii). The test is two lookups rather than a score, and
+# income is not one of them: the payment a family is about to take on is never
+# measured against what they earn. Three things a shorter version gets wrong,
+# so all three are in the string and check_plus_approval asserts them:
+#
+#   (A)(2)/(A)(3)  a refusal has two answers, an endorser without an adverse
+#                  history or documented extenuating circumstances. "You will
+#                  be refused" would be false.
+#   (F)            the absence of a credit history is NOT adverse credit and
+#                  is not grounds for refusal. That runs OPPOSITE to private
+#                  lending, so a family with no credit file assumes wrongly.
+#   the fallout    a refusal is not simply a smaller budget. It raises the
+#                  student's own limit by $26,000 across four years, so the
+#                  money moves into the student's name at the student's rate.
+#
+# $2,085 is the regulation's own threshold and (C)/(D) have the Secretary
+# adjusting it for CPI-U, so it is quoted and nothing is built on it.
+PARENT_PLUS_APPROVAL_NOTE = (
+    "**The Direct PLUS figure is an offer, not an award.** A parent applies for it after the "
+    "letter, and it is refused for an adverse credit history: more than $2,085 of debt that is "
+    "90 days late, in collection or charged off within two years, or a default, bankruptcy "
+    "discharge, foreclosure, repossession, tax lien, wage garnishment or written-off federal "
+    "education debt within five. Income is not tested at all, so the payment itself is never "
+    "measured against what the family earns. A refusal can be answered with an endorser who has "
+    "no adverse history or with documented extenuating circumstances, and having no credit "
+    "history at all does not count as adverse credit. If it is refused outright the student's "
+    "own federal limit rises by $26,000 across four years, at the student's rate rather than "
+    "the parent's. 34 CFR 685.200(c)."
+)
+
+
 # PROFESSIONAL-degree borrowing, post-OBBBA. Every path in this app carrying
 # additional_training_debt is a professional degree -- MD, DDS/DMD, JD -- so
 # these are the limits that apply to medical, dental and law school debt.
@@ -4870,6 +4907,11 @@ def render_financing_note(financing: dict) -> None:
             "here, and they carry no income-driven repayment or forgiveness, so this "
             "estimate is, if anything, optimistic.".replace("$", r"\$")
         )
+    # Gated on the PLUS tranche rather than on the gap: an independent student
+    # has no Parent PLUS at all, and printing an approval warning for a loan
+    # they cannot take is the same error the "$0 Direct PLUS" line avoids.
+    if (financing.get("plus_principal", 0) or 0) > 0:
+        st.info(PARENT_PLUS_APPROVAL_NOTE.replace("$", r"\$"))
     if financing.get("gap_share", 0) > 0.4:
         st.warning(
             f"About {fmt_pct(financing['gap_share'] * 100)} of this loan is Direct PLUS or "
@@ -4900,6 +4942,13 @@ def _pdf_financing_flowables(financing: dict, styles: dict) -> list:
             "that must come from a private lender, family money, or not at all. Private "
             "loans are credit-priced and usually cost more than the rate modeled here, "
             "and carry no income-driven repayment or forgiveness."), styles["caption"]))
+    # Same reasoning as the block above, and it applies harder here: the report
+    # is the copy that survives the session, and a family reading it in June is
+    # further from the aid office than the one reading the screen in March.
+    # reportlab has no markdown, so the bold markers come out.
+    if (financing.get("plus_principal", 0) or 0) > 0:
+        out.append(Paragraph(xml_escape(PARENT_PLUS_APPROVAL_NOTE.replace("**", "")),
+                             styles["caption"]))
     return out
 
 
