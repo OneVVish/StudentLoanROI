@@ -1,6 +1,11 @@
 {
   "_comment": "Written by infra/rank_charts.py. Raw like tallies with no denominator; see that file before reading meaning into the order.",
   "by_likes": [
-    "professional-debt-versus-pay"
+    "professional-debt-versus-pay",
+    "borrow-the-federal-maximum",
+    "rent-versus-the-raise",
+    "careers-without-a-bachelors",
+    "world-tuition",
+    "best-career-by-year"
   ]
 }
