@@ -375,6 +375,7 @@ CH13 = "ch13-long-roads.md"
 CH11 = "ch11-major-or-career.md"
 CH14 = "ch14-short-roads.md"
 CH17 = "ch17-ride-or-pay.md"
+CH18 = "ch18-slashing-interest-priced.md"
 FIX = "families.md"
 
 # ---- The Reyes family against the Forbes twenty, chapter 4. The prices are
@@ -501,7 +502,7 @@ FIGURES = [
         "~$3,900", [FIX], exact="$3,930"),
     Fig("dana-standard-monthly",
         lambda ns: _dana_fed(ns, DANA_INCOME)["Standard (10-year)"]["monthly_payment"],
-        "~$141", [FIX, CH17]),
+        "~$141", [FIX, CH17, CH18]),
     Fig("dana-rap-70k-interest",
         lambda ns: _dana_fed(ns, DANA_INCOME)[
             ns["RAP_STRATEGY_LABEL"]]["total_interest"],
@@ -509,7 +510,7 @@ FIGURES = [
     Fig("dana-rap-70k-monthly",
         lambda ns: float(_dana_fed(ns, DANA_INCOME)[
             ns["RAP_STRATEGY_LABEL"]]["schedule"]["payment"].iloc[0]),
-        "~$350", [FIX, CH17]),
+        "~$350", [FIX, CH17, CH18]),
     Fig("dana-private-required",
         lambda ns: ns["calculate_standard_repayment"](
             DANA_PRIV, DANA_PRIV_RATE, DANA_PRIV_TERM)["monthly_payment"],
