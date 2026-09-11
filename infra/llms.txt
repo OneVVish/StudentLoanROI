@@ -163,6 +163,15 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [What a major pays, against whether it places](https://worthmydegree.com/charts#pay-against-placement):
+  Every major the New York Fed publishes, plotted by early-career pay
+  against unemployment plus the share working in jobs that do not need
+  the degree. The two questions agree about a third of the time.
+- [What the top twenty actually cost](https://worthmydegree.com/charts#what-the-top-twenty-cost):
+  The twenty colleges at the head of Forbes' 2027 ranking, priced from
+  federal data: four years at sticker, four years at the average net
+  price paid by aided students, and the median debt their graduates
+  leave with.
 - [The best-paid career depends on when you ask](https://worthmydegree.com/charts#best-career-by-year):
   Where each career ranks by that year's pay among the 825 occupations
   the calculator models, at years 1, 5, 10 and 20 after a bachelor's
@@ -269,8 +278,9 @@ anywhere with attribution. One page, so each is addressed by fragment.
   Every business degree tiered by early-career pay and by the share of
   graduates working in jobs that do not require the degree.
 - [College majors, ranked by the job market](https://worthmydegree.com/charts#majors-tier-list):
-  A tier list of college majors built from early-career pay,
-  unemployment and underemployment rather than reputation.
+  All 73 majors the New York Fed publishes, tiered by unemployment
+  plus the share of graduates working in jobs that do not need the
+  degree. Pay is shown on every tile and decides nothing.
 - [The federal cap is doing the flattening](https://worthmydegree.com/charts#student-vs-parent-debt):
   Median federal debt at graduation by field, students against
   parents, showing how the Parent PLUS cap compresses what a family

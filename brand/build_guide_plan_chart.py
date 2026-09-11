@@ -38,6 +38,8 @@ line reaches, so a reader comparing two panels is comparing equal heights, and
 the 15 percent line is never cut off at the top of its own panel.
 """
 import re
+import argparse
+import pathlib
 import sys
 from pathlib import Path
 
@@ -111,8 +113,17 @@ def ibr_points(allowance, rate, cap):
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--balance", type=float, default=BALANCE,
+                    help="the loan the cap is a function of (default: the guide's)")
+    ap.add_argument("--rate", type=float, default=RATE_PCT)
+    ap.add_argument("--out", default=None,
+                    help="output SVG path; defaults to the guide's own file")
+    args = ap.parse_args()
+    balance, rate_pct = args.balance, args.rate
+    out_path = pathlib.Path(args.out) if args.out else OUT
     ns = load_app()
-    cap = ns["calculate_standard_repayment"](BALANCE, RATE_PCT)["monthly_payment"]
+    cap = ns["calculate_standard_repayment"](balance, rate_pct)["monthly_payment"]
     panels = []
     for size in SIZES:
         allowance = ns["idr_income_allowance"](size)
@@ -170,7 +181,7 @@ def main():
       '<tspan class="mark-tld">.com</tspan></text>')
     a(f'  <text class="f deck" x="40" y="84">What each plan asks for, by household size</text>')
 
-    a('  <text class="f axis" x="40" y="124">On a $27,000 balance at 6.5 percent</text>')
+    a(f'  <text class="f axis" x="40" y="124">On a ${balance:,.0f} balance at {rate_pct:g} percent</text>')
     key = [(OLD_C, "IBR, older loans", 40), (NEW_C, "IBR, newer loans", 340), (RAP_C, "RAP", 640)]
     for colour, label, x in key:
         a(f'  <line x1="{x}" y1="166" x2="{x + 36}" y2="166" stroke="{colour}" '
@@ -226,14 +237,15 @@ def main():
         ET.fromstring(svg)
     except ET.ParseError as exc:
         sys.exit(f"refusing to write invalid SVG: {exc}")
-    OUT.write_text(svg)
-    print(f"wrote {OUT}  ({OUT.stat().st_size:,} bytes, {W}x{height})")
+    out_path.write_text(svg)
+    print(f"wrote {out_path}  ({out_path.stat().st_size:,} bytes, {W}x{height}), "
+          f"cap ${cap:,.2f} on ${balance:,.0f} at {rate_pct:g}%")
     for p in panels:
         r = dict(p["rap"])[AGI_MAX]
         print(f"  household {p['size']}: shelters ${p['allowance']:>8,.0f} | "
               f"at $150k  RAP ${r:>7.2f}  new ${p['new'][-1][1]:>7.2f}  "
               f"old ${p['old'][-1][1]:>7.2f}")
-    print(f"  IBR ceiling (10-year Standard on ${BALANCE:,} at {RATE_PCT}%): "
+    print(f"  IBR ceiling (10-year Standard on ${balance:,.0f} at {rate_pct:g}%): "
           f"${cap:,.2f}")
 
 

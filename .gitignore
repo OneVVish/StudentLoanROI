@@ -167,3 +167,6 @@ skills-lock.json
 # see build_ppd_flags.py. curl gets the proxy block page here; urllib through
 # certifi gets the real file.
 ppd2026_*.xlsx
+
+# Verification evidence from .claude/skills/verify-worthmydegree (proof artifacts, not source)
+verification-evidence/

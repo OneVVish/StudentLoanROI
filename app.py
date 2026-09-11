@@ -6126,6 +6126,57 @@ def bare_arrival() -> bool:
         return False
 
 
+def wizard_params(answers: dict) -> dict:
+    """The wizard's answers as share params, from however many exist.
+
+    IN SECTION 2 BECAUSE ITS FAILURE MODE IS SILENCE, the reason
+    graduate_apply_target lives here too. A hand-off that quietly drops half
+    the answers looks exactly like one that carried them: the calculator opens,
+    it is populated with something, and only the visitor knows it is not what
+    they said.
+
+    Written for the PARTIAL case. The wizard used to build params on its final
+    screen alone, so a visitor who answered three questions and took the skip
+    link landed on Computer Science in San Francisco, which is the default and
+    not their answer. Every key here is conditional, and two of them travel
+    only in pairs:
+
+      * MODE AND MAJOR GO TOGETHER OR NOT AT ALL. The two dropdowns hold
+        different option lists, so a Career occupation seeded while the radio
+        says Major is reconciled away on arrival (see the mode-switch re-pin),
+        and the visitor watches their answer vanish.
+      * A RETURNING STUDENT NEEDS ALL THREE SALARY ANSWERS. The vocabulary and
+        the arithmetic switch on returning_baseline_ready(), which wants both
+        salaries, so seeding the radio without them puts the page in a mode it
+        cannot compute and the counterfactual silently stays the high school
+        graduate.
+
+    compare=0 rides whenever anything else does, for the reason the final
+    screen sends it: an arrival with no arm stated is randomised, and a
+    half-seeded scenario landing in Compare Mode is worse than a bare one.
+    """
+    p = {}
+    if answers.get("mode") and answers.get("major"):
+        p["mode"] = answers["mode"]
+        p["major"] = answers["major"]
+    if answers.get("city"):
+        p["city"] = answers["city"]
+    if "returning" in answers:
+        returning = bool(answers["returning"])
+        if not returning:
+            p["smode"] = "first"
+        elif all(answers.get(k) is not None for k in ("age", "cur_sal", "sal10")):
+            p.update({"smode": "returning", "age": str(int(answers["age"])),
+                      "cur_sal": str(int(answers["cur_sal"])),
+                      "sal10": str(int(answers["sal10"]))})
+    if answers.get("school"):
+        p["school"] = answers["school"]
+        p["in_state"] = "1" if answers.get("in_state") else "0"
+    if p:
+        p["compare"] = "0"
+    return p
+
+
 def internal_tool_url(tool: str = "", extra: dict = None) -> str:
     """A link from one page of this app to another, carrying the params that
     describe THIS VISIT. Pass "" for the calculator.
@@ -27709,11 +27760,15 @@ def render_start_wizard(always_open: bool = False) -> None:
     conversation it is pretending to be. A "Back" button pops one answer.
     """
     del always_open  # the page is the wizard; there is nothing to open
+    answers = st.session_state.setdefault("wizard_answers", {})
     if is_mobile_visit() and bare_arrival():
         # This phone was routed here from the bare calculator URL. The link
         # carries from=start, so the arrival is not bare and is the calculator.
-        st.caption(f"Prefer the full calculator? [Skip to it]({internal_tool_url()}).")
-    answers = st.session_state.setdefault("wizard_answers", {})
+        # It also carries whatever has been answered so far: leaving halfway
+        # used to discard every answer and land the visitor on the default
+        # scenario, which looks like a populated calculator and is not theirs.
+        st.caption("Prefer the full calculator? "
+                   f"[Skip to it]({internal_tool_url(extra=wizard_params(answers))}).")
     step = st.session_state.setdefault("wizard_step", 0)
 
     def nav(i: int, ready: bool = True) -> None:
@@ -27869,16 +27924,9 @@ def render_start_wizard(always_open: bool = False) -> None:
         # share link does, and it has the same consequence: the session's
         # arm and its initial state disagree, which is how such sessions are
         # kept outside the randomised analysis.
-        params = {"mode": answers["mode"], "major": answers["major"],
-                  "city": answers["city"], "compare": "0",
-                  "smode": "returning" if answers.get("returning") else "first"}
-        if answers.get("returning"):
-            params.update({"age": str(int(answers["age"])),
-                           "cur_sal": str(int(answers["cur_sal"])),
-                           "sal10": str(int(answers["sal10"]))})
-        if answers.get("school"):
-            params["school"] = answers["school"]
-            params["in_state"] = "1" if answers.get("in_state") else "0"
+        # ONE BUILDER for the finished hand-off and the skip link both, so
+        # the two cannot drift about which answers travel.
+        params = wizard_params(answers)
         # A REAL NAVIGATION, so the calculator seeds itself from these params
         # the way it seeds from a share link. internal_tool_url carries test
         # and src and stamps from=start, so the arrival is logged as a nav.

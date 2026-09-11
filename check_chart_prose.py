@@ -115,6 +115,10 @@ UNPUBLISHED_SCRIPTS = {
     "forgiveness_map_chart.py": "one panel of forgiveness_map_pair.py, never published alone",
     "debt_by_major_chart.py": "withheld, see marketing/rejected-charts/",
     "reel_data.py": "an adapter, draws nothing",
+    "chart_palette.py": "a palette map, draws nothing. It swaps the dark "
+                        "charts' two brand series for light-ground "
+                        "counterparts BY VALUE, so the book's white "
+                        "interior can reuse the scripts that had no --light.",
     "work_map_chart.py": "built 2026-09-09, not yet published: no manifest, no "
                          "committed jpeg, and the phone render is unbuilt. Give it "
                          "a chart_code() tag and drop this line when it ships.",

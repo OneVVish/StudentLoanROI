@@ -130,6 +130,35 @@ COLUMNS_TO_LOAD = [
     "NPT4_PUB",        # Avg annual net price, public, Title IV aid recipients
     "NPT4_PRIV",       # Avg annual net price, private, same basis
     #
+    # DEBT AT GRADUATION, added 2026-09-10. The app has always had this figure
+    # and only ever through a LIVE Scorecard call (fetch_median_debt), so
+    # nothing offline could reach it: no guard, no chart and no analysis
+    # script could put a school's debt beside its price without a network
+    # round trip and an API key. It is in the same file as everything else
+    # here.
+    #
+    # It is the median for BORROWERS who completed, so it says nothing about
+    # how many borrowed, and at a school where most students borrow nothing
+    # a low median is the aid working rather than the price being small.
+    # Anything displaying it carries that, the way the Parent PLUS column
+    # already does.
+    "DEBT_MDN",        # Median debt at graduation, completers who borrowed
+    #
+    # NET PRICE BY INCOME BAND, added 2026-09-10. The average above is pulled
+    # down hard by the students who receive the most aid, so at a school with
+    # deep aid it is nowhere near what a particular family pays: across the
+    # twenty colleges at the head of one 2027 ranking the average four-year net
+    # price is $75,750, and for a household above $110,000 the median is
+    # $194,602. Same measure, same schools, two and a half times apart. A
+    # family has an income, so it can be handed its own band.
+    #
+    # Split by sector exactly as NPT4 is, and coalesced the same way.
+    "NPT41_PUB", "NPT41_PRIV",   # $0 to $30,000
+    "NPT42_PUB", "NPT42_PRIV",   # $30,001 to $48,000
+    "NPT43_PUB", "NPT43_PRIV",   # $48,001 to $75,000
+    "NPT44_PUB", "NPT44_PRIV",   # $75,001 to $110,000
+    "NPT45_PUB", "NPT45_PRIV",   # $110,001 and up
+    #
     # COMPLETION is the assumption the ROI model never states. It charges a
     # full programme and pays out a graduate's salary; a school where 28% of
     # students finish is a different financial proposition from one where 90%
@@ -221,7 +250,8 @@ def load_scorecard_data(csv_path: str) -> pd.DataFrame:
     numeric_columns = ["CONTROL", "COSTT4_A", "COSTT4_P", "TUITIONFEE_IN",
                        "TUITIONFEE_OUT", "UNITID", "CURROPER", "DISTANCEONLY",
                        "ADM_RATE", "PLUS_DEBT_INST_COMP_MD", "PLUS_DEBT_INST_COMP_N",
-                       "NPT4_PUB", "NPT4_PRIV", "C150_4", "C150_L4"]
+                       "NPT4_PUB", "NPT4_PRIV", "C150_4", "C150_L4", "DEBT_MDN",
+                       "NPT41_PUB", "NPT41_PRIV", "NPT42_PUB", "NPT42_PRIV", "NPT43_PUB", "NPT43_PRIV", "NPT44_PUB", "NPT44_PRIV", "NPT45_PUB", "NPT45_PRIV"]
     for column in numeric_columns:
         # errors="coerce" is a safety net: if any stray non-numeric text
         # slipped past NA_VALUES, it becomes NaN instead of crashing the script.
@@ -310,6 +340,14 @@ def calculate_coa(df: pd.DataFrame) -> pd.DataFrame:
     # -- one rule, in the pipeline, so every reader gets the same answer and
     # the derivation is visible beside the raw columns it came from.
     df["net_price"] = df["NPT4_PUB"].fillna(df["NPT4_PRIV"])
+    # Straight rename, no coalescing: Scorecard publishes one debt column
+    # for every sector.
+    df["debt_median"] = df["DEBT_MDN"]
+    df["net_price_0_30"] = df["NPT41_PUB"].fillna(df["NPT41_PRIV"])
+    df["net_price_30_48"] = df["NPT42_PUB"].fillna(df["NPT42_PRIV"])
+    df["net_price_48_75"] = df["NPT43_PUB"].fillna(df["NPT43_PRIV"])
+    df["net_price_75_110"] = df["NPT44_PUB"].fillna(df["NPT44_PRIV"])
+    df["net_price_110_plus"] = df["NPT45_PUB"].fillna(df["NPT45_PRIV"])
     df["completion_rate"] = df["C150_4"].fillna(df["C150_L4"])
 
     return df
@@ -352,6 +390,8 @@ def build_clean_dataframe(csv_path: str) -> pd.DataFrame:
         # beside the coalesced value so the derivation can be checked without
         # re-reading a 100MB source file.
         "net_price", "NPT4_PUB", "NPT4_PRIV",
+        "debt_median",
+        "net_price_0_30", "net_price_30_48", "net_price_48_75", "net_price_75_110", "net_price_110_plus",
         "completion_rate", "C150_4", "C150_L4",
     ]
     return calculated[final_columns].reset_index(drop=True)
