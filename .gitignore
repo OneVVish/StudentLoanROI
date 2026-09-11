@@ -136,6 +136,10 @@ brand/guide-*.png
 # Back one up before regenerating it. The recorded seed documents which attempt
 # made the file and keeps a reroll off the same dice; it does not reproduce it.
 brand/book-opener-*.png
+# Same again for the timeline panels' nine masters. The three composed
+# static/book-timeline-*.jpg are what the book reads; the per household
+# masters exist so one panel can be reshot without redrawing the other two.
+brand/book-timeline-*.png
 # Same rule, same reason, for the calculator link-preview card. Its INPUT is
 # the exception and IS committed: brand/sources/ holds a browser screenshot of
 # the running app, which no script can regenerate, so it is source rather than
