@@ -217,10 +217,63 @@ SCENES = {
  },
 }
 
+# THEO'S TEN YEAR SLOT IS THREE PANELS, NOT ONE, and that asymmetry is the
+# argument rather than an accident. Sofia and Marcus have chosen and get one
+# room each. Theo has not, and `families.md` prices all three of his majors:
+# Psychology never breaks even and is ahead at forty-one, Business Management
+# breaks even at ~$20,400 and is ahead at thirty-three, Mechanical Engineering
+# at ~$208,000 and twenty-six. Chapter 11 exists because that spread is the
+# finding, so drawing one of them asserts an outcome the book declines to.
+#
+# The previous version drew him on the business management path and needed a
+# caption warning that the picture was not a finding. A caveat that a picture
+# misleads is a sign the picture is wrong. Three panels need no caveat: the
+# spread IS the picture.
+#
+# 576 is a multiple of 16 (the FLUX.2 requirement) and three of them plus two
+# 32px gutters come to 1792 exactly, so the row is the page width. They are
+# PORTRAIT where the other rows are landscape, which marks the unresolved
+# household without a word of explanation.
+THEO_PANEL = (576, 896)
+THEO_GUTTER = 32
+THEO_PATHS = (
+ ("Psychology",
+  "a community counseling room with two low armchairs facing each other, a "
+  "side table, a box of tissues and a window with a blind half drawn",
+  "in his early thirties, sitting in one of the armchairs turned toward the "
+  "other",
+  "nobody else in the picture",
+  "Late afternoon light through the blind", CAM_ACROSS, 20261761),
+ ("Business Management",
+  "a conference room with a long table, task chairs around it, a water jug and "
+  "glasses and a plain bare wall at the far end",
+  "in his early thirties, standing at the end of the table mid gesture, "
+  "presenting to the room",
+  "three colleagues seated at the table facing him",
+  "Late afternoon light from one side", CAM_ACROSS, 20261762),
+ ("Mechanical Engineering",
+  "a machine shop with a workbench, a vise, hand tools on a rack, a steel "
+  "component clamped in place and a roll-up door at the back",
+  "in his early thirties, standing at the bench with a steel part in one hand",
+  "nobody else in the picture",
+  "Daylight through the roll-up door", CAM_ACROSS, 20261763),
+)
+
 MOMENTS = {"applying": "Applying",
            "graduation": "After graduation",
            "ten-years": "Ten years after graduation"}
 
+
+
+def theo_prompt(path):
+    """One of Theo's three ten-year paths. Same person, same contract."""
+    _major, scene, subject, rest, light, camera, _seed = path
+    if camera not in CAMERAS:
+        raise SystemExit(f"  theo path camera not one of three: {camera!r}")
+    person = PEOPLE["nakamura"][1]
+    rest = rest[0].upper() + rest[1:]
+    return (f"Flat vector illustration of {scene}, {camera}. {person} {subject}. "
+            f"{rest}. {light}. {OPENER_STYLE}")
 
 
 def build_prompt(family, moment):
@@ -239,16 +292,29 @@ def compose(moment, images):
     f_title = ImageFont.truetype(FONT_PATH, 56, index=1)
     f_row = ImageFont.truetype(FONT_PATH, 38, index=1)
     rows = list(PEOPLE)
-    h = LABEL_H + len(rows) * (ROW_LABEL_H + PANEL[1]) + PAD_BOT
+    h = LABEL_H + len(rows) * ROW_LABEL_H + PAD_BOT
+    for key in rows:
+        h += (THEO_PANEL[1] + 46) if isinstance(images[key], list) else PANEL[1]
     page = Image.new("RGB", (PANEL[0], h), GROUND)
     d = ImageDraw.Draw(page)
     d.text((0, 24), MOMENTS[moment], font=f_title, fill=INK)
     y = LABEL_H
+    f_path = ImageFont.truetype(FONT_PATH, 30)
     for key in rows:
         d.text((0, y + 10), PEOPLE[key][0], font=f_row, fill=MUTED)
         y += ROW_LABEL_H
-        page.paste(images[key], (0, y))
-        y += PANEL[1]
+        cell = images[key]
+        if isinstance(cell, list):
+            # Theo's ten-year row: three paths across, each named under itself.
+            x = 0
+            for (major, *_), im in zip(THEO_PATHS, cell):
+                page.paste(im, (x, y))
+                d.text((x, y + THEO_PANEL[1] + 8), major, font=f_path, fill=MUTED)
+                x += THEO_PANEL[0] + THEO_GUTTER
+            y += THEO_PANEL[1] + 46
+        else:
+            page.paste(cell, (0, y))
+            y += PANEL[1]
     return page
 
 
@@ -270,10 +336,32 @@ def build(moment, dry_run=False, only=None):
     for k, (pr, seed) in prompts.items():
         master = MASTERS / f"book-timeline-{k}-{moment}.png"
         if only and k != only:
+            if k == "nakamura" and moment == "ten-years":
+                cell = []
+                for major, *_r in THEO_PATHS:
+                    slug = major.lower().replace(" ", "-")
+                    m3 = MASTERS / f"book-timeline-nakamura-ten-years-{slug}.png"
+                    if not m3.exists():
+                        raise SystemExit(f"  no master {m3.name}; build the moment once")
+                    cell.append(Image.open(m3))
+                images[k] = cell
+                print(f"  reusing Theo's three ten-year masters")
+                continue
             if not master.exists():
                 raise SystemExit(f"  no master for {k}/{moment}; build the whole moment once")
             images[k] = Image.open(master)
             print(f"  reusing {master.name}")
+            continue
+        if k == "nakamura" and moment == "ten-years":
+            cell = []
+            for major, *_rest, seed3 in THEO_PATHS:
+                slug = major.lower().replace(" ", "-")
+                m3 = MASTERS / f"book-timeline-nakamura-ten-years-{slug}.png"
+                im3 = generate(theo_prompt((major, *_rest, seed3)), seed3, STEPS,
+                               acct, token, model="klein4b", size=THEO_PANEL)
+                im3.save(m3)
+                cell.append(im3)
+            images[k] = cell
             continue
         im = generate(pr, seed, STEPS, acct, token, model="klein4b", size=PANEL)
         im.save(master)
@@ -312,6 +400,21 @@ def _check():
             assert not bad, f"{fam}/{moment} asserts an outcome: {bad}"
             screens = [w for w in SCREEN_PROPS if w in blob]
             assert not screens, f"{fam}/{moment} names a prop that draws: {screens}"
+
+    assert len(THEO_PATHS) == 3, "Theo's spread is three majors"
+    majors = [t[0] for t in THEO_PATHS]
+    assert majors == ["Psychology", "Business Management", "Mechanical Engineering"], majors
+    tseeds = [t[6] for t in THEO_PATHS]
+    assert len(set(tseeds)) == 3 and not (set(tseeds) & set(seeds)), "seed reused"
+    assert THEO_PANEL[0] * 3 + THEO_GUTTER * 2 == PANEL[0], "Theo's row is not the page width"
+    assert not any(n % 16 for n in THEO_PANEL), "THEO_PANEL is not a multiple of 16"
+    for path in THEO_PATHS:
+        pr = theo_prompt(path)
+        assert OPENER_STYLE in pr, f"{path[0]}: lost the style contract"
+        assert PEOPLE["nakamura"][1] in pr, f"{path[0]}: lost Theo"
+        blob = " ".join(path[1:4]).lower()
+        assert not [w for w in VERDICT_WORDS if w in blob], f"{path[0]} asserts an outcome"
+        assert not [w for w in SCREEN_PROPS if w in blob], f"{path[0]} names a prop that draws"
 
     # Theo's GRADUATION panel still carries no field object: the gown is empty
     # and the ambiguity chapter 11 turns on survives there. His ten year panel
