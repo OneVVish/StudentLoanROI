@@ -192,13 +192,15 @@ SCENES = {
              "Late afternoon light through the window", CAM_DOOR, 20261401),
     "ch07": ("a family kitchen table with a pen resting on it, a folded " "newspaper, a mug and the student's chair empty at the far end",
              "two parents alone at the table, one of them holding the pen",
-             "Night, one light above the table and the room dark beyond it",
-             CAM_BEHIND, 20261409),
+             "Night, one light above the table and the room beyond it dim but "
+             "still legible rather than black",
+             CAM_BEHIND, 20261802),
     "ch08": ("a living room with a sofa, a side table, a single lamp, a folded " "blanket and a bookcase against the far wall",
              "a parent and an adult child on the sofa and a third adult "
              "standing behind it",
-             "Night, one lamp and deep shadow in the corners",
-             CAM_ACROSS, 20261410),
+             "Night, one lamp and the corners in soft shadow rather than "
+             "blackness",
+             CAM_ACROSS, 20261803),
     "ch09": ("a small college dorm room on move-in day, half unpacked, with two "
              "open suitcases, a duffel bag, a laundry basket, a folded "
              "duvet on the floor, a bare mattress and an empty desk",
@@ -217,10 +219,26 @@ SCENES = {
              "a student in an apron behind the counter and two friends "
              "waiting in front of it",
              "Early evening, warm light over the counter", CAM_ACROSS, 20261413),
+    # THREE NIGHT SCENES ASKED FOR DARKNESS AND GOT IT. Measured 2026-09-11
+    # across the nineteen: the set's median mean brightness is 132 of 255, and
+    # ch13 came back at 27.7, ch07 at 57.6 and ch08 at 60.2. On a printed page
+    # that is ink rather than atmosphere. All three said some version of "the
+    # rest of the room dark", "dark beyond it", "deep shadow", and the model is
+    # right to draw what it is told. The night stays in all three, because in
+    # ch07 and ch08 it is doing real work; the word that had to go is the one
+    # asking for an absence of light rather than a low level of it.
+    #
+    # ch13 SAID "the rest of the room dark" AND GOT IT: seed 20261414 came back
+    # near black, the only opener in the set that could not sit on a printed page
+    # without soaking it. A chapter about long roads wants late and quiet, not
+    # unlit. The light line asks for low light rather than darkness now, and the
+    # cast says one student and says they are large in the frame, because the
+    # dark version drew two small ones.
     "ch13": ("a university library nearly empty at night, one lit carrel among " "many dark ones, a stack of books, a chair pushed out and long " "shelves receding",
-             "a single student at the far lit carrel",
-             "Night, one lamp lit and the rest of the room dark",
-             CAM_ACROSS, 20261414),
+             "one student alone at the lit carrel, large in the frame",
+             "Late evening, that carrel's lamp lit and the room beyond it in "
+             "soft low light rather than darkness",
+             CAM_ACROSS, 20261801),
     "ch14": ("a workshop and lab classroom with workbenches, hand tools on a " "pegboard, a vise, safety goggles and a roll-up door at the back",
              "three students working at the benches and an instructor leaning "
              "in beside one of them",
