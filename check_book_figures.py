@@ -385,18 +385,27 @@ FIX = "families.md"
 # committed CSV keeps the average only; the file is the same release, which is
 # how the debt column was added.
 REYES_AGI, REYES_SIZE = 150_000, 4
-TOP20_IPEDS = [
-    "Massachusetts Institute of Technology", "Princeton University",
-    "Harvard University", "Columbia University in the City of New York",
-    "University of Pennsylvania", "Stanford University",
-    "California Institute of Technology", "Yale University",
-    "University of California-Berkeley", "Vanderbilt University",
-    "Johns Hopkins University", "University of California-Los Angeles",
-    "Duke University", "Cornell University", "Northwestern University",
-    "Rice University", "University of Chicago", "Brown University",
-    "Williams College", "Dartmouth College",
-]
+# THE TWENTY ARE DERIVED, NOT LISTED, and the guard derives them the same way
+# the chart does rather than holding a copy. A second hand-typed list is how the
+# two come to disagree about which twenty, silently, with both looking right.
+#
+# They used to be Forbes' twenty. The selection is the book's own now, by a
+# published rule: under Feist a factual compilation protects its SELECTION and
+# not its facts, and borrowing the selection was the one part that was theirs.
+MIN_FAMILIES, TOP_N = 5, 20
 _BAND5 = {}
+
+
+def _top20(d):
+    """Bachelor's-granting, 5+ CIP families, the twenty lowest admit rates."""
+    # programs_bachl IS A PIPE-DELIMITED STRING, never a count: to_numeric on it
+    # is NaN for almost every row and drops 1,870 of the 2,235.
+    b = d[d.programs_bachl.notna() & (d.programs_bachl.astype(str).str.strip() != "")].copy()
+    b["families"] = (b.programs_bachl.astype(str).str.split("|")
+                     .apply(lambda x: len([i for i in x if i.strip()])))
+    return (b.dropna(subset=["ADM_RATE"])
+             .query("families >= @MIN_FAMILIES")
+             .nsmallest(TOP_N, "ADM_RATE"))
 
 
 def _band5(name=None):
@@ -407,11 +416,39 @@ def _band5(name=None):
         # are in the cleaned dataset for exactly that reason.
         import pandas as pd
         d = pd.read_csv(REPO / "data/college_coa_clean.csv",
-                        usecols=["INSTNM", "net_price_110_plus"])
-        d = d[d.INSTNM.isin(TOP20_IPEDS)]
+                        usecols=["INSTNM", "net_price_110_plus", "ADM_RATE",
+                                 "programs_bachl"], low_memory=False)
+        d = _top20(d)
         _BAND5.update(dict(zip(d.INSTNM, d.net_price_110_plus * 4)))
         _BAND5["__median__"] = float(d.net_price_110_plus.median() * 4)
     return _BAND5["__median__"] if name is None else _BAND5[name]
+
+
+_CA = {}
+
+
+def _ca(name=None):
+    """Four years at band 5 for a California public, or the median of them.
+
+    A SECOND READER AND NOT _band5, because that one is scoped to the twenty
+    and every school here is deliberately outside it. Same breadth floor as the
+    twenty so the two tables in chapter 4 compare like with like, and the
+    community colleges that award one bachelor's cannot pass as universities.
+    """
+    if not _CA:
+        import pandas as pd
+        d = pd.read_csv(REPO / "data/college_coa_clean.csv",
+                        usecols=["INSTNM", "STABBR", "control_type",
+                                 "net_price_110_plus", "programs_bachl"],
+                        low_memory=False)
+        b = d[d.programs_bachl.notna() & (d.programs_bachl.astype(str).str.strip() != "")].copy()
+        b["families"] = (b.programs_bachl.astype(str).str.split("|")
+                         .apply(lambda x: len([i for i in x if i.strip()])))
+        ca = b[(b.STABBR == "CA") & (b.control_type == "Public")
+               & (b.families >= MIN_FAMILIES)].dropna(subset=["net_price_110_plus"])
+        _CA.update(dict(zip(ca.INSTNM, ca.net_price_110_plus * 4)))
+        _CA["__median__"] = float(ca.net_price_110_plus.median() * 4)
+    return _CA["__median__"] if name is None else _CA[name]
 
 
 def _reyes_sai(ns):
@@ -449,14 +486,28 @@ FIGURES = [
     # ---- Chapter 4's Reyes case against the twenty.
     Fig("reyes-sai-year", lambda ns: _reyes_sai(ns), "~$25,200", [FIX, CH04], exact="$25,231"),
     Fig("reyes-sai-four", lambda ns: _reyes_sai(ns) * 4, "~$100,900", [FIX, CH04], exact="$100,924"),
-    Fig("reyes-ucla", lambda ns: _band5("University of California-Los Angeles"),
+    Fig("reyes-ucla", lambda ns: _ca("University of California-Los Angeles"),
         "~$118,700", [FIX, CH04], exact="$118,728"),
-    Fig("reyes-berkeley", lambda ns: _band5("University of California-Berkeley"),
+    Fig("reyes-berkeley", lambda ns: _ca("University of California-Berkeley"),
         "~$138,100", [FIX, CH04], exact="$138,116"),
     Fig("reyes-princeton", lambda ns: _band5("Princeton University"),
         "~$144,400", [FIX, CH04], exact="$144,376"),
+    Fig("reyes-bowdoin", lambda ns: _band5("Bowdoin College"),
+        "~$140,800", [FIX, CH04], exact="$140,784"),
+    Fig("reyes-penn", lambda ns: _band5("University of Pennsylvania"),
+        "~$223,900", [FIX, CH04], exact="$223,888"),
+    # ---- Her own state, which is a different table and a different question.
+    Fig("reyes-ca-long-beach", lambda ns: _ca("California State University-Long Beach"),
+        "~$79,000", [FIX, CH04], exact="$79,000"),
+    Fig("reyes-ca-median", lambda ns: _ca(),
+        "~$90,100", [FIX, CH04], exact="$90,092"),
+    Fig("reyes-ca-sdsu", lambda ns: _ca("San Diego State University"),
+        "~$95,300", [FIX, CH04], exact="$95,284"),
+    Fig("reyes-ca-calpoly",
+        lambda ns: _ca("California Polytechnic State University-San Luis Obispo"),
+        "~$111,100", [FIX, CH04], exact="$111,088"),
     Fig("reyes-top20-median", lambda ns: _band5(),
-        "~$194,600", [FIX, CH04], exact="$194,602"),
+        "~$192,400", [FIX, CH04], exact="$192,350"),
     Fig("reyes-duke", lambda ns: _band5("Duke University"),
         "~$216,900", [FIX, CH04], exact="$216,920"),
     # ---- The Reyes family's three Parent PLUS roads. Every one of these
