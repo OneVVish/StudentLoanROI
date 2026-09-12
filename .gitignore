@@ -193,3 +193,6 @@ ppd2026_*.xlsx
 
 # Verification evidence from .claude/skills/verify-worthmydegree (proof artifacts, not source)
 verification-evidence/
+
+# The wrangler install behind package.json. Committed lock, not the tree.
+node_modules/

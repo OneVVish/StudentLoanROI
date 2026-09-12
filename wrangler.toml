@@ -13,6 +13,24 @@
 # `npx wrangler deploy` -- wrangler discovers this file by walking up from the
 # working directory, and `main` below is resolved relative to THIS file.
 
+# WRANGLER ITSELF IS PINNED, IN package.json, AND THAT IS NEW (2026-09-12).
+# Until then there was no package.json at all, so `npx wrangler deploy` fetched
+# whatever was current at the moment of the deploy: the deploy that shipped the
+# SAVE enrollment correction pulled 4.130.0 fresh off the registry. That is the
+# unpinned-dependency failure requirements.txt already exists to prevent,
+# sitting on the one command that changes what the public sees. package-lock
+# .json is committed with it, so the 91 packages behind wrangler are fixed too.
+#
+# `npx` prefers the local install, so the documented command below is unchanged
+# and now resolves to the pin.
+#
+# TWO POSTINSTALL SCRIPTS ARE DELIBERATELY NOT APPROVED. npm 11 holds back
+# esbuild's and workerd's, and `wrangler deploy` does not need either: verified
+# with `--dry-run`, which bundled to 1501.06 KiB, the same size the live deploy
+# uploaded. `wrangler dev` DOES need workerd, so if the local runtime is ever
+# wanted, `npm approve-scripts workerd` is the deliberate step rather than
+# approving everything by reflex.
+
 name = "wmd-edge"
 main = "infra/worker.js"
 

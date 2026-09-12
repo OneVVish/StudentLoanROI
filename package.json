@@ -1,0 +1,8 @@
+{
+  "name": "worthmydegree-edge",
+  "private": true,
+  "description": "Toolchain pin for the Cloudflare Worker in infra/worker.js. Not a published package; see wrangler.toml for what deploying does.",
+  "devDependencies": {
+    "wrangler": "4.130.0"
+  }
+}
