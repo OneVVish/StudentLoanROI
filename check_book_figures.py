@@ -376,6 +376,7 @@ CH11 = "ch11-major-or-career.md"
 CH14 = "ch14-short-roads.md"
 CH17 = "ch17-ride-or-pay.md"
 CH18 = "ch18-slashing-interest-priced.md"
+CH00 = "ch00-introduction.md"
 FIX = "families.md"
 
 # ---- The Reyes family against the Forbes twenty, chapter 4. The prices are
@@ -418,7 +419,33 @@ def _reyes_sai(ns):
     return r["sai"] if isinstance(r, dict) else r
 
 
+SOCIAL_WORKER_WAGE = 48270.0     # Child, Family, and School Social Workers
+HS_AT_22 = 36182.0               # HS_GRAD_SALARY * hs_age_factor(22)
+TAKE_HOME_STATE = "OH"           # ch11 already uses Columbus as the ordinary market
+
+
+def _monthly_net(ns, salary):
+    return ns["calculate_take_home_pay"](salary, TAKE_HOME_STATE)["net_take_home"] / 12
+
+
 FIGURES = [
+    # ---- Chapter 0's school social worker, run monthly before it is run over
+    # the decade. The point of the passage is that these five all say the
+    # degree is ahead while the ten-year premium says it finishes ~$30,400
+    # behind, so they have to be right or the contrast is not a contrast.
+    Fig("ch00-sw-take-home", lambda ns: _monthly_net(ns, SOCIAL_WORKER_WAGE),
+        "~$3,350", [FIX, CH00], exact="$3,346"),
+    Fig("ch00-hs-take-home", lambda ns: _monthly_net(ns, HS_AT_22),
+        "~$2,560", [FIX, CH00], exact="$2,564.80"),
+    # THE TERM COMES FROM THE LAW, NOT FROM A CHOICE, and reading it from
+    # calculate_tiered_standard_term rather than typing 15 is what stops this
+    # silently reverting to the ten-year Standard plan that 34 CFR 685.208(b)
+    # closed to any loan made on or after July 1, 2026. The first draft of
+    # chapter 0 priced that closed plan at $305 and contradicted chapter 6.
+    Fig("ch00-student-cap-payment",
+        lambda ns: ns["calculate_standard_repayment"](
+            27000, 6.5, ns["calculate_tiered_standard_term"](27000))["monthly_payment"],
+        "$235", [FIX, CH00], exact="$235.20"),
     # ---- Chapter 4's Reyes case against the twenty.
     Fig("reyes-sai-year", lambda ns: _reyes_sai(ns), "~$25,200", [FIX, CH04], exact="$25,231"),
     Fig("reyes-sai-four", lambda ns: _reyes_sai(ns) * 4, "~$100,900", [FIX, CH04], exact="$100,924"),
@@ -607,7 +634,7 @@ FIGURES = [
         "~$126,300", [FIX, CH14], exact="$126,335.68"),
     Fig("ch14-bachelor-median-premium",
         lambda ns: level_medians(BACH)["premium"],
-        "~$177,800", [FIX, CH14], exact="$177,760.64"),
+        "~$177,800", [FIX, CH14, CH00], exact="$177,760.64"),
     Fig("ch14-associate-median-wage",
         lambda ns: _assoc_wage_median(ASSOC),
         "~$67,000", [FIX, CH14], exact="$66,985"),
