@@ -24583,7 +24583,7 @@ def plan_change_from_today(current_payment, rows: list,
 
     DELIBERATELY NOT A SAVE PAYMENT FORMULA. SAVE has been in forbearance since
     the Department resumed charging interest on 2025-08-01, so for nearly all of
-    the 7.7 million borrowers enrolled the number to compare against is what
+    the 7.5 million borrowers enrolled the number to compare against is what
     they pay now, which is nothing. Reproducing SAVE's own rate would need an
     undergraduate/graduate split of the balance (5% against 10%, weighted) that
     this tool collects nowhere, to price a plan almost nobody is paying and that

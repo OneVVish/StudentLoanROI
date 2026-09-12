@@ -39,7 +39,7 @@ None of which makes the ten-year plan affordable. About $900 a month on a $47,00
 
 ## The number you are moving from is probably zero
 
-If your loans are on SAVE, the plan has been in forbearance. The Department resumed charging interest on August 1, 2025 but has required no payment since, and nearly 7.7 million borrowers were enrolled when the wind-down was announced. So the change in front of you is not one formula being swapped for another. It is a payment of nothing becoming a payment of something.
+If your loans are on SAVE, the plan has been in forbearance. The Department resumed charging interest on August 1, 2025 but has required no payment since, and more than 7.5 million borrowers were enrolled when the wind-down was announced. So the change in front of you is not one formula being swapped for another. It is a payment of nothing becoming a payment of something.
 
 That is worth saying plainly, because it decides which number matters. On the balance above, every row in that table is an increase. RAP is the smallest of them at about $160 a month, and it is still the difference between paying nothing and paying something every month for thirty years. The question is not whether your payment goes up. It is which increase you are choosing, and what each one costs by the end.
 
