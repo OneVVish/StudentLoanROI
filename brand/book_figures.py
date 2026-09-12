@@ -931,6 +931,154 @@ def fig_roll_down(ns):
                  f"{money(rolled['total_interest'])} / {rolled['payoff_years']:.1f}y")
 
 
+
+# ------------------------------------------------- Federal Student Aid, stock
+
+# THE DEPARTMENT'S OWN BANDS, transcribed from Direct Loan Portfolio by Borrower
+# Debt Size, FY2026 Q2 (the quarter ending 3/31/2026), read 2026-09-11. The
+# source is a quarterly .xls download that is NOT in git, so the table lives
+# here as literals for the same reason check_sai_worksheet.py holds the
+# published SAI tables as literals: a figure a clone cannot draw is a figure
+# nobody can check. `marketing/book/read_fsa_xls.py --report` re-derives them
+# from the download when it is present.
+#
+# Dollars in billions, borrowers in millions, both as the Department rounds
+# them. They are NOT re-rounded here: the shares below are computed from these
+# figures exactly as published, so the curve is theirs and not ours.
+DEBT_BANDS = (("$5k", 16.5, 5.9), ("$10k", 47.7, 6.6), ("$20k", 121.9, 8.4),
+              ("$40k", 252.0, 8.9), ("$60k", 190.7, 3.9), ("$80k", 158.4, 2.3),
+              ("$100k", 108.0, 1.2), ("$200k", 317.1, 2.3),
+              ("$200k+", 318.6, 1.0))
+
+# A DIFFERENT POPULATION AND A DIFFERENT DATE, which is the whole caveat on the
+# lower strip. IDR Portfolio by Academic Level, FY2025 Q1 (3/31/2025), read the
+# same day: the 12.6 million borrowers on an income-driven plan, not the 40.5
+# million above. The Department publishes NO split of the debt bands by level,
+# so these two halves cannot be drawn as one picture and are not.
+LEVEL_SPLIT = (("Undergraduate only", 270.7, 8.7),
+               ("Graduate only", 120.2, 1.1),
+               ("Both", 327.6, 2.6))
+
+
+def fig_who_owes_what(ns):
+    """Balance owed, by borrower percentile. The quantile function, not the CDF.
+
+    WHY THIS WAY ROUND, having drawn it the other way first. A CDF puts the
+    dollar bands on the x axis, and the Department's bands are NOT evenly
+    spaced: $5k, $10k, $20k, $40k, $60k, $80k, $100k, $200k. Drawn as nine
+    equal slots the axis silently rescales the money, and drawn to scale the
+    nine points bunch into the left tenth. Turning it over fixes both, because
+    the axis that is genuinely continuous and evenly spaced is the POPULATION:
+    every percentile is the same width by construction.
+
+    It also states the finding in the shape rather than in a gap between two
+    lines. Flat across two thirds of borrowers, then vertical. The reader does
+    not have to subtract anything to see it.
+
+    THE POINTS ARE BAND EDGES AND ONLY BAND EDGES. Nothing published says how
+    balances are shaped inside a band, so the nine points are drawn and joined
+    and the caption says they are the Department's own cuts. Reading a value
+    between two of them is interpolation, which is why no gridline invites it.
+
+    THE TOP IS OPEN, and that is the tail rather than a drawing problem.
+    "$200k+" has no upper edge, so the curve leaves the frame at 97.5% instead
+    of landing on a number, and the label carries what those borrowers hold.
+    """
+    dollars = [d for _, d, _ in DEBT_BANDS]
+    people = [n for _, _, n in DEBT_BANDS]
+    td, tp = sum(dollars), sum(people)
+    edges = (5, 10, 20, 40, 60, 80, 100, 200)          # thousands, band upper edges
+
+    x0, x1, top, bot = 118, 828, 186, 470
+    ymax = 200.0
+    xof = lambda p: x0 + p * (x1 - x0)
+    yof = lambda k: bot - min(k, ymax) / ymax * (bot - top)
+
+    b = [text("h", 40, 52, "Who owes what"),
+         text("sub", 40, 84, "Every Direct Loan borrower, smallest balance to largest"),
+         text("sub", 40, 112,
+              f"{tp:.1f} million borrowers. ${td:,.0f} billion. March 2026.")]
+
+    for k in (0, 50, 100, 150, 200):
+        y = yof(k)
+        b.append(f'<line x1="{x0}" y1="{y:.1f}" x2="{x1}" y2="{y:.1f}" '
+                 f'stroke="{GRID}" stroke-width="2"/>')
+        b.append(text("ax", x0 - 12, y + 9, f"${k}k" if k else "$0", anchor="end"))
+    for p in (0, 0.25, 0.5, 0.75, 1.0):
+        b.append(text("ax", xof(p), bot + 34, f"{p:.0%}", anchor="middle"))
+    b.append(text("ax", (x0 + x1) / 2, bot + 68,
+                  "Share of borrowers, ordered by what they owe", anchor="middle"))
+
+    cum, pts = 0.0, [(xof(0), yof(0))]
+    for i, k in enumerate(edges):
+        cum += people[i] / tp
+        pts.append((xof(cum), yof(k)))
+    tail_x = pts[-1][0]
+    b.append('<polyline points="%s" fill="none" stroke="%s" stroke-width="5" '
+             'stroke-linejoin="round"/>'
+             % (" ".join(f"{x:.1f},{y:.1f}" for x, y in pts), GAIN))
+    for x, y in pts[1:]:
+        b.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="6" fill="{GAIN}"/>')
+    # The open top band: up and out of the frame rather than to a value.
+    b.append(f'<line x1="{tail_x:.1f}" y1="{yof(200):.1f}" x2="{tail_x:.1f}" '
+             f'y2="{top - 44}" stroke="{COST}" stroke-width="5" '
+             f'stroke-dasharray="11 9"/>')
+    b.append(f'<path d="M {tail_x - 11:.1f} {top - 40} L {tail_x:.1f} {top - 58} '
+             f'L {tail_x + 11:.1f} {top - 40} Z" fill="{COST}"/>')
+
+    half = sum(people[:3]) / tp                        # through the $20k band
+    b.append(f'<line x1="{x0}" y1="{yof(20):.1f}" x2="{xof(half):.1f}" '
+             f'y2="{yof(20):.1f}" stroke="{RULE}" stroke-width="3"/>')
+    b.append(text("key", x0 + 14, yof(20) - 16,
+                  f"{half:.0%} owe $20,000 or less", fill=INK))
+
+    tail_p = people[-1] / tp
+    b.append(text("key", tail_x - 16, top - 34,
+                  f"the last {tail_p:.1%} owe more than $200,000",
+                  anchor="end", fill=COST))
+    b.append(text("key", tail_x - 16, top - 6,
+                  f"and hold {dollars[-1] / td:.0%} of all the money",
+                  anchor="end", fill=COST))
+
+    # ---- The level split, deliberately a strip and not a second axis.
+    sy = bot + 118
+    b.append(text("lab", 40, sy, "By level, income-driven plans only"))
+    shown = sum(n for _, _, n in LEVEL_SPLIT)
+    b.append(text("ax", 40, sy + 30,
+                  f"{shown:.1f} million of the 12.6 million on those plans, March 2025"))
+    # THE COUNT SITS UNDER THE NAME, NOT IN A THIRD COLUMN. Drawn as columns,
+    # the money label and the borrower count each fitted its own budget and
+    # landed on top of each other, which is the overlap `text` cannot catch:
+    # it measures one string against the canvas, never two against each other.
+    widest = max(d * 1e9 / (n * 1e6) for _, d, n in LEVEL_SPLIT)
+    bar_x, bar_max = 330, 380
+    for j, (lab, d, n) in enumerate(LEVEL_SPLIT):
+        y = sy + 66 + j * 76
+        mean = d * 1e9 / (n * 1e6)
+        w = (mean / widest) * bar_max
+        b.append(text("lab", 40, y + 18, lab))
+        b.append(text("ax", 40, y + 46, f"{n:.1f} million borrowers"))
+        # Dark wherever GRADUATE borrowing is in the bar, so the two carrying
+        # it read as one group against the one that does not.
+        b.append(f'<rect x="{bar_x}" y="{y}" width="{w:.1f}" height="32" '
+                 f'fill="{GAIN if lab.startswith("Undergraduate") else DEEP}"/>')
+        b.append(text("num", bar_x + w + 16, y + 26, money(round(mean, -2)),
+                      budget=W - (bar_x + bar_max + 16) - 20))
+    # THE CHAPTER AND THE PICTURE MUST QUOTE THE SAME BANDS. Both figures the
+    # introduction states are read straight off the Department's cuts here, so
+    # a refreshed quarter that moves either one fails the guard rather than
+    # leaving the prose describing last quarter's distribution.
+    #
+    # Both are STATUTORY-STYLE exact rather than rounded: they are the band
+    # EDGES the Department publishes, not estimates of anything, so they carry
+    # no tilde and the half-place rule must not be applied to them.
+    claim("who-owes-what", "ch00", exact=("$20,000", "$200,000"),
+          **{"$20,000": 20_000, "$200,000": 200_000})
+    return write("who-owes-what", 940, b,
+                 note=f"median band $20k; top {tail_p:.1%} hold "
+                      f"{dollars[-1] / td:.1%} of the balance")
+
+
 FIGURES = {"three-roads": fig_three_roads,
            "cap-ladder": fig_cap_ladder,
            "extra-dollar": fig_extra_dollar,
@@ -942,7 +1090,8 @@ FIGURES = {"three-roads": fig_three_roads,
            "households": fig_households,
            "the-year": fig_the_year,
            "the-order": fig_the_order,
-           "roll-down": fig_roll_down}
+           "roll-down": fig_roll_down,
+           "who-owes-what": fig_who_owes_what}
 
 
 def main():
