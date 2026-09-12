@@ -356,6 +356,9 @@ def fig_cap_ladder(ns):
     for colour, label in ((DEEP, "Subsidized: no interest while enrolled"),
                           (GAIN, "Unsubsidized: interest runs from disbursement")):
         b.append(f'<rect x="40" y="{y - 20}" width="26" height="26" fill="{colour}"/>')
+        if "loan" in label.lower():
+            b.append(f'<rect x="40" y="{y - 20}" width="26" height="26" '
+                     f'fill="url(#loanhatch)"/>')
         b.append(text("key", 80, y, label))
         y += 44
     b.append(f'<line x1="40" y1="{y + 6}" x2="{W - 40}" y2="{y + 6}" '
@@ -610,7 +613,20 @@ def fig_take_home(ns):
 
     PAD_L, TOP, BAR_H = 40, 200, 118
     height = TOP + BAR_H + 96 + len(segs) * 46 + 60
-    b = [text("h", 40, 52, "Where a nurse's pay goes"),
+    # A HATCH ON THE LOAN SEGMENT, because this bar does not survive grayscale
+    # without it. Measured 2026-09-11: the loan's orange and What is left's blue
+    # convert to the same dark grey, in the bar AND in the legend swatch, so the
+    # two segments app.py's own note calls "the two carrying the decision" become
+    # one block. The hatch is a SECOND channel, so the distinction no longer
+    # rests on hue alone and the deliberate three-step grey tax ramp is left
+    # exactly as it was. Interior print may be monochrome; this figure no longer
+    # depends on the answer.
+    b = [('<defs><pattern id="loanhatch" width="10" height="10" '
+          'patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
+          '<rect width="10" height="10" fill="none"/>'
+          f'<line x1="0" y1="0" x2="0" y2="10" stroke="{INK}" stroke-width="4" '
+          'stroke-opacity="0.55"/></pattern></defs>'),
+         text("h", 40, 52, "Where a nurse's pay goes"),
          text("sub", 40, 96, f"San Francisco, {money(gross)} gross, and the "
                              f"payment on the"),
          text("sub", 40, 132, "whole $27,000 federal student loan")]
@@ -619,10 +635,16 @@ def fig_take_home(ns):
         w = (W - 80) * v / gross
         b.append(f'<rect x="{x:.1f}" y="{TOP}" width="{w:.1f}" height="{BAR_H}" '
                  f'fill="{colour}"/>')
+        if "loan" in label.lower():
+            b.append(f'<rect x="{x:.1f}" y="{TOP}" width="{w:.1f}" '
+                     f'height="{BAR_H}" fill="url(#loanhatch)"/>')
         x += w
     y = TOP + BAR_H + 76
     for label, v, colour, _ in segs:
         b.append(f'<rect x="40" y="{y - 20}" width="26" height="26" fill="{colour}"/>')
+        if "loan" in label.lower():
+            b.append(f'<rect x="40" y="{y - 20}" width="26" height="26" '
+                     f'fill="url(#loanhatch)"/>')
         b.append(text("key", 80, y, label))
         b.append(text("key", W - 40, y, f"{100 * v / gross:.0f}%", anchor="end",
                       fill=MUTED, budget=90))

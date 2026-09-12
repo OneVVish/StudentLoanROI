@@ -124,6 +124,22 @@ pppub*.csv
 # rule does not untrack a tracked file, and quietly deleting published assets
 # is not what "stop carrying duplicates" asked for.
 brand/guide-*.png
+# Same rule for the book chapter openers, with one difference that matters.
+# brand/book-opener-*.png is the lossless 1792x896 klein4b returns;
+# static/book-opener-*.jpg is what the book reads and is the archive, about
+# 3 MB against roughly ten times that in PNG.
+#
+# THE DIFFERENCE: klein4b is NOT deterministic on a seed. Verified 2026-09-11
+# by regenerating ch17 from its pinned seed and getting a visibly different
+# picture. So unlike every other generated asset here, the committed JPEG is
+# the ONLY copy of its image and re-running the script will not bring it back.
+# Back one up before regenerating it. The recorded seed documents which attempt
+# made the file and keeps a reroll off the same dice; it does not reproduce it.
+brand/book-opener-*.png
+# Same again for the timeline panels' nine masters. The three composed
+# static/book-timeline-*.jpg are what the book reads; the per household
+# masters exist so one panel can be reshot without redrawing the other two.
+brand/book-timeline-*.png
 # Same rule, same reason, for the calculator link-preview card. Its INPUT is
 # the exception and IS committed: brand/sources/ holds a browser screenshot of
 # the running app, which no script can regenerate, so it is source rather than

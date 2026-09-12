@@ -9,6 +9,7 @@
   .key{ font-size: 26px; }
 </style>
 <rect width="900" height="704" fill="#ffffff"/>
+<defs><pattern id="loanhatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="10" height="10" fill="none"/><line x1="0" y1="0" x2="0" y2="10" stroke="#14161a" stroke-width="4" stroke-opacity="0.55"/></pattern></defs>
 <text class="h" x="40.0" y="52.0">Where a nurse's pay goes</text>
 <text class="sub" x="40.0" y="96.0">San Francisco, $186,600 gross, and the payment on the</text>
 <text class="sub" x="40.0" y="132.0">whole $27,000 federal student loan</text>
@@ -16,6 +17,7 @@
 <rect x="190.8" y="200" width="58.8" height="118" fill="#bebdb7"/>
 <rect x="249.6" y="200" width="57.8" height="118" fill="#dcdbd6"/>
 <rect x="307.5" y="200" width="16.2" height="118" fill="#eb6834"/>
+<rect x="307.5" y="200" width="16.2" height="118" fill="url(#loanhatch)"/>
 <rect x="323.6" y="200" width="536.4" height="118" fill="#2a78d6"/>
 <rect x="40" y="374" width="26" height="26" fill="#a09f99"/>
 <text class="key" x="80.0" y="394.0">Federal tax</text>
@@ -30,6 +32,7 @@
 <text class="key" x="860.0" y="486.0" text-anchor="end" fill="#5c636d">7%</text>
 <text class="key" x="768.0" y="486.0" text-anchor="end" fill="#5c636d">$13,159</text>
 <rect x="40" y="512" width="26" height="26" fill="#eb6834"/>
+<rect x="40" y="512" width="26" height="26" fill="url(#loanhatch)"/>
 <text class="key" x="80.0" y="532.0">Student loan</text>
 <text class="key" x="860.0" y="532.0" text-anchor="end" fill="#5c636d">2%</text>
 <text class="key" x="768.0" y="532.0" text-anchor="end" fill="#5c636d">$3,679</text>

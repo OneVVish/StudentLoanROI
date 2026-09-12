@@ -1708,6 +1708,17 @@ IDR_MAX_TERM_YEARS = 20
 OLD_IBR_PAYMENT_RATE = 0.15
 OLD_IBR_MAX_TERM_YEARS = 25
 
+# The Social Security FULL retirement age, 20 CFR 404.409: "1/2/1960 and
+# later: 67 years." Not a claim about when anyone retires -- 404.409(c) lets
+# benefits be taken at 62, reduced for life, and the measured average is
+# earlier than either. It is the age at which unreduced benefits begin, which
+# is the age a payment running past it is being made FROM. Two surfaces warn on
+# it and both used to carry the literal plus the sentence "the 67 most people
+# plan to retire at", which is a behavioral claim with no source behind it.
+# marketing/book/sources.md carries the regulation with a read date; chapter 7
+# used 65 (Medicare eligibility, not a Social Security age) until 2026-09-11.
+RETIREMENT_AGE_FRA = 67
+
 STANDARD_TERM_YEARS = 10
 # The Extended Standard plan: a fixed payment stretched to 25 years, for
 # borrowers with enough balance to qualify. Included in the existing-loan
@@ -17405,8 +17416,9 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
             story.append(Paragraph(
                 f"On {chart_label}, you would be ~{_end_age:.0f} when this ends "
                 "(paid off, or the remainder discharged)"
-                + (" -- past the 67 most people plan to retire at."
-                   if _end_age >= 67 else "."),
+                + (f", past the {RETIREMENT_AGE_FRA} at which full Social "
+                   "Security benefits begin for anyone born in 1960 or later."
+                   if _end_age >= RETIREMENT_AGE_FRA else "."),
                 styles["caption"]))
             story.append(Spacer(1, 6))
         # The same split the screen draws. A twin showing FEWER series than
@@ -24146,9 +24158,10 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             _end_age = age + chosen_result["payoff_years"]
             _end_phrase = (f"On **{chosen}**, you'd be **~{_end_age:.0f}** when "
                            "this ends (paid off, or the remainder discharged).")
-            if _end_age >= 67:
-                st.warning(_end_phrase + " That is past the 67 most people "
-                           "plan to retire at.")
+            if _end_age >= RETIREMENT_AGE_FRA:
+                st.warning(_end_phrase + f" That is past the {RETIREMENT_AGE_FRA} "
+                           "at which full Social Security benefits begin for "
+                           "anyone born in 1960 or later.")
             else:
                 st.caption(_end_phrase)
         _repayment_actions(rows, balance, rate, income, deps, accrued,
@@ -28805,7 +28818,7 @@ def payoff_age_for(scenario: dict, current_age, program_years: int):
 
 
 def render_payoff_age(scenario: dict, current_age, program_years: int,
-                       retirement_age: int = 67) -> None:
+                       retirement_age: int = RETIREMENT_AGE_FRA) -> None:
     """Caption under the payoff metric. Shared by both 5c branches -- rendering
     it in one and not the other is an H2 confound, not a cosmetic gap."""
     age = payoff_age_for(scenario, current_age, program_years)
@@ -28814,8 +28827,9 @@ def render_payoff_age(scenario: dict, current_age, program_years: int,
     if age >= retirement_age:
         st.warning(
             f"You'd be **{age:.0f}** when this is repaid, past the "
-            f"{retirement_age} most people plan to retire at. The debt outlasts "
-            "the working years you were counting on."
+            f"{retirement_age} at which full Social Security benefits begin for "
+            "anyone born in 1960 or later. The debt outlasts the working years "
+            "you were counting on."
         )
     else:
         st.caption(f"You'd be **{age:.0f}** when this is fully repaid.")

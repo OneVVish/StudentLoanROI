@@ -163,6 +163,12 @@ Free single-picture charts built from the same federal data as the
 calculator, indexed at https://worthmydegree.com/charts. Reusable
 anywhere with attribution. One page, so each is addressed by fragment.
 
+- [Ranked on what a family pays, printed at something else](https://worthmydegree.com/charts#five-prices-one-college):
+  The 25 colleges Forbes ranked highest for return on investment in
+  September 2026, priced from federal data: what families in each of
+  five income bands actually pay for a year after grant aid, housing
+  and food included, against the full sticker cost and against the
+  tuition and fees a ranking prints, which counts neither.
 - [What a major pays, against whether it places](https://worthmydegree.com/charts#pay-against-placement):
   Every major the New York Fed publishes, plotted by early-career pay
   against unemployment plus the share working in jobs that do not need
