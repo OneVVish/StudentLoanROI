@@ -2650,3 +2650,32 @@ end $$;
 -- Not covered, deliberately: a path carrying professional debt. That figure
 -- is Scorecard's debt at graduation and already includes accrual, so
 -- charging its bachelor's years here would double-count the larger number.
+
+-- 2026-09-12  SEAM: "the top twenty" is a different twenty. NO DDL.
+--
+-- The what-the-top-twenty-cost infographic and the book's chapter 4 priced
+-- the twenty names at the head of Forbes' 2027 America's Top Colleges, used
+-- as a list of names with the ranking discarded. The selection is derived
+-- from this date: bachelor's-granting, teaching five or more CIP families,
+-- the twenty lowest ADM_RATE in data/college_coa_clean.csv.
+--
+-- The reason is copyright rather than accuracy. Under Feist v. Rural
+-- Telephone a factual compilation protects its SELECTION and not its facts,
+-- so publishing our own numbers about somebody else's chosen twenty used the
+-- one part of their work that is theirs. Every figure was always federal.
+--
+-- 15 of the 20 are the same schools. Out: Cornell, Rice, Williams,
+-- UC Berkeley, UCLA. In: Bowdoin, Colby, Northeastern, Pomona, Swarthmore.
+--
+-- WHAT MOVED. The median four years at the $110,000-and-up band goes
+-- $194,602 to $192,350. Colleges past the federal maximum for the Reyes case
+-- go 13 of 20 to 10 of 20. CSS Profile collectors go 15 to 17. The sticker
+-- median, net median and peer count on the chart's own footer all move.
+-- Every one of the twenty is now a private nonprofit, because no public
+-- university admits a small enough share to reach the cut.
+--
+-- ANY FIGURE QUOTED AGAINST "THE TWENTY" BEFORE THIS DATE DESCRIBES A
+-- DIFFERENT TWENTY, in the published picture, in the guides and in the book.
+-- The gallery image changed under the same filename, so a reposted copy from
+-- before today shows the old selection; the ?v= cache-bust means the edge
+-- serves the new one.

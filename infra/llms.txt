@@ -174,10 +174,10 @@ anywhere with attribution. One page, so each is addressed by fragment.
   against unemployment plus the share working in jobs that do not need
   the degree. The two questions agree about a third of the time.
 - [What the top twenty actually cost](https://worthmydegree.com/charts#what-the-top-twenty-cost):
-  The twenty colleges at the head of Forbes' 2027 ranking, priced from
-  federal data: four years at sticker, four years at the average net
-  price paid by aided students, and the median debt their graduates
-  leave with.
+  The twenty most selective bachelor's colleges in the federal data,
+  priced from that same data: four years at sticker, four years at the
+  average net price paid by aided students, and the median debt their
+  graduates leave with.
 - [The best-paid career depends on when you ask](https://worthmydegree.com/charts#best-career-by-year):
   Where each career ranks by that year's pay among the 825 occupations
   the calculator models, at years 1, 5, 10 and 20 after a bachelor's
