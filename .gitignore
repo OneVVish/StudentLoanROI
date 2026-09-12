@@ -140,6 +140,13 @@ brand/book-opener-*.png
 # static/book-timeline-*.jpg are what the book reads; the per household
 # masters exist so one panel can be reshot without redrawing the other two.
 brand/book-timeline-*.png
+# The cover masters, and here the reasoning INVERTS the one above. A klein4b
+# master is ignored because it cannot be reproduced; a cover master is ignored
+# because it can: brand/build_book_cover.py redraws all four deterministically
+# from palette.json, the bundled Inter faces and the committed Scorecard file,
+# byte for byte. The served static/cover-*.jpg are what KDP and the EPUB read.
+# The contact sheet is a judging aid and regenerates with --contact-sheet.
+brand/cover-*.png
 # Same rule, same reason, for the calculator link-preview card. Its INPUT is
 # the exception and IS committed: brand/sources/ holds a browser screenshot of
 # the running app, which no script can regenerate, so it is source rather than
