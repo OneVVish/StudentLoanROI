@@ -94,6 +94,64 @@ CEILING = 92_000
 TWO_QUESTIONS = ("Paying for college is two questions.\n"
                  "The second is the one almost nobody asks.")
 
+# The back cover. Same house rules as the front and one more that this
+# category breaks on every shelf: the last line is what the book declines to
+# do, not what it promises. $92,000 and the two counts are statutory or
+# computed, so none of them carries a tilde.
+BACK_COPY = (
+    "The federal government will lend a family $92,000 for one bachelor’s "
+    "degree. At 1,644 of the 2,235 colleges that grant one, four years of "
+    "the in-state sticker price costs more than that.\n\n"
+    "This book prices the gap. It joins the federal data that already "
+    "exists, what every college costs, what every occupation pays, and the "
+    "rule behind every loan, into one question a family can answer: what "
+    "this degree costs, and what it pays back.\n\n"
+    "Nineteen chapters follow four families through the arithmetic. Every "
+    "figure is computed from a federal source rather than quoted from "
+    "anyone.\n\n"
+    "It does not tell you what to choose.")
+
+# KDP print wrap, read 2026-09-12 at kdp.amazon.com/en_US/help/topic/
+# G201834181: 0.125in bleed on all four outer edges, and a spine of
+# pages x 0.002252in for black ink on white paper. Spine TEXT is allowed
+# from 100 pages, with 0.0625in of clearance each side.
+BLEED_IN, TRIM_W_IN, TRIM_H_IN = 0.125, 6.0, 9.0
+SPINE_PER_PAGE_IN = 0.002252
+SPINE_TEXT_MIN_PAGES = 100
+SPINE_SAFE_IN = 0.0625
+# KDP prints the barcode over the back cover at 2 x 1.2in and asks for it to
+# be left clear. Placed up from the bottom trim and in from the outer trim.
+BARCODE_W_IN, BARCODE_H_IN, BARCODE_PAD_IN = 2.0, 1.2, 0.25
+WRAP_DPI = 300
+INTERIOR_PDF = REPO / "marketing" / "book" / "_tex" / "book.pdf"
+
+
+def interior_pages(pdf):
+    """The page count, read from the interior rather than typed.
+
+    THE SPINE IS A FUNCTION OF IT, so a hand-typed count that drifts from the
+    file is a cover that does not fit the book: at 0.002252in a page, being
+    ten pages out moves the spine by 0.0225in and puts the front panel's fold
+    inside the artwork. The page tree lives in compressed object streams, the
+    same read build_latex.report does, so grepping the raw bytes finds nothing
+    and returns a spine of no thickness.
+    """
+    import re as _re, zlib
+    b = pdf.read_bytes()
+    counts = set()
+    for m in _re.finditer(rb"stream\r?\n(.*?)endstream", b, _re.S):
+        try:
+            d = zlib.decompress(m.group(1))
+        except Exception:
+            continue
+        counts |= {int(c) for c in
+                   _re.findall(rb"/Type\s*/Pages.{0,200}?/Count\s+(\d+)", d, _re.S)}
+        counts |= {int(c) for c in
+                   _re.findall(rb"/Count\s+(\d+).{0,200}?/Type\s*/Pages", d, _re.S)}
+    if not counts:
+        raise SystemExit(f"  could not read a page count from {pdf}")
+    return max(counts)
+
 
 def frame(repo: Path):
     """The 2,235 bachelor's-granting colleges, by what four years costs.
@@ -381,6 +439,155 @@ def render(name, args):
     return out
 
 
+def _edge_colour(im):
+    """A panel background sampled from the front art's own border.
+
+    The MEDIAN of pixels along all four edges, never a corner pixel, which is
+    the rule the landing cards already carry: one stray bright pixel or a mark
+    in a corner would otherwise pick the colour for the whole back cover.
+    """
+    w, h = im.size
+    px = ([im.getpixel((x, 0)) for x in range(0, w, 7)]
+          + [im.getpixel((x, h - 1)) for x in range(0, w, 7)]
+          + [im.getpixel((0, y)) for y in range(0, h, 7)]
+          + [im.getpixel((w - 1, y)) for y in range(0, h, 7)])
+    return tuple(sorted(c[i] for c in px)[len(px) // 2] for i in range(3))
+
+
+def _ink_for(bg):
+    """Type that can be read on whatever the panel turned out to be."""
+    lum = (0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2]) / 255
+    return (26, 28, 31) if lum > 0.5 else (247, 244, 238)
+
+
+def _wrapped(draw, text, font, max_px):
+    """Break a paragraph to a measured width. MEASURED, not counted."""
+    out = []
+    for para in text.split("\n\n"):
+        line, lines = "", []
+        for word in para.split():
+            trial = f"{line} {word}".strip()
+            if draw.textlength(trial, font=font) <= max_px or not line:
+                line = trial
+            else:
+                lines.append(line)
+                line = word
+        lines.append(line)
+        out.append(lines)
+    return out
+
+
+def wrap(name):
+    """One KDP-ready cover wrap: back, spine and front on a single sheet.
+
+    The front art is the concept render, padded to the panel's ratio with its
+    own background rather than stretched or cropped. Cropping is what a naive
+    fit does and it is the wrong choice here: every concept sets its title in
+    the top twentieth of the canvas, so trimming height to reach 6.125 x 9.25
+    would slice the question off the book.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    src = REPO / "brand" / f"cover-{name}.png"
+    if not src.exists():
+        raise SystemExit(f"  refusing: render the {name} cover first")
+    pages = interior_pages(INTERIOR_PDF)
+    spine_in = pages * SPINE_PER_PAGE_IN
+    panel_w_in = TRIM_W_IN + BLEED_IN
+    full_w_in = 2 * panel_w_in + spine_in
+    full_h_in = TRIM_H_IN + 2 * BLEED_IN
+
+    px = lambda inches: round(inches * WRAP_DPI)
+    pt = lambda points: round(points * WRAP_DPI / 72)
+    W_px, H_px = px(full_w_in), px(full_h_in)
+
+    front = Image.open(src).convert("RGB")
+    bg = _edge_colour(front)
+    ink = _ink_for(bg)
+
+    # Pad the art to the panel ratio, then resize. The panel is relatively
+    # wider than the 1600x2560 render, so the padding goes on the sides and
+    # every concept is centred, which is why this costs the composition
+    # nothing.
+    want = panel_w_in / full_h_in
+    fw, fh = front.size
+    if fw / fh < want:
+        pad_w = round(fh * want)
+        canvas_im = Image.new("RGB", (pad_w, fh), bg)
+        canvas_im.paste(front, ((pad_w - fw) // 2, 0))
+        front = canvas_im
+    front = front.resize((px(panel_w_in), H_px), Image.LANCZOS)
+
+    sheet = Image.new("RGB", (W_px, H_px), bg)
+    sheet.paste(front, (W_px - px(panel_w_in), 0))
+    d = ImageDraw.Draw(sheet)
+
+    f = lambda ttf, size: ImageFont.truetype(str(FONT_DIR / ttf), pt(size))
+    body = f("SourceSerif4-Regular.ttf", 11)
+    semi = f("InterDisplay-SemiBold.ttf", 12)
+    black = f("InterDisplay-Black.ttf", 15)
+
+    # BACK COVER. Text sits inside the trim with a real margin, and stops
+    # above the barcode block KDP prints over this panel.
+    margin = px(BLEED_IN + 0.55)
+    text_w = px(panel_w_in) - margin - px(0.55)
+    y = px(BLEED_IN + 1.05)
+    leading = pt(11) * 1.42
+    for para in _wrapped(d, BACK_COPY, body, text_w):
+        for line in para:
+            d.text((margin, y), line, font=body, fill=ink)
+            y += leading
+        y += leading * 0.55
+    back_text_bottom = y
+
+    site_y = H_px - px(BLEED_IN + 0.42)
+    d.text((margin, site_y), SITE, font=semi, fill=ink)
+
+    # The barcode's clear zone, bottom right of the back panel.
+    bx1 = px(panel_w_in) - px(BLEED_IN + BARCODE_PAD_IN)
+    by1 = H_px - px(BLEED_IN + BARCODE_PAD_IN)
+    barcode = (bx1 - px(BARCODE_W_IN), by1 - px(BARCODE_H_IN), bx1, by1)
+    if back_text_bottom > barcode[1] - px(0.15):
+        raise SystemExit("  refusing: the back copy runs into the barcode block")
+
+    # SPINE. Allowed from 100 pages, and this book clears it; below that the
+    # spine is left blank rather than set in type nobody could read.
+    if pages >= SPINE_TEXT_MIN_PAGES:
+        usable = spine_in - 2 * SPINE_SAFE_IN
+        strip = Image.new("RGB", (H_px, px(spine_in)), bg)
+        sd = ImageDraw.Draw(strip)
+        label, auth = "IS IT WORTH IT?", AUTHOR
+        for fnt in (black, f("InterDisplay-Black.ttf", 13),
+                    f("InterDisplay-Black.ttf", 11)):
+            if fnt.getbbox(label)[3] - fnt.getbbox(label)[1] <= px(usable):
+                black = fnt
+                break
+        else:
+            raise SystemExit("  refusing: no spine size clears the safe zone")
+        gap = sd.textlength("     ", font=black)
+        total = sd.textlength(label, font=black) + gap + sd.textlength(auth, font=semi)
+        if total > H_px - px(1.0):
+            raise SystemExit("  refusing: the spine line is longer than the spine")
+        sx = (H_px - total) / 2
+        sy = (px(spine_in) - (black.getbbox(label)[3] - black.getbbox(label)[1])) / 2
+        sd.text((sx, sy - black.getbbox(label)[1]), label, font=black, fill=ink)
+        sd.text((sx + sd.textlength(label, font=black) + gap,
+                 sy - semi.getbbox(auth)[1]), auth, font=semi, fill=ink)
+        # TOP TO BOTTOM, which is the US convention and the one Amazon's own
+        # shelf photographs follow: rotate(90) is counter-clockwise and set
+        # the spine reading upwards, so the author's name arrived above the
+        # title and the whole line was upside down against its neighbours.
+        sheet.paste(strip.rotate(-90, expand=True), (px(panel_w_in), 0))
+
+    out = REPO / "brand" / f"cover-wrap-{name}.pdf"
+    sheet.save(out, "PDF", resolution=WRAP_DPI)
+    png = REPO / "brand" / f"cover-wrap-{name}.png"
+    sheet.save(png)
+    print(f"  wrote {out.name}  {full_w_in:.3f}x{full_h_in:.2f}in, "
+          f"spine {spine_in:.3f}in from {pages} pages, {WRAP_DPI} dpi")
+    return out
+
+
 def contact_sheet():
     """Kindle browsing is the real viewing condition: about 100px of width.
     A cover that fails here fails, whatever it looks like at full size."""
@@ -407,12 +614,17 @@ def main():
     ap.add_argument("--concept", choices=list(CONCEPTS) + ["all"], default="all")
     ap.add_argument("--face", help="re-cut the display type, for the licence question")
     ap.add_argument("--contact-sheet", action="store_true")
+    ap.add_argument("--wrap", action="store_true",
+                    help="the KDP print wrap: back, spine and front, one PDF")
     args = ap.parse_args()
     if args.contact_sheet:
         return contact_sheet()
     names = list(CONCEPTS) if args.concept == "all" else [args.concept]
     for n in names:
-        render(n, args)
+        if args.wrap:
+            wrap(n)
+        else:
+            render(n, args)
 
 
 if __name__ == "__main__":
