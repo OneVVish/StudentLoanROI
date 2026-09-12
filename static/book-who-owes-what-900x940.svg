@@ -40,21 +40,21 @@
 <line x1="810.5" y1="186.0" x2="810.5" y2="142" stroke="#eb6834" stroke-width="5" stroke-dasharray="11 9"/>
 <path d="M 799.5 146 L 810.5 128 L 821.5 146 Z" fill="#eb6834"/>
 <line x1="118" y1="441.6" x2="484.4" y2="441.6" stroke="#dfe3e8" stroke-width="3"/>
-<text class="key" x="132.0" y="425.6" fill="#14161a">52% owe $20,000 or less</text>
-<text class="key" x="794.5" y="152.0" text-anchor="end" fill="#eb6834">the last 2.5% owe more than $200,000</text>
+<text class="key" x="132.0" y="425.6" fill="#14161a">52% owe less than $20,000</text>
+<text class="key" x="794.5" y="152.0" text-anchor="end" fill="#eb6834">the last 2.5% owe $200,000 or more</text>
 <text class="key" x="794.5" y="180.0" text-anchor="end" fill="#eb6834">and hold 21% of all the money</text>
-<text class="lab" x="40.0" y="588.0">By level, income-driven plans only</text>
-<text class="ax" x="40.0" y="618.0">12.4 million of the 12.6 million on those plans, March 2025</text>
+<text class="lab" x="40.0" y="588.0">Average balance by level, income-driven plans only</text>
+<text class="ax" x="40.0" y="618.0">12.4 million of the 12.6 million on those plans, December 2024</text>
 <text class="lab" x="40.0" y="672.0">Undergraduate only</text>
 <text class="ax" x="40.0" y="700.0">8.7 million borrowers</text>
 <rect x="330" y="654" width="93.8" height="32" fill="#2a78d6"/>
-<text class="num" x="439.8" y="680.0">$31,100</text>
+<text class="num" x="439.8" y="680.0">~$31,000</text>
 <text class="lab" x="40.0" y="748.0">Graduate only</text>
 <text class="ax" x="40.0" y="776.0">1.1 million borrowers</text>
 <rect x="330" y="730" width="329.6" height="32" fill="#12335c"/>
-<text class="num" x="675.6" y="756.0">$109,300</text>
+<text class="num" x="675.6" y="756.0">~$109,000</text>
 <text class="lab" x="40.0" y="824.0">Both</text>
 <text class="ax" x="40.0" y="852.0">2.6 million borrowers</text>
 <rect x="330" y="806" width="380.0" height="32" fill="#12335c"/>
-<text class="num" x="726.0" y="832.0">$126,000</text>
+<text class="num" x="726.0" y="832.0">~$126,000</text>
 </svg>

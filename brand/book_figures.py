@@ -951,8 +951,10 @@ DEBT_BANDS = (("$5k", 16.5, 5.9), ("$10k", 47.7, 6.6), ("$20k", 121.9, 8.4),
               ("$200k+", 318.6, 1.0))
 
 # A DIFFERENT POPULATION AND A DIFFERENT DATE, which is the whole caveat on the
-# lower strip. IDR Portfolio by Academic Level, FY2025 Q1 (3/31/2025), read the
-# same day: the 12.6 million borrowers on an income-driven plan, not the 40.5
+# lower strip. IDR Portfolio by Academic Level, FY2025 Q1, which ENDS 12/31/2024:
+# the Department's fiscal year starts in October, so Q1 closes in December and
+# the 3/31 this once said is the Q2 date applied to a Q1 row. sources.md records
+# the same trap in the other direction. Read 2026-09-11: the 12.6 million borrowers on an income-driven plan, not the 40.5
 # million above. The Department publishes NO split of the debt bands by level,
 # so these two halves cannot be drawn as one picture and are not.
 LEVEL_SPLIT = (("Undergraduate only", 270.7, 8.7),
@@ -1030,11 +1032,11 @@ def fig_who_owes_what(ns):
     b.append(f'<line x1="{x0}" y1="{yof(20):.1f}" x2="{xof(half):.1f}" '
              f'y2="{yof(20):.1f}" stroke="{RULE}" stroke-width="3"/>')
     b.append(text("key", x0 + 14, yof(20) - 16,
-                  f"{half:.0%} owe $20,000 or less", fill=INK))
+                  f"{half:.0%} owe less than $20,000", fill=INK))
 
     tail_p = people[-1] / tp
     b.append(text("key", tail_x - 16, top - 34,
-                  f"the last {tail_p:.1%} owe more than $200,000",
+                  f"the last {tail_p:.1%} owe $200,000 or more",
                   anchor="end", fill=COST))
     b.append(text("key", tail_x - 16, top - 6,
                   f"and hold {dollars[-1] / td:.0%} of all the money",
@@ -1042,10 +1044,10 @@ def fig_who_owes_what(ns):
 
     # ---- The level split, deliberately a strip and not a second axis.
     sy = bot + 118
-    b.append(text("lab", 40, sy, "By level, income-driven plans only"))
+    b.append(text("lab", 40, sy, "Average balance by level, income-driven plans only"))
     shown = sum(n for _, _, n in LEVEL_SPLIT)
     b.append(text("ax", 40, sy + 30,
-                  f"{shown:.1f} million of the 12.6 million on those plans, March 2025"))
+                  f"{shown:.1f} million of the 12.6 million on those plans, December 2024"))
     # THE COUNT SITS UNDER THE NAME, NOT IN A THIRD COLUMN. Drawn as columns,
     # the money label and the borrower count each fitted its own budget and
     # landed on top of each other, which is the overlap `text` cannot catch:
@@ -1062,7 +1064,7 @@ def fig_who_owes_what(ns):
         # it read as one group against the one that does not.
         b.append(f'<rect x="{bar_x}" y="{y}" width="{w:.1f}" height="32" '
                  f'fill="{GAIN if lab.startswith("Undergraduate") else DEEP}"/>')
-        b.append(text("num", bar_x + w + 16, y + 26, money(round(mean, -2)),
+        b.append(text("num", bar_x + w + 16, y + 26, "~" + money(round(mean, -3)),
                       budget=W - (bar_x + bar_max + 16) - 20))
     # THE CHAPTER AND THE PICTURE MUST QUOTE THE SAME BANDS. Both figures the
     # introduction states are read straight off the Department's cuts here, so
