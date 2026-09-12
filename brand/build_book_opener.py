@@ -190,7 +190,16 @@ SCENES = {
              "one student working at the desk and a roommate sitting on the "
              "bed",
              "Late afternoon light through the window", CAM_DOOR, 20261401),
-    "ch07": ("a family kitchen table with a pen resting on it, a folded " "newspaper, a mug and the student's chair empty at the far end",
+    # A FOLDED NEWSPAPER WAS HERE AND IT CAME BACK AS A NEWSPAPER, open, with
+    # columns of simulated text and grey image blocks, in a book whose whole
+    # claim is that its figures are real. Reshot 2026-09-12. It is the rule this
+    # file already records: a negative clause does not beat a strong object
+    # association, and a newspaper is the strongest of them, being nothing but
+    # text. Reading glasses carry the same meaning, somebody has been reading
+    # something hard, and their real-world version has nothing written on it.
+    "ch07": ("a family kitchen table with a pen resting on it, a pair of "
+             "reading glasses folded beside it, a mug and the student's "
+             "chair empty at the far end",
              "two parents alone at the table, one of them holding the pen",
              "Night, one light above the table and the room beyond it dim but "
              "still legible rather than black",
