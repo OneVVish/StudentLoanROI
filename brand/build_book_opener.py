@@ -177,10 +177,27 @@ SCENES = {
     "ch03": ("a family kitchen table with a shoebox of folders open on it, " "loose papers, a coffee pot and an empty chair at the near end",
              "two parents leaning over the open folders together",
              "Morning light from a window to the left", CAM_BEHIND, 20261406),
-    "ch04": ("a family living room with a low table, one opened envelope, a " "sofa with cushions, a rug and a lamp in the corner",
-             "two adults on the sofa with the opened letter between them and "
-             "a younger sibling sitting on the rug",
-             "Evening, warm lamplight from one corner", CAM_ACROSS, 20261407),
+    # A LIVING ROOM WITH AN OPENED ENVELOPE WAS HERE, and it was the weakest
+    # opener in the book for three reasons at once. It repeated ch08's room, it
+    # told ch00's and ch03's story a third time (a family at home with
+    # paperwork, three of the first five openers), and it showed the letter
+    # ARRIVING, which is chapter 3's moment and not this chapter's. Chapter 4 is
+    # the price you would actually pay: in state against out of state, the same
+    # seat at two prices, a family shopping across a state line. That wants a
+    # PLACE and a distance, not another table. Reshot 2026-09-12.
+    #
+    # THE CAR IS SIDE-ON ON PURPOSE. A number plate is writing, and this file's
+    # own rule is that a prop carrying writing carries writing however firmly
+    # the contract says otherwise. A car seen from the side has no plate in
+    # frame, which is the scene-level fix rather than a negative clause.
+    "ch04": ("a campus visitor parking lot, one parked car seen side on, a "
+             "painted bay line and university buildings in muted brown grey "
+             "brick across the way",
+             "exactly three people, two parents and their teenager, standing "
+             "at full length beside the car with their backs to us and looking "
+             "across at the buildings",
+             "Late afternoon, low sun, the buildings warm on one side",
+             CAM_BEHIND, 20261408),
     "ch05": ("a community college cafeteria with long tables, trays, a window " "wall onto a parking lot, a napkin dispenser and stacked chairs",
              "two students at a table with their trays and a third setting "
              "hers down to join them",
