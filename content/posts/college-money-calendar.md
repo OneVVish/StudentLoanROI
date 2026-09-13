@@ -15,6 +15,7 @@ This guide puts the dates in order and names, for each one, the tool on this sit
 | October 1 | The FAFSA opens for the next school year | Know your federal number before you file |
 | November | Early decision deadlines at the schools that offer it | Price the school before you sign anything binding |
 | January | Income-driven payments reset to new poverty guidelines | Only if someone in the house is already repaying |
+| January to March | Priority deadlines set by colleges and by states | The one that binds is not the federal one |
 | March and April | Aid letters arrive | Put each letter into the calculator, then appeal |
 | May 1 | The reply date | The money decision is made here, not in March |
 | July 1 | Rates, caps and plans change for the year | Know which side of the date your loan falls on |
@@ -38,6 +39,18 @@ That is the month to run the school's own net price calculator and to price the 
 Nothing happens in January for a first-time student. For a household with someone already repaying, a parent with older loans or an older sibling, January is when the Department of Health and Human Services reissues the poverty guidelines, and every income-driven payment in the country is figured against them at the borrower's next recertification. [The repayment tool](/?tool=repayment&from=guide) carries the current table, and a payment that moved without the balance moving is usually this.
 
 Many colleges and state programs also set their own priority aid deadlines between January and March. These vary by school and are not federal dates, which is exactly why they are easy to miss.
+
+## January to March: the deadline that actually binds
+
+There is one form and three deadlines on it, and the Department of Education sets them out in those terms. They belong to three different parties and they do not fall together.
+
+The federal deadline is the last of the three and the least useful. A FAFSA for the 2027-28 year can be filed until June 30, 2028, after the school year it pays for has ended. It is a hard stop rather than a priority date, so missing it means that year's form cannot be filed at all, but almost nobody should be aiming at it.
+
+The college's deadline comes first and is usually the one that decides the size of the offer. Each school sets its own, most fall between January and March, and it is a priority date: a form filed later is still read, it is just read behind everyone who filed on time. California State University Long Beach, to take one published example, lists March 2, 2027 for the 2027-28 year and asks for any documents it requests by June 11.
+
+The state's deadline is the one families are least likely to know exists, because nothing in the federal process mentions it. Each state sets its own through its own agency, and in several of them the grant money is awarded until it runs out rather than divided among everyone who qualifies. California's is March 2, and it asks for two things rather than one: the application, and a school-certified grade point average that has to reach the California Student Aid Commission by the same day. A student at a California community college has until September 2 for both. In California the application is the FAFSA for most students and [the California Dream Act Application](/guides/california-dream-act-application) for students who cannot file a FAFSA, and both are due on the same date. Your own state agency is the only reliable source for your state's date, because a list assembled from summaries goes stale quietly.
+
+One federal rule underneath this explains why the order matters at all. A Pell grant and the student's own federal loan are not rationed by the college: a student who qualifies is awarded them whenever the form arrives. Campus-based money is different. Each college receives a fixed allocation of Federal Work-Study and Federal Supplemental Educational Opportunity Grant funds and awards it until that allocation is gone, which is also the pool [an outside scholarship can collide with](/guides/when-a-scholarship-costs-you-money). Those are the dollars an early form wins and a late one cannot.
 
 ## March and April: the aid letter
 

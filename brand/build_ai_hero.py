@@ -74,6 +74,23 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "california-dream-act-application": (
+        # The guide is about a second route to the same place, so this is an
+        # entrance rather than the closed gate that carries
+        # upper-middle-class-financial-aid: steps going up, doors standing
+        # open. Steps, a handrail and panelled doors are what klein4b draws
+        # well, per the note in CLAUDE.md about a lawn giving it no edges.
+        # NO PAPER AND NO SIGNAGE: this is a guide about an application form,
+        # and a squiggle on a drawn form would read as a fabricated document.
+        # A college building also naturally carries a sign, so the scene names
+        # stucco and planting instead of a facade that would want lettering.
+        "A wide flight of concrete steps rising to the open double doors of a "
+        "public college building in early morning California light, a metal "
+        "handrail down the center of the steps, a low stucco wall and dry "
+        "planting along the edges, long shadows across the treads, nobody in "
+        "frame. Documentary photography, muted warm colour, quiet and still. "
+        "No text, no legible signs, no logos, no paper, no people.",
+        20260921, 4),
     "when-a-scholarship-costs-you-money": (
         # Two envelopes, because the guide is about one piece of money
         # arriving and another quietly leaving. NO PAPER WITH WRITING ON IT:

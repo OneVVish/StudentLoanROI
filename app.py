@@ -27675,6 +27675,24 @@ def render_sai_worksheet(always_open: bool = False) -> None:
         "real estimate at one school, use that school's own net price "
         "calculator."
     )
+    # THIS WORKSHEET IS THE FEDERAL FORMULA, AND SOME STUDENTS ARE NOT IN IT.
+    # 34 CFR 668.33(a) decides who may hold Title IV aid at all, and a student
+    # who meets none of its tests gets no Pell, no Direct loan and no Parent
+    # PLUS. For them the SAI is not a smaller number, it is not the number that
+    # decides anything, and a worksheet that says so is worth more than one
+    # that quietly hands them a figure. DIRECTION AND SCOPE, NEVER AN AMOUNT:
+    # the same treatment css_profile_divergences gets, and for the same reason.
+    # California's is the parallel route this project has read at the statute;
+    # no other state's has been read, so none is named.
+    st.caption(
+        "**Who this worksheet is for.** It is the federal formula, so it "
+        "describes a student who can file a FAFSA. Federal aid eligibility is "
+        "set by 34 CFR 668.33, which asks about the student's own citizenship "
+        "or residency and not a parent's. A student who does not meet it "
+        "receives no federal grant and no federal loan, so this figure does "
+        "not decide their aid. California runs a separate application for "
+        f"them: [what it reaches, and what it does not]({guides_url('california-dream-act-application')})."
+    )
     st.caption(
         f"**Source.** Every allowance, rate and bracket above is from the "
         f"{SAI_AWARD_YEAR} Student Aid Index (SAI) and Pell Grant Eligibility "

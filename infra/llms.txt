@@ -76,6 +76,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [Financial aid when you cannot file a FAFSA](https://worthmydegree.com/guides/california-dream-act-application):
+  One federal rule decides who can hold a federal student loan, and it
+  asks about the student, not the parents. California built a separate
+  application for those it leaves out.
 - [When a scholarship does not lower your bill](https://worthmydegree.com/guides/when-a-scholarship-costs-you-money):
   Federal rule makes a college count an outside scholarship against
   your aid. Whether that costs you anything depends on which line the
