@@ -15,6 +15,13 @@ stroke that carries on up to (58,8) with a dot at the crossing. That is the
 net-position curve: what the degree costs, when it gets ahead, and by how
 much. It has been the favicon all along.
 
+CHOSEN ON 2026-09-13: `mark`. The other three stay in this file rather than
+being deleted, because a cover decision is the kind that gets revisited and
+the losing concepts are the only record of what it was decided against. Only
+the chosen wrap is copied into marketing/book/kdp/, so the upload folder
+cannot offer the wrong file. The EPUB's own cover is wired separately, at
+COVER in marketing/book/build_book.py, and must name the same concept.
+
 THE FOUR, each against a real archetype on the Amazon shelf:
   mark       white, glyph-led      the editorial trade book (Lieber)
   ceiling    cream, chart-led      the number-led self-publisher
