@@ -90,7 +90,12 @@ def check_parser_agrees():
 def run_figures():
     """Draw every figure into a scratch directory and collect its claims."""
     import contextlib, io
-    sys.path.insert(0, str(REPO / "brand"))
+    # book_figures MOVED to marketing/book/ on 2026-09-13, with the figures
+    # it draws, because the book's diagrams were the one part of an
+    # unpublished manuscript living in a public repo. This import is
+    # reached only after main() has confirmed BOOK exists, so CI still
+    # skips before getting here rather than failing on a missing module.
+    sys.path.insert(0, str(BOOK))
     import book_figures as bf
     bf.OUT_DIR = Path(tempfile.mkdtemp())
     with contextlib.redirect_stdout(io.StringIO()):
