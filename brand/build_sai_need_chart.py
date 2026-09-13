@@ -82,6 +82,30 @@ def costs():
             ("the median private nonprofit", float(prv.median())))
 
 
+# Per character class, copied from brand/build_guide_refi_chart.py so the two
+# guide figures measure a string the same way. Deliberately pessimistic: it is
+# a stand-in for a renderer, and its job is to refuse a line rather than to
+# typeset one.
+_ADV = {"narrow": 0.28, "digit": 0.56, "upper": 0.66, "lower": 0.50, "space": 0.26}
+
+
+def text_width(s, px):
+    """Approximate rendered width of a string at a given font size."""
+    total = 0.0
+    for ch in s:
+        if ch == " ":
+            total += _ADV["space"]
+        elif ch.isdigit():
+            total += _ADV["digit"]
+        elif ch.isupper():
+            total += _ADV["upper"]
+        elif ch.islower():
+            total += _ADV["lower"]
+        else:
+            total += _ADV["narrow"]
+    return total * px
+
+
 def esc(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
@@ -149,14 +173,40 @@ def main() -> int:
         y += PANEL_GAP - (ROW - BAR_H)
 
     # Key, in the picture because the two pieces are unlabeled otherwise.
+    #
+    # THE SECOND SWATCH IS PLACED FROM THE FIRST LABEL'S MEASURED END, and it
+    # used to sit at a hardcoded x=470. "what the formula says the family pays"
+    # runs to about x=544 at 27px, so the dashed swatch was drawn on top of the
+    # word "pays" and the key read "...the family pay[ ]s need, which is not an
+    # award". Text width depends on the string, which is the rule every other
+    # surface in this repo keeps relearning; an SVG clips silently rather than
+    # wrapping, so the row is measured and the whole key refuses to overrun.
     y += 8
-    parts.append(f'<rect x="4" y="{y}" width="30" height="24" fill="{SAI_FILL}"/>')
-    parts.append(f'<text x="44" y="{y + 20}" font-size="27" fill="{INK}" '
-                 f'font-family="Georgia,serif">what the formula says the family pays</text>')
-    parts.append(f'<rect x="470" y="{y + 1}" width="29" height="22" fill="none" '
-                 f'stroke="{NEED_EDGE}" stroke-width="2.5" stroke-dasharray="7 5"/>')
-    parts.append(f'<text x="510" y="{y + 20}" font-size="27" fill="{INK}" '
-                 f'font-family="Georgia,serif">need, which is not an award</text>')
+    # STACKED, NOT SIDE BY SIDE, and the measurement is what decided it. On one
+    # row the two items need 905 units of a 900 canvas, so the second swatch had
+    # been sitting at a hardcoded x=470, drawn on top of the word "pays": the key
+    # read "...the family pay[ ]s need, which is not an award". Cutting the copy
+    # was the other way out and the copy is doing work, since "which is not an
+    # award" is the misreading this whole figure exists to prevent.
+    key_px, sw_w, key_row = 27, 30, 38
+    for i_row, (swatch, label) in enumerate((
+            ("fill", "what the formula says the family pays"),
+            ("outline", "need, which is not an award"))):
+        ky = y + i_row * key_row
+        if swatch == "fill":
+            parts.append(f'<rect x="4" y="{ky}" width="{sw_w}" height="24" '
+                         f'fill="{SAI_FILL}"/>')
+        else:
+            parts.append(f'<rect x="4" y="{ky + 1}" width="{sw_w - 1}" height="22" '
+                         f'fill="none" stroke="{NEED_EDGE}" stroke-width="2.5" '
+                         f'stroke-dasharray="7 5"/>')
+        end = 44 + text_width(label, key_px)
+        if end > W - 20:
+            sys.exit(f"a key line needs {end:.0f} units of a {W} canvas: {label!r}. "
+                     f"Cut the copy rather than shrinking the type.")
+        parts.append(f'<text x="44" y="{ky + 20}" font-size="{key_px}" fill="{INK}" '
+                     f'font-family="Georgia,serif">{esc(label)}</text>')
+    y += key_row
     height = y + 46
 
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {height}" '
