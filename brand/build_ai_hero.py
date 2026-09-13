@@ -74,6 +74,20 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "when-a-scholarship-costs-you-money": (
+        # Two envelopes, because the guide is about one piece of money
+        # arriving and another quietly leaving. NO PAPER WITH WRITING ON IT:
+        # klein4b puts illegible squiggles on any page it draws, and a
+        # squiggle on an aid letter in a guide about aid letters would read as
+        # a fabricated document. Sealed envelopes carry it instead, and a
+        # sealed envelope has nothing to write on.
+        "Two sealed envelopes lying on a worn kitchen table in morning light, "
+        "one larger and one small, slightly overlapping, a set of house keys "
+        "and a cold cup of coffee beside them, the rest of the room soft and "
+        "out of focus. Documentary photography, shallow depth of field, muted "
+        "warm colour, unposed. No text, no writing, no logos, no screens, no "
+        "people.",
+        20260913, 4),
     "refusing-to-pay-for-a-major": (
         # The conversation is over and the arithmetic is still on the table.
         # NO PAPER: klein4b writes illegible squiggles on any page it draws,
