@@ -814,13 +814,19 @@ def fig_households(ns):
 
 def fig_the_year(ns):
     """The college money year, in the order the dates arrive."""
+    # JULY 1 AND SEPTEMBER 30 CAME OFF ON 2026-09-12. Both were 2026 dates in a
+    # book about 2027: the July changeover is now simply the rules, priced in
+    # chapters 6 and 7, and the September auto pay window is shut. A calendar is
+    # only worth drawing if every date on it is still ahead of the reader.
     stops = [("October 1", "The form opens", "Ch. 3"),
+             ("Through the fall", "The colleges' own form", "Ch. 3"),
+             ("Autumn to spring", "Outside scholarships", "Ch. 4"),
              ("November", "Binding deadlines land first", "Ch. 4"),
              ("January", "The numbers underneath reset", "Ch. 3"),
-             ("March, April", "The letter", "Ch. 2"),
+             ("January to March", "Priority aid deadlines", "Ch. 3"),
+             ("March, April", "The letter, then the campus", "Ch. 2"),
+             ("Before May 1", "The appeal", "Ch. 4"),
              ("May 1", "The reply date", "Ch. 4"),
-             ("July 1", "The day the rules change", "Ch. 6"),
-             ("September 30", "One form, one point", "Ch. 18"),
              ("Six months out", "The first payment", "Ch. 17")]
     TOP, STEP, LX = 176, 78, 300
     height = TOP + len(stops) * STEP + 130
