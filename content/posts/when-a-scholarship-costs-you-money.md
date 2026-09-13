@@ -1,20 +1,20 @@
 ---
 title: When a scholarship does not lower your bill
-description: Federal rule makes a college count an outside scholarship against your aid. Whether that costs you anything depends on which line the college reduces, and most colleges never say which.
+description: Federal rule makes a college count an outside scholarship against your aid. Whether that costs you anything depends on which line the college reduces, and a college is not required to say which.
 summary: Win $4,000 and the bill may not move. A federal rule makes the college count an outside scholarship, and the college decides whether the loan shrinks or its own grant does. One of those is worth $3,500 to a family and the other is worth nothing.
 date: 2026-09-13
 hero: guide-hero-when-a-scholarship-costs-you-money-klein4b.png
 ---
 
-A student wins a $4,000 scholarship from a local foundation. The family sends the letter to the college, and the bill does not move.
+A student wins a $4,000 scholarship from a local foundation. The family sends the award letter to the college, and the bill does not move a single dollar.
 
-Nobody has done anything wrong. A federal rule requires the college to count that money, and once it is counted something in the package has to give. Which line gives is the college's decision, not the government's, and the two common answers are worth about $3,500 and about nothing to the same family on the same award.
+The system is working exactly as written. A federal rule requires the college to count that outside money. Once the college counts it, something else in the package has to give. Which line gives is the college's decision rather than the government's. There are only two places a reduction can come from, and they are worth ~$3,500 and nothing to the exact same family on the exact same award.
 
-This guide sets out the rule, then the part the rule does not decide.
+This guide sets out the rule, followed by the part the rule leaves open.
 
 ## Start with need, because that is what the rule is measured against
 
-Need is a subtraction and nothing more: the cost of attendance minus what the federal formula says the family can pay, which the form now calls the Student Aid Index. It is not a promise. A college that meets it in full is making a commitment a few hundred colleges make and most do not.
+Need is a subtraction and nothing more. It is the cost of attendance minus what the federal formula says the family can pay, a figure the form now calls the Student Aid Index. The result is not a promise. A college that meets that need in full is making a commitment a few hundred schools make and most do not.
 
 ![Two stacked panels, public and private, one bar per family income from $75,000 to $250,000. Each bar is a whole year of cost of attendance, cut where the Student Aid Index falls. The solid piece is what the formula says the family pays and it grows with income. The remainder is drawn as a hollow outline, because need is an arithmetic gap rather than an award](guide-sai-need-900x1030.svg)
 
@@ -22,13 +22,13 @@ The hollow half of each bar is the number that matters here. At the median in-st
 
 ## What the regulation actually says
 
-Three sentences of 34 CFR 673.5 do the work.
+Three sentences of 34 CFR 673.5 dictate the outcome.
 
 The first says a scholarship counts. The regulation lists what a college must treat as estimated financial assistance, and the list is explicit: "Scholarships, including athletic scholarships". Tuition waivers and fellowships sit beside them in the same list.
 
 The second sets the ceiling. A college may award campus-based aid, meaning Federal Work-Study, a Federal Supplemental Educational Opportunity Grant or a Perkins loan, only if that aid "combined with the other estimated financial assistance the student receives, does not exceed the student's financial need".
 
-The third names what happens when money arrives after the package is built, which is when an outside scholarship usually arrives: "the overaward is the amount that exceeds need".
+The third names what happens when money arrives after the package is built, which is the case the regulation is written for: "the overaward is the amount that exceeds need".
 
 So the ceiling is need, not the bill. That distinction is the whole of it, and it cuts both ways.
 
@@ -40,11 +40,11 @@ Two more parts of the same regulation are worth knowing because they create room
 
 ## The part the rule does not decide
 
-Nothing above says which line a college reduces. That is the college's own choice, and it is the choice that decides whether the family gains anything.
+Nothing above dictates which line a college reduces. That decision belongs entirely to the college, and that single decision determines whether the family actually gains anything.
 
-Reduce the subsidized loan first and the family borrows $3,500 less in that year. The bill is identical and the debt is smaller, which is the entire value of the award. Reduce the college's own grant instead and the family has swapped one gift for another: same bill, same loan, nothing gained. Both endings are drawn above, both are legal, and neither is announced.
+Reduce the subsidized loan first and the family borrows ~$3,500 less in that year. The bill is identical and the debt is smaller. That debt reduction is the entire value of the award. Reduce the college's own grant instead and the family has simply swapped one gift for another: the same bill, the same loan, and no net gain. Both outcomes are perfectly legal. Neither outcome is announced.
 
-It is also why a single answer to "does my college displace" does not exist. Two colleges reading the same regulation, holding the same letter, will do different things with it, and a family comparing two letters in April has no way to tell from the letters which is which.
+That college discretion is why a universal rule on displacement does not exist. Two colleges reading the same regulation and holding the same letter will do entirely different things with the money. A family comparing two letters in April has no way to tell from the letters themselves which path a college will take.
 
 ## A handful of states have legislated, and the detail matters
 
@@ -56,13 +56,26 @@ Most have not. Connecticut's Office of Legislative Research described the defaul
 
 Other states have passed something. This guide names the two it has read in the statute, because the reporting on this topic is inconsistent enough that a list assembled from summaries would be wrong somewhere. Your own state is worth checking directly, and the rules move.
 
-## What a family can find out, and from whom
+## Call the financial aid office and ask
 
-The federal half of this is public and is quoted above. The institutional half exists in one place, which is the aid office, and outside Connecticut no rule requires it to be written down anywhere a family can find it before applying.
+The federal half of this is public and is quoted above. The institutional half exists in one place, which is the financial aid office at each college on the list, and outside Connecticut nothing requires it to be written down anywhere a family can find it.
 
-The question that has an answer is narrow and specific: if an outside scholarship arrives, which line of this letter changes. A college that reduces loans first is describing a policy worth real money to the student. A college that reduces its own grant first is describing one worth nothing. Asking is free, and the answer is more useful before a scholarship application than after an award.
+So call them. Every college publishes a financial aid office number, the call is free, and the question has a definite answer that the person on the phone deals with every spring.
 
-One thing to hold onto while asking: an award that is displaced was not wasted in every sense, since a reduced subsidized loan is a smaller debt even when the bill is unchanged. What it does not do is what most families assume it does, which is lower what they hand over in August.
+Ask it narrowly, because a broad question gets a broad answer:
+
+- If my student wins an outside scholarship, which line of the aid offer is reduced first, the loan and work-study or the college's own grant?
+- Is there an amount we can win before anything is reduced at all?
+- Does the answer change if the scholarship is paid directly to the college rather than to the student?
+- Will you put that in writing, or point me to where it is published?
+
+The last one matters most. A policy quoted on the phone in October is not a policy anyone can hold a college to in April, and an aid office that will send the answer by email has given a family something it can compare against a second college's answer.
+
+Two moments are worth the call. Before applying for scholarships, because the answer decides how much the effort is worth. And again when an award actually arrives, because the amount and who it is paid to can both matter.
+
+There is no wrong answer to collect here, and that is the point of asking rather than guessing. A college that reduces loans first is describing a policy worth real money to the student. A college that reduces its own grant first is describing one worth nothing. Both are legal and only one of them is worth chasing scholarships for.
+
+One thing to hold onto while asking: an award that is displaced was not wasted in every sense, since a reduced subsidized loan is a smaller debt even when the bill is unchanged. What it does not do is the thing a family expects it to do, which is lower what they hand over in August.
 
 ## Price the letter you actually have
 
