@@ -68,9 +68,28 @@ LOAN = "#b8c4d4"       # borrowed money
 SCHOL = "#5c6b1f"      # the outside award
 NEED_EDGE = "#2a78d6"  # brand gain blue, as an outline only
 
-INCOME = 75_000
-FAMILY_SIZE = 4        # chapter 3's household: two parents, one in college
-SCHOLARSHIP = 4_000
+# TWO FIGURES FROM ONE SCRIPT, because the guide and the book are answering
+# this for different people.
+#
+# The guide's is a median family at the median in-state public, whose package
+# fills need exactly. That is the case displacement needs in order to happen at
+# all, so it is the right one for explaining the mechanism.
+#
+# The book's is Marisol Reyes, whom chapter 4 has already priced, and the
+# arithmetic refuses to give her three endings: at every school in that chapter
+# she has UNMET need, so an award falls into the gap and nothing is displaced.
+# What her figure draws instead is the school-level difference that decides it,
+# at two real California publics the chapter already tables.
+#
+# IT IS NOT A CLAIM ABOUT EITHER COLLEGE'S DISPLACEMENT POLICY. No source
+# publishes that, which is the whole point of the section, and content/README.md
+# forbids institution-level outcome claims anyway. What differs here is only
+# where each school's package leaves her against the need ceiling, and that is
+# arithmetic out of college_coa_clean.csv and the app's own index.
+GUIDE_INCOME, GUIDE_AWARD = 75_000, 4_000
+FAMILY_SIZE = 4
+BOOK_INCOME, BOOK_AWARD = 150_000, 4_000
+BOOK_SCHOOLS = ("San Diego State University", "University of California-Berkeley")
 
 _ADV = {"narrow": 0.28, "digit": 0.56, "upper": 0.66, "lower": 0.50, "space": 0.26}
 
@@ -118,6 +137,17 @@ def model():
     return ns
 
 
+def school_cost(name):
+    """One named school's in-state cost and the grant its net price implies."""
+    import pandas as pd
+    df = pd.read_csv(REPO / "data" / "college_coa_clean.csv")
+    r = df[df.INSTNM == name]
+    if r.empty:
+        sys.exit(f"no row for {name!r} in college_coa_clean.csv")
+    r = r.iloc[0]
+    return float(r.in_state_coa), float(r.net_price_110_plus)
+
+
 def public_coa():
     """The median in-state cost at a bachelor's-granting public.
 
@@ -138,7 +168,7 @@ def public_coa():
 def figures():
     ns = model()
     coa = public_coa()
-    sai = float(ns["compute_student_aid_index"](INCOME, FAMILY_SIZE)["sai"])
+    sai = float(ns["compute_student_aid_index"](GUIDE_INCOME, FAMILY_SIZE)["sai"])
     sai = max(sai, 0.0)
     need = max(coa - sai, 0.0)
     # The FIRST YEAR subsidized limit, read off the app's own table rather than
@@ -165,13 +195,112 @@ def bar(x0, y, scale, blocks, need_w):
     return out, x
 
 
+def book_figure():
+    """Two real schools, one family, one award: where the ceiling sits.
+
+    THE DIFFERENCE DRAWN HERE IS ARITHMETIC AND NOT POLICY. Nobody publishes
+    what a college reduces first, and this figure asserts nothing about it.
+    What it draws is where each school's package leaves Marisol Reyes against
+    her need, because that is what decides whether an award has anywhere to go.
+    """
+    ns = model()
+    sai = float(ns["compute_student_aid_index"](BOOK_INCOME, FAMILY_SIZE)["sai"])
+    rows = []
+    for name in BOOK_SCHOOLS:
+        coa, net = school_cost(name)
+        need, grant = max(coa - sai, 0.0), max(coa - net, 0.0)
+        rows.append(dict(name=name, coa=coa, need=need, grant=grant,
+                         unmet=max(need - grant, 0.0)))
+    widest = max(r["coa"] for r in rows)
+    scale = (W - LEFT - RIGHT) / widest
+    parts, y = [], 150
+
+    parts.append(f'<text x="{LEFT}" y="52" font-size="34" font-weight="700" '
+                 f'fill="{INK}" font-family="Georgia,serif">'
+                 f'{esc(fits("The same award, at two of her schools", 34, LEFT))}</text>')
+    deck = (f"Marisol Reyes, index {money(sai)} a year, and a {money(BOOK_AWARD)} "
+            f"scholarship")
+    parts.append(f'<text x="{LEFT}" y="88" font-size="26" fill="{MUTED}" '
+                 f'font-family="Georgia,serif">{esc(fits(deck, 26, LEFT))}</text>')
+    short = {"San Diego State University": "San Diego State",
+             "University of California-Berkeley": "UC Berkeley"}
+    for r in rows:
+        title = f"{short.get(r['name'], r['name'])}, {money(r['coa'])} a year"
+        parts.append(f'<text x="{LEFT}" y="{y}" font-size="28" font-weight="700" '
+                     f'fill="{INK}" font-family="Georgia,serif">'
+                     f'{esc(fits(title, 28, LEFT))}</text>')
+        bar_top = y + 16
+        x = LEFT
+        for value, fill in ((r["grant"], GRANT), (BOOK_AWARD, SCHOL)):
+            w = value * scale
+            parts.append(f'<rect x="{x:.1f}" y="{bar_top}" width="{w:.1f}" '
+                         f'height="{BAR_H}" fill="{fill}" stroke="#ffffff" '
+                         f'stroke-width="1"/>')
+            x += w
+        parts.append(f'<rect x="{LEFT}" y="{bar_top - 5}" '
+                     f'width="{r["need"] * scale:.1f}" height="{BAR_H + 10}" '
+                     f'fill="none" stroke="{NEED_EDGE}" stroke-width="2.5" '
+                     f'stroke-dasharray="7 5"/>')
+        # SHORT, because the first pass overran the canvas by 198 units and the
+        # house rule sends an explanatory sentence to the caption rather than
+        # into the picture. The bar says where the ceiling is; the caption says
+        # what that means.
+        note = (f"Need {money(r['need'])}, grant {money(r['grant'])}, "
+                + (f"{money(r['unmet'])} still open."
+                   if r["unmet"] >= BOOK_AWARD else "need already covered."))
+        base = bar_top + BAR_H + 35
+        parts.append(f'<text x="{LEFT}" y="{base}" font-size="26" fill="{MUTED}" '
+                     f'font-family="Georgia,serif">{esc(fits(note, 26, LEFT))}</text>')
+        y = base + 52
+
+    y += 6
+    for fill, label in ((GRANT, "grant, from the school's net price at her band"),
+                        (SCHOL, "the outside scholarship"),
+                        (None, "need, which is cost of attendance less her index")):
+        if fill:
+            parts.append(f'<rect x="{LEFT}" y="{y}" width="30" height="24" fill="{fill}"/>')
+        else:
+            parts.append(f'<rect x="{LEFT}" y="{y + 1}" width="29" height="22" '
+                         f'fill="none" stroke="{NEED_EDGE}" stroke-width="2.5" '
+                         f'stroke-dasharray="7 5"/>')
+        parts.append(f'<text x="{LEFT + 40}" y="{y + 20}" font-size="27" fill="{INK}" '
+                     f'font-family="Georgia,serif">{esc(fits(label, 27, LEFT + 40))}</text>')
+        y += NOTE_H
+    height = y + 20
+
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {height}" '
+           f'width="{W}" height="{height}" role="img" aria-labelledby="bd-t bd-d">'
+           f'<title id="bd-t">The same scholarship at two schools</title>'
+           f'<desc id="bd-d">Two bars, one per school, on a shared scale. At San '
+           f'Diego State the grant already covers need, so a scholarship has '
+           f'nowhere to go inside it. At Berkeley a large part of need is unmet, '
+           f'so the same scholarship lands in the gap.</desc>'
+           f'<rect width="{W}" height="{height}" fill="#ffffff"/>'
+           + "".join(parts) + "</svg>")
+    import xml.etree.ElementTree as ET
+    try:
+        ET.fromstring(svg)
+    except ET.ParseError as exc:
+        sys.exit(f"refusing to write: the SVG does not parse ({exc})")
+    path = OUT_DIR / f"book-displacement-{W}x{height}.svg"
+    for stale in OUT_DIR.glob(f"book-displacement-{W}x*.svg"):
+        if stale != path:
+            stale.unlink(); print(f"  swept {stale.name}")
+    path.write_text(svg)
+    print(f"wrote {path.relative_to(REPO)}  ({path.stat().st_size:,} bytes, {W}x{height})")
+    for r in rows:
+        print(f"  {r['name'][:38]:40} need {money(r['need']):>9}  "
+              f"grant {money(r['grant']):>9}  unmet {money(r['unmet']):>9}")
+    return path
+
+
 def main():
     f = figures()
     # THE SCALE COMES FROM THE WIDEST BAR, NOT FROM THE COST OF ATTENDANCE.
     # Panel 2 is the whole cost PLUS the scholarship, because that is what
     # "past need" means, so scaling on the cost alone ran that bar off the
     # right edge of the canvas and clipped the family's own block in half.
-    widest = f["coa"] + SCHOLARSHIP
+    widest = f["coa"] + GUIDE_AWARD
     scale = (W - LEFT - RIGHT) / widest
     need_w = f["need"] * scale
     parts, y = [], TOP
@@ -180,7 +309,7 @@ def main():
                  f'fill="{INK}" font-family="Georgia,serif">'
                  f'{esc(fits("One scholarship, three endings", 34, LEFT))}</text>')
     sub_line = (f"A year at {money(f['coa'])}, the median in-state public, on a "
-                f"{money(INCOME)} income")
+                f"{money(GUIDE_INCOME)} income")
     parts.append(f'<text x="{LEFT}" y="78" font-size="26" fill="{MUTED}" '
                  f'font-family="Georgia,serif">{esc(fits(sub_line, 26, LEFT))}</text>')
 
@@ -212,24 +341,24 @@ def main():
            (f["sai"], FAMILY, "the family")],
           f"Need is {money(f['need'])} and the package fills it exactly.")
 
-    over = min(SCHOLARSHIP, f["need"])
-    panel(f"A {money(SCHOLARSHIP)} scholarship arrives",
+    over = min(GUIDE_AWARD, f["need"])
+    panel(f"A {money(GUIDE_AWARD)} scholarship arrives",
           [(f["grant"], GRANT, "grant"), (f["sub"], LOAN, "subsidized loan"),
-           (SCHOLARSHIP, SCHOL, "scholarship"), (f["sai"], FAMILY, "the family")],
+           (GUIDE_AWARD, SCHOL, "scholarship"), (f["sai"], FAMILY, "the family")],
           f"Now {money(over)} of assistance sits past need. Something gives.")
 
-    cut_loan = min(SCHOLARSHIP, f["sub"])
-    cut_grant_after_loan = SCHOLARSHIP - cut_loan
+    cut_loan = min(GUIDE_AWARD, f["sub"])
+    cut_grant_after_loan = GUIDE_AWARD - cut_loan
     panel("It comes off the loan",
           [(f["grant"] - cut_grant_after_loan, GRANT, "grant"),
            (f["sub"] - cut_loan, LOAN, "subsidized loan"),
-           (SCHOLARSHIP, SCHOL, "scholarship"), (f["sai"], FAMILY, "the family")],
+           (GUIDE_AWARD, SCHOL, "scholarship"), (f["sai"], FAMILY, "the family")],
           f"{money(cut_loan)} less borrowed. The family is better off by that.")
 
     panel("It comes off the college's grant",
-          [(f["grant"] - SCHOLARSHIP, GRANT, "grant"),
+          [(f["grant"] - GUIDE_AWARD, GRANT, "grant"),
            (f["sub"], LOAN, "subsidized loan"),
-           (SCHOLARSHIP, SCHOL, "scholarship"), (f["sai"], FAMILY, "the family")],
+           (GUIDE_AWARD, SCHOL, "scholarship"), (f["sai"], FAMILY, "the family")],
           "Same bill, same loan. The family is better off by nothing.")
 
     keys = [(GRANT, "grant, the college's own money"),
@@ -283,9 +412,14 @@ def main():
     print(f"  cost of attendance {money(f['coa'])}, index {money(f['sai'])}, "
           f"need {money(f['need'])}")
     print(f"  package: grant {money(f['grant'])} + subsidized {money(f['sub'])}")
-    print(f"  a {money(SCHOLARSHIP)} award off the loan saves {money(cut_loan)}, "
+    print(f"  a {money(GUIDE_AWARD)} award off the loan saves {money(cut_loan)}, "
           f"off the grant saves $0")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--book", action="store_true",
+                    help="the two-school figure chapter 4 places")
+    a = ap.parse_args()
+    book_figure() if a.book else main()
