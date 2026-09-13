@@ -109,7 +109,15 @@ BACK_COPY = (
     "Nineteen chapters follow four families through the arithmetic. Every "
     "figure is computed from a federal source rather than quoted from "
     "anyone.\n\n"
-    "It does not tell you what to choose.")
+    "It does not tell you what to choose.\n\n"
+    # THE BIO IS THREE FACTS AND NO MORE, from the author on 2026-09-13: the
+    # name, high school senior, built the calculator. No school and no city:
+    # this is a minor's author bio on a book sold publicly, and neither fact
+    # is needed to say what the book is. The age is the point rather than a
+    # disclaimer, so it is stated plainly and not apologized for.
+    "Veer Vishwakarma is a high school senior. He built worthmydegree.com, "
+    "the free calculator behind every figure in this book, and is the age of "
+    "the reader it was written for.")
 
 # KDP print wrap, read 2026-09-12 at kdp.amazon.com/en_US/help/topic/
 # G201834181: 0.125in bleed on all four outer edges, and a spine of
