@@ -491,8 +491,15 @@ def wrap(name):
     src = REPO / "brand" / f"cover-{name}.png"
     if not src.exists():
         raise SystemExit(f"  refusing: render the {name} cover first")
+    # THE SPINE IS A COUNT OF LEAVES, NOT OF PAGES, and an odd manuscript is
+    # what makes the two differ. A sheet has two sides, so 187 pages are bound
+    # as 188 and the printer adds the last blank itself. Reading the page count
+    # straight made this file and build_latex.py disagree by 0.0023in the first
+    # time the interior came out odd, which is exactly the drift that deriving
+    # the spine from the interior was supposed to rule out.
     pages = interior_pages(INTERIOR_PDF)
-    spine_in = pages * SPINE_PER_PAGE_IN
+    leaves = pages + pages % 2
+    spine_in = leaves * SPINE_PER_PAGE_IN
     panel_w_in = TRIM_W_IN + BLEED_IN
     full_w_in = 2 * panel_w_in + spine_in
     full_h_in = TRIM_H_IN + 2 * BLEED_IN
@@ -584,7 +591,8 @@ def wrap(name):
     png = REPO / "brand" / f"cover-wrap-{name}.png"
     sheet.save(png)
     print(f"  wrote {out.name}  {full_w_in:.3f}x{full_h_in:.2f}in, "
-          f"spine {spine_in:.3f}in from {pages} pages, {WRAP_DPI} dpi")
+          f"spine {spine_in:.3f}in from {pages} pages ({leaves} leaves), "
+          f"{WRAP_DPI} dpi")
     return out
 
 
