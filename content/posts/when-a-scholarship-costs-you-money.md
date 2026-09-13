@@ -79,4 +79,12 @@ One thing to hold onto while asking: an award that is displaced was not wasted i
 
 ## Price the letter you actually have
 
-None of this changes what the degree costs, and the cost is the larger question. [The calculator](/?from=guide) takes the school, the major and the loan that is left after grants and family money, and measures the result against not going at all. A scholarship changes the loan that goes into it, which is the number worth being sure of.
+None of this changes what the degree costs, and the cost is the larger question. [Open the calculator in Detailed mode](/?from=guide&loan_mode=Detailed), which is the setting that builds the loan from your own figures instead of from the median debt this school's graduates happen to leave with. Three fields do the work, and every one of them is per year:
+
+- Cost of Attendance: the figure on the letter rather than the tuition line, since it includes housing, food and books.
+- Personal Contribution: what the family puts in from savings and income before any borrowing.
+- Grants and Scholarships: everything in the package that is never repaid, which is where the answer from the aid office goes.
+
+That last field is this whole guide in one input. If the college reduces the loan when an award lands, enter the college's grant plus the scholarship, and the loan the calculator builds falls by the award. If the college reduces its own grant instead, the two changes cancel, the figure you enter does not move, and neither does the loan. Entering a scholarship on top without knowing which of those happened understates the borrowing, and the borrowing is what the rest of the arithmetic rests on.
+
+The per year label is doing work too. The field takes one figure and applies it to every year, so a one-time award goes in as its share of the years rather than at face: $4,000 won once against a four-year degree is $1,000 in that field, while a renewable $4,000 is $4,000. Between those two the difference is most of the award.
