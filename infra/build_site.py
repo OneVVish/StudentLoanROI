@@ -1605,8 +1605,22 @@ def _chart_jpeg(source: str, out: str, width: int, box=None, pad=None) -> bool:
             canvas.paste(im, ((pw - im.width) // 2, (ph - im.height) // 2))
             im = canvas
         else:
-            height = round(im.height * width / im.width)
-            im = im.resize((width, height), Image.LANCZOS)
+            # CAP THE SHORT EDGE, NOT THE WIDTH. Capping width alone hands a
+            # LANDSCAPE chart a fraction of the pixels a portrait one gets: at
+            # 1400 wide the five treemaps landed at 1400x962, 1.3 MP, against
+            # 1400x2333 and 3.3 MP for a portrait chart. They are also the
+            # charts carrying the most small text, hundreds of tile labels
+            # apiece, so they lost the most and showed it. Reported as "the
+            # tree diagrams look low resolution", and they were, by half.
+            #
+            # Portrait charts are UNAFFECTED, their short edge already being
+            # the width, so this changes only the handful that are wider than
+            # they are tall. Never upscales: a source smaller than the cap is
+            # left alone rather than interpolated up to it.
+            scale = min(1.0, width / min(im.width, im.height))
+            if scale < 1.0:
+                im = im.resize((round(im.width * scale),
+                                round(im.height * scale)), Image.LANCZOS)
         im.save(dst, "JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True)
     print(f"  chart image {out}  ({dst.stat().st_size:,} bytes"
           f" from {src.stat().st_size:,})")
