@@ -127,17 +127,37 @@ BACK_COPY = (
     "the reader it was written for.")
 
 # KDP print wrap, read 2026-09-12 at kdp.amazon.com/en_US/help/topic/
-# G201834181: 0.125in bleed on all four outer edges, and a spine of
-# pages x 0.002252in for black ink on white paper. Spine TEXT is allowed
+# G201834181: 0.125in bleed on all four outer edges. Spine TEXT is allowed
 # from 100 pages, with 0.0625in of clearance each side.
 BLEED_IN, TRIM_W_IN, TRIM_H_IN = 0.125, 6.0, 9.0
-SPINE_PER_PAGE_IN = 0.002252
+
+# THE MULTIPLIER IS A PROPERTY OF THE PAPER, AND CREAM IS NOT WHITE. Cream
+# stock is thicker, so the same interior binds to a wider spine. This file
+# carried the white figure alone while the book was switched to cream on
+# 2026-09-13, and the two are far enough apart to be rejected: KDP's previewer
+# answered "expected 12.752x9.250, submitted 12.703x9.250", a spine 0.049in
+# short, which is exactly 201 x (0.0025 - 0.002252).
+SPINE_PER_PAGE_IN = {"cream": 0.0025, "white": 0.002252}
+PAPER = "cream"                      # what the KDP title is set to
+
+# AND IT IS PAGES, NOT LEAVES. This file and build_latex.py both counted
+# leaves, on the reasoning that a sheet has two sides so 201 pages bind as
+# 202. That reasoning is about the BOOK BLOCK and KDP's formula is not: its
+# help page says "page count x multiplier", and its own expected width settles
+# it, 12.752 = 2 x 6.125 + 201 x 0.0025 to the thousandth. At 202 it would be
+# 12.755. The old note claiming leaves is kept in CLAUDE.md with the
+# correction beside it.
 SPINE_TEXT_MIN_PAGES = 100
 SPINE_SAFE_IN = 0.0625
 # KDP prints the barcode over the back cover at 2 x 1.2in and asks for it to
 # be left clear. Placed up from the bottom trim and in from the outer trim.
 BARCODE_W_IN, BARCODE_H_IN, BARCODE_PAD_IN = 2.0, 1.2, 0.25
-WRAP_DPI = 300
+# 400, NOT 300, AND THE REASON IS ARITHMETIC RATHER THAN QUALITY. The wrap is
+# 12.7525 x 9.25in, and at 300 dpi neither edge lands on a whole pixel
+# (3825.75 and 2775.0), so the saved page is a thousandth of an inch out on
+# whichever axis rounds. At 400 both are exact integers (5101 and 3700), and
+# so are the two panels and the spine, so nothing in the layout rounds either.
+WRAP_DPI = 400
 INTERIOR_PDF = REPO / "marketing" / "book" / "_tex" / "book.pdf"
 
 
@@ -506,15 +526,8 @@ def wrap(name):
     src = REPO / "brand" / f"cover-{name}.png"
     if not src.exists():
         raise SystemExit(f"  refusing: render the {name} cover first")
-    # THE SPINE IS A COUNT OF LEAVES, NOT OF PAGES, and an odd manuscript is
-    # what makes the two differ. A sheet has two sides, so 187 pages are bound
-    # as 188 and the printer adds the last blank itself. Reading the page count
-    # straight made this file and build_latex.py disagree by 0.0023in the first
-    # time the interior came out odd, which is exactly the drift that deriving
-    # the spine from the interior was supposed to rule out.
     pages = interior_pages(INTERIOR_PDF)
-    leaves = pages + pages % 2
-    spine_in = leaves * SPINE_PER_PAGE_IN
+    spine_in = pages * SPINE_PER_PAGE_IN[PAPER]
     panel_w_in = TRIM_W_IN + BLEED_IN
     full_w_in = 2 * panel_w_in + spine_in
     full_h_in = TRIM_H_IN + 2 * BLEED_IN
@@ -602,11 +615,16 @@ def wrap(name):
         sheet.paste(strip.rotate(-90, expand=True), (px(panel_w_in), 0))
 
     out = REPO / "brand" / f"cover-wrap-{name}.pdf"
-    sheet.save(out, "PDF", resolution=WRAP_DPI)
+    # THE PAGE SIZE IS SET FROM THE INTENDED INCHES, NOT FROM THE PIXELS.
+    # A PDF saved at a flat 300 dpi takes its MediaBox from the rounded pixel
+    # count, and 12.7525in x 300 is 3825.75px: rounding to 3826 writes a page
+    # of 12.753in, over the size KDP asked for. Dividing the pixels by the
+    # inches instead makes the box exact and leaves the raster untouched.
+    sheet.save(out, "PDF", resolution=W_px / full_w_in)
     png = REPO / "brand" / f"cover-wrap-{name}.png"
     sheet.save(png)
     print(f"  wrote {out.name}  {full_w_in:.3f}x{full_h_in:.2f}in, "
-          f"spine {spine_in:.3f}in from {pages} pages ({leaves} leaves), "
+          f"spine {spine_in:.3f}in from {pages} {PAPER} pages, "
           f"{WRAP_DPI} dpi")
     return out
 

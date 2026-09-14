@@ -119,26 +119,6 @@ UNPUBLISHED_SCRIPTS = {
                         "charts' two brand series for light-ground "
                         "counterparts BY VALUE, so the book's white "
                         "interior can reuse the scripts that had no --light.",
-    "work_map_chart.py": "built 2026-09-09, not yet published: no manifest, no "
-                         "committed jpeg, and the phone render is unbuilt. Give it "
-                         "a chart_code() tag and drop this line when it ships.",
-    "major_map_chart.py": "its companion, same date and same state. Publish the "
-                          "pair together or neither: each one's deck cites the "
-                          "other's finding.",
-    "doctorate_map_chart.py": "the fifth and last of the same set, built "
-                              "2026-09-10. Colored on a floor of 10 schools "
-                              "per field, which leaves 42% of it colored: "
-                              "Scorecard's doctoral debt is one school deep "
-                              "in most fields and the suppression rule is "
-                              "not public.",
-    "masters_map_chart.py": "the fourth of the same set, built 2026-09-10. The "
-                            "947,602 master's degrees no other panel drew, and the "
-                            "one colored by debt rather than wage: no federal source "
-                            "publishes a wage by field at this level.",
-    "professional_map_chart.py": "the third of the same set, same state. The "
-                                 "bachelor's map cannot contain a doctor or a "
-                                 "lawyer, so this one exists; publish it with "
-                                 "the other two.",
 }
 
 

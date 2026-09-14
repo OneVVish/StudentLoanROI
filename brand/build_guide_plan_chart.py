@@ -119,6 +119,9 @@ def main():
     ap.add_argument("--rate", type=float, default=RATE_PCT)
     ap.add_argument("--out", default=None,
                     help="output SVG path; defaults to the guide's own file")
+    ap.add_argument("--book", action="store_true",
+                    help="dash the three lines, for the black and white "
+                         "print interior; the web guide stays solid")
     args = ap.parse_args()
     balance, rate_pct = args.balance, args.rate
     out_path = pathlib.Path(args.out) if args.out else OUT
@@ -182,10 +185,29 @@ def main():
     a(f'  <text class="f deck" x="40" y="84">What each plan asks for, by household size</text>')
 
     a(f'  <text class="f axis" x="40" y="124">On a ${balance:,.0f} balance at {rate_pct:g} percent</text>')
-    key = [(OLD_C, "IBR, older loans", 40), (NEW_C, "IBR, newer loans", 340), (RAP_C, "RAP", 640)]
-    for colour, label, x in key:
+    # A LINE'S IDENTITY CANNOT BE ITS HUE, ON PAPER. This figure is placed in
+    # the book as well as the guide, and the interior prints black and white,
+    # where three lines differing only in colour converge to one grey:
+    # reported by a reader looking at the printed page. The dash is the second
+    # channel there, and the key carries it because a swatch that does not
+    # show the pattern names nothing. RAP stays solid, being the plan both the
+    # guide and the chapter follow.
+    #
+    # THE WEB GUIDE KEEPS ITS SOLID LINES, which is why this is a flag rather
+    # than a change. On screen the figure renders in colour, the hue is doing
+    # the work perfectly well, and dashing it would cost legibility to solve a
+    # problem that surface does not have. Same split as
+    # build_guide_displacement.py's --book.
+    DASH = ({"old": "2.5 7", "new": "11 8", "rap": ""} if args.book
+            else {"old": "", "new": "", "rap": ""})
+    key = [(OLD_C, "IBR, older loans", 40, DASH["old"]),
+           (NEW_C, "IBR, newer loans", 340, DASH["new"]),
+           (RAP_C, "RAP", 640, DASH["rap"])]
+    for colour, label, x, dash in key:
+        da = f' stroke-dasharray="{dash}"' if dash else ""
+        cap_style = "butt" if args.book else "round"
         a(f'  <line x1="{x}" y1="166" x2="{x + 36}" y2="166" stroke="{colour}" '
-          'stroke-width="5" stroke-linecap="round"/>')
+          f'stroke-width="5" stroke-linecap="{cap_style}"{da}/>')
         a(f'  <text class="f key" x="{x + 46}" y="175">{label}</text>')
 
     for idx, p in enumerate(panels):
@@ -214,8 +236,10 @@ def main():
                                       ("rap", RAP_C, 5)):
             d = " ".join(f"{'M' if i == 0 else 'L'} {sx(x):.1f} {sy(y):.1f}"
                          for i, (x, y) in enumerate(p[series]))
+            da = f' stroke-dasharray="{DASH[series]}"' if DASH[series] else ""
+            lc = "butt" if args.book else "round"
             a(f'  <path d="{d}" fill="none" stroke="{colour}" stroke-width="{width}" '
-              'stroke-linecap="round" stroke-linejoin="round"/>')
+              f'stroke-linecap="{lc}" stroke-linejoin="round"{da}/>')
 
         for agi in (0, 50_000, 100_000, 150_000):
             label = "$0" if agi == 0 else f"${agi // 1000}k"
