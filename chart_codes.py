@@ -30,6 +30,15 @@ CHANNELS = {
     "ig": "a link we post on Instagram",
     "li": "a link we post on LinkedIn",
     "em": "a link we send by email",
+    # THE BOOK, and these two are one surface in two formats. A printed page
+    # can only hand over a URL as a QR; an ebook reader is already a screen and
+    # gets a tappable link instead. They are separate channels because the
+    # question "does the book send anyone to the site" has a different answer
+    # for the paperback than for the Kindle edition, and one tag could not say
+    # which. `qr` shipped in build_qr.py before it was ever listed here, so a
+    # scan of any of the eighteen printed codes folded to an unknown channel.
+    "qr": "scanned off a page of the printed book",
+    "eb": "tapped on a figure in the ebook",
 }
 CODE_RE = re.compile(r"^[a-z]{2,6}$")
 TAG_RE = re.compile(r"^[a-z]{2}-[a-z]{2,6}$")
