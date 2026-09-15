@@ -209,7 +209,16 @@ def main():
               "clone, so there are no chapters to check the figures against. "
               "This is expected on CI and on any machine but the author's.")
         return 0
-    chapters = {p.name.split("-")[0]: p.read_text() for p in BOOK.glob("ch*.md")}
+    # CHAPTER 0 IS TWO FILES, so this JOINS rather than overwrites. The preface
+    # and the introduction are both ch00 (a preface carries no chapter number,
+    # and "Chapter 0" is not a thing a book says), and a dict comprehension
+    # silently kept whichever the glob yielded last. The preface won on this
+    # machine, so the introduction's own figures reported as missing from the
+    # chapter that quotes them. Joining is honest: both files ARE chapter 0.
+    chapters = {}
+    for path in sorted(BOOK.glob("ch*.md")):
+        key = path.name.split("-")[0]
+        chapters[key] = chapters.get(key, "") + "\n" + path.read_text()
     bf = run_figures()
     problems = (check_parser_agrees() + check_coverage(bf)
                 + check_claims(bf, chapters))
