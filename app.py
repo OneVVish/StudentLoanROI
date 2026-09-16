@@ -2587,6 +2587,15 @@ def community_college_cost_for_state(state_key, in_district: bool = True) -> int
 # fields, e.g. "2018.cost.attendance.academic_year"). Fixed years rather
 # than "latest" keep the estimate stable across app runs instead of
 # silently drifting whenever College Scorecard releases newer data.
+# THE COMMITTED COST FILE'S DATA YEAR, WHICH IS NOT ITS RELEASE DATE. The
+# release of June 10, 2026 carries cost fields that stop at 2024, as far forward
+# as Scorecard's costs reach. TWO SURFACES name it: the Methodology's sources
+# table and the school search's caption. A second literal is exactly how they
+# come to disagree after a refresh, so both read this.
+# Bump it in the same commit as data/college_coa_clean.csv, never on its own.
+COA_DATA_YEAR = 2024
+COA_ACADEMIC_YEAR = "2024-25"
+
 COA_INFLATION_START_YEAR = 2018
 COA_INFLATION_END_YEAR = 2022
 
@@ -15471,7 +15480,7 @@ def _pdf_sources_section(styles: dict, roi_window_years: int, uses_training_debt
         ["Cost of attendance & college debt",
          "U.S. Department of Education, College Scorecard, institution file from "
          "the release of June 10, 2026. The cost figures in that release are "
-         "data year 2024, which is as far forward as its cost fields reach: the "
+         f"data year {COA_DATA_YEAR}, which is as far forward as its cost fields reach: the "
          "release is current and the costs it reports are two years behind it. "
          "Verified by matching every committed figure against the API's "
          "year-prefixed cost field for the same school."],
@@ -26871,7 +26880,9 @@ def render_school_search(always_open: bool = False) -> None:
                                    results.attrs.get("beyond_cap"))
             + " These are **sticker prices before aid**, so a pricier school can end up "
             "cheaper once grants are applied, so treat this as a starting list and "
-            "run the **Net price** calculator on any school you're serious about."
+            "run the **Net price** calculator on any school you're serious about. "
+            f"They are {COA_ACADEMIC_YEAR} figures, the most recent the federal "
+            "file carries, so a school's own page will show a later year."
         )
         _ppd_caption = ppd_search_caption(results, credential, family)
         if _ppd_caption:

@@ -2578,6 +2578,23 @@ def main(allow_no_node: bool = False):
     ref.write_text(inject_sitemap(ref.read_text(), posts, lastmod, charts))
     print(f"  sitemap: {len(posts) + 1} guide URL(s) in both halves")
 
+    # infra/robots.txt, from the ROBOTS constant the Worker actually serves.
+    # IT WAS HAND-KEPT AND IT ROTTED. worker.js said "still hand-kept in step
+    # with the ROBOTS constant below, so change both in the same PR", and then,
+    # correctly, that "a stale half is invisible: the file still serves, still
+    # parses, and simply describes an older site". On 2026-09-16 the copy was
+    # six weeks old and listed one of the eleven disallowed AI training
+    # crawlers. The constant stays the source; this makes the copy a build
+    # output like llms.txt and the sitemap, so it cannot drift again.
+    m = re.search(r"const ROBOTS = `(.*?)`;", worker, re.S)
+    if not m:
+        raise SystemExit("  FAILED: could not find the ROBOTS constant in "
+                         "worker.js, so infra/robots.txt would go stale "
+                         "silently. Fix the constant or this regex.")
+    (ROOT / "infra" / "robots.txt").write_text(m.group(1))
+    rules = m.group(1).count("Disallow: /\n")
+    print(f"  robots.txt: reference copy written, {rules} crawler(s) disallowed")
+
 
 def preview(port: int = 8787):
     """Serve the site from memory, writing NOTHING.
