@@ -22,8 +22,9 @@ VERIFIED without recording where you read it.
 | --- | --- | --- | --- | --- |
 | College Scorecard | `college_coa_clean.csv`, `graduate_debt_clean.csv`, `discipline_outcomes_clean.csv` | release June 10, 2026; cost fields report **2024** | **2 to 5 releases a year, irregular** | VERIFIED 2026-09-15 |
 | BLS OEWS | `cleaned_careers.csv`, `state_careers_clean.csv`, `metro_careers_clean.csv`, `metro_wage_index.csv` | May 2025 reference period | annual, released the following spring | ASSUMED |
+| BLS CPS usual weekly earnings | `HS_GRAD_SALARY` | **2026 Q2, $994/week** | **quarterly** | VERIFIED 2026-09-16 |
 | IPEDS IC/HD | `graduate_tuition_clean.csv`, `professional_tuition_clean.csv`, `cc_costs_clean.csv`, `public4_systems_clean.csv` | IC2023_AY / HD2023 | annual collection; the charges file LAGS the directory | ASSUMED |
-| CPS ASEC | `hs_age_profile.csv`, `grad_age_profile.csv` | pppub25 | annual | ASSUMED |
+| CPS ASEC | `hs_age_profile.csv`, `grad_age_profile.csv` | pppub25 (ASEC 2025) | annual, published mid-September | **VERIFIED 2026-09-16, AND ONE RELEASE BEHIND** |
 | HHS poverty guidelines | `POVERTY_GUIDELINES_2026` | 2026 | **every January**, effective mid-month | recorded in CLAUDE.md |
 | SAI / Federal Need Analysis Methodology | the whole `?tool=sai` worksheet | 2027-28 guide, issued June 12, 2026 | **every spring, for the next award year** | recorded in CLAUDE.md |
 | 34 CFR (loan terms, rates, plans) | the repayment simulators | title 34 as issued August 31, 2026 | **July 1 each year** for terms and rates; eCFR issues continuously | recorded in CLAUDE.md |
@@ -48,6 +49,45 @@ was established, and it is the check to repeat: match a handful of committed
 `in_state_coa` values against the API's `<year>.cost.attendance.academic_year`
 for the same UNITID and see which year hits to the dollar. A wider sweep gets
 HTTP 429.
+
+## The two high-school-baseline sources, checked 2026-09-16
+
+Both feed the counterfactual every figure in this app is measured against, and
+they were the two rows this file had never verified.
+
+**`HS_GRAD_SALARY` IS CURRENT.** BLS series `LEU0252917300` read from
+api.bls.gov: 2026 Q2 is **$994/week**, which is the most recent quarter BLS
+has published, and $994 x 52 = $51,688 to the dollar. Both warnings already in
+app.py's comment also check out against the API: the series really did fall
+$977 to $953 across the 2024 to 2025 turn, and **2025 Q4 genuinely does not
+exist** in the data, the shutdown quarter.
+
+Two things worth knowing before anyone refreshes it. **`Q05` IS THE ANNUAL
+AVERAGE, NOT A FIFTH QUARTER** -- averaging all five periods double counts the
+year and is the obvious way to get this wrong. And the constant is a SINGLE
+QUARTER rather than an annual average: 2025's annual average is $966/week
+($50,232) and the 2026 quarters so far average $985.50 ($51,246), so $51,688
+is the highest reading available. That makes the baseline the most demanding
+of the three, which understates every degree's premium, which is the direction
+this project errs in deliberately.
+
+**CPS ASEC IS ONE RELEASE BEHIND, BY A DAY.** `asecpub26csv.zip` was published
+**2026-09-15** (139.1 MB); the committed profiles are built from
+`asecpub25csv.zip` of 2025-09-09. So ASEC lands in mid-September and the next
+one is due around September 2027.
+
+Refreshing it is NOT a free vintage bump. `hs_age_profile.csv` supplies the
+SHAPE of the baseline's age curve and `grad_age_profile.csv` the shape of the
+career plateau after year 10, so a new release moves every premium,
+break-even and crossover the model produces. It is the same class of change as
+the no-degree metro index parked at
+`~/.claude-personal/plans/no-degree-metro-baseline-index.md`, and the two
+should be done TOGETHER: both move the baseline, and one seam in
+`migrations.sql` is better than two a month apart.
+
+Refreshing `HS_GRAD_SALARY` on its own stays safe meanwhile, by design:
+`hs_young_wage_disclosure` reads the profile's `ratio_to_25plus` and never its
+dollars, so the sentence stays true across a level change.
 
 ## How to check, without a subscription to anything
 
