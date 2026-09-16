@@ -151,6 +151,59 @@ def check_earnings_and_benchmark_are_both_present(df):
     return []
 
 
+def check_methodology_figures_still_reproduce(df):
+    """Every PPD figure app.py's Methodology quotes, recomputed from the file.
+
+    Question 5 gained a section on 2026-09-16 setting the Department's own
+    do-no-harm test beside this model's comparison, and it quotes five figures
+    out of this dataset. PPD has a KNOWN EXPIRY -- the July 2027 measurement
+    supersedes it -- so the refresh that makes this file current is exactly
+    the event that makes that prose false, silently, on a page whose whole
+    claim is that its numbers are traceable.
+
+    The expectations are recomputed here rather than transcribed, and the
+    PROSE is what gets read for the quoted values, so a figure edited in one
+    place and not the other fails rather than drifting.
+    """
+    import re
+    app = (REPO / "app.py").read_text()
+    start = app.find("#### The federal government is about to run this same comparison")
+    if start < 0:
+        return ["  the Methodology section that quotes this file is gone; "
+                "delete this check with it"]
+    prose = app[start:app.index("### 6. How is repayment modeled?", start)]
+
+    prog = df.drop_duplicates(subset=["OPEID6", "CIPCODE", "CREDLEV"])
+    ug = prog[prog.CREDLEV.isin([2, 3])]
+    cert = prog[prog.CREDLEV == 1]
+    want = {
+        "undergraduate programmes measured": f"{len(ug):,}",
+        "on the same-state HS benchmark":
+            f"{int((ug.benchmark_test == 'Same-State HS Median').sum()):,}",
+        "certificate programmes": f"{len(cert):,}",
+    }
+    problems = [f"  the prose does not name the {label} ({value})"
+                for label, value in want.items() if value not in prose]
+
+    # The rates in the table, to one decimal as the prose writes them.
+    for credlev, name in ((2, "Associate's"), (3, "Bachelor's"), (5, "Master's")):
+        g = prog[prog.CREDLEV == credlev]
+        rate = f"{g.master_fail.mean():.1%}"
+        if rate not in prose:
+            problems.append(f"  the table's {name} rate is not {rate}")
+
+    # The claim the section turns on: certificates are outside the test.
+    if not cert.obbb_fail.isna().all():
+        problems.append(
+            "  some certificate programmes now carry an earnings-test result, "
+            "so the Methodology's claim that the test does not cover them at "
+            "all is false")
+    cert_rate = f"{cert.master_fail.mean():.0%}"
+    if cert_rate not in prose:
+        problems.append(f"  the certificate flag rate is not {cert_rate}")
+    return problems
+
+
 CHECKS = (
     ("shape and key uniqueness", check_shape),
     ("failure rates match ED's published range", check_failure_rates),
@@ -159,6 +212,8 @@ CHECKS = (
     ("withheld OPE IDs never appear", check_mixed_opeids_are_absent),
     ("propagation is recorded on every fanned row", check_propagation_is_recorded),
     ("earnings and benchmark travel together", check_earnings_and_benchmark_are_both_present),
+    ("the Methodology's quoted figures still reproduce",
+        check_methodology_figures_still_reproduce),
 )
 
 
