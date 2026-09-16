@@ -115,26 +115,62 @@ def check(paths):
 
 
 def negative_controls(paths):
-    """Break the prose deliberately and confirm each rule fires."""
-    sample = paths[0].read_text()
+    """Break the prose deliberately and confirm each rule fires, on ITS OWN rule.
+
+    THE SAMPLE IS NORMALISED, and that is the fix for a control that silently
+    stopped working on 2026-09-14. The fixture used to be whatever
+    `sorted(BOOK.glob("ch*.md"))` put first, with the planted line appended
+    after a single newline. That made the tilde-initial control depend on the
+    last CHARACTER of an unrelated file: the rule fires on a paragraph opening
+    or a sentence opening, so it matched only because ch00-introduction.md
+    happened to end "an envelope." and the lookbehind saw ".\n". Adding the
+    preface put ch00-a-preface.md first, which ends "September 2026" with no
+    period and no trailing newline, and the control stopped exercising the
+    rule while still reporting itself as a control. The rule was correct the
+    whole time. Nothing failed except the thing that was supposed to fail.
+
+    So the sample now ends at a known paragraph boundary, and every case says
+    WHICH rule it expects. A control that fires because the planted text
+    tripped some other rule is not a control, which is this repository's own
+    standing finding: an inconclusive control reading as a pass is worse than
+    having none.
+    """
+    sample = paths[0].read_text().rstrip() + "\n\n"
     fired = []
+    # (label, planted prose, a fragment the matching problem must contain)
     cases = [
-        ("em dash", sample + "\nA sentence with an em dash — like this one.\n"),
-        ("British spelling", sample + "\nThe programme was modelled carefully.\n"),
-        ("percent", sample + "\nAbout 40 percent of borrowers.\n"),
-        ("double hedge", sample + "\nIt costs about ~$12,000 a year.\n"),
-        ("tilde-initial", sample + "\n~$3,000 of that is tuition.\n"),
-        ("contractions", sample + ("\nIt isn't and they're and we'll and I've. " * 200)),
+        ("em dash", "A sentence with an em dash \u2014 like this one.\n",
+         "dash punctuation"),
+        ("British spelling", "The programme was modelled carefully.\n",
+         "British spelling"),
+        ("percent", "About 40 percent of borrowers.\n",
+         "'percent' spelled out"),
+        ("double hedge", "It costs about ~$12,000 a year.\n",
+         "double hedge"),
+        ("tilde-initial", "~$3,000 of that is tuition.\n",
+         "opens on a tilde"),
+        ("contractions", "It isn't and they're and we'll and I've. " * 200,
+         "contraction"),
     ]
     tmp = paths[0].parent / "_prose_control.md"
-    for label, text in cases:
+    for label, planted, expected in cases:
+        text = sample + planted
+        # The planted line must SURVIVE readable(), or the control is testing
+        # the stripper rather than the rule.
+        if planted.split("\n")[0][:24] not in readable(text):
+            print(f"  NEGATIVE CONTROL NEVER APPLIED: {label} was stripped "
+                  f"before any rule could see it")
+            continue
         tmp.write_text(text)
         try:
             probs, _, _ = check([tmp])
         finally:
             tmp.unlink()
-        if probs:
+        if any(expected in x for x in probs):
             fired.append(label)
+        elif probs:
+            print(f"  NEGATIVE CONTROL FIRED ON THE WRONG RULE: {label} "
+                  f"expected {expected!r}, got {probs[0]!r}")
         else:
             print(f"  NEGATIVE CONTROL DID NOT FIRE: {label}")
     return fired
