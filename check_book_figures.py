@@ -322,6 +322,27 @@ def level_medians(level):
     return _LEVELS[level]
 
 
+def premium_at_length(title, years):
+    """Ten-year premium at no loan for one path, at a stated program length.
+
+    Chapter 14 quotes truck driving at BOTH the four years the model used to
+    charge and the one it charges now, and the four-year figure is no longer
+    reachable through find_breakeven_loan -- the model resolves a certificate
+    to one year. Recomputing it by overriding the length is what keeps a
+    historical figure checkable instead of exempt: if the rest of the model
+    moves under it, the chapter's own before-and-after stops reproducing and
+    this fails rather than quietly describing two different models.
+    """
+    ns, _ = roi_layer()
+    start = ns["baseline_start_age_for"](years, years, title)
+    buf = io.StringIO()
+    with redirect_stderr(buf):
+        r = ns["compute_scenario_results"](title, 0.0, ROI_RATE, ROI_STRATEGY,
+                                            enrollment_years=years,
+                                            baseline_start_age=start)
+    return r["roi_result"]["earnings_premium"]
+
+
 def _assoc_wage_median(level):
     """Median wage across one education level, from MAJOR_DATA."""
     ns, _ = roi_layer()
@@ -369,6 +390,7 @@ VET_TECH = "Veterinary Technologists and Technicians"
 PRESCHOOL = "Preschool Teachers, Except Special Education"
 POLICE = "Police and Sheriff's Patrol Officers"
 ASSOC, BACH = "Associate's degree", "Bachelor's degree"
+CERT = "Postsecondary nondegree award"
 CH03 = "ch03-what-the-formula-expects.md"
 CH04 = "ch04-the-price-you-would-pay.md"
 CH13 = "ch13-long-roads.md"
@@ -692,6 +714,35 @@ FIGURES = [
     Fig("ch14-bachelor-median-wage",
         lambda ns: _assoc_wage_median(BACH),
         "~$83,700", [FIX, CH14], exact="$83,680"),
+
+    # The certificate tier, added 2026-09-16 when the level stopped being
+    # charged four years and the chapter stopped saying it could not be
+    # priced. Same three medians as the two columns above, on the same basis.
+    Fig("ch14-certificate-median-breakeven",
+        lambda ns: level_medians(CERT)["breakeven"],
+        "~$111,700", [FIX, CH14], exact="$111,709.59",
+        note="median over the 39 of 51 that have a break-even at all; the "
+             "other 12 never get ahead"),
+    Fig("ch14-certificate-median-premium",
+        lambda ns: level_medians(CERT)["premium"],
+        "~$115,700", [FIX, CH14], exact="$115,707.85"),
+    Fig("ch14-certificate-median-wage",
+        lambda ns: _assoc_wage_median(CERT),
+        "$60,600", [FIX, CH14], exact="$60,600",
+        note="a published BLS median, so quoted exactly rather than hedged"),
+    # The sign flip, at both lengths. These two ARE the chapter's argument
+    # for the change, so neither is exempt.
+    Fig("ch14-truck-premium-four-years",
+        lambda ns: abs(premium_at_length(
+            "Heavy and Tractor-Trailer Truck Drivers", 4)),
+        "~$36,100", [FIX, CH14], exact="$36,062.48",
+        note="the MAGNITUDE. This premium is negative and the chapter states "
+             "the direction in words ('behind'), so a signed citation would "
+             "match no string in the prose. What the model said while it "
+             "charged a certificate four years."),
+    Fig("ch14-truck-premium-one-year",
+        lambda ns: premium_at_length("Heavy and Tractor-Trailer Truck Drivers", 1),
+        "~$103,500", [FIX, CH14], exact="$103,494.60"),
 
     # The named rows. Wages come out of MAJOR_DATA rather than the CSV so
     # the curated entries and the overlay are applied, which is the wage
