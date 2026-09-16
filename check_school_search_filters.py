@@ -1833,6 +1833,85 @@ def check_ppd_never_a_sort_key(ns) -> list:
                         "stay out of the search, filter and sort entirely")
     return problems
 
+def check_sector_visibility_note(ns) -> list:
+    """The note fires on a real gap, stays silent without one, and never
+    grades a sector.
+
+    It exists because the PRODUCT carried the opposite claim: the school-type
+    filter's help said for-profit prices "sort near the top". They do not.
+    They are the middle sector by price, so a cheapest-first window off the
+    top is mostly public and under-shows them. A sentence that got the
+    direction wrong for months is exactly what nothing was checking.
+
+    The pool share is recomputed here from the UNCAPPED search rather than
+    read back off attrs, so this cannot pass by asserting that attrs equals
+    itself.
+    """
+    problems = []
+    note = ns["sector_visibility_note"]
+    search = ns["search_schools_by_budget"]
+    fp = ns["FOR_PROFIT_CONTROL_TYPE"]
+
+    # A fixture with a real gap: health certificates, where the pool runs
+    # about a fifth for-profit and the cheapest 25 almost none.
+    kw = dict(cip_family="51", credential="Certificate (1-2 years)",
+              max_coa_per_year=30_000, home_state="CA")
+    shown_frame = search(limit=25, **kw)
+    whole = search(limit=100_000, **kw)
+    if len(whole) <= 25:
+        return ["  fixture matches too few schools for a cap to bind"]
+    pool = (whole["control_type"] == fp).mean()
+    seen = (shown_frame["control_type"] == fp).mean()
+    if pool - seen < ns["SECTOR_VISIBILITY_GAP"]:
+        return [f"  fixture no longer exhibits a gap (pool {pool:.0%}, "
+                f"shown {seen:.0%}); this check discriminates nothing"]
+
+    text = note(shown_frame)
+    if not text:
+        problems.append(f"  the note is silent on a {pool - seen:.0%} gap")
+    else:
+        # It must name the pool share computed independently, not attrs'.
+        if f"{pool:.0%}" not in text:
+            problems.append(f"  the note does not name the pool share "
+                            f"{pool:.0%}: {text!r}")
+        if f"{len(whole):,}" not in text:
+            problems.append(f"  the note does not name the match count "
+                            f"{len(whole):,}")
+        # content/README.md forbids an outcome claim by institution, and a
+        # sector is an institution class. The note may describe composition
+        # and price order and nothing else.
+        banned = ("predatory", "worse", "better", "quality", "avoid",
+                  "beware", "scam", "low-quality", "poor")
+        for word in banned:
+            if word in text.lower():
+                problems.append(f"  the note grades a sector ({word!r}), "
+                                f"which content/README.md forbids")
+
+    # Silent where the ordering is doing nothing unusual.
+    flat = dict(cip_family="52", credential="Associate's degree",
+                max_coa_per_year=25_000, home_state="FL")
+    quiet = search(limit=25, **flat)
+    qwhole = search(limit=100_000, **flat)
+    qgap = ((qwhole["control_type"] == fp).mean()
+            - (quiet["control_type"] == fp).mean())
+    if qgap >= ns["SECTOR_VISIBILITY_GAP"]:
+        problems.append("  the quiet fixture now has a gap; pick another")
+    elif note(quiet):
+        problems.append("  the note fires where there is no gap, which is how "
+                        "a caption stops being read")
+
+    # An empty frame and a frame with no attrs must both be silent rather
+    # than raising: the graduate searches return frames this never stamps.
+    if note(shown_frame.iloc[0:0]):
+        problems.append("  the note speaks about an empty list")
+    stripped = shown_frame.copy()
+    stripped.attrs = {}
+    if note(stripped):
+        problems.append("  the note speaks with no sector_matches attribute, "
+                        "so a graduate frame would get an undergraduate claim")
+    return problems
+
+
 def main() -> int:
     ns = load_app_namespace()
     if ns["load_coa_dataset"]().empty:
@@ -1884,6 +1963,7 @@ def main() -> int:
         ("per-tool widget keys",
          lambda: check_shared_controls_have_per_tool_keys(ns)),
         ("programmes without debt", lambda: check_programmes_without_debt(ns)),
+        ("sector visibility note", lambda: check_sector_visibility_note(ns)),
     ]:
         found = fn()
         checks.append(name)
