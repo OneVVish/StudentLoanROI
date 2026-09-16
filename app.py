@@ -4410,6 +4410,41 @@ def returning_baseline_ready() -> bool:
         return False
 
 
+def repayment_band_label(band) -> str:
+    """College Scorecard's banded repayment rate, as something a person reads.
+
+    THE VALUE IS A BANDED STRING, NEVER A NUMBER. 99 distinct values in this
+    release and 57 of them carry "<", ">" or "-": "<=0.01", "0.10 - 0.14",
+    ">=0.80". build_discipline_outcomes.py's T5 records why they are stored raw
+    and never scored -- pd.to_numeric empties the column SILENTLY, and some
+    bands are 0.20 wide, so a midpoint would inject a tenth of invented
+    precision. This formats; it does not numericise, and nothing sorts on it.
+
+    ED's own name for the element is "Percentage of undergraduate completer
+    undergraduate federal student loan borrowers making progress after 2
+    years" (BBRR2_FED_COMP_MAKEPROG, source NSLDS). What ED counts as progress
+    is not defined in the data dictionary and is NOT asserted here.
+    """
+    if band is None or (isinstance(band, float) and pd.isna(band)):
+        return "—"
+    s = str(band).strip()
+    if not s or s.lower() in ("nan", "none"):
+        return "—"
+    def pct(x):
+        return f"{round(float(x) * 100)}%"
+    try:
+        if s.startswith(">="):
+            return f"{pct(s[2:])} or more"
+        if s.startswith("<="):
+            return f"{pct(s[2:])} or less"
+        if "-" in s:
+            lo, hi = (part.strip() for part in s.split("-", 1))
+            return f"{pct(lo)} to {pct(hi)}"
+        return pct(s)
+    except (TypeError, ValueError):
+        return "—"          # an unparsed band is missing data, never a guess
+
+
 def counterfactual_vocab() -> dict:
     """The words for whichever baseline this session is being measured against.
 
@@ -8791,7 +8826,8 @@ def discipline_scores(discipline_key: str) -> pd.DataFrame:
     with its columns named when the file or the discipline is absent, so a
     missing dataset costs a column rather than the page.
     """
-    columns = ["UNITID", "discipline_score", "thin_cohort", "score_basis"]
+    columns = ["UNITID", "discipline_score", "thin_cohort", "score_basis",
+               "repayment_band_makeprog"]
     df = load_discipline_outcomes()
     if df.empty or "discipline_key" not in df.columns or not discipline_key:
         return pd.DataFrame(columns=columns)
@@ -27005,6 +27041,16 @@ def render_school_search(always_open: bool = False) -> None:
                                                     pd.Series(False,
                                                               index=results.index)))]}
                if "discipline_score" in results.columns else {}),
+            # REPAYING: Scorecard's own banded figure, displayed and never
+            # sorted on. SEARCH_SORT_MODES refuses net price and both debt
+            # columns because ordering on them "would read as a recommendation
+            # built out of what other people were willing to owe", and this is
+            # the same class of figure. It is also a BAND rather than a number,
+            # so an ordering would have to invent a midpoint to have anything
+            # to compare, which is the precision T5 refuses.
+            **({"Repaying": [repayment_band_label(b)
+                             for b in results["repayment_band_makeprog"]]}
+               if "repayment_band_makeprog" in results.columns else {}),
             # Scorecard publishes a per-school calculator for all but one row,
             # and the caption above has always told visitors to go check one.
             # Until now the only one the page could reach was for the school
@@ -27128,6 +27174,29 @@ def render_school_search(always_open: bool = False) -> None:
                 f"{fmt_money_md(4049)} to {fmt_money_md(45268)} depending on "
                 f"where you study. It is not a cost, so never add it to the "
                 f"prices above. **—** means unreported."
+            )
+
+        # REPAYING gets its own caption and it is mostly about what the
+        # figure is NOT. It is the one column on this page describing what
+        # happened to other borrowers rather than what a school charges, and a
+        # bare percentage beside a price invites reading it as a verdict on the
+        # school. The band, the population and the window are all named,
+        # because each one narrows it.
+        if "repayment_band_makeprog" in results.columns:
+            _rep_known = int(sum(
+                1 for value in results["repayment_band_makeprog"]
+                if repayment_band_label(value) != "—"))
+            _cap(
+                "**Repaying** is the share of former students who borrowed "
+                "federally, finished this program at that school, and were "
+                "making progress on those loans two years later. It is the "
+                "Department of Education's own figure and its own wording, "
+                "published as a RANGE rather than a number, so it is shown as "
+                "one and nothing here sorts on it. Higher is better. It "
+                "describes people who finished, so it says nothing about "
+                "anyone who left, and two years is early in a loan. "
+                f"**—** means unreported, and {_rep_known} of the "
+                f"{len(results)} schools listed report a band."
             )
 
         # THE OUTCOME COLUMN NEEDS TWO CAPTIONS, and the second is the one
