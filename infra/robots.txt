@@ -1,7 +1,6 @@
 # worthmydegree.com — free college-ROI calculator (student project)
-# Canonical host. AI crawlers welcome; see /llms.txt for a dense summary.
-# Reference copy: the served file is the ROBOTS constant in infra/worker.js.
-# Change BOTH in the same PR.
+# Canonical host. Retrieval and agent crawlers welcome; see /llms.txt for a
+# dense summary. TRAINING crawlers are disallowed, from 2026-09-16.
 
 User-agent: *
 Allow: /
@@ -9,17 +8,25 @@ Disallow: /*?*admin=
 Disallow: /*?*test=
 Disallow: /*?*research=
 
-# --- AI / LLM crawlers: explicitly welcome ---
-User-agent: GPTBot
-Allow: /
+# --- AI crawlers, split by what they do with the page ---
+#
+# RETRIEVAL AND AGENT CRAWLERS ARE WELCOME. They fetch a page to answer a
+# question someone is asking right now, and they cite. That is reach, and it is
+# the whole reason /llms.txt exists.
+#
+# TRAINING CRAWLERS ARE NOT. They absorb the page into a model and send nobody
+# back. The guides overlap with a book that is published for money, which is
+# what changed the answer on 2026-09-16; before that date every crawler below
+# was allowed and this file said so.
+#
+# EACH ONE IS NAMED AND DISALLOWED EXPLICITLY, never deleted. "User-agent: *"
+# above says "Allow: /", so a crawler with no rule of its own falls through to
+# it. Removing an entry here READS like a block and is the opposite of one.
 
 User-agent: OAI-SearchBot
 Allow: /
 
 User-agent: ChatGPT-User
-Allow: /
-
-User-agent: ClaudeBot
 Allow: /
 
 User-agent: Claude-User
@@ -34,16 +41,40 @@ Allow: /
 User-agent: Perplexity-User
 Allow: /
 
-User-agent: Google-Extended
-Allow: /
-
 User-agent: Amazonbot
 Allow: /
 
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
 User-agent: CCBot
-Allow: /
+Disallow: /
 
 User-agent: meta-externalagent
-Allow: /
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: TikTok Spider
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: Google-CloudVertexBot
+Disallow: /
+
+User-agent: PetalBot
+Disallow: /
 
 Sitemap: https://worthmydegree.com/sitemap.xml
