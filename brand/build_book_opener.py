@@ -45,10 +45,15 @@ WHAT THIS MUST NEVER GENERATE. An opener faces a page of real federal figures.
 charts, no grids of numbers, no dashboards, nothing resembling a figure, however
 illegible.
 
-NO FACES, AND NOT ONLY FOR CRAFT REASONS. Every figure is turned away. A botched
-face is the most visible failure on a printed page and `figures.md` already
-commits the book's figures to none, but the reason that outranks both is that a
-face attached to a money figure is a claim about who is in this situation.
+FACES ARE DRAWN, since the author reversed that on 2026-09-11. This paragraph
+used to read "NO FACES, AND NOT ONLY FOR CRAFT REASONS. Every figure is turned
+away", and it was still saying so months after the constant stopped agreeing.
+The prohibition was REPLACED rather than deleted, because bare permission leaves
+the model free to render at any level of detail and that is where the botched
+face lives: the contract names the treatment instead, a few clean lines, calm
+and unexaggerated. One reason for the original rule survives in `figures.md`
+and is not a craft one, that a face attached to a money figure is a claim about
+who is in this situation.
 
 REPRODUCIBILITY. Every scene pins a seed, and here that is the whole
 reproducibility story rather than half of it: same prompt, same seed, same
@@ -73,8 +78,20 @@ from workers_ai import (                                     # noqa: E402
     credentials, generate)
 
 ROOT = Path(__file__).resolve().parent.parent
-STATIC = ROOT / "static"
 MASTERS = ROOT / "brand"
+
+# WHERE THE BOOK ACTUALLY READS ITS FIGURES, which stopped being static/ on
+# 2026-09-13 when the manuscript's figures moved to the private repo. This
+# generator was not moved with them, so for three days every run SUCCEEDED and
+# wrote its JPEG to a directory the book does not open: static/ holds no
+# book-opener-*.jpg at all. The failure is silent in the worst way, because the
+# script prints a path and a file size and both are true.
+#
+# Resolved the way build_book.py, build_latex.py and print_pages.py already
+# resolve it: the book's own directory when it exists, the public one when it
+# does not, so a clone without marketing/ still writes somewhere sensible.
+BOOK_FIGURES = ROOT / "marketing" / "book" / "figures"
+STATIC = BOOK_FIGURES if BOOK_FIGURES.is_dir() else ROOT / "static"
 
 SIZE = (1792, 896)          # 2:1, both multiples of 16, ~400 dpi at 4.5in
 STEPS = 4
@@ -125,6 +142,58 @@ OPENER_STYLE = (
     "posters with words, no charts, no screens showing content, no logos and "
     "no brand marks."
 )
+
+
+# A SECOND CONTRACT, ON TRIAL. Chapter 13's opener had to be regraded on
+# 2026-09-16 because a flat-shaded night scene measured a mean luminance of 57
+# against a set averaging 130 and printed as a dark block. That regrade is a
+# patch on a symptom: line art on white paper has almost no tone to lose, so
+# the whole class of problem stops existing rather than being corrected image
+# by image. Chapter 7 at 74 is the next candidate.
+#
+# IT IS A SEPARATE CONSTANT AND NOT AN EDIT, because build_timeline_panel.py
+# imports OPENER_STYLE and asserts it survives into every prompt: changing it
+# restyles nineteen openers and thirteen timeline masters, and by this file's
+# own rule every one of them then needs a new seed. That is the commitment
+# being tested, not the test. Promote this one and delete the flag if it lands.
+#
+# "NO CROSSHATCHING, NO STIPPLE, NO FINE TEXTURE" IS LOAD-BEARING, not taste.
+# build_book.py packs illustrations at 1000px and quality 72 on the stated
+# reasoning that they are flat line work with no texture, which is what JPEG
+# compresses best and what downscaling barely touches. Crosshatch is the exact
+# opposite. Keeping the washes flat is what keeps that packing valid.
+#
+# The negatives are copied VERBATIM from OPENER_STYLE. Every clause in them
+# exists because a prop carried writing, and a style trial is no reason to
+# re-earn any of it.
+OPENER_STYLE_WASH = (
+    "Every edge drawn with a confident black ink outline, "
+    "the line varying in weight the way a nib does. No color: the only tones "
+    "are two or three flat washes of warm grey, laid in large simple areas, "
+    "with the white of the paper doing most of the work. No gradients, no "
+    "crosshatching, no stipple, no fine texture. Drawn to the edges of the "
+    "frame on clean white, no paper grain, no torn or deckled edge, no "
+    "border and no visible paper sheet. Subtle shadows, generous "
+    "margins. Strong light to dark separation so the scene reads without "
+    "color. Faces drawn simply in the same few clean lines as the room, calm "
+    "and unexaggerated, no caricature. Every figure and object complete and "
+    "well inside the picture, nothing touching or running off the edges of "
+    "the frame. No text, no numbers, no letters, no labels, no signage, no "
+    "posters with words, no charts, no screens showing content, no logos and "
+    "no brand marks."
+)
+
+# The same drawing with the house accents kept, because the EPUB is in colour
+# even where the interior is not. Shot beside the grey one rather than argued
+# about: at a tenth of a cent an image the comparison is cheaper than the
+# discussion.
+OPENER_STYLE_WASH_ACCENT = OPENER_STYLE_WASH.replace(
+    "No color: the only tones are two or three flat washes of warm grey",
+    "Almost no color: soft green and navy as the only hues, over two or three "
+    "flat washes of warm grey")
+
+STYLES = {"flat": OPENER_STYLE, "wash": OPENER_STYLE_WASH,
+          "wash-accent": OPENER_STYLE_WASH_ACCENT}
 
 
 # Exactly three cameras, and that restriction is what stops nineteen images
@@ -198,11 +267,24 @@ SCENES = {
              "across at the buildings",
              "Late afternoon, low sun, the buildings warm on one side",
              CAM_BEHIND, 20261408),
+    # SEED COLLISION, FOUND 2026-09-16, AND ONE HALF OF IT IS UNRECOVERABLE.
+    # This entry and ch04 both read 20261408 and had done long enough for the
+    # self-test to be red the whole time, which is the real finding: this
+    # script's --self-test is not in CI, so a failing contract check sat here
+    # unnoticed while nineteen images were generated against it.
+    #
+    # ch04 carries a "Reshot 2026-09-12" note, so 20261408 is most likely its
+    # own and this one is the stale copy, but that cannot be established from
+    # anything on disk. The seed is renumbered here so the check means
+    # something again; the committed book-opener-ch05.jpg was made under a seed
+    # this file can no longer name. That costs nothing reproducible, because
+    # klein4b cannot reproduce a seed at all (verified 2026-09-11), and a seed
+    # here documents which dice were thrown rather than reproducing the throw.
     "ch05": ("a community college cafeteria with long tables, trays, a window " "wall onto a parking lot, a napkin dispenser and stacked chairs",
              "two students at a table with their trays and a third setting "
              "hers down to join them",
              "Midday, bright even light through the window wall",
-             CAM_ACROSS, 20261408),
+             CAM_ACROSS, 20261605),
     "ch06": ("a small college dorm room with a single bed and a plain blanket, " "a wooden desk with a mug and a small desk lamp, a shelf of books " "and a backpack on the floor",
              "one student working at the desk and a roommate sitting on the "
              "bed",
@@ -295,10 +377,27 @@ SCENES = {
 # and the alternative was editing a scene line to fit a budget, which is the
 # tail wagging the dog. Anything that needs more than this is a scene carrying
 # too many props.
-PROMPT_LIMIT = 1100
+#
+# 1100 UNTIL 2026-09-16, AND IT HAD ALREADY BEEN BREACHED BY THE COMMITTED SET:
+# ch04 measured 1125 on the FLAT contract, so this assertion was failing on the
+# nineteen openers the book ships. It went unseen because --self-test is not in
+# CI and the seed-collision assert above it fired first, so the run stopped
+# before reaching this one. Two red checks, one script nobody ran.
+#
+# SO IT NOW MEASURES THE SCENE, WHICH IS WHAT IT ALWAYS MEANT TO POLICE. The
+# cap exists so a scene does not accumulate props; it measured the whole
+# prompt, so every rewrite of the style contract moved it, three times, never
+# once for the reason the cap was written. Raising it a fourth time for the
+# pen-and-ink trial would have been the tail wagging the dog twice over.
+#
+# The scene portion runs 290 to 429 across the nineteen, so 480 is real
+# headroom and still refuses a scene carrying too many props. A contract now
+# costs what it costs: flat is 696, the trial contracts 899 and 930, and none
+# of them can push a scene over its own budget.
+SCENE_LIMIT = 480
 
 
-def build_prompt(chapter: str) -> str:
+def build_prompt(chapter: str, style: str = "flat") -> str:
     """One scene plus the frozen style contract, in that order.
 
     Concatenated here and nowhere else, which is what makes it impossible for
@@ -307,12 +406,19 @@ def build_prompt(chapter: str) -> str:
     scene, cast, light, camera, _seed = SCENES[chapter]
     if camera not in CAMERAS:
         raise SystemExit(f"  {chapter}: camera is not one of the three: {camera!r}")
+    if style not in STYLES:
+        raise SystemExit(f"  no such style: {style!r}. One of {sorted(STYLES)}.")
     cast = cast[0].upper() + cast[1:]
-    return (f"Flat vector illustration of {scene}, {camera}. {cast}. "
-            f"{light}. {OPENER_STYLE}")
+    # The opening noun belongs to the style, not to the scene: "Flat vector
+    # illustration of a library" and "Pen and ink drawing" in one prompt is two
+    # illustrators in one sentence.
+    lead = ("Flat vector illustration of" if style == "flat"
+            else "Pen and ink drawing of")
+    return (f"{lead} {scene}, {camera}. {cast}. "
+            f"{light}. {STYLES[style]}")
 
 
-def write(im, chapter: str):
+def write(im, chapter: str, out=None):
     """The master PNG and the committed JPEG. No crop: the size was requested.
 
     The master is lossless and gitignored; the JPEG is what the book and the
@@ -321,12 +427,17 @@ def write(im, chapter: str):
     """
     if im.size != SIZE:
         raise SystemExit(f"  got {im.size}, asked for {SIZE}")
-    master = MASTERS / f"book-opener-{chapter}.png"
+    master = (out.with_suffix(".png") if out
+              else MASTERS / f"book-opener-{chapter}.png")
+    master.parent.mkdir(parents=True, exist_ok=True)
     im.save(master)
-    jpg = STATIC / f"book-opener-{chapter}.jpg"
+    jpg = out or STATIC / f"book-opener-{chapter}.jpg"
+    jpg.parent.mkdir(parents=True, exist_ok=True)
     im.save(jpg, "JPEG", quality=88, progressive=True, optimize=True)
-    print(f"  {master.relative_to(ROOT)}  (master, {im.size[0]}x{im.size[1]})")
-    print(f"  {jpg.relative_to(ROOT)}  ({jpg.stat().st_size // 1024} KB)")
+    mwhere = master.relative_to(ROOT) if ROOT in master.parents else master
+    print(f"  {mwhere}  (master, {im.size[0]}x{im.size[1]})")
+    where = jpg.relative_to(ROOT) if ROOT in jpg.parents else jpg
+    print(f"  {where}  ({jpg.stat().st_size // 1024} KB)")
 
 
 def self_test():
@@ -346,10 +457,27 @@ def self_test():
 
     for ch in SCENES:
         p = build_prompt(ch)
-        assert len(p) <= PROMPT_LIMIT, f"{ch}: prompt is {len(p)} chars"
+        assert len(p) - len(OPENER_STYLE) <= SCENE_LIMIT, \
+            f"{ch}: scene is {len(p) - len(OPENER_STYLE)} chars"
         assert OPENER_STYLE in p, f"{ch}: lost the style contract"
         assert SCENES[ch][1].strip(), f"{ch}: nobody is in the room"
-        assert "" in p, f"{ch}: cast may show a face"
+        # WAS `assert "" in p`, which is true of every string and tested
+        # nothing. It is the vestigial faceless guard, left behind when
+        # the author reversed that rule on 2026-09-11, and an assertion
+        # that cannot fail reads as coverage while being none. What is
+        # worth asserting now is that the contract still SAYS how a face
+        # is drawn, since that clause is the whole botched-face defence.
+        assert "no caricature" in p, f"{ch}: lost the face treatment"
+        # EVERY CONTRACT, NOT ONLY THE DEFAULT. A second style that nothing
+        # checks is a second style that silently loses a clause, which is the
+        # exact failure one frozen constant was introduced to make impossible.
+        for name in STYLES:
+            q = build_prompt(ch, name)
+            assert STYLES[name] in q, f"{ch}/{name}: lost the style contract"
+            scene_len = len(q) - len(STYLES[name])
+            assert scene_len <= SCENE_LIMIT, \
+                f"{ch}/{name}: scene is {scene_len} chars, over {SCENE_LIMIT}"
+            assert "no brand marks" in q, f"{ch}/{name}: lost the negatives"
         if SCENES[ch][3] == CAM_DOOR:
             assert "doorway" not in SCENES[ch][1], \
                 f"{ch}: the camera stands where the cast stands"
@@ -374,7 +502,8 @@ def self_test():
             raise AssertionError("a fourth camera was accepted")
 
         SCENES["ch00"] = (saved[0] + " x" * 600, saved[1], saved[2], saved[3], saved[4])
-        assert len(build_prompt("ch00")) > PROMPT_LIMIT, "overlong prompt not caught"
+        assert (len(build_prompt("ch00")) - len(OPENER_STYLE)) > SCENE_LIMIT, \
+            "overlong scene not caught"
 
         SCENES["ch00"] = (saved[0], "", saved[2], saved[3], saved[4])
         try:
@@ -386,8 +515,10 @@ def self_test():
     finally:
         SCENES["ch00"] = saved
 
-    print(f"  self-test OK: 19 scenes at {SIZE[0]}x{SIZE[1]}, longest prompt "
-          f"{max(len(build_prompt(c)) for c in SCENES)}/{PROMPT_LIMIT} chars")
+    print(f"  self-test OK: 19 scenes at {SIZE[0]}x{SIZE[1]}, "
+          f"longest scene "
+          f"{max(len(build_prompt(c)) - len(OPENER_STYLE) for c in SCENES)}"
+          f"/{SCENE_LIMIT} chars")
 
 
 def main():
@@ -400,6 +531,15 @@ def main():
                     help="check the contract, no network")
     ap.add_argument("--seed", type=int,
                     help="override the pinned seed: a REJECT GETS A NEW SEED, " "never an edited prompt at the old one")
+    ap.add_argument("--style", choices=sorted(STYLES), default="flat",
+                    help="the style contract. flat is the nineteen committed "
+                         "openers; wash and wash-accent are the 2026-09-16 "
+                         "pen-and-ink trial and write beside them, never over "
+                         "them, until one is promoted")
+    ap.add_argument("-o", "--out",
+                    help="write the JPEG here instead of the book's figure "
+                         "directory, for a trial that must not overwrite a "
+                         "committed opener")
     args = ap.parse_args()
 
     if args.self_test:
@@ -415,15 +555,24 @@ def main():
         raise SystemExit(f"  unknown chapter {args.chapter!r}")
 
     seed = args.seed or SCENES[args.chapter][4]
-    prompt = build_prompt(args.chapter)
-    print(f"\n{args.chapter}  seed {seed}  ({len(prompt)}/{PROMPT_LIMIT} chars)\n")
+    prompt = build_prompt(args.chapter, args.style)
+    # A NON-DEFAULT STYLE AT THE PINNED SEED IS A MISTAKE, and a quiet one: the
+    # pinned seed belongs to the picture the committed opener already is, so
+    # reusing it for a different contract makes the two impossible to talk
+    # about afterwards. Same rule as a reject, arrived at from the other side.
+    if args.style != "flat" and not args.seed:
+        raise SystemExit(f"  --style {args.style} needs its own --seed; "
+                         f"{args.chapter}'s {seed} belongs to the flat one")
+    scene_len = len(prompt) - len(STYLES[args.style])
+    print(f"\n{args.chapter}  seed {seed}  style {args.style}  "
+          f"(scene {scene_len}/{SCENE_LIMIT}, prompt {len(prompt)})\n")
     print(f"  {prompt}\n")
     if args.dry_run:
         return
 
     acct, token = credentials()
     im = generate(prompt, seed, STEPS, acct, token, model="klein4b", size=SIZE)
-    write(im, args.chapter)
+    write(im, args.chapter, Path(args.out) if args.out else None)
 
 
 if __name__ == "__main__":
