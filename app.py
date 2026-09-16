@@ -31196,6 +31196,65 @@ this comparison as "a degree versus a typical working adult without one,"
 rather than "versus your classmate who skipped college." It's the more
 demanding of the two tests.
 
+#### The federal government is about to run this same comparison
+
+From July 2027 the Education Department begins measuring programs against a
+test that works the way this page does. A program whose completers earn less
+than a benchmark loses eligibility for federal student loans, and for most
+undergraduate programs that benchmark is the median high school graduate in
+the same state. The Department's own preliminary file names the test in those
+words: "Same-State HS Median" is the benchmark for 27,535 of the 31,419
+undergraduate programs it measures. This tool has compared against a high
+school graduate since it was built. The comparison is not ours and it is about
+to be the law.
+
+The two are not the same test, and the differences all run one way.
+
+The federal test measures a LEVEL. It takes what completers earn a few years
+out and asks whether it clears a fixed bar. This page measures a DECADE, and
+the person on the other side of the comparison is aging up a real wage curve
+the whole time rather than standing still at a state median.
+
+The federal test charges the program nothing for the time it takes. A year
+spent enrolled and not earning is a real cost of a degree and is not in that
+arithmetic; it is in this one, which is most of why the two disagree.
+
+And the federal test never sees the loan. That is the gap its own architects
+name, and it is the thing this page exists to close: an earnings rule cannot
+tell a graduate on modest pay with no debt from a graduate on the same pay
+owing $55,000, and those are different lives. The break-even loan above is
+exactly that distinction, and no earnings test has one.
+
+Run this model on the federal test's own terms, charging nothing for the
+enrolled years, and the two land close. Run it on ours and it is far harsher.
+The Department's figures below are computed from its own December 2025
+program file, not quoted from a summary:
+
+| Level | Education Dept. | This model, no enrolled years charged | This model, as shown |
+| --- | --- | --- | --- |
+| Associate's | 6.5% | 4% | 8% |
+| Bachelor's | 1.2% | 3% | 17% |
+| Master's | 3.9% | 2% | 41% |
+
+The middle column and the left one agree within a couple of points at every
+level. The distance to the right-hand column is the price of the years, which
+the federal test does not count and this page does.
+
+One level is missing from that table, and its absence is the part worth
+knowing. **The earnings test does not cover undergraduate certificates at
+all.** All 5,332 certificate programs in the Department's file sit outside the
+statute's list of covered programs, and they are the level its wider screen
+flags most often, at 28%. So the shortest and cheapest credentials, the ones
+this page had the least confidence pricing until recently, are the ones the
+new federal rule will not measure either. What this model says about them is
+above, with the length you chose attached to it.
+
+Treat none of this as a verdict on a school or a program. The Department says
+plainly that its file is preliminary, that it is not the official eligibility
+metric, and that the first real measurements are July 2027, after which a
+program loses eligibility only on failing twice in three years. Nothing has
+lost anything.
+
 ### 6. How is repayment modeled?
 
 #### How your loan payment is calculated
