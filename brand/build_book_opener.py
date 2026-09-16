@@ -163,6 +163,20 @@ OPENER_STYLE = (
 # compresses best and what downscaling barely touches. Crosshatch is the exact
 # opposite. Keeping the washes flat is what keeps that packing valid.
 #
+# NAMING THE SURFACE IS WHAT DREW THE SURFACE. The first two renders came back
+# with a torn deckled edge and paper grain, through a clause that said "no
+# paper grain, no torn or deckled edge, no border and no visible paper sheet".
+# That is the failing construction this file already records for props that
+# carry writing: "a blank X with nothing written on it" NAMES X and gets X. The
+# word paper appeared three times in a contract asking for no paper, and the
+# lead said "Pen and ink drawing of", which is a drawing on a sheet.
+#
+# So the medium is now named by its marks rather than its support, "Ink and
+# grey wash illustration", the word paper appears nowhere, and the frame is
+# asserted POSITIVELY: the image fills the whole rectangular frame edge to
+# edge. A positive instruction about the frame beats a negative one about the
+# sheet, which is the same move as swapping a cardboard box for a suitcase.
+#
 # The negatives are copied VERBATIM from OPENER_STYLE. Every clause in them
 # exists because a prop carried writing, and a style trial is no reason to
 # re-earn any of it.
@@ -170,10 +184,9 @@ OPENER_STYLE_WASH = (
     "Every edge drawn with a confident black ink outline, "
     "the line varying in weight the way a nib does. No color: the only tones "
     "are two or three flat washes of warm grey, laid in large simple areas, "
-    "with the white of the paper doing most of the work. No gradients, no "
-    "crosshatching, no stipple, no fine texture. Drawn to the edges of the "
-    "frame on clean white, no paper grain, no torn or deckled edge, no "
-    "border and no visible paper sheet. Subtle shadows, generous "
+    "with clean white doing most of the work. No gradients, no "
+    "crosshatching, no stipple, no fine texture. The image fills the whole "
+    "rectangular frame edge to edge. Subtle shadows, generous "
     "margins. Strong light to dark separation so the scene reads without "
     "color. Faces drawn simply in the same few clean lines as the room, calm "
     "and unexaggerated, no caricature. Every figure and object complete and "
@@ -413,7 +426,7 @@ def build_prompt(chapter: str, style: str = "flat") -> str:
     # illustration of a library" and "Pen and ink drawing" in one prompt is two
     # illustrators in one sentence.
     lead = ("Flat vector illustration of" if style == "flat"
-            else "Pen and ink drawing of")
+            else "Ink and grey wash illustration of")
     return (f"{lead} {scene}, {camera}. {cast}. "
             f"{light}. {STYLES[style]}")
 
