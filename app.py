@@ -2634,7 +2634,7 @@ def cc_path_options(program_years: int, ccb_available: bool = False) -> tuple:
     if ccb_available:
         options.append("ccb")
         labels["ccb"] = (f"Bachelor's awarded by the community college: all "
-                         f"{program_years} years there, no transfer")
+                         f"{year_count(program_years)} there, no transfer")
     return options, labels
 
 
@@ -5212,7 +5212,7 @@ def render_financing_note(financing: dict) -> None:
              f"student is enrolled and is added to the balance at graduation. Only "
              f"subsidized federal loans are exempt; unsubsidized Direct, Parent PLUS and "
              f"private money all accrue from the day they are disbursed. Averaged over "
-             f"{financing.get('undergrad_accrual_years', 0)} years of borrowing, since a "
+             f"{year_count(financing.get('undergrad_accrual_years', 0))} of borrowing, since a "
              f"dollar lent in the first year accrues longer than one lent in the last."
              ).replace("$", r"\$"))
     if (financing.get("plus_principal", 0) or 0) > 0:
@@ -11974,6 +11974,17 @@ def ccb_school(coa_row, predominant_degree) -> bool:
     return len(bachl) / len(assoc) <= CCB_MAX_BACHELORS_TO_ASSOC_RATIO
 
 
+def year_count(n: int) -> str:
+    """"1 year" or "4 years".
+
+    A program length could not be 1 until 2026-09-16, when the certificate
+    levels stopped being charged four. "all 1 years" and "1 years against 4"
+    both reached production that day, in two different strings, which is why
+    this is a helper rather than a third inline conditional.
+    """
+    return f"{n} year" if n == 1 else f"{n} years"
+
+
 def loan_amount_label(loan_basis: str, program_years: int,
                       cost_years: int = None) -> str:
     """Label for the Total Loan Amount figure, matching how it was derived.
@@ -12007,13 +12018,8 @@ def loan_amount_label(loan_basis: str, program_years: int,
         # it would assert something Scorecard does not measure.
         return "Total Loan Amount (graduate, school-reported)"
     if cost_years is not None and 0 < cost_years < program_years:
-        return (f"Total Loan Amount ({cost_years} undergraduate "
-                f"{'year' if cost_years == 1 else 'years'})")
-    # "all 1 years" became reachable on 2026-09-16, when the certificate
-    # levels stopped being charged four. A label that cannot count reads as a
-    # broken page on exactly the level whose length the reader just set.
-    return (f"Total Loan Amount (all {program_years} "
-            f"{'year' if program_years == 1 else 'years'})")
+        return f"Total Loan Amount ({year_count(cost_years)} undergraduate)"
+    return f"Total Loan Amount (all {year_count(program_years)})"
 
 
 def split_loan_financing(effective_principal: float, federal_cap: float,
@@ -20089,7 +20095,7 @@ elif loan_source_a == "personal":
         f"Year 1 ({start_year_a}): {fmt_money(effective_coa_per_year_a)} COA − "
         f"{fmt_money(personal_contribution_per_year_a)} personal "
         f"− {fmt_money(grants_per_year_a)} grants → est. {fmt_pct(inflation_rate_a * 100)} COA inflation/yr "
-        f"→ over {cost_years_a} years: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
+        f"→ over {year_count(cost_years_a)}: **{fmt_money(computed_loan_amount_a)}** cost-based loan estimate, **{fmt_money(personal_contribution)}** personal"
     )
 elif cc_mode_a == "ccb":
     # Simplified at a CCB-granting community college is the one place the
@@ -21668,7 +21674,7 @@ if compare_mode:
                 f"Year 1 ({start_year_b}): {fmt_money(effective_coa_per_year_b)} COA − "
                 f"{fmt_money(personal_contribution_per_year_b)} personal "
                 f"− {fmt_money(grants_per_year_b)} grants → est. {fmt_pct(inflation_rate_b * 100)} COA inflation/yr "
-                f"→ over {cost_years_b} years: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
+                f"→ over {year_count(cost_years_b)}: **{fmt_money(computed_loan_amount_b)}** cost-based loan estimate, **{fmt_money(personal_contribution_b)}** personal"
             )
         elif cc_mode_b == "ccb":
             # See Scenario A: at a community college the reported median debt is
@@ -29281,7 +29287,7 @@ def render_loan_basis_disclosure(loan_basis: str, loan_source: str,
             f"{school_name}, but that is one institution-wide median blending completers "
             "of every credential length, with no per-year or per-credential breakdown. We "
             f"scale it by the ratio of cumulative federal Direct borrowing limits, "
-            f"{program_years} years against {UNDERGRAD_YEARS} "
+            f"{year_count(program_years)} against {UNDERGRAD_YEARS} "
             f"(**{simplified_scale * 100:.0f}%**), because the Scorecard figure counts "
             "**federal loans only** and federal limits are what bound federal borrowing. "
             "Direct PLUS and private borrowing aren't included either way, so a student "
