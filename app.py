@@ -2853,6 +2853,20 @@ DEFAULT_COA_INFLATION_RATE = 0.027  # Public rate, used when control type is unk
 # file, so a drift in either direction just narrows the offered options.
 CONTROL_TYPE_ORDER = tuple(CATEGORY_COA_INFLATION_RATES)
 
+# Named because sector_visibility_note needs to ask about ONE of the three,
+# and a retyped "Private Nonprofit" would match nothing and report it as a
+# real answer -- the wrong-ANSWER failure the derivation above exists to make
+# unspellable. The assert is the whole point: this must be a key of the map,
+# not a string that looks like one.
+FOR_PROFIT_CONTROL_TYPE = "Private For-Profit"
+assert FOR_PROFIT_CONTROL_TYPE in CATEGORY_COA_INFLATION_RATES
+
+# How far the shown list may fall below the matched pool before the search
+# says so. A 25-row window off a sorted list is never a random sample, so a
+# small gap is the ordering working as intended; this marks the case where a
+# whole sector is effectively absent from the screen.
+SECTOR_VISIBILITY_GAP = 0.10
+
 # Federal income tax, 2024, single filer. Source: IRS Rev. Proc. 2023-34.
 # Brackets are (upper bound of bracket, marginal rate on income up to that
 # bound). Scope: single filer only, no dependents, no itemized deductions or
@@ -8957,6 +8971,11 @@ def search_schools_by_budget(cip_family: str, credential: str,
     # already warns about, arriving through the sort instead of the filter.
     total_matches = len(matches)
     unrated_matches = int(matches["ADM_RATE"].isna().sum())
+    # What the cap destroys about the SHAPE of the list, not just its length.
+    # Counted here, before the sort and before the cap, for the same reason
+    # total_matches is: after either, this describes the window rather than
+    # the search.
+    sector_matches = matches["control_type"].value_counts().to_dict()
 
     # BEFORE THE SORT AND BEFORE THE CAP, unlike the field-debt merge below.
     # That one is display-only so it can join the capped 25; this column can BE
@@ -9016,6 +9035,7 @@ def search_schools_by_budget(cip_family: str, credential: str,
     out.attrs["unrated_matches"] = unrated_matches
     out.attrs["hidden_by_out_of_state"] = hidden_by_oos
     out.attrs["beyond_cap"] = beyond_cap
+    out.attrs["sector_matches"] = sector_matches
     return out
 
 
@@ -9242,6 +9262,54 @@ def resolve_search_sort(mode: str, credential: str,
     """
     return (mode if mode in search_sort_modes(credential, discipline_key)
             else SEARCH_SORT_DEFAULT)
+
+
+def sector_visibility_note(results) -> str:
+    """Says when the visible list is missing a whole sector the search matched.
+
+    THIS FUNCTION EXISTS BECAUSE THE OPPOSITE CLAIM WAS IN THE PRODUCT, and
+    the correction is the interesting part. The school-type filter's help said
+    for-profit prices "sort near the top, so this is how you look past them".
+    Measured on 2026-09-16 across twenty field-and-credential combinations,
+    that is false in every one: for-profits are UNDER-represented at the top
+    of a cheapest-first list, by 0 to 29 points. Health-professions
+    certificates ran 8% of the shown 25 against 29% of the matches; culinary
+    under-a-year ran 44% against 60%.
+
+    The reason is that they are the MIDDLE sector by price, not the cheapest.
+    Median annual cost of attendance runs $17,725 public, $25,292 for-profit,
+    $44,760 private non-profit, and for-profits charge one price rather than
+    a resident and a non-resident one, so a cheapest-first window off the top
+    is mostly public and the largest sector in the file (1,884 of 5,035 rows)
+    is the one a price-sorted screen shows least of.
+
+    So the note names the composition and stops. It says nothing about what a
+    sector is worth, which content/README.md forbids and which no column in
+    this dataset could support; it points at the filter, because the filter is
+    the only thing that changes what is on screen.
+
+    Returns "" unless the gap clears SECTOR_VISIBILITY_GAP, so an ordinary
+    sorted window says nothing at all.
+    """
+    if results is None or len(results) == 0:
+        return ""
+    counts = results.attrs.get("sector_matches") or {}
+    matched = sum(counts.values())
+    if not matched:
+        return ""
+    pool_share = counts.get(FOR_PROFIT_CONTROL_TYPE, 0) / matched
+    shown = int((results["control_type"] == FOR_PROFIT_CONTROL_TYPE).sum())
+    if pool_share - shown / len(results) < SECTOR_VISIBILITY_GAP:
+        return ""
+    return (
+        f"**What this ordering leaves out.** {shown} of the {len(results)} "
+        f"schools listed {'is' if shown == 1 else 'are'} private for-profit, "
+        f"against {pool_share:.0%} of "
+        f"the {matched:,} that match your filters. Sorting by price shows "
+        f"public colleges first, because they are the cheapest of the three "
+        f"school types; for-profit prices sit in the middle and private "
+        f"non-profit prices above both. Use School type above to see them."
+    )
 
 
 def search_result_caption(shown: int, total: int, mode: str,
@@ -26281,12 +26349,22 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     # ever asked it for -- control_types has been a parameter since this
     # feature shipped, with no control wired to it.
     #
-    # It earns a place because of what cheapest-first does without it.
-    # Private For-Profit is the LARGEST of the three categories in the
-    # dataset (1,884 of 5,035 rows, more than Public's 1,797) and its
-    # short-programme pricing sorts high, so the top of a price-driven
-    # list is exactly where those schools concentrate -- and a price-driven
-    # list is the only kind this tool makes.
+    # It earns a place because of what cheapest-first does without it, and
+    # THE DIRECTION OF THAT WAS WRONG HERE UNTIL 2026-09-16. This comment
+    # read: "its short-programme pricing sorts high, so the top of a
+    # price-driven list is exactly where those schools concentrate". Measured
+    # across twenty field-and-credential combinations, the opposite holds in
+    # every one. For-profits are the MIDDLE sector by price ($25,292 median
+    # against $17,725 public and $44,760 private non-profit) and they charge
+    # one price rather than a resident and a non-resident one, so a
+    # cheapest-first window off the top is mostly public and they are
+    # UNDER-represented by 0 to 29 points.
+    #
+    # Private For-Profit is still the LARGEST of the three categories in the
+    # dataset (1,884 of 5,035 rows, more than Public's 1,797), which is what
+    # makes the under-representation worth a control and worth a sentence:
+    # the sector a price-sorted screen shows least of is the one the file
+    # holds most of. See sector_visibility_note.
     #
     # Empty means no filter, matching the states control beside it. There
     # is deliberately no default: which sectors a visitor will consider is
@@ -26299,8 +26377,9 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
         on_change=lambda: mark_interaction(control_types_key),
         help="Public, private non-profit, private for-profit. Leave it empty "
               "to include all three. For-profit schools are the largest group "
-              "in this dataset and their prices sort near the top, so this is "
-              "how you look past them.")
+              "in this dataset and the one a cheapest-first list shows least "
+              "of, because their prices sit above public colleges, so this is "
+              "how you bring them into view or leave them out.")
 
     # Reconciled BEFORE the widget exists. A stored "Admit rate" outlives the
     # bachelor's search that offered it, and Streamlit raises when a keyed
@@ -27157,6 +27236,13 @@ def render_school_search(always_open: bool = False) -> None:
         _ppd_caption = ppd_search_caption(results, credential, family)
         if _ppd_caption:
             st.caption(_ppd_caption)
+        # Screen only, like the PPD caption above it and for the same reason:
+        # it points at a control ("above"), which is a sentence a printed list
+        # cannot act on. It is silent unless a whole sector is missing from
+        # the window, so it costs nothing on an ordinary search.
+        _sector_note = sector_visibility_note(results)
+        if _sector_note:
+            st.caption(_sector_note)
         # Shown per row because it varies per row -- the visitor is resident in
         # one of these states and a visitor state elsewhere. Naming the rate is
         # what makes the price checkable against the school's own published
