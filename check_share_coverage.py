@@ -46,6 +46,28 @@ WIDGET_FUNCS = {
 # reason: the point of the allowlist is to force the decision to be conscious,
 # not to be a place to silence the check.
 # (session_state key, params it rides on, what it is). See the loop in main().
+
+def func_src(src: str, name: str) -> str:
+    """One function's own body.
+
+    Both checks below ask whether a particular function still reads the
+    length table, and an unscoped substring search answers yes as long as ANY
+    function does. That is not a hypothetical: the first version of the read
+    check passed its own negative control, because render_program_length_
+    control contains the same line as stated_program_years and the control
+    only broke one of them. An inconclusive control reading as a pass is the
+    failure this repo rates worse than having no control at all.
+    """
+    start = src.index(f"def {name}(")
+    end = src.index("\ndef ", start + 1)
+    return src[start:end]
+
+
+def emitter_src(src: str) -> str:
+    """Just build_share_params' own body."""
+    return func_src(src, "build_share_params")
+
+
 NON_WIDGET_SHARE_STATE = (
     ("_applied_prof_price", ("pp", "pps"),
      "a price carried from the graduate search"),
@@ -209,6 +231,9 @@ PARAM_EXEMPT = {
 }
 
 
+_APP_NS = []
+
+
 def load_app_namespace():
     """app.py's sections 1-2, without the UI.
 
@@ -219,11 +244,14 @@ def load_app_namespace():
     round-tripped for real instead of merely looked at. Same exec-prefix trick
     the other guards use.
     """
+    if _APP_NS:
+        return _APP_NS[0]
     src = open(APP).read()
     cut = src.index("# 3. PAGE CONFIG & SESSION STATE")
     prefix = src[:src.rindex("# " + "=" * 60, 0, cut)]
     ns = {"__name__": "sharecheck"}
     exec(compile(prefix, APP, "exec"), ns)
+    _APP_NS.append(ns)
     return ns
 
 
@@ -397,6 +425,70 @@ def main() -> int:
                     f"  READ SIDE  ?{param}= is emitted for {state_key} ({what}) but no\n"
                     f"             get_shared_* call reads it back, so the link carries\n"
                     f"             a value the visit that opens it ignores.")
+
+    # The two program-length controls, same shape and the same blindness: the
+    # emitter loops over PROGRAM_LENGTH_KEYS and the reader looks its param up
+    # in the same dict, so NEITHER name is a literal the scan above can see.
+    # Check the table. A length decides the tuition, the loan AND the years of
+    # foregone wages, so a control that silently stopped riding a link would
+    # recreate the sender's scenario at a different price.
+    lengths = next((n for n in ast.walk(tree)
+                    if isinstance(n, ast.Assign)
+                    and any(getattr(t, "id", "") == "PROGRAM_LENGTH_KEYS"
+                            for t in n.targets)), None)
+    if lengths is None:
+        failures.append("  PROGRAM_LENGTH_KEYS is gone; the certificate-length "
+                        "controls are unchecked and their links unguarded.")
+    else:
+        # The keys are CERTIFICATE_LEVEL / SOME_COLLEGE_LEVEL rather than
+        # literals, so resolve them from their own assignments. Naming the
+        # strings here instead would let the two drift apart in silence.
+        import re as _re
+        consts = dict(_re.findall(r'^([A-Z_]+_LEVEL) = "([^"]+)"', src, _re.M))
+        level_params = {}
+        for k, v in zip(lengths.value.keys, lengths.value.values):
+            name = getattr(k, "id", None)
+            if name is None or name not in consts:
+                failures.append(
+                    f"  LENGTH      PROGRAM_LENGTH_KEYS is keyed on "
+                    f"{ast.dump(k)[:60]}, which\n"
+                    f"              this check cannot resolve to a level name.")
+                continue
+            level_params[consts[name]] = (v.elts[0].value, v.elts[1].value)
+        # EVERY level the app admits it has no length for must have a control.
+        # Without this a third mismodelled level would silently go back to
+        # being charged whatever program_years_for_education falls through to,
+        # with no way for the reader to say otherwise.
+        mismodelled = set(load_app_namespace()["MISMODELLED_EDUCATION_LEVELS"])
+        for level in sorted(mismodelled - set(level_params)):
+            failures.append(
+                f"  LENGTH      {level!r} is in MISMODELLED_EDUCATION_LEVELS but has\n"
+                f"              no PROGRAM_LENGTH_KEYS entry, so nothing lets the\n"
+                f"              reader state a length and nothing shares one.")
+        for level in sorted(set(level_params) - mismodelled):
+            failures.append(
+                f"  LENGTH      PROGRAM_LENGTH_KEYS names {level!r}, which is not a\n"
+                f"              mismodelled level. A control for a level with a\n"
+                f"              published length would override it silently.")
+        for level, (skey, param) in sorted(level_params.items()):
+            if param in emitted and param not in {p for _, p in level_params.values()}:
+                failures.append(
+                    f"  LENGTH      ?{param}= collides with a calculator param.")
+        params_seen = [p for _, p in level_params.values()]
+        if len(set(params_seen)) != len(params_seen):
+            failures.append("  LENGTH      two levels share one share param; one "
+                            "would overwrite the other.")
+        # Both halves must actually reach the table, which is the thing a
+        # literal scan cannot tell us.
+        if "PROGRAM_LENGTH_KEYS.items()" not in emitter_src(src):
+            failures.append(
+                "  LENGTH      build_share_params no longer loops over\n"
+                "              PROGRAM_LENGTH_KEYS, so no length rides a link.")
+        if ("PROGRAM_LENGTH_KEYS[typical_education]"
+                not in func_src(src, "stated_program_years")):
+            failures.append(
+                "  LENGTH      stated_program_years no longer reads\n"
+                "              PROGRAM_LENGTH_KEYS, so a shared length is ignored.")
 
     # The repayment tool's own share pipeline. Its emitter and its seeder both
     # loop over REPAYMENT_SHARE_FIELDS, so every param name reaches

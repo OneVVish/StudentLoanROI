@@ -1917,10 +1917,16 @@ UNDERGRAD_YEARS = 4
 # Operators need only a diploma and still out-earn the baseline heavily. What
 # goes away is a cost that was never incurred.
 #
-# "Postsecondary nondegree award" and "Some college, no degree" stay out. The
-# first spans a six-week certificate and an eighteen-month program; the second
-# has no defined end at all. A guess there would be indistinguishable from data
-# -- see MISMODELLED_EDUCATION_LEVELS.
+# "Postsecondary nondegree award" and "Some college, no degree" stay out of
+# THIS map and are priced by the reader instead, since 2026-09-16. The first
+# spans a six-week certificate and an eighteen-month program; the second has no
+# defined end at all, so neither has a standard length this map could carry.
+# What changed is the fallback: they used to drop through to UNDERGRAD_YEARS,
+# a length IPEDS says no certificate in the country has, and they now resolve
+# through stated_program_years to a length the reader accepted or chose. A
+# guess here would still be indistinguishable from data, which is why the
+# answer is a control rather than an entry. See MISMODELLED_EDUCATION_LEVELS
+# and CERTIFICATE_LENGTH_BANDS.
 # Graduate levels are ADDITIONAL years on top of a bachelor's, not a total.
 # A master's is 2 years after 4; a doctorate 5 after 4. Keeping them here as
 # the additional figure and adding UNDERGRAD_YEARS in program_years_for_education
@@ -2031,6 +2037,76 @@ ALL_EDUCATION_LEVELS = SUB_BACHELORS_EDUCATION_LEVELS | set(GRADUATE_ADDITIONAL_
 MISMODELLED_EDUCATION_LEVELS = (
     ALL_EDUCATION_LEVELS - set(PROGRAM_YEARS_BY_EDUCATION)
 )
+
+# The two levels that resolves to, named, because each is asked a different
+# question below and neither can be asked the other's.
+CERTIFICATE_LEVEL = "Postsecondary nondegree award"
+SOME_COLLEGE_LEVEL = "Some college, no degree"
+
+# HOW LONG A CERTIFICATE TAKES, WHICH BLS DOES NOT PUBLISH AND IPEDS DOES.
+#
+# Until 2026-09-16 this app charged both levels above UNDERGRAD_YEARS, because
+# MISMODELLED_EDUCATION_LEVELS had no length to offer and four was the
+# fallback. Four years is not an imprecise answer, it is an impossible one:
+# of the 2,189,818 sub-baccalaureate certificates IPEDS counts, 56% finish in
+# under one academic year, 98% in under two, and NONE takes four. The length
+# was charged twice over, once as tuition and once as foregone wages, and it
+# flipped the sign of the ten-year premium on the largest occupations at the
+# level -- Heavy and Tractor-Trailer Truck Drivers, 2.06 million jobs, read
+# -$36,062 at four years and +$103,495 at one.
+#
+# THE OPTIONS ARE IPEDS'S OWN AWARD-LEVEL BANDS, not a length this app
+# invented, so a reader can match their program's catalog page to one. The
+# shares come from data/certificate_lengths_clean.csv
+# (build_certificate_lengths.py) and are shown beside each band.
+#
+# A BAND SHORTER THAN A YEAR IS CHARGED ONE, because the enrollment loop is
+# range(years) and teaching the cost model fractions would reach the loan
+# schedule, the class-standing caps, foregone earnings and the baseline start
+# age. Rounding up is also the direction this project errs in: it overstates
+# the cost of the 56% of awards that take less than a year.
+CERTIFICATE_LENGTHS_PATH = "data/certificate_lengths_clean.csv"
+
+# The structural half, and the reason it is duplicated here rather than read:
+# these are IPEDS's categories and the whole-year charge this app assigns each,
+# which are decisions rather than data. A deploy without the CSV loses the
+# SHARES beside each option and keeps every option and every length.
+CERTIFICATE_LENGTH_BANDS = (
+    (20, "Under 12 weeks", 1),
+    (21, "12 weeks to under 1 year", 1),
+    (2, "1 to under 2 years", 2),
+    (4, "2 to under 4 years", 3),
+)
+# The band holding the median award. 56.1% of all certificates are at or below
+# it, so the default already rounds up for most of them.
+DEFAULT_CERTIFICATE_BAND = 21
+
+# "Some college, no degree" is NOT a certificate and IPEDS says nothing about
+# it: BLS's level means coursework with no award at the end, so there is no
+# completion to count and no band to read. One year is the AUTHOR'S CALL of
+# 2026-09-16, not a federal figure, and this comment exists so nobody later
+# quotes it as one. It replaces four years, which was indefensible in the same
+# way and in the same direction.
+SOME_COLLEGE_LENGTH_OPTIONS = (
+    (1, "About 1 year", 1),
+    (2, "About 2 years", 2),
+)
+DEFAULT_SOME_COLLEGE_KEY = 1
+
+# One control PER LEVEL rather than per scenario, and that is a correctness
+# decision rather than a saving. The length has to reach payoff_age_for, the
+# in-school capitalisation, the PDF's loan label and every caption that prints
+# a year count, and threading a per-scenario value through all of them is the
+# silent drift this file records three times over ("Anything that prints a
+# year COUNT must read cost_years"). Keyed on the LEVEL, program_years_for_
+# education can resolve it alone and no call site can be missed.
+#
+# What it costs: Compare Mode with both scenarios at the same level prices
+# both at one length. The caption says so where it can happen.
+PROGRAM_LENGTH_KEYS = {
+    CERTIFICATE_LEVEL: ("cert_length", "cl"),
+    SOME_COLLEGE_LEVEL: ("somecollege_length", "scl"),
+}
 
 # Which credential an occupation's BLS entry-education implies, for the loan
 # limits. Graduate borrowing has its own annual and aggregate caps and its own
@@ -2238,6 +2314,65 @@ def school_cost_years(program_years: int, graduate_years: int,
     return int(program_years)
 
 
+@st.cache_data(show_spinner=False)
+def load_certificate_length_shares() -> dict:
+    """{awlevel: share} for the IPEDS certificate bands, for the help text.
+
+    From build_certificate_lengths.py. A missing file returns {} and the
+    options render without their shares, which costs a sentence rather than
+    the control -- the hs_young_wage_disclosure rule.
+    """
+    try:
+        frame = pd.read_csv(CERTIFICATE_LENGTHS_PATH)
+    except Exception:
+        return {}
+    return {int(r["awlevel"]): float(r["share"]) for _, r in frame.iterrows()}
+
+
+def program_length_options(typical_education: str) -> tuple:
+    """(options, default_key) for a level this app has no standard length for.
+
+    options is a tuple of (key, label, years). Empty for every level with a
+    published length, which is what the sidebar tests before rendering a
+    control at all.
+    """
+    if typical_education == CERTIFICATE_LEVEL:
+        return CERTIFICATE_LENGTH_BANDS, DEFAULT_CERTIFICATE_BAND
+    if typical_education == SOME_COLLEGE_LEVEL:
+        return SOME_COLLEGE_LENGTH_OPTIONS, DEFAULT_SOME_COLLEGE_KEY
+    return (), None
+
+
+def stated_program_years(typical_education: str) -> int:
+    """Years to charge a level with no published length, or None for the rest.
+
+    Reads the one control per level (PROGRAM_LENGTH_KEYS) and falls back to
+    that level's default, so this answers the same whether a visitor has
+    touched the control, is on a shared link, or is analyze_model.py running
+    with no Streamlit session at all. The try/except is the counterfactual_
+    vocab pattern and is what keeps section 2 exec-safe.
+
+    NEVER returns UNDERGRAD_YEARS. The four years this replaced were the
+    fallback of a function asked a question it had no answer to; the answer
+    now is the shortest defensible length, which for both levels is one year.
+    """
+    options, default_key = program_length_options(typical_education)
+    if not options:
+        return None
+    key = default_key
+    session_key, share_param = PROGRAM_LENGTH_KEYS[typical_education]
+    try:
+        stored = st.session_state.get(session_key)
+        if stored is None:
+            stored = get_shared_int(share_param, None)
+        if stored is not None:
+            key = int(stored)
+    except Exception:
+        pass
+    years = {k: y for k, _, y in options}
+    return years.get(key, years[default_key])
+
+
 def program_years_for_education(typical_education: str, title: str = None) -> int:
     """How many years of enrollment the cost model should charge for an
     occupation with this BLS typical-entry-education. UNDERGRAD_YEARS for
@@ -2251,36 +2386,97 @@ def program_years_for_education(typical_education: str, title: str = None) -> in
     graduate = graduate_years_for_education(typical_education, title)
     if graduate:
         return UNDERGRAD_YEARS + graduate
+    stated = stated_program_years(typical_education)
+    if stated is not None:
+        return stated
     return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
 
 
-def mismodelled_length_note(major_name: str, typical_education: str) -> str:
-    """The caption for a level this app admits it prices at a length it does
-    not believe. One string, two call sites, because it renders in both result
-    arms and a sentence written twice is a sentence free to disagree.
+# Reset on every rerun, because Streamlit re-executes this module top to
+# bottom. It exists so Compare Mode cannot render one level's control twice
+# and raise StreamlitDuplicateElementKey when both scenarios sit at the same
+# level -- the render_salary_flow_charts lesson, on a control this time.
+_LENGTH_CONTROLS_RENDERED = set()
 
-    IT NAMES BOTH DIRECTIONS, and the second half is the one that was missing
-    until 2026-09-16. The wrong length is charged twice over: once as tuition,
-    which the visitor can see is an upper bound, and once as years of foregone
-    wages, which sits inside the earnings premium where nothing marks it.
 
-    Measured on the model's own occupations, at no loan at all, over ten
-    years: of the 51 occupations BLS files as a postsecondary nondegree award,
-    28 finish behind a debt-free high school graduate at the four years this
-    app charges, 20 at two years and 12 at one. So more than half of that
-    level's failures are the length rather than the wages, and the premium is
-    a floor in exactly the way the debt figure is a ceiling.
+def render_program_length_control(slot, typical_education: str) -> None:
+    """The one control for a level this app publishes no standard length for.
+
+    Renders at most ONCE per level per run whichever scenario asks for it
+    first, so the two scenarios share a length where they share a level. See
+    PROGRAM_LENGTH_KEYS for why that is a correctness decision rather than a
+    saving.
+
+    Reading it happens ~1,600 lines above this, in resolve_program_years,
+    which is the read-before-the-widget pattern dataset_mode and city already
+    use: Streamlit stores the value on interaction and the rerun reads it at
+    the top, so the choice lands on the same run the visitor sees.
     """
+    options, default_key = program_length_options(typical_education)
+    if not options or typical_education in _LENGTH_CONTROLS_RENDERED:
+        return
+    _LENGTH_CONTROLS_RENDERED.add(typical_education)
+    session_key, share_param = PROGRAM_LENGTH_KEYS[typical_education]
+    st.session_state.setdefault(session_key,
+                                get_shared_int(share_param, default_key))
+    shares = (load_certificate_length_shares()
+              if typical_education == CERTIFICATE_LEVEL else {})
+    keys = [k for k, _, _ in options]
+    labels = {k: lab for k, lab, _ in options}
+    years = {k: y for k, _, y in options}
+
+    def _fmt(k):
+        share = shares.get(k)
+        charged = f"{years[k]} year" + ("s" if years[k] != 1 else "")
+        tail = f" ({share:.0%} of awards)" if share else ""
+        return f"{labels[k]}{tail}, charged as {charged}"
+
+    # A stored value from a level whose options no longer contain it makes a
+    # keyed widget RAISE, the reconcile_cc_mode rule. Both levels keep their
+    # own key, so this can only fire on a hand-edited link.
+    if st.session_state.get(session_key) not in keys:
+        st.session_state[session_key] = default_key
+    slot.selectbox("How long is the program?", keys, key=session_key,
+                   format_func=_fmt,
+                   help=("BLS publishes no standard length for this level, so "
+                         "this app cannot derive one. The options are the "
+                         "federal award-length bands and the figures below "
+                         "move with whichever you pick."
+                         if typical_education == CERTIFICATE_LEVEL else
+                         "BLS's level means college coursework with no "
+                         "credential at the end, so there is no published "
+                         "length. The figures below move with this."))
+
+
+def mismodelled_length_note(major_name: str, typical_education: str) -> str:
+    """The caption under the length control, for a level with no published
+    standard length. One string, two call sites, because it renders in both
+    result arms and a sentence written twice is free to disagree.
+
+    IT NAMES THE DIRECTION, and that half was missing until 2026-09-16. The
+    length is charged twice over: once as tuition, which the visitor can read
+    as an upper bound, and once as years of foregone wages, which sits inside
+    the earnings premium where nothing marks it. Both move together when the
+    control moves, so the sentence points at the control rather than asking
+    the reader to discount a number by eye.
+
+    The four years this level used to be charged were not an estimate. IPEDS
+    counts 2,189,818 sub-baccalaureate certificates and NONE of them takes
+    four years; 56% finish inside one. See CERTIFICATE_LENGTH_BANDS.
+    """
+    if typical_education == CERTIFICATE_LEVEL:
+        source = ("The lengths offered are the federal award bands, and the "
+                  "default is the band holding the median certificate.")
+    else:
+        source = ("BLS's level means college coursework with no credential at "
+                  "the end, so no federal source gives it a length and one "
+                  "year is this app's own assumption.")
     return (
-        f"ℹ️ The typical entry-level education for {major_name} (BLS: "
-        f"\"{typical_education}\") is below a bachelor's degree. This app's Cost "
-        f"of Attendance/loan model below still assumes {UNDERGRAD_YEARS} years "
-        "of undergraduate cost, because BLS doesn't publish a standard length "
-        "for this level. Treat the debt figures as an upper bound and the "
-        f"earnings premium as a lower bound: those same {UNDERGRAD_YEARS} years "
-        "are also "
-        "charged against this path as wages not earned, and a shorter program "
-        "gives up fewer of them."
+        f"ℹ️ BLS gives the typical entry-level education for "
+        f"{major_name} as \"{typical_education}\", and publishes no standard "
+        f"length for it. {source} Everything below is priced on the length "
+        f"shown above: the tuition, the loan, and the years of wages given up "
+        f"to attend. Change it and the figures change with it."
     )
 
 
@@ -7375,6 +7571,15 @@ def build_share_params(career_data_source, major, city, school_name_a, in_state_
     params["foregone"] = "1" if st.session_state.get("count_foregone_earnings") else "0"
     params["deps"] = str(st.session_state.get("rap_dependents", 0))
     params["legacy"] = "1" if st.session_state.get("enable_legacy_plans") else "0"
+    # Program length for the two levels with no published one. Emitted only
+    # when the visitor has a value stored, because a link carrying a length
+    # for a level neither scenario is at would be noise -- and because the
+    # default is already what a bare link resolves to. It decides the tuition,
+    # the loan AND the years of foregone wages, so a link that dropped it
+    # would recreate the sender's scenario at a different price.
+    for _level, (_skey, _sparam) in PROGRAM_LENGTH_KEYS.items():
+        if st.session_state.get(_skey) is not None:
+            params[_sparam] = str(st.session_state[_skey])
     # Professional school. Only meaningful for the paths that attend one, so
     # emitted only when set -- a link for Software Developers carrying an empty
     # medical-school param would be noise.
@@ -11734,8 +11939,13 @@ def loan_amount_label(loan_basis: str, program_years: int,
         # it would assert something Scorecard does not measure.
         return "Total Loan Amount (graduate, school-reported)"
     if cost_years is not None and 0 < cost_years < program_years:
-        return f"Total Loan Amount ({cost_years} undergraduate years)"
-    return f"Total Loan Amount (all {program_years} years)"
+        return (f"Total Loan Amount ({cost_years} undergraduate "
+                f"{'year' if cost_years == 1 else 'years'})")
+    # "all 1 years" became reachable on 2026-09-16, when the certificate
+    # levels stopped being charged four. A label that cannot count reads as a
+    # broken page on exactly the level whose length the reader just set.
+    return (f"Total Loan Amount (all {program_years} "
+            f"{'year' if program_years == 1 else 'years'})")
 
 
 def split_loan_financing(effective_principal: float, federal_cap: float,
@@ -12637,21 +12847,24 @@ def breakeven_summary(major_name: str, loan_amount: float, interest_rate: float,
     all: "this degree stops paying off at $X" is malformed when the model
     charged four financed years to reach a job that never asked for them.
 
-    That gate is MISMODELLED_EDUCATION_LEVELS, not every sub-baccalaureate
-    level. An associate's degree now costs the two years it actually takes
-    (PROGRAM_YEARS_BY_EDUCATION), so its break-even is a real number about a
-    real program and is shown. The levels still charged four wrong years are
-    the ones with no defensible standard length -- those stay suppressed.
+    The gate is a program of ZERO years, and since 2026-09-16 that is the
+    only gate. It used to include MISMODELLED_EDUCATION_LEVELS, because those
+    levels were charged four years nothing believed and a ceiling built on a
+    wrong premise is worse than no ceiling. They now carry a length the reader
+    either accepted or chose (see PROGRAM_LENGTH_KEYS), so the premise is
+    stated rather than invented and the number is about a real program.
+
+    What stays suppressed is a path needing no degree at all: "this degree
+    stops paying off at $X" has no referent when there is no degree to weigh,
+    and a career enterable with a diploma has no debt ceiling.
     """
     _cf = counterfactual_vocab()
     typical_education = MAJOR_DATA.get(major_name, {}).get("typical_education", "")
-    # Two different reasons to stay silent, both ending in the same place.
-    # MISMODELLED: we're charging a length we don't believe, so the number
-    # would be built on a wrong premise. Zero program years: there is no degree
-    # to weigh, so "this degree stops paying off at $X" has no referent at all
-    # -- a career you can enter with a diploma doesn't have a debt ceiling.
-    if (typical_education in MISMODELLED_EDUCATION_LEVELS
-            or program_years_for_education(typical_education) == 0):
+    # One reason to stay silent now: there is no degree to weigh, so "this
+    # degree stops paying off at $X" has no referent at all. The second reason
+    # this carried until 2026-09-16 (a length nothing believed) is gone, because
+    # the reader now states one.
+    if program_years_for_education(typical_education) == 0:
         return {"headline": None, "detail": None, "status": "not_applicable",
                 "points": []}
 
@@ -20675,6 +20888,7 @@ if is_returning and major in MAJOR_DATA:
 
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
 if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
+    render_program_length_control(_sb_study, typical_education_a)
     _sb_study.caption(
         mismodelled_length_note(major, typical_education_a).replace("$", r"\$"))
 elif program_years_a == 0:
@@ -21038,6 +21252,7 @@ if compare_mode:
 
         typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
         if typical_education_b in MISMODELLED_EDUCATION_LEVELS:
+            render_program_length_control(st, typical_education_b)
             st.caption(
                 mismodelled_length_note(major_b, typical_education_b)
                 .replace("$", r"\$"))
@@ -30479,11 +30694,13 @@ education, per BLS Employment Projections' "Typical Education Needed for
 Entry" data ([bls.gov/oes/additional.htm](https://www.bls.gov/oes/additional.htm)):
 selecting a profession that typically requires less than a bachelor's
 degree shows a disclosure, since this app's Cost of Attendance/loan model
-otherwise assumes 4 years of undergraduate cost for every major. It's
+assumes 4 years of undergraduate cost wherever it has nothing better. It's
 kept in the dropdown rather than removed, since it's still a real career a
 student might be evaluating. Where BLS does publish a standard length, the
 model uses it: an associate's degree is charged two years, and a job needing no
-degree at all is charged none. See "How long we assume you're enrolled" below.
+degree at all is charged none. Where BLS publishes none, at the two levels
+below an associate's, you set the length yourself and the default is one year.
+See "How long we assume you're enrolled" below.
 
 #### Which geography a salary comes from
 
@@ -30725,11 +30942,28 @@ break-even. What doesn't change is the pay comparison, and that's the point.
 A nuclear power reactor operator needs no degree and still earns far above
 the high-school median. The cost side goes to zero; the earnings side stands.
 
-We still don't guess at the remaining two levels. "Postsecondary nondegree
-award" covers everything from a six-week certificate to an eighteen-month
-program, and "some college, no degree" has no defined end at all. Those still
-get four years, say so on screen, and have their break-even suppressed rather
-than printing a number built on a length we don't believe.
+The remaining two levels are the ones you set yourself, and until
+September 2026 they were the worst-priced things on this page. "Postsecondary
+nondegree award" covers everything from a six-week certificate to an
+eighteen-month program, and "some college, no degree" has no defined end at
+all, so we charged both of them four years. That is not an imprecise answer.
+Of the 2,189,818 sub-baccalaureate certificates IPEDS counts, 56% finish
+inside one academic year, 98% inside two, and none takes four. The length was
+charged twice over, once as tuition and once as wages given up to attend, and
+on the largest occupation at that level it reversed the answer: heavy truck
+driving read $36,000 behind a high school graduate over ten years at four
+years of school, and $103,000 ahead at one.
+
+So the certificate level now asks. The options are the federal award-length
+bands, with the share of all certificates in each shown beside it, and the
+default is the band holding the median. A band shorter than a year is charged
+one, which rounds up for most of them. "Some college, no degree" has no
+federal completion to count, so its one year is our own assumption rather than
+a published figure, and it says so.
+
+The break-even is no longer suppressed at either level. It was, for as long as
+the length underneath it was one nobody believed; a ceiling stated on a length
+you chose is a number about a real program.
 
 #### One more place length matters: the Simplified loan
 

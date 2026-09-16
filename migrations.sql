@@ -2679,3 +2679,38 @@ end $$;
 -- The gallery image changed under the same filename, so a reposted copy from
 -- before today shows the old selection; the ?v= cache-bust means the edge
 -- serves the new one.
+
+-- 2026-09-16  SEAM: the two levels with no published length stopped being
+--             charged four years. NO DDL.
+--
+-- MISMODELLED_EDUCATION_LEVELS resolves to "Postsecondary nondegree award"
+-- and "Some college, no degree". Neither has a length BLS publishes, so both
+-- fell through program_years_for_education to UNDERGRAD_YEARS. That was not
+-- an imprecise length: IPEDS 2023 counts 2,189,818 sub-baccalaureate
+-- certificates, of which 56% finish inside one academic year, 98% inside two,
+-- and NONE takes four. The length was charged twice, once as tuition and once
+-- as foregone wages.
+--
+-- Both now resolve through stated_program_years: a control per level, the
+-- certificate level offering IPEDS's own award bands, defaulting to one year
+-- at both. The break-even is no longer suppressed at either level.
+--
+-- WHAT MOVED, and it is confined to 57 of the 836 career options (13.5M jobs,
+-- 8.7% of US employment). Occupations finishing ten years behind a debt-free
+-- high school graduate at NO loan:
+--     Postsecondary nondegree award   28 of 51  ->  12 of 51
+--     Some college, no degree          6 of 6   ->   2 of 6
+-- Every other credential level is bit-identical; the bachelor's tier still
+-- reads 30 of 177. The direction is uniformly toward the credential, because
+-- the change removes cost and foregone years and adds neither.
+--
+-- HOW TO CONDITION ON IT. There is no flag for the length, so the join is
+-- the occupation: any row whose scenario_a_major / scenario_b_major sits at
+-- one of those two levels changes meaning at this date, and every other row
+-- is unaffected. `cleaned_careers.csv`'s typical_education column is what
+-- says which. Do NOT pool an affected occupation's earnings_premium, roi_pct
+-- or break-even across 2026-09-16.
+--
+-- Rows after this date carry the length on the share params `cl` (certificate
+-- band, an IPEDS AWLEVEL code) and `scl`, but only when the visitor's session
+-- had one stored, so absence means the default of one year rather than four.
