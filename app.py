@@ -2254,6 +2254,36 @@ def program_years_for_education(typical_education: str, title: str = None) -> in
     return PROGRAM_YEARS_BY_EDUCATION.get(typical_education or "", UNDERGRAD_YEARS)
 
 
+def mismodelled_length_note(major_name: str, typical_education: str) -> str:
+    """The caption for a level this app admits it prices at a length it does
+    not believe. One string, two call sites, because it renders in both result
+    arms and a sentence written twice is a sentence free to disagree.
+
+    IT NAMES BOTH DIRECTIONS, and the second half is the one that was missing
+    until 2026-09-16. The wrong length is charged twice over: once as tuition,
+    which the visitor can see is an upper bound, and once as years of foregone
+    wages, which sits inside the earnings premium where nothing marks it.
+
+    Measured on the model's own occupations, at no loan at all, over ten
+    years: of the 51 occupations BLS files as a postsecondary nondegree award,
+    28 finish behind a debt-free high school graduate at the four years this
+    app charges, 20 at two years and 12 at one. So more than half of that
+    level's failures are the length rather than the wages, and the premium is
+    a floor in exactly the way the debt figure is a ceiling.
+    """
+    return (
+        f"ℹ️ The typical entry-level education for {major_name} (BLS: "
+        f"\"{typical_education}\") is below a bachelor's degree. This app's Cost "
+        f"of Attendance/loan model below still assumes {UNDERGRAD_YEARS} years "
+        "of undergraduate cost, because BLS doesn't publish a standard length "
+        "for this level. Treat the debt figures as an upper bound and the "
+        f"earnings premium as a lower bound: those same {UNDERGRAD_YEARS} years "
+        "are also "
+        "charged against this path as wages not earned, and a shorter program "
+        "gives up fewer of them."
+    )
+
+
 def program_years_for_context(typical_education: str, returning: bool = False,
                                title: str = None) -> int:
     """Years of enrollment to charge, for THIS visitor rather than for the
@@ -20645,14 +20675,8 @@ if is_returning and major in MAJOR_DATA:
 
 typical_education_a = MAJOR_DATA.get(major, {}).get("typical_education", "")
 if typical_education_a in MISMODELLED_EDUCATION_LEVELS:
-    _sb_study.caption((
-        f"ℹ️ The typical entry-level education for {major} (BLS: "
-        f"\"{typical_education_a}\") is below a bachelor's degree. This "
-        f"app's Cost of Attendance/loan model below still assumes "
-        f"{UNDERGRAD_YEARS} years of undergraduate cost, because BLS doesn't "
-        "publish a standard length for this level -- treat the debt figures as "
-        "an upper bound."
-    ).replace("$", r"\$"))
+    _sb_study.caption(
+        mismodelled_length_note(major, typical_education_a).replace("$", r"\$"))
 elif program_years_a == 0:
     # A different statement from the two above: not "we're charging the wrong
     # length" and not "we're charging a shorter one", but "there is nothing to
@@ -21014,14 +21038,9 @@ if compare_mode:
 
         typical_education_b = MAJOR_DATA.get(major_b, {}).get("typical_education", "")
         if typical_education_b in MISMODELLED_EDUCATION_LEVELS:
-            st.caption((
-                f"ℹ️ The typical entry-level education for {major_b} (BLS: "
-                f"\"{typical_education_b}\") is below a bachelor's degree. "
-                f"This app's Cost of Attendance/loan model below still "
-                f"assumes {UNDERGRAD_YEARS} years of undergraduate cost, because "
-                "BLS doesn't publish a standard length for this level -- treat "
-                "the debt figures as an upper bound."
-            ).replace("$", r"\$"))
+            st.caption(
+                mismodelled_length_note(major_b, typical_education_b)
+                .replace("$", r"\$"))
         elif program_years_b == 0:
             st.caption((
                 f"ℹ️ BLS gives the typical entry-level education for {major_b} as "
