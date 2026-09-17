@@ -20,7 +20,7 @@ A school's ROI is one median across everyone who enrolled, whatever they studied
 
 ## It does not know where you will work
 
-Registered Nurses typically earn about $187,000 in San Francisco and about $84,000 in Columbus, Ohio. Same degree, same license, more than double the pay, and very different rent. The Chronicle's own methodology note says it plainly: none of these data control for cost of living. A school whose graduates cluster in expensive coastal cities will look better than one whose graduates stay in cheaper places, without either school doing anything differently.
+Registered Nurses typically earn about $187,000 in San Francisco and about $84,000 in Columbus, Ohio. Same degree, same license, more than double the pay, and very different rent. Nothing in the figure adjusts for that, and the Chronicle's own piece says as much about Berkeley: its graduates earn more partly because they enter one of the highest-wage markets in the country, and a high cost of living means the money does not stretch as far. A school whose graduates cluster in expensive coastal cities will look better than one whose graduates stay in cheaper places, without either school doing anything differently.
 
 ## It leaves the debt out entirely
 
