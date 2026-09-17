@@ -175,6 +175,7 @@ REYES_RATE = 9.07          # published Direct PLUS, July 1 2026 to June 30 2027
 REYES_PER_LOAN = 16_250.0
 
 HALL_PRIVATE = [{"balance": 59_000.0, "rate": 11.0, "term_years": 10}]
+HARDWARE = "Computer Hardware Engineers"      # chapter 15, Marcus
 
 DANA_FED, DANA_FED_RATE = 13_000.0, 5.5
 DANA_PRIV, DANA_PRIV_RATE, DANA_PRIV_TERM = 102_000.0, 11.0, 10
@@ -253,12 +254,19 @@ def breakeven(title):
         return am.find_breakeven_loan(ns, title, ROI_RATE, ROI_STRATEGY)
 
 
-def premium(title, loan, years=10):
+def premium(title, loan, years=10, rate=None):
     """The ten-year premium over a debt-free high school graduate.
 
     Same baseline assembly as the break-even, which is the point of routing
     through analyze_model rather than calling compute_scenario_results with
     hand-written kwargs.
+
+    `rate` defaults to the book's federal ROI_RATE and is passed explicitly
+    only for chapter 15's Marcus, whose loan is PRIVATE at 11%. Leaving it to
+    the default would have priced his scenario at somebody else's rate and
+    still produced a plausible number, which is the quiet kind of wrong this
+    file exists to catch. Its negative control is exactly that: dropping the
+    rate reads $771,665 against the book's ~$754,500.
     """
     ns, am = roi_layer()
     md = ns["MAJOR_DATA"][title]
@@ -271,8 +279,8 @@ def premium(title, loan, years=10):
     buf = io.StringIO()
     with redirect_stderr(buf):
         return ns["compute_scenario_results"](
-            title, float(loan), ROI_RATE, ROI_STRATEGY,
-            **kw)["roi_result"]["earnings_premium"]
+            title, float(loan), ROI_RATE if rate is None else rate,
+            ROI_STRATEGY, **kw)["roi_result"]["earnings_premium"]
 
 
 def sai_at(income):
@@ -399,6 +407,7 @@ CH14 = "ch14-short-roads.md"
 CH17 = "ch17-ride-or-pay.md"
 CH18 = "ch18-slashing-interest-priced.md"
 CH00 = "ch00-introduction.md"
+CH15 = "ch15-what-ai-changes.md"
 FIX = "families.md"
 
 # ---- The Reyes family against the Forbes twenty, chapter 4. The prices are
@@ -687,6 +696,41 @@ FIGURES = [
     Fig("ch13-law-premium",
         lambda ns: premium("Lawyers", 13_000),
         "~$100,500", [CH13], exact="$100,506"),
+
+    # ---- Chapter 15: Marcus, and the chapter nothing reproduced until today.
+    #
+    # It carries the book's most contested claims, about AI and about college
+    # rankings, and it had ZERO coverage here: the chapter making the argument
+    # a reader is most likely to challenge was the one chapter no fixture
+    # touched. families.md recorded every figure and MARKED none of them, and
+    # the marker is what this guard derives coverage from, so nothing failed
+    # and nothing said so.
+    #
+    # The crossover behind these is the load-bearing one. The chapter's whole
+    # verdict for Marcus is that a lost first year is "expensive in dollars and
+    # cheap in outcome", which is true only while the crossover does not move.
+    Fig("ch15-marcus-year-one",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][HARDWARE]["starting_salary"],
+        "~$126,100", [FIX, CH15], exact="$126,090"),
+    Fig("ch15-marcus-median",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][HARDWARE]["median_salary"],
+        "~$161,700", [FIX, CH15], exact="$161,740",
+        note="the occupation median, which the chapter names precisely to say "
+             "it is NOT the wage the model starts a graduate at"),
+    Fig("ch15-marcus-premium",
+        lambda ns: premium(HARDWARE, 0.0),
+        "~$852,100", [FIX, CH15], exact="$852,057"),
+    Fig("ch15-marcus-premium-loan",
+        lambda ns: premium(HARDWARE, 59_000.0, rate=11.0),
+        "~$754,500", [FIX, CH15], exact="$754,530",
+        note="his private loan, $59,000 at 11%, which is the rate chapter 8 "
+             "prices and not the federal one every other premium here uses"),
+    Fig("ch15-sofia-year-one",
+        lambda ns: roi_layer()[0]["MAJOR_DATA"][KINDERGARTEN]["starting_salary"],
+        "~$52,200", [CH15], exact="$52,180",
+        note="the same $52,180 chapter 11 rounds to ~$52,000. Two precisions "
+             "of one figure is allowed and mixing bases is not; both are "
+             "checked against the same exact value so neither can drift"),
 
     # ---- Chapter 14: the two-year credential against the four-year one.
     # The four medians are the chapter's argument, so they are computed

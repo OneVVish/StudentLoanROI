@@ -108,14 +108,22 @@ TWO_QUESTIONS = ("Paying for college is two questions.\n"
 BACK_COPY = (
     "The federal government will lend a family $92,000 for one bachelor’s "
     "degree. At 1,644 of the 2,235 colleges that grant one, four years of "
-    "the in-state sticker price costs more than that.\n\n"
-    "This book prices the gap. It joins the federal data that already "
+    "the in-state sticker price costs more than that loan.\n\n"
+    # BOTH RATES ARE THE NY FED'S 2026 Q2 RELEASE, in sources.md. The 42% is
+    # the all-graduates figure. The computer science figure is the committed
+    # nyfed_majors_clean.csv at 6.99%, which chapter 11 states as one in
+    # fourteen; an earlier release's 6.1% was offered for this line and
+    # declined, because a cover figure has to match the chapter inside.
+    # The wording is the author's, 2026-09-16, reaffirmed after a query.
+    "At the same time, the math after graduation has changed. In 2026, 42% "
+    "of recent college graduates are underemployed, and the unemployment "
+    "rate for new computer science graduates sits at 7%.\n\n"
+    "This book prices the gap. The text joins the federal data that already "
     "exists, what every college costs, what every occupation pays, and the "
     "rule behind every loan, into one question a family can answer: what "
-    "this degree costs, and what it pays back.\n\n"
+    "the degree costs, and what the degree pays back.\n\n"
     "Nineteen chapters follow four families through the arithmetic. Every "
-    "figure is computed from a federal source rather than quoted from "
-    "anyone.\n\n"
+    "figure is computed from a federal source.\n\n"
     "It does not tell you what to choose.\n\n"
     # THE BIO IS THREE FACTS AND NO MORE, from the author on 2026-09-13: the
     # name, high school senior, built the calculator. No school and no city:
@@ -123,8 +131,8 @@ BACK_COPY = (
     # is needed to say what the book is. The age is the point rather than a
     # disclaimer, so it is stated plainly and not apologized for.
     "Veer Vishwakarma is a high school senior. He built worthmydegree.com, "
-    "the free calculator behind every figure in this book, and is the age of "
-    "the reader it was written for.")
+    "the free calculator behind every figure in this book, and is the exact "
+    "age of the reader the book was written for.")
 
 # KDP print wrap, read 2026-09-12 at kdp.amazon.com/en_US/help/topic/
 # G201834181: 0.125in bleed on all four outer edges. Spine TEXT is allowed
