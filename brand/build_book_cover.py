@@ -114,9 +114,10 @@ BACK_COPY = (
     # nyfed_majors_clean.csv at 6.99%, which chapter 11 states as one in
     # fourteen; an earlier release's 6.1% was offered for this line and
     # declined, because a cover figure has to match the chapter inside.
-    "The math after graduation is its own question. In 2026, about 42% of "
-    "recent college graduates are underemployed, and about 7% of new "
-    "computer science graduates are not working at all.\n\n"
+    # The wording is the author's, 2026-09-16, reaffirmed after a query.
+    "At the same time, the math after graduation has changed. In 2026, 42% "
+    "of recent college graduates are underemployed, and the unemployment "
+    "rate for new computer science graduates sits at 7%.\n\n"
     "This book prices the gap. The text joins the federal data that already "
     "exists, what every college costs, what every occupation pays, and the "
     "rule behind every loan, into one question a family can answer: what "
