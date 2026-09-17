@@ -123,8 +123,8 @@ BACK_COPY = (
     "rule behind every loan, into one question a family can answer: what "
     "the degree costs, and what the degree pays back.\n\n"
     "Nineteen chapters follow four families through the arithmetic. Every "
-    "figure is computed from a federal source. The text does not tell you "
-    "what to choose.\n\n"
+    "figure is computed from a federal source.\n\n"
+    "It does not tell you what to choose.\n\n"
     # THE BIO IS THREE FACTS AND NO MORE, from the author on 2026-09-13: the
     # name, high school senior, built the calculator. No school and no city:
     # this is a minor's author bio on a book sold publicly, and neither fact
