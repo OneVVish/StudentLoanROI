@@ -607,15 +607,19 @@ def wrap(name):
                 break
         else:
             raise SystemExit("  refusing: no spine size clears the safe zone")
+        # THREE THINGS ON THE SPINE: title, author, site. The site went on at
+        # the author's request 2026-09-18; it is the one line of the book a
+        # shelf shows, and the URL is the book's whole call to action.
         gap = sd.textlength("     ", font=black)
-        total = sd.textlength(label, font=black) + gap + sd.textlength(auth, font=semi)
+        parts = [(label, black), (auth, semi), (SITE, semi)]
+        total = sum(sd.textlength(t, font=fn) for t, fn in parts) + gap * (len(parts) - 1)
         if total > H_px - px(1.0):
             raise SystemExit("  refusing: the spine line is longer than the spine")
         sx = (H_px - total) / 2
         sy = (px(spine_in) - (black.getbbox(label)[3] - black.getbbox(label)[1])) / 2
-        sd.text((sx, sy - black.getbbox(label)[1]), label, font=black, fill=ink)
-        sd.text((sx + sd.textlength(label, font=black) + gap,
-                 sy - semi.getbbox(auth)[1]), auth, font=semi, fill=ink)
+        for t, fn in parts:
+            sd.text((sx, sy - fn.getbbox(t)[1]), t, font=fn, fill=ink)
+            sx += sd.textlength(t, font=fn) + gap
         # TOP TO BOTTOM, which is the US convention and the one Amazon's own
         # shelf photographs follow: rotate(90) is counter-clockwise and set
         # the spine reading upwards, so the author's name arrived above the
