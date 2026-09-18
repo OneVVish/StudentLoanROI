@@ -656,7 +656,7 @@ def wrap(name):
         # 2026-09-18 (it is the one line of the book a shelf shows, and the
         # URL is the book's whole call to action); the author moved to the
         # end and the separators were added the same day, on his call.
-        gap = sd.textlength("   ", font=black)
+        gap = sd.textlength("      ", font=black)
         sep = ("\u00b7", semi)
         parts = [(label, black), sep, (SITE, semi), sep, (auth, semi)]
         total = sum(sd.textlength(t, font=fn) for t, fn in parts) + gap * (len(parts) - 1)
