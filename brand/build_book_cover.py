@@ -651,18 +651,25 @@ def wrap(name):
                 break
         else:
             raise SystemExit("  refusing: no spine size clears the safe zone")
-        # THREE THINGS ON THE SPINE: title, author, site. The site went on at
-        # the author's request 2026-09-18; it is the one line of the book a
-        # shelf shows, and the URL is the book's whole call to action.
-        gap = sd.textlength("     ", font=black)
-        parts = [(label, black), (auth, semi), (SITE, semi)]
+        # THREE THINGS ON THE SPINE: title, site, author, in that order and
+        # with a dot between each. The site went on at the author's request
+        # 2026-09-18 (it is the one line of the book a shelf shows, and the
+        # URL is the book's whole call to action); the author moved to the
+        # end and the separators were added the same day, on his call.
+        gap = sd.textlength("      ", font=black)
+        sep = ("\u00b7", semi)
+        parts = [(label, black), sep, (SITE, semi), sep, (auth, semi)]
         total = sum(sd.textlength(t, font=fn) for t, fn in parts) + gap * (len(parts) - 1)
         if total > H_px - px(1.0):
             raise SystemExit("  refusing: the spine line is longer than the spine")
         sx = (H_px - total) / 2
         sy = (px(spine_in) - (black.getbbox(label)[3] - black.getbbox(label)[1])) / 2
+        cap_h = black.getbbox(label)[3] - black.getbbox(label)[1]
         for t, fn in parts:
-            sd.text((sx, sy - fn.getbbox(t)[1]), t, font=fn, fill=ink)
+            bb = fn.getbbox(t)
+            # Words hang from the title's cap line; the dot sits on its middle.
+            y = sy + (cap_h - (bb[3] - bb[1])) / 2 if (t, fn) == sep else sy
+            sd.text((sx, y - bb[1]), t, font=fn, fill=ink)
             sx += sd.textlength(t, font=fn) + gap
         # TOP TO BOTTOM, which is the US convention and the one Amazon's own
         # shelf photographs follow: rotate(90) is counter-clockwise and set
