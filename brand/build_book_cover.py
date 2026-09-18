@@ -510,6 +510,15 @@ def _ink_for(bg):
     return (26, 28, 31) if lum > 0.5 else (247, 244, 238)
 
 
+def _muted_for(bg):
+    """The front cover's own muted grey for the site line, so the spine and
+    the front say worthmydegree.com in one colour (the author, 2026-09-18).
+    On a dark ground the dark palette's muted is the readable one."""
+    lum = (0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2]) / 255
+    h = PAL["light" if lum > 0.5 else "dark"]["muted"].lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
 def _wrapped_rich(draw, text, fonts, max_px):
     """_wrapped with one extra rule: words inside a **span** are set in
     fonts[1], everything else in fonts[0]. Returns, per paragraph, a list of
@@ -669,7 +678,8 @@ def wrap(name):
             bb = fn.getbbox(t)
             # Words hang from the title's cap line; the dot sits on its middle.
             y = sy + (cap_h - (bb[3] - bb[1])) / 2 if (t, fn) == sep else sy
-            sd.text((sx, y - bb[1]), t, font=fn, fill=ink)
+            sd.text((sx, y - bb[1]), t, font=fn,
+                    fill=_muted_for(bg) if t == SITE else ink)
             sx += sd.textlength(t, font=fn) + gap
         # TOP TO BOTTOM, which is the US convention and the one Amazon's own
         # shelf photographs follow: rotate(90) is counter-clockwise and set
