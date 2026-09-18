@@ -106,10 +106,13 @@ TWO_QUESTIONS = ("Paying for college is two questions.\n"
 # do, not what it promises. $92,000 and the two counts are statutory or
 # computed, so none of them carries a tilde.
 BACK_COPY = (
-    "The federal government will lend a family $92,000 for one bachelor’s "
+    # THE LEAD SENTENCE IS BOLD, the author's call 2026-09-18. The ** marker is
+    # read by _wrapped_rich, which sets the words inside it in the bold face
+    # and the rest of the paragraph in the regular one, sharing lines.
+    "**The federal government will lend a family $92,000 for one bachelor’s "
     # "grant a degree" is the author's wording, asked for twice (2026-09-16 and
     # 2026-09-18) after the note that the 2,235 are bachelor's-granting colleges.
-    "degree. At 1,644 of the 2,235 colleges that grant a degree, four years of "
+    "degree.** At 1,644 of the 2,235 colleges that grant a degree, four years of "
     "the in-state sticker price costs more than that loan.\n\n"
     # BOTH RATES ARE THE NY FED'S 2026 Q2 RELEASE, in sources.md. The 42% is
     # the all-graduates figure. The computer science figure is the committed
@@ -328,10 +331,12 @@ def draw_mark_cover(args):
     t = fig.text(0.5, 0.955, TITLE, fontproperties=DISPLAY_BLACK, fontsize=118, color=INK,
                  ha="center", va="top", linespacing=0.92, parse_math=False)
     fit(fig, t, 0.82)
-    mark(fig, 0.245, 0.395, 0.51, ring=WHITE, rule_span=(0.065, 0.935))
-    sub = fig.text(0.5, 0.315, SUBTITLE, fontname=BODY_F, fontsize=29,
+    # THE SUBTITLE SITS UNDER THE TITLE, the author's call 2026-09-18; it sat
+    # under the mark before. The mark moved down to keep its clearance.
+    sub = fig.text(0.5, under(fig, t, 0.018), SUBTITLE, fontname=BODY_F, fontsize=29,
                    color=MUTED, ha="center", va="top", parse_math=False)
     fit(fig, sub, 0.84)
+    mark(fig, 0.245, 0.335, 0.51, ring=WHITE, rule_span=(0.065, 0.935))
     byline(fig, INK, MUTED)
     return fig, [t, sub]
 
@@ -505,6 +510,38 @@ def _ink_for(bg):
     return (26, 28, 31) if lum > 0.5 else (247, 244, 238)
 
 
+def _wrapped_rich(draw, text, fonts, max_px):
+    """_wrapped with one extra rule: words inside a **span** are set in
+    fonts[1], everything else in fonts[0]. Returns, per paragraph, a list of
+    lines, each line a list of (word, font) so two weights can share a line."""
+    regular, bold = fonts
+    space = draw.textlength(" ", font=regular)
+    out = []
+    for para in text.split("\n\n"):
+        words, face = [], regular
+        for word in para.split():
+            if word.startswith("**"):
+                face, word = bold, word[2:]
+            closing = word.endswith("**")
+            if closing:
+                word = word[:-2]
+            words.append((word, face))
+            if closing:
+                face = regular
+        lines, line, width = [], [], 0.0
+        for word, fn in words:
+            w = draw.textlength(word, font=fn)
+            if line and width + space + w > max_px:
+                lines.append(line)
+                line, width = [(word, fn)], w
+            else:
+                width += (space if line else 0) + w
+                line.append((word, fn))
+        lines.append(line)
+        out.append(lines)
+    return out
+
+
 def _wrapped(draw, text, font, max_px):
     """Break a paragraph to a measured width. MEASURED, not counted."""
     out = []
@@ -569,6 +606,7 @@ def wrap(name):
 
     f = lambda ttf, size: ImageFont.truetype(str(FONT_DIR / ttf), pt(size))
     body = f("SourceSerif4-Regular.ttf", 11)
+    body_bold = f("SourceSerif4-Bold.ttf", 11)
     semi = f("InterDisplay-SemiBold.ttf", 12)
     black = f("InterDisplay-Black.ttf", 15)
 
@@ -578,9 +616,13 @@ def wrap(name):
     text_w = px(panel_w_in) - margin - px(0.55)
     y = px(BLEED_IN + 1.05)
     leading = pt(11) * 1.42
-    for para in _wrapped(d, BACK_COPY, body, text_w):
+    space = d.textlength(" ", font=body)
+    for para in _wrapped_rich(d, BACK_COPY, (body, body_bold), text_w):
         for line in para:
-            d.text((margin, y), line, font=body, fill=ink)
+            x = margin
+            for word, fn in line:
+                d.text((x, y), word, font=fn, fill=ink)
+                x += d.textlength(word, font=fn) + space
             y += leading
         y += leading * 0.55
     back_text_bottom = y
