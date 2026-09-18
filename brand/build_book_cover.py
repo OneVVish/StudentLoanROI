@@ -107,7 +107,9 @@ TWO_QUESTIONS = ("Paying for college is two questions.\n"
 # computed, so none of them carries a tilde.
 BACK_COPY = (
     "The federal government will lend a family $92,000 for one bachelor’s "
-    "degree. At 1,644 of the 2,235 colleges that grant one, four years of "
+    # "grant a degree" is the author's wording, asked for twice (2026-09-16 and
+    # 2026-09-18) after the note that the 2,235 are bachelor's-granting colleges.
+    "degree. At 1,644 of the 2,235 colleges that grant a degree, four years of "
     "the in-state sticker price costs more than that loan.\n\n"
     # BOTH RATES ARE THE NY FED'S 2026 Q2 RELEASE, in sources.md. The 42% is
     # the all-graduates figure. The computer science figure is the committed
@@ -124,7 +126,7 @@ BACK_COPY = (
     "the degree costs, and what the degree pays back.\n\n"
     "Nineteen chapters follow four families through the arithmetic. Every "
     "figure is computed from a federal source.\n\n"
-    "It does not tell you what to choose.\n\n"
+    "The math does not tell you what to choose.\n\n"
     # THE BIO IS THREE FACTS AND NO MORE, from the author on 2026-09-13: the
     # name, high school senior, built the calculator. No school and no city:
     # this is a minor's author bio on a book sold publicly, and neither fact
