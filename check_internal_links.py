@@ -98,11 +98,16 @@ def check_landing_ctas_tagged(ns, fail):
         #     the app DO carry from=charts, which is where that hop is
         #     counted; tagging the link INTO it would claim a nav the app
         #     never sees;
+        #   * /book is an edge page too, and its clicks are counted by the
+        #     book_click beacon rather than by a nav row: the link is the
+        #     header's on every page and a from= tag would claim a nav the
+        #     app never sees.
         #   * llms.txt leaves the site entirely.
         #   * /welcome is this page by its other name, and the only name that
         #     survives a carried query string (see check_logo_goes_to_welcome).
         if (href == "/" or href == "/welcome" or href.startswith("/guides")
-                or href.startswith("/charts") or "llms.txt" in href):
+                or href.startswith("/charts") or href.startswith("/book")
+                or "llms.txt" in href):
             continue
         if f"from={ns['NAV_WELCOME']}" not in href:
             fail(f"landing CTA {href!r} does not carry from={ns['NAV_WELCOME']} "
