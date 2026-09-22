@@ -846,8 +846,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
       length: what a degree costs a particular family, what the loan costs
       after it, and what the degree pays back against never going to college. Nineteen
       chapters, {BOOK_PAGES} pages, four families followed through the
-      numbers. Every figure is computed from a federal source and the sources
-      chapter says how to reproduce any of them.</p>
+      numbers. Every figure is computed from a federal source.</p>
       <p class="deck"><a href="{BOOK_URL}" rel="noopener"
         style="color:var(--blue);font-weight:600;text-decoration:none">Paperback
         and Kindle on Amazon&nbsp;→</a></p>
