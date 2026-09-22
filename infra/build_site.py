@@ -60,6 +60,51 @@ END_MARK = "// {{LANDING_HTML_END}}"
 # EIN, until the filing that licenses each one exists.
 ORG_STATUS_LINE = "Worth My Degree Inc. is a California nonprofit corporation."
 
+# THE BOOK, published 2026-09-21. It is the same arithmetic this site runs,
+# worked out at length, so it belongs on the landing page rather than in a
+# footnote: a reader who finishes the paperback and types the URL should find
+# it here, and a visitor should learn it exists.
+#
+# NO SALES FIGURES ANYWHERE, EVER. Amazon's KDP terms make sales data
+# confidential for three years, and this project publishes its numbers by
+# habit, which is exactly why the rule is written down rather than remembered.
+# The book may be named, described and linked; what it has sold may not.
+BOOK_TITLE = "Is It Worth It?"
+BOOK_SUBTITLE = "Paying for College in 2027 by the Numbers"
+# THE ASIN IS NOT GUESSABLE AND MUST NOT BE GUESSED. A 979 ISBN has no
+# ISBN-10, so amazon.com/dp/<isbn> does not resolve; KDP assigns an ASIN and
+# the only place it exists is the listing. A plausible-looking ASIN was
+# written here once and would have 404'd for every reader; the build refuses
+# a URL that is not https, so that cannot happen quietly.
+#
+# TWO ASINs, ONE BOOK: B0HKH6PGTR is the paperback and B0HKH145N6 the Kindle
+# edition. The paperback is linked because it is the edition the price on this
+# page belongs to and its listing carries the Kindle option beside it; the
+# a.co share form is a redirector and is not used, since a link on our own
+# page should not depend on a second hop resolving. Verified on the listings
+# 2026-09-22.
+BOOK_URL = "https://www.amazon.com/dp/B0HKH6PGTR"
+BOOK_AUTHOR = "Veer Vishwakarma"
+BOOK_COVER = "cover-mark.jpg"
+# brand/build_book_mockup.py draws this from the cover: the front in
+# perspective with a spine and a shadow, which is what makes a card read as a
+# book rather than a picture of one. Committed like every other generated
+# asset, because a clone cannot rebuild it without the cover.
+BOOK_MOCKUP = "book-3d.png"
+BOOK_KINDLE_URL = "https://www.amazon.com/dp/B0HKH145N6"
+BOOK_ISBN = "9798174119734"
+BOOK_BLURB = ("Nineteen chapters on what a degree costs a family, what the "
+              "loan costs after it, and what the degree pays back against "
+              "never going to college, with every figure computed from "
+              "federal data by the calculator at worthmydegree.com.")
+# THE "NEW" PILL EXPIRES BY ITSELF. A badge that has to be taken down by hand
+# is a badge that goes stale, and nothing in this build would remind anyone:
+# the chapters already had two 2026 dates left in the present tense until a
+# grep found them. Sixty days is about how long a release is news.
+BOOK_PUBLISHED = datetime.date(2026, 9, 21)
+BOOK_NEW_DAYS = 60
+BOOK_PAGES = 219
+
 
 # --- content ---------------------------------------------------------------
 #
@@ -345,6 +390,30 @@ SITE_CSS = """  :root {
     padding: 7px 14px; }
   .chart-card .reactions .thread:hover { border-color: var(--blue); color: var(--blue); }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  /* The header's book link: the cover at 20px beside two words. */
+  .booklink { display: inline-flex; align-items: center; gap: 8px;
+              color: var(--deep); font-weight: 600; font-size: 15px;
+              text-decoration: none; margin-right: 18px; }
+  .booklink:hover { color: var(--blue); }
+  .booklink img { border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,.22); }
+  .booklink .pill { background: var(--orange); color: #fff; font-size: 11px;
+                    font-weight: 700; letter-spacing: .04em; text-transform:
+                    uppercase; border-radius: 999px; padding: 2px 7px; }
+  /* The book band: cover beside copy, stacking under 720px with the rest. */
+  .book { display: grid; grid-template-columns: 200px 1fr; gap: 18px;
+          align-items: start; background: var(--tint); border-radius: 12px;
+          border-left: 4px solid var(--orange); padding: 20px; }
+  /* The render carries its own spine and shadow, so the element gets
+     neither a radius nor a box-shadow: a second shadow under a drawn one
+     reads as two books. */
+  .book-cover img { width: 100%; height: auto; display: block; }
+  .book-copy b { display: block; font-size: 22px; line-height: 1.2; }
+  .book-copy b a { color: var(--deep); text-decoration: none; }
+  .book-copy b a:hover { color: var(--blue); }
+  .book-copy span { display: block; color: var(--muted); font-size: 16px;
+                    margin-top: 2px; }
+  .book-copy .byline { color: var(--deep); font-size: 15px; margin-top: 8px; }
+  .book-copy .deck { margin: 10px 0 0; }
   /* ===== ONE CARD, TWO COLOURS =====
      The landing page holds two kinds of card: a tool is something you use, a
      guide is something you read. Before this they were two neutral greys
@@ -388,6 +457,8 @@ SITE_CSS = """  :root {
     .paths .grid { grid-template-columns: 1fr; }
     .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
+    .book { grid-template-columns: 1fr; gap: 16px; }
+    .book-cover { max-width: 200px; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
@@ -782,6 +853,81 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     infographics&nbsp;→</a></p>
 </section>'''
 
+    # THE BOOK AS STRUCTURED DATA. Without it the page MENTIONS a book;
+    # with it the page is ABOUT one, which is the difference between a link
+    # a crawler follows to Amazon and a result this site can rank for. Two
+    # workExample entries because the paperback and the Kindle edition are
+    # two editions of one work with two ASINs and two prices, which is
+    # exactly what schema.org's Book/workExample pair is for. json.dumps
+    # does the escaping, the rule article_jsonld already records: a hand
+    # written quote in a title produces invalid JSON-LD, which search
+    # engines drop SILENTLY rather than reporting.
+    book_jsonld = json.dumps({
+        "@type": "Book",
+        "@id": "https://worthmydegree.com/#book",
+        "name": f"{BOOK_TITLE} {BOOK_SUBTITLE}",
+        "author": {"@type": "Person", "name": BOOK_AUTHOR},
+        "isbn": BOOK_ISBN,
+        "numberOfPages": BOOK_PAGES,
+        "inLanguage": "en",
+        "datePublished": BOOK_PUBLISHED.isoformat(),
+        "bookEdition": "1st",
+        "publisher": {"@id": "https://worthmydegree.com/#org"},
+        "url": BOOK_URL,
+        "about": ["College costs", "Student loans", "Financial aid",
+                  "Return on investment"],
+        "description": BOOK_BLURB,
+        "workExample": [
+            {"@type": "Book", "isbn": BOOK_ISBN, "bookFormat":
+             "https://schema.org/Paperback", "inLanguage": "en",
+             "potentialAction": {"@type": "ReadAction", "target": BOOK_URL},
+             "offers": {"@type": "Offer", "price": "19.95",
+                        "priceCurrency": "USD", "url": BOOK_URL,
+                        "availability": "https://schema.org/InStock"}},
+            {"@type": "Book", "bookFormat": "https://schema.org/EBook",
+             "inLanguage": "en", "url": BOOK_KINDLE_URL,
+             "offers": {"@type": "Offer", "price": "9.99",
+                        "priceCurrency": "USD", "url": BOOK_KINDLE_URL,
+                        "availability": "https://schema.org/InStock"}},
+        ],
+    })
+
+    # 360px wide, which is 2x the ~180px the card draws it at. The source is
+    # the 1600x2560 Kindle cover, which is 120 KB and absurd for a card.
+    if not BOOK_URL.startswith("https://"):
+        sys.exit("  refusing: BOOK_URL is still the placeholder. Paste the "
+                 "Amazon listing URL into build_site.py; the ASIN cannot be "
+                 "derived from the ISBN.")
+    book_cover = _resized_jpeg(BOOK_COVER, 360, "card")
+    # The book band. The cover is a picture, so the card carries it, the way
+    # the infographics band does and for the same reason: a text-only card
+    # would advertise the one thing it cannot show.
+    book_section = f'''<section>
+  <h2 id="the-book">The book</h2>
+  <p class="deck">Everything this calculator does, worked out at length.</p>
+  <div class="book">
+    <a class="book-cover" href="{BOOK_URL}" rel="noopener">
+      <img src="/app/static/{BOOK_MOCKUP}" width="257" height="394"
+           alt="{_attr(BOOK_TITLE + " " + BOOK_SUBTITLE)}, the cover"
+           loading="lazy"></a>
+    <div class="book-copy">
+      <b><a href="{BOOK_URL}" rel="noopener">{BOOK_TITLE}</a></b>
+      <span>{BOOK_SUBTITLE}</span>
+      <span class="byline">By {BOOK_AUTHOR}, founder of worthmydegree.com</span>
+      <p class="deck">The federal government will lend a family $92,000 for
+      one bachelor's degree. At 1,644 of the 2,235 colleges that grant one,
+      four years of the in-state sticker price costs more than that. This book
+      prices the gap: what a degree costs your family, what the loan costs
+      after it, and what the degree pays back against never going to college.
+      Nineteen chapters, {BOOK_PAGES} pages, four families followed all the
+      way through. Every figure computed from a federal source.</p>
+      <p class="deck"><a href="{BOOK_URL}" rel="noopener"
+        style="color:var(--blue);font-weight:600;text-decoration:none">Paperback
+        and Kindle on Amazon&nbsp;→</a></p>
+    </div>
+  </div>
+</section>'''
+
     cap_body = "\n".join(
         f"        <tr><td>{label}</td><td>{money(d)}</td>"
         f"<td>{money(p)}{'*' if label == 'Senior' else ''}</td>"
@@ -819,7 +965,8 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
       "url": "https://worthmydegree.com/",
       "applicationCategory": "FinanceApplication", "operatingSystem": "Web",
       "offers": {{"@type": "Offer", "price": "0", "priceCurrency": "USD"}},
-      "publisher": {{"@id": "https://worthmydegree.com/#org"}}}}
+      "publisher": {{"@id": "https://worthmydegree.com/#org"}}}},
+    {book_jsonld}
   ]
 }}</script>
 <style>
@@ -831,6 +978,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(True)}
   <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
@@ -947,6 +1095,8 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 <div class="wrap">
 
 {guides_section}
+
+{book_section}
 
 <div class="cta">
   <h2>Two minutes. Zero forms.</h2>
@@ -1243,6 +1393,7 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(False)}
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 
@@ -1505,6 +1656,23 @@ def _resized_jpeg(source: str, width: int, prefix: str) -> str:
     print(f"  {prefix} image {out}  ({dst.stat().st_size:,} bytes"
           f" from {src.stat().st_size:,})")
     return out
+
+
+def book_header_link(on_landing: bool) -> str:
+    """The header's link to the book: the cover at thumbnail size and two
+    words. It points at the LANDING BAND, not at Amazon, so the header never
+    throws a reader off the site: the band is where the book is described and
+    the Amazon link lives. On the landing itself that is a fragment jump; on
+    a guide or the gallery it is /welcome#the-book, which CARRY_QS_JS carries
+    the visitor's query onto like any other internal link (query before
+    fragment, the rule it already records).
+    """
+    href = "#the-book" if on_landing else "/welcome#the-book"
+    new = ((datetime.date.today() - BOOK_PUBLISHED).days <= BOOK_NEW_DAYS)
+    pill = '<span class="pill">New</span>' if new else ""
+    return (f'<a class="booklink hide-m" href="{href}">'
+            f'<img src="/app/static/{_resized_jpeg(BOOK_COVER, 64, "nav")}" '
+            f'width="20" height="32" alt="" loading="lazy">{pill}Read the book</a>')
 
 
 def card_thumb(source: str) -> str:
@@ -1854,6 +2022,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(False)}
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">
@@ -2108,6 +2277,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(False)}
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 <section class="guides-band">

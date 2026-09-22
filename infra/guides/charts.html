@@ -236,6 +236,30 @@
     padding: 7px 14px; }
   .chart-card .reactions .thread:hover { border-color: var(--blue); color: var(--blue); }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  /* The header's book link: the cover at 20px beside two words. */
+  .booklink { display: inline-flex; align-items: center; gap: 8px;
+              color: var(--deep); font-weight: 600; font-size: 15px;
+              text-decoration: none; margin-right: 18px; }
+  .booklink:hover { color: var(--blue); }
+  .booklink img { border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,.22); }
+  .booklink .pill { background: var(--orange); color: #fff; font-size: 11px;
+                    font-weight: 700; letter-spacing: .04em; text-transform:
+                    uppercase; border-radius: 999px; padding: 2px 7px; }
+  /* The book band: cover beside copy, stacking under 720px with the rest. */
+  .book { display: grid; grid-template-columns: 200px 1fr; gap: 18px;
+          align-items: start; background: var(--tint); border-radius: 12px;
+          border-left: 4px solid var(--orange); padding: 20px; }
+  /* The render carries its own spine and shadow, so the element gets
+     neither a radius nor a box-shadow: a second shadow under a drawn one
+     reads as two books. */
+  .book-cover img { width: 100%; height: auto; display: block; }
+  .book-copy b { display: block; font-size: 22px; line-height: 1.2; }
+  .book-copy b a { color: var(--deep); text-decoration: none; }
+  .book-copy b a:hover { color: var(--blue); }
+  .book-copy span { display: block; color: var(--muted); font-size: 16px;
+                    margin-top: 2px; }
+  .book-copy .byline { color: var(--deep); font-size: 15px; margin-top: 8px; }
+  .book-copy .deck { margin: 10px 0 0; }
   /* ===== ONE CARD, TWO COLOURS =====
      The landing page holds two kinds of card: a tool is something you use, a
      guide is something you read. Before this they were two neutral greys
@@ -279,6 +303,8 @@
     .paths .grid { grid-template-columns: 1fr; }
     .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
+    .book { grid-template-columns: 1fr; gap: 16px; }
+    .book-cover { max-width: 200px; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
@@ -507,6 +533,7 @@
   </g>
 </svg>
 </a>
+  <a class="booklink hide-m" href="/welcome#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">

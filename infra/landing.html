@@ -26,7 +26,8 @@
       "url": "https://worthmydegree.com/",
       "applicationCategory": "FinanceApplication", "operatingSystem": "Web",
       "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
-      "publisher": {"@id": "https://worthmydegree.com/#org"}}
+      "publisher": {"@id": "https://worthmydegree.com/#org"}},
+    {"@type": "Book", "@id": "https://worthmydegree.com/#book", "name": "Is It Worth It? Paying for College in 2027 by the Numbers", "author": {"@type": "Person", "name": "Veer Vishwakarma"}, "isbn": "9798174119734", "numberOfPages": 219, "inLanguage": "en", "datePublished": "2026-09-21", "bookEdition": "1st", "publisher": {"@id": "https://worthmydegree.com/#org"}, "url": "https://www.amazon.com/dp/B0HKH6PGTR", "about": ["College costs", "Student loans", "Financial aid", "Return on investment"], "description": "Nineteen chapters on what a degree costs a family, what the loan costs after it, and what the degree pays back against never going to college, with every figure computed from federal data by the calculator at worthmydegree.com.", "workExample": [{"@type": "Book", "isbn": "9798174119734", "bookFormat": "https://schema.org/Paperback", "inLanguage": "en", "potentialAction": {"@type": "ReadAction", "target": "https://www.amazon.com/dp/B0HKH6PGTR"}, "offers": {"@type": "Offer", "price": "19.95", "priceCurrency": "USD", "url": "https://www.amazon.com/dp/B0HKH6PGTR", "availability": "https://schema.org/InStock"}}, {"@type": "Book", "bookFormat": "https://schema.org/EBook", "inLanguage": "en", "url": "https://www.amazon.com/dp/B0HKH145N6", "offers": {"@type": "Offer", "price": "9.99", "priceCurrency": "USD", "url": "https://www.amazon.com/dp/B0HKH145N6", "availability": "https://schema.org/InStock"}}]}
   ]
 }</script>
 <style>
@@ -250,6 +251,30 @@
     padding: 7px 14px; }
   .chart-card .reactions .thread:hover { border-color: var(--blue); color: var(--blue); }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  /* The header's book link: the cover at 20px beside two words. */
+  .booklink { display: inline-flex; align-items: center; gap: 8px;
+              color: var(--deep); font-weight: 600; font-size: 15px;
+              text-decoration: none; margin-right: 18px; }
+  .booklink:hover { color: var(--blue); }
+  .booklink img { border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,.22); }
+  .booklink .pill { background: var(--orange); color: #fff; font-size: 11px;
+                    font-weight: 700; letter-spacing: .04em; text-transform:
+                    uppercase; border-radius: 999px; padding: 2px 7px; }
+  /* The book band: cover beside copy, stacking under 720px with the rest. */
+  .book { display: grid; grid-template-columns: 200px 1fr; gap: 18px;
+          align-items: start; background: var(--tint); border-radius: 12px;
+          border-left: 4px solid var(--orange); padding: 20px; }
+  /* The render carries its own spine and shadow, so the element gets
+     neither a radius nor a box-shadow: a second shadow under a drawn one
+     reads as two books. */
+  .book-cover img { width: 100%; height: auto; display: block; }
+  .book-copy b { display: block; font-size: 22px; line-height: 1.2; }
+  .book-copy b a { color: var(--deep); text-decoration: none; }
+  .book-copy b a:hover { color: var(--blue); }
+  .book-copy span { display: block; color: var(--muted); font-size: 16px;
+                    margin-top: 2px; }
+  .book-copy .byline { color: var(--deep); font-size: 15px; margin-top: 8px; }
+  .book-copy .deck { margin: 10px 0 0; }
   /* ===== ONE CARD, TWO COLOURS =====
      The landing page holds two kinds of card: a tool is something you use, a
      guide is something you read. Before this they were two neutral greys
@@ -293,6 +318,8 @@
     .paths .grid { grid-template-columns: 1fr; }
     .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
+    .book { grid-template-columns: 1fr; gap: 16px; }
+    .book-cover { max-width: 200px; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
@@ -419,6 +446,7 @@
   </g>
 </svg>
 </a>
+  <a class="booklink hide-m" href="#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
   <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
@@ -575,6 +603,32 @@
     style="color:var(--blue)">O*NET Interest Profiler</a>, the federal
   government's free interest assessment. It tells you which careers fit you.
   This site tells you what each one costs to reach, and when it pays off.</p>
+</section>
+
+<section>
+  <h2 id="the-book">The book</h2>
+  <p class="deck">Everything this calculator does, worked out at length.</p>
+  <div class="book">
+    <a class="book-cover" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">
+      <img src="/app/static/book-3d.png" width="257" height="394"
+           alt="Is It Worth It? Paying for College in 2027 by the Numbers, the cover"
+           loading="lazy"></a>
+    <div class="book-copy">
+      <b><a href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">Is It Worth It?</a></b>
+      <span>Paying for College in 2027 by the Numbers</span>
+      <span class="byline">By Veer Vishwakarma, founder of worthmydegree.com</span>
+      <p class="deck">The federal government will lend a family $92,000 for
+      one bachelor's degree. At 1,644 of the 2,235 colleges that grant one,
+      four years of the in-state sticker price costs more than that. This book
+      prices the gap: what a degree costs your family, what the loan costs
+      after it, and what the degree pays back against never going to college.
+      Nineteen chapters, 219 pages, four families followed all the
+      way through. Every figure computed from a federal source.</p>
+      <p class="deck"><a href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener"
+        style="color:var(--blue);font-weight:600;text-decoration:none">Paperback
+        and Kindle on Amazon&nbsp;→</a></p>
+    </div>
+  </div>
 </section>
 
 <div class="cta">
