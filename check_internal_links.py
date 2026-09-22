@@ -180,6 +180,42 @@ def check_landing_action_separate(ns, fail):
              f"app.py's LANDING_ACTION_PREFIX and the Worker have drifted, so "
              f"the admin panel would show nothing with no error anywhere")
 
+    # THE BOOK LINKS, THREE PLACES THAT MUST AGREE. app.py names the four
+    # links and labels them, the Worker validates the same four (the endpoint
+    # is public, so an unchecked value writes arbitrary text into
+    # usage_logs.action), and the pages tag their links with them. A place
+    # added to one and not the others is silent in every direction: a tagged
+    # link the Worker rejects logs nothing, a validated place nothing emits
+    # reads as a link nobody clicks, and an unlabelled place raises a KeyError
+    # in the admin panel only once somebody clicks it.
+    if f'BOOK_ACTION = "{ns["BOOK_CLICK_ACTION_PREFIX"]}"' not in worker:
+        fail(f"infra/worker.js does not emit BOOK_ACTION = "
+             f"{ns['BOOK_CLICK_ACTION_PREFIX']!r} -- book clicks would be "
+             f"written under a name the admin panel does not read")
+    if '"/api/book"' not in worker:
+        fail("infra/worker.js has no /api/book route -- every book-click "
+             "beacon would fall through to the app origin and be lost")
+    places = list(ns["BOOK_CLICK_PLACES"])
+    m = re.search(r"const BOOK_WHERE = \[([^\]]*)\]", worker)
+    if not m:
+        fail("infra/worker.js has no BOOK_WHERE list to validate against")
+    elif sorted(re.findall(r'"([^"]+)"', m.group(1))) != sorted(places):
+        fail(f"infra/worker.js BOOK_WHERE is {m.group(1).strip()} and app.py "
+             f"BOOK_CLICK_PLACES is {places} -- a place in one and not the "
+             f"other either logs nothing or reads as a link nobody clicks")
+    missing = [p for p in places if p not in ns["BOOK_CLICK_PLACE_LABELS"]]
+    if missing:
+        fail(f"BOOK_CLICK_PLACE_LABELS has no label for {missing} -- the "
+             f"admin panel raises a KeyError the first time one is clicked")
+    site = open("infra/build_site.py").read()
+    untagged = [p for p in places if f'data-book="{p}"' not in site]
+    if untagged:
+        fail(f"infra/build_site.py tags no link with {untagged} -- those "
+             f"places are counted by nothing and will read as zero forever")
+    if 'fetch("/api/book"' not in site:
+        fail("infra/build_site.py does not POST to /api/book -- the book "
+             "links would work perfectly and count nothing")
+
 
 def check_repayment_section_guides(ns, src):
     """Every per-section guide pointer names a guide that is actually published.

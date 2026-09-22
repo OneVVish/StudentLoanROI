@@ -6363,11 +6363,32 @@ CHART_SHARE_ACTION_PREFIX = "chart_share"
 # either place would let them disagree about which page they are describing.
 CHART_GALLERY_SLUG = "charts"
 
+# The book links, written by the edge when a reader clicks one. Four places
+# lead to the book and the `where` key separates them: `header` is the link in
+# every page's header, and `cover`, `title` and `cta` are the three ways into
+# the Amazon listing from the landing band. So `header` answers "did anyone
+# notice the book exists" and the other three answer "did the band persuade
+# anyone", which are different questions and would be lost if pooled.
+#
+# IT COUNTS CLICKS AND CANNOT COUNT SALES. Amazon reports nothing that links
+# back to a click, and KDP's terms make what it does report confidential. A
+# click is intent, and the gap between intent and a purchase is unmeasurable
+# from here.
+BOOK_CLICK_ACTION_PREFIX = "book_click"
+BOOK_CLICK_PLACES = ("header", "cover", "title", "cta")
+BOOK_CLICK_PLACE_LABELS = {
+    "header": "Header link, every page",
+    "cover": "The cover, in the band",
+    "title": "The title, in the band",
+    "cta": "Paperback and Kindle on Amazon",
+}
+
 # Everything the edge writes directly. These rows never ran the app, carry no
 # session_id, and must be kept out of any panel that means "app activity".
 EDGE_ACTION_PREFIXES = (LANDING_ACTION_PREFIX, LIKE_ACTION_PREFIX,
                         SHARE_ACTION_PREFIX, GUIDE_ACTION_PREFIX,
-                        CHART_LIKE_ACTION_PREFIX, CHART_SHARE_ACTION_PREFIX)
+                        CHART_LIKE_ACTION_PREFIX, CHART_SHARE_ACTION_PREFIX,
+                        BOOK_CLICK_ACTION_PREFIX)
 
 
 def requested_tool() -> str:
@@ -25262,6 +25283,37 @@ def _admin_chart_reactions(usage_df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _admin_book_clicks(usage_df: pd.DataFrame) -> pd.DataFrame:
+    """Clicks on each of the four links that lead to the book.
+
+    The rows are `book_click:where=<place>`, written by the edge, so they carry
+    no session and cannot be de-duplicated by person: the beacon fires once per
+    place per page view, which stops a reader who clicks the cover twice
+    counting twice and does nothing about the same reader returning tomorrow.
+
+    THE HEADER ROW HAS A DENOMINATOR AND THE OTHER THREE DO NOT. A header click
+    can be read against landing and guide reads, since the link is on every
+    page. The three band links are seen only by a reader who scrolled to the
+    band, and nothing counts that, so their tallies are raw the way a chart
+    like is raw.
+    """
+    if usage_df.empty or "action" not in usage_df.columns:
+        return pd.DataFrame()
+    actions = usage_df["action"].astype(str)
+    clicks = actions[actions.str.startswith(BOOK_CLICK_ACTION_PREFIX)]
+    if clicks.empty:
+        return pd.DataFrame()
+    counts = clicks.str.split("where=").str[-1].value_counts()
+    # Every place is a row even at zero, so a link nobody has clicked reads as
+    # a zero rather than as an absence: "the cover is not counted" and "nobody
+    # clicked the cover" look identical in a table built from the data alone.
+    table = pd.DataFrame({
+        "Link": [BOOK_CLICK_PLACE_LABELS[p] for p in BOOK_CLICK_PLACES],
+        "Clicks": [int(counts.get(p, 0)) for p in BOOK_CLICK_PLACES],
+    })
+    return table.sort_values("Clicks", ascending=False).reset_index(drop=True)
+
+
 def _admin_chart_destinations(usage_df: pd.DataFrame) -> pd.DataFrame:
     """Where visitors went from the gallery, out of how many gallery reads.
 
@@ -25649,6 +25701,25 @@ def render_admin_dashboard() -> None:
     _charts = _admin_chart_reactions(usage_df)
     _chart_dests = _admin_chart_destinations(usage_df)
     if not _charts.empty or not _chart_dests.empty:
+        _book = _admin_book_clicks(usage_df)
+        st.markdown("#### 📕 The book")
+        st.caption(
+            "Clicks on the four links that lead to the book, counted at the "
+            "edge. The header link is on every page, so it can be read against "
+            "the reads above; the three in the band are seen only by a reader "
+            "who scrolled to it, and nothing counts that, so those are raw "
+            "tallies.\n\n"
+            "A click is intent and nothing more. Amazon reports nothing that "
+            "links back to one, so the gap between a click here and a book "
+            "sold cannot be measured from this side. The beacon fires once per "
+            "link per page view, which de-duplicates a second click and not a "
+            "second visit."
+        )
+        if not _book.empty:
+            render_centered_table(_book)
+        else:
+            st.caption("No clicks yet.")
+
         st.markdown("#### 📊 Infographics")
         _gallery_reads = (_charts.attrs.get("gallery_reads")
                           or _chart_dests.attrs.get("reads", 0))
