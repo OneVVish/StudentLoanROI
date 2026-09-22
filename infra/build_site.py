@@ -2452,11 +2452,11 @@ def build_book_html(logo_svg, favicon) -> str:
   <a href="/charts" style="color:inherit">Infographics</a>
 </footer>
 </div>
-{{BOOK_CLICK_JS}}
-{{CARRY_QS_JS}}
+{BOOK_CLICK_JS}
+{CARRY_QS_JS}
 </body>
 </html>
-'''.replace("{{BOOK_CLICK_JS}}", BOOK_CLICK_JS).replace("{{CARRY_QS_JS}}", CARRY_QS_JS)
+'''
 
 
 def build_guides_index_html(posts, logo_svg, favicon) -> str:
