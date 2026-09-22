@@ -234,6 +234,48 @@ def main() -> int:
     # what worker.js carries: a script edited without a rebuild is blocked by
     # the browser with nothing on the build failing, and the Helpful button
     # simply stops. Landing keyed "/", every other page by its path.
+    # ---- No page ships an unsubstituted template placeholder -----------
+    #
+    # /book shipped `{BOOK_CLICK_JS}` and `{CARRY_QS_JS}` as VISIBLE TEXT at
+    # the foot of the page, and neither script ran: the template is an
+    # f-string, so `{{NAME}}` had already become `{NAME}` by the time a
+    # trailing .replace("{{NAME}}", ...) looked for it. Three failures from
+    # one bug -- the query string stopped being carried onto that page's
+    # links, its buy buttons counted nothing, and two strings appeared on the
+    # page -- and not one existing check could see any of them. The CSP hash
+    # check even PASSED, because a page with no scripts and a worker entry of
+    # no scripts agree with each other.
+    #
+    # The general form is what is guarded: a built page containing
+    # {IDENTIFIER} is a template that did not finish. Deliberate braces in
+    # rendered prose are not this shape (they would need to be a bare
+    # ALL-CAPS-or-snake identifier alone in braces), and no page has one.
+    placeholder = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}")
+    for path in sorted((ROOT / "infra" / "guides").glob("*.html")):
+        for hit in set(placeholder.findall(path.read_text())):
+            fail(f"infra/guides/{path.name} contains {hit} -- an f-string "
+                 f"placeholder that was never substituted. Whatever it stands "
+                 f"for is missing from the page AND the text is visible to a "
+                 f"reader.")
+    landing = (ROOT / "infra" / "landing.html").read_text()
+    for hit in set(placeholder.findall(landing)):
+        fail(f"infra/landing.html contains {hit} -- an unsubstituted "
+             f"placeholder (see above)")
+
+    # ---- Every page carries the query string onto its own links ---------
+    #
+    # The guides are checked one by one above, at the point their template is
+    # built. This catches the pages built by other functions, which is how
+    # /book slipped through: it is not a guide, so nothing looked at it.
+    for path in sorted((ROOT / "infra" / "guides").glob("*.html")):
+        if CARRY_MARKER not in path.read_text():
+            fail(f"infra/guides/{path.name} does not carry the query string "
+                 f"onto its internal links, so ?test=1 and ?src= are lost "
+                 f"the moment a reader clicks anything on it")
+    if CARRY_MARKER not in landing:
+        fail("infra/landing.html does not carry the query string onto its "
+             "internal links")
+
     m = re.search(r"^const CSP_SCRIPT_HASHES = (.*?);$", worker, re.M)
     if not m:
         fail("infra/worker.js has no CSP_SCRIPT_HASHES; every edge page's "

@@ -653,7 +653,49 @@
   <a href="/charts" style="color:inherit">Infographics</a>
 </footer>
 </div>
-{BOOK_CLICK_JS}
-{CARRY_QS_JS}
+<script>
+(function () {
+  var seen = {};
+  document.querySelectorAll("[data-book]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var where = el.getAttribute("data-book");
+      // Once per place per page view. A reader who clicks the cover, goes
+      // back and clicks it again is one person interested, not two.
+      if (seen[where]) return;
+      seen[where] = 1;
+      try {
+        fetch("/api/book" + location.search, {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({where: where}),
+          keepalive: true,
+        }).catch(function () {});
+      } catch (e) {}
+    });
+  });
+})();
+</script>
+<script>
+(function () {
+  var qs = location.search.replace(/^\?/, "");
+  if (!qs) return;
+  document.querySelectorAll('a[href^="/"]').forEach(function (a) {
+    var href = a.getAttribute("href");
+    if (href.indexOf("llms.txt") !== -1) return;
+    // The query goes BEFORE the fragment. This used to append blindly, which
+    // turned /charts#some-slug into /charts#some-slug?v=1: the anchor then
+    // matches no element, so the link stops jumping to the chart it names, AND
+    // the carried value ends up inside the fragment where nothing reads it --
+    // so ?src= is silently lost on exactly the links this script exists to
+    // protect. Harmless until the first fragment link, which the landing's
+    // infographic cards are.
+    var hash = "";
+    var cut = href.indexOf("#");
+    if (cut !== -1) { hash = href.slice(cut); href = href.slice(0, cut); }
+    a.setAttribute("href",
+      href + (href.indexOf("?") === -1 ? "?" : "&") + qs + hash);
+  });
+})();
+</script>
 </body>
 </html>
