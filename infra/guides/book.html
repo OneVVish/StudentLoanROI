@@ -248,9 +248,17 @@
                        color: var(--deep); margin: 0; }
   .book-hero-copy .sub { font-size: 20px; color: var(--muted); margin: 6px 0 0; }
   .book-hero-copy .byline { font-size: 15px; color: var(--deep); margin: 14px 0 0; }
-  .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
-  .btn.ghost { background: #fff; color: var(--deep);
-               box-shadow: inset 0 0 0 2px var(--deep); }
+  /* The one tinted callout on the page. It earns the emphasis by being the
+     only thing here with a date on it: everything else is true whenever it
+     is read, and this stops being true when the rules change again. */
+  .book-hero-copy .rules { background: var(--tint); border-left: 3px solid
+    var(--orange); border-radius: 0 8px 8px 0; padding: 12px 16px;
+    margin: 16px 0 0; font-size: 15px; color: var(--ink); }
+  /* .btn.ghost is defined ONCE, up with .btn. A second copy here won by
+     source order and said something slightly different, which is how two
+     rules for one class come to disagree. */
+  .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px;
+         align-items: center; }
   /* The header's book link: the cover at 20px beside two words. */
   .booklink { display: inline-flex; align-items: center; gap: 8px;
               color: var(--deep); font-weight: 600; font-size: 15px;
@@ -568,16 +576,18 @@
     bachelor's degree. At 1,644 of the 2,235 colleges that grant one, four
     years of the in-state sticker price costs more than that. This book
     prices the gap.</p>
-    <div class="buy"><a class="btn big" data-book="cta" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">Paperback, $19.95 on Amazon</a><a class="btn ghost" data-book="kindle" href="https://www.amazon.com/dp/B0HKH145N6" rel="noopener">Kindle, $9.99</a></div>
+    <p class="rules">Priced under the rules that took effect
+    <b>July 1, 2026</b>: the new borrowing caps, the Repayment Assistance
+    Plan, the Tiered Standard Plan and the end of Grad PLUS. Advice written
+    before that date is describing a system that no longer exists.</p>
+    <div class="buy"><a class="btn big" data-book="cta" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">Paperback, $19.95 on Amazon</a><a class="btn big ghost" data-book="kindle" href="https://www.amazon.com/dp/B0HKH145N6" rel="noopener">Kindle, $9.99</a></div>
   </div>
 </section>
 
 <section>
   <h2>What is in it</h2>
   <p class="deck">Nineteen chapters following four families through the
-  arithmetic, under the rules that took effect on July 1, 2026: the new
-  borrowing caps, the Repayment Assistance Plan, the Tiered Standard Plan and
-  the end of Grad PLUS.</p>
+  arithmetic, in the order the money actually arrives.</p>
   <div class="grid two">
     <div class="tile"><b>Part I · The price</b>
       <p>What a college costs a particular family, which is never the number
@@ -629,7 +639,7 @@
   <p class="deck" style="margin:8px auto 22px">The calculator does the
   arithmetic for one family in two minutes. The book explains where every
   figure comes from, and what it means when it is yours.</p>
-  <div class="buy" style="justify-content:center"><a class="btn big" data-book="cta" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">Paperback, $19.95 on Amazon</a><a class="btn ghost" data-book="kindle" href="https://www.amazon.com/dp/B0HKH145N6" rel="noopener">Kindle, $9.99</a></div>
+  <div class="buy" style="justify-content:center"><a class="btn big" data-book="cta" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">Paperback, $19.95 on Amazon</a><a class="btn big ghost" data-book="kindle" href="https://www.amazon.com/dp/B0HKH145N6" rel="noopener">Kindle, $9.99</a></div>
   <p class="deck" style="margin-top:18px"><a href="/?go=1&amp;from=guide"
     style="color:var(--blue);font-weight:600;text-decoration:none">Open the
     calculator, free&nbsp;→</a></p>

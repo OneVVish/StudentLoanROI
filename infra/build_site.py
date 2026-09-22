@@ -438,9 +438,17 @@ SITE_CSS = """  :root {
                        color: var(--deep); margin: 0; }
   .book-hero-copy .sub { font-size: 20px; color: var(--muted); margin: 6px 0 0; }
   .book-hero-copy .byline { font-size: 15px; color: var(--deep); margin: 14px 0 0; }
-  .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
-  .btn.ghost { background: #fff; color: var(--deep);
-               box-shadow: inset 0 0 0 2px var(--deep); }
+  /* The one tinted callout on the page. It earns the emphasis by being the
+     only thing here with a date on it: everything else is true whenever it
+     is read, and this stops being true when the rules change again. */
+  .book-hero-copy .rules { background: var(--tint); border-left: 3px solid
+    var(--orange); border-radius: 0 8px 8px 0; padding: 12px 16px;
+    margin: 16px 0 0; font-size: 15px; color: var(--ink); }
+  /* .btn.ghost is defined ONCE, up with .btn. A second copy here won by
+     source order and said something slightly different, which is how two
+     rules for one class come to disagree. */
+  .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px;
+         align-items: center; }
   /* The header's book link: the cover at 20px beside two words. */
   .booklink { display: inline-flex; align-items: center; gap: 8px;
               color: var(--deep); font-weight: 600; font-size: 15px;
@@ -2325,10 +2333,14 @@ def build_book_html(logo_svg, favicon) -> str:
     the same rule the guides follow: a reader who doubts a claim here can go
     and check it, and the checking is the product.
     """
+    # PRIMARY SOLID, SECONDARY OUTLINED, BOTH THE SAME SIZE. The paperback is
+    # the edition the page's price belongs to, so it carries the fill; the
+    # Kindle button is outlined rather than smaller, because two buttons at
+    # different heights read as a mistake rather than as a hierarchy.
     buy = (f'<a class="btn big" data-book="cta" href="{BOOK_URL}" '
            f'rel="noopener">Paperback, $19.95 on Amazon</a>'
-           f'<a class="btn ghost" data-book="kindle" href="{BOOK_KINDLE_URL}" '
-           f'rel="noopener">Kindle, $9.99</a>')
+           f'<a class="btn big ghost" data-book="kindle" '
+           f'href="{BOOK_KINDLE_URL}" rel="noopener">Kindle, $9.99</a>')
     return f'''<!doctype html>
 <html lang="en">
 <head>
@@ -2363,6 +2375,10 @@ def build_book_html(logo_svg, favicon) -> str:
     bachelor's degree. At 1,644 of the 2,235 colleges that grant one, four
     years of the in-state sticker price costs more than that. This book
     prices the gap.</p>
+    <p class="rules">Priced under the rules that took effect
+    <b>July 1, 2026</b>: the new borrowing caps, the Repayment Assistance
+    Plan, the Tiered Standard Plan and the end of Grad PLUS. Advice written
+    before that date is describing a system that no longer exists.</p>
     <div class="buy">{buy}</div>
   </div>
 </section>
@@ -2370,9 +2386,7 @@ def build_book_html(logo_svg, favicon) -> str:
 <section>
   <h2>What is in it</h2>
   <p class="deck">Nineteen chapters following four families through the
-  arithmetic, under the rules that took effect on July 1, 2026: the new
-  borrowing caps, the Repayment Assistance Plan, the Tiered Standard Plan and
-  the end of Grad PLUS.</p>
+  arithmetic, in the order the money actually arrives.</p>
   <div class="grid two">
     <div class="tile"><b>Part I · The price</b>
       <p>What a college costs a particular family, which is never the number
