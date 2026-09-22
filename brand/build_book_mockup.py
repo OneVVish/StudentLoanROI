@@ -19,10 +19,9 @@ much each contributes:
      sliver of spine down the left is the whole illusion, and it is drawn in
      the cover's own edge colour darkened, so it cannot clash with art it was
      sampled from.
-  2. The VERTICAL SHEAR. The front panel's far edge is shorter than its near
-     edge, which is what a camera does to a rectangle turned a few degrees.
-     Pillow's QUAD transform does it exactly: give it the four corners the
-     panel should land on and it solves the mapping.
+  2. The VERTICAL SHEAR, sloping UP from the spine to the outer edge. A
+     column shear is the whole effect; the direction is what decides whether
+     the object reads as standing (up) or lying on a desk (down).
   3. The SHADOW, offset down and right, blurred. Without it the object floats.
      Drawn on its own layer and composited, never painted over the cover.
   4. The PAGE EDGE, a two-pixel cream line inside the right edge. Small, and
@@ -87,7 +86,7 @@ def build(width: int = WIDTH) -> Path:
     spine_w = round(width * SPINE_W)
     face_w = width - spine_w
     face_h = round(face_w * ratio)
-    drop = round(face_h * TILT)          # how far the near edge hangs lower
+    drop = round(face_h * TILT)          # how far the outer edge rides higher
     pad = SHADOW_BLUR * 3                # room for the blur to fall into
     canvas_w, canvas_h = width + pad * 2, face_h + drop + pad * 2
 
@@ -97,21 +96,23 @@ def build(width: int = WIDTH) -> Path:
     # author's name and the URL came off the bottom of the cover. A column
     # shear alone is the whole effect, so that is all it does now.
     #
-    # Every column x slides down by drop * x / face_w, so the far (left) edge
-    # sits high and the near (right) edge low, which is a rectangle turned a
-    # few degrees toward the viewer.
+    # SLOPING UP, the author's call 2026-09-22: column x rises by
+    # drop * x / face_w, so the spine edge sits LOW and the outer edge high.
+    # The first version sloped the other way, which reads as a book lying
+    # face up on a desk; this one reads as a book standing and turned toward
+    # the viewer, which is what a shelf or a shop listing shows.
     flat = cover.convert("RGBA").resize((face_w, face_h), Image.LANCZOS)
     face = Image.new("RGBA", (face_w, face_h + drop), (0, 0, 0, 0))
     for x in range(face_w):
         face.paste(flat.crop((x, 0, x + 1, face_h)),
-                   (x, round(drop * x / face_w)))
+                   (x, drop - round(drop * x / face_w)))
 
     ink = edge_colour(cover)
-    # THE SPINE, a parallelogram: its top rises as it goes left, mirroring the
-    # front's far edge, so the two share one silhouette.
+    # THE SPINE, a parallelogram whose top follows the front's, so the two
+    # share one silhouette: it is the LOW end now that the face slopes up.
     spine = Image.new("RGBA", (spine_w, face_h + drop), (0, 0, 0, 0))
     for x in range(spine_w):
-        top = round(drop * x / (spine_w + face_w))
+        top = drop - round(drop * x / (spine_w + face_w))
         for y in range(top, top + face_h):
             # A gradient across the spine, darkest at the fold, which is what
             # a curved paper spine does to light.
@@ -125,7 +126,7 @@ def build(width: int = WIDTH) -> Path:
     # THE PAGE EDGE: two columns of near-white just inside the right edge,
     # following the same slope as the cover beside them.
     for x in range(width - 3, width - 1):
-        top = round(drop * x / width)
+        top = drop - round(drop * x / width)
         for y in range(top, top + face_h):
             book.putpixel((x, y), (246, 243, 237, 255))
 
