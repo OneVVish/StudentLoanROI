@@ -84,6 +84,7 @@ BOOK_SUBTITLE = "Paying for College in 2027 by the Numbers"
 # page should not depend on a second hop resolving. Verified on the listings
 # 2026-09-22.
 BOOK_URL = "https://www.amazon.com/dp/B0HKH6PGTR"
+BOOK_AUTHOR = "Veer Vishwakarma"
 BOOK_COVER = "cover-mark.jpg"
 BOOK_PAGES = 219
 
@@ -382,6 +383,7 @@ SITE_CSS = """  :root {
                  line-height: 1.2; }
   .book-copy span { display: block; color: var(--muted); font-size: 16px;
                     margin-top: 2px; }
+  .book-copy .byline { color: var(--deep); font-size: 15px; margin-top: 8px; }
   .book-copy .deck { margin: 10px 0 0; }
   /* ===== ONE CARD, TWO COLOURS =====
      The landing page holds two kinds of card: a tool is something you use, a
@@ -842,6 +844,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     <div class="book-copy">
       <b>{BOOK_TITLE}</b>
       <span>{BOOK_SUBTITLE}</span>
+      <span class="byline">By {BOOK_AUTHOR}, founder of worthmydegree.com</span>
       <p class="deck">The same arithmetic this calculator runs, worked out at
       length: what a degree costs a particular family, what the loan costs
       after it, and what the degree pays back against never going to college. Nineteen
