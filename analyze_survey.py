@@ -190,10 +190,22 @@ MODULE_FLAGS = [
 #
 # Treat NULL as false on both flags, per migrations.sql: a NULL is a row
 # written before that column existed, not a row that opted out.
-BASELINE_ERA_CURRENT = "real units (2026-08-18+)"
+# A FOURTH SEAM, AND THE ONLY ONE NOT CARRIED BY A FLAG. On 2026-09-22 the
+# high school baseline stopped being scaled by the metro's ALL-OCCUPATIONS
+# wage index and started using a no-degree one, because the old index handed
+# the person who never enrolled a wage inflated by other people's degrees.
+# Nothing logs hs_wage_index, but `city` is logged, so the affected rows are
+# exactly those on a non-national city before that date: a row on the national
+# default does not move, the index being 1.0 either way. See migrations.sql
+# for the per-metro factors.
+BASELINE_INDEX_FIX_DATE = "2026-09-22"
+BASELINE_ERA_CITY_INDEX = ("all-occupations city index (non-national city, "
+                           "pre 2026-09-22)")
+BASELINE_ERA_CURRENT = "real units, no-degree city index (2026-09-22+)"
 BASELINE_ERA_DRIFT = "age curve + 2% drift (2026-07-31 to 2026-08-17)"
 BASELINE_ERA_FLAT = "flat age-25+ baseline (pre 2026-07-31)"
-BASELINE_ERA_ORDER = [BASELINE_ERA_CURRENT, BASELINE_ERA_DRIFT, BASELINE_ERA_FLAT]
+BASELINE_ERA_ORDER = [BASELINE_ERA_CURRENT, BASELINE_ERA_CITY_INDEX,
+                      BASELINE_ERA_DRIFT, BASELINE_ERA_FLAT]
 
 
 def _flag_true(df: pd.DataFrame, column: str) -> pd.Series:
@@ -208,6 +220,16 @@ def baseline_era(df: pd.DataFrame) -> pd.Series:
     era = pd.Series(BASELINE_ERA_FLAT, index=df.index)
     era[_flag_true(df, "hs_baseline_age_aware")] = BASELINE_ERA_DRIFT
     era[_flag_true(df, "hs_baseline_real_units")] = BASELINE_ERA_CURRENT
+    # The city-index seam, applied LAST and only to rows already in the
+    # current era: it is a narrowing of that era, not a fourth flag. Rows on
+    # the national default are left alone, since the index was 1.0 on both
+    # sides of the date and their figures did not move.
+    if {"timestamp", "city"} <= set(df.columns):
+        when = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+        cutoff = pd.Timestamp(BASELINE_INDEX_FIX_DATE, tz="UTC")
+        local = df["city"].astype(str).str.strip().ne("National Average") & df["city"].notna()
+        era[(era == BASELINE_ERA_CURRENT) & local & when.notna()
+            & (when < cutoff)] = BASELINE_ERA_CITY_INDEX
     return era
 
 

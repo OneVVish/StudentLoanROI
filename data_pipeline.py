@@ -64,7 +64,13 @@ import argparse
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+
+# The education mapping comes from the same loader add_education_field.py uses
+# on cleaned_careers.csv, so the no-degree basket and the app's own
+# typical_education column can never disagree about which jobs need a degree.
+from add_education_field import load_education_data
 
 # BLS's current top-code threshold for suppressed high wages (the "#"
 # marker). Source: BLS OEWS technical documentation, $115/hour x 2,080
@@ -581,6 +587,105 @@ def build_metro_wage_index(xlsx_path: str, national_xlsx: str = None) -> pd.Data
     return pd.DataFrame(rows).sort_values("wage_index", ascending=False).reset_index(drop=True)
 
 
+# The two education levels that mean "no degree was required to enter this
+# job", straight from BLS's own typical-entry field. Taken as a pair because
+# the baseline this feeds is one figure for everyone who did not go to
+# college, and BLS draws the line between these two and "Some college, no
+# degree" -- which is a person who enrolled, and so is not the counterfactual.
+NO_DEGREE_LEVELS = ("No formal educational credential",
+                    "High school diploma or equivalent")
+# Under this many matched occupations a metro's basket is too thin to price,
+# and a thin basket is worse than none: it writes a plausible index nothing
+# can tell is wrong. Every current metro clears 276.
+MIN_NODEGREE_OCCUPATIONS = 60
+
+
+def build_metro_nodegree_index(metro_df: pd.DataFrame, national_xlsx: str,
+                               education_xlsx: str) -> pd.DataFrame:
+    """Each app city's wage level FOR WORK THAT NEEDS NO DEGREE, against the
+    nation.
+
+    WHY THIS EXISTS, AND WHY metro_wage_index.csv CANNOT DO IT. The high
+    school baseline every comparison runs against is one national figure
+    scaled by a city index, and until now that index was the metro's
+    ALL-OCCUPATIONS median. A Bay Area all-occupations median is high partly
+    BECAUSE the metro is full of degree-holders, so using it to scale the
+    NON-degree baseline imports the degree premium into the counterfactual the
+    degree is being measured against. San Francisco's all-occupations index is
+    1.457 where its no-degree wage is 1.153: a baseline overstated by 26%, and
+    21 of the 22 metros run the same way.
+
+    Austin is the case that is not about expensive cities. Its all-occupations
+    index is ABOVE national at 1.117 while its no-degree wage is BELOW it at
+    0.904, so the old index raised a baseline that should fall.
+
+    IT IS COMPUTED, NOT READ. build_metro_wage_index takes OEWS's own
+    `o_group == "total"` row, a published per-metro median. BLS publishes no
+    "no-degree total", so this is an employment-weighted median over the
+    occupations BLS says need no degree, which is why it needs three files
+    rather than one.
+
+    THE WEIGHTS ARE NATIONAL, DELIBERATELY. OEWS suppresses metro employment
+    for many cells, and a metro-weighted basket would measure the city's
+    INDUSTRIAL MIX as much as its pay. A national basket priced at metro
+    wages measures what this question asks: what the same work pays there.
+    """
+    education = load_education_data(education_xlsx)
+    nodeg = education[education["typical_education"].isin(NO_DEGREE_LEVELS)]
+    national = load_bls_data(national_xlsx)
+    national = national[national["o_group"].astype(str).str.strip().str.lower()
+                        == "detailed"].copy()
+    national["a_median"] = clean_wage_column(national["a_median"])
+    national["tot_emp"] = pd.to_numeric(national["tot_emp"], errors="coerce")
+    national["occ_code"] = national["occ_code"].astype(str).str.strip()
+    basket = national.merge(nodeg[["occ_code"]], on="occ_code")
+    basket = basket.dropna(subset=["a_median", "tot_emp"])
+    if len(basket) < MIN_NODEGREE_OCCUPATIONS:
+        raise ValueError(
+            f"Only {len(basket)} no-degree occupations matched between "
+            f"'{national_xlsx}' and '{education_xlsx}'. The two releases "
+            f"probably disagree about SOC codes; refusing to write an index "
+            f"from a basket that thin.")
+    national_median = _weighted_median(basket["a_median"], basket["tot_emp"])
+
+    # NAMED COLUMNS ON BOTH SIDES OF THE JOIN. The metro frame carries its
+    # own tot_emp in memory (it is dropped on the way to the CSV), so a bare
+    # merge produced tot_emp_x and tot_emp_y and the weights silently went
+    # missing. Taking two columns from each side makes that unreachable, and
+    # it also documents which employment figure is doing the weighting: the
+    # NATIONAL one, for the reason the docstring gives.
+    weights = basket[["occ_code", "tot_emp"]].rename(
+        columns={"tot_emp": "national_emp"})
+    metro = metro_df[["city", "occ_code", "a_median"]].copy()
+    metro["occ_code"] = metro["occ_code"].astype(str).str.strip()
+    metro["a_median"] = pd.to_numeric(metro["a_median"], errors="coerce")
+    rows = []
+    for city, city_rows in metro.groupby("city"):
+        priced = (city_rows.merge(weights, on="occ_code")
+                           .dropna(subset=["a_median", "national_emp"]))
+        if len(priced) < MIN_NODEGREE_OCCUPATIONS:
+            raise ValueError(
+                f"{city} matched only {len(priced)} no-degree occupations, "
+                f"under the {MIN_NODEGREE_OCCUPATIONS} floor. A thin basket "
+                f"writes a plausible index nothing can tell is wrong.")
+        median = _weighted_median(priced["a_median"], priced["national_emp"])
+        rows.append({"city": city, "nodegree_median": median,
+                     "occupations": len(priced),
+                     "baseline_index": median / national_median})
+    return (pd.DataFrame(rows).sort_values("baseline_index", ascending=False)
+                              .reset_index(drop=True))
+
+
+def _weighted_median(values, weights) -> float:
+    """The value at which half the EMPLOYMENT sits below, not the middle of
+    the list. An unweighted median over 430 occupations would let a 900-person
+    occupation count as much as a 3-million-person one."""
+    order = np.argsort(np.asarray(values, dtype=float))
+    v = np.asarray(values, dtype=float)[order]
+    w = np.asarray(weights, dtype=float)[order]
+    return float(v[np.searchsorted(np.cumsum(w), np.cumsum(w)[-1] / 2)])
+
+
 def print_summary(df: pd.DataFrame) -> None:
     print()
     print(f"Total occupations processed: {len(df)}")
@@ -596,6 +701,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Clean a BLS OEWS national XLSX release into a per-occupation wage dataset."
     )
+    parser.add_argument("--education", default="occupation.xlsx",
+                        help="BLS occupation.xlsx (the ind-occ matrix), for "
+                             "the no-degree baseline index written beside the "
+                             "metro wage index. Only used with --metros.")
     parser.add_argument("input_xlsx", nargs="?", default="raw_bls_data.xlsx",
                          help="Path to the raw BLS OEWS XLSX file (default: raw_bls_data.xlsx)")
     parser.add_argument("--state", default=None,
@@ -661,6 +770,32 @@ if __name__ == "__main__":
               f"median {clean_df.groupby('city').size().median():.0f} per city.")
         index_path = str(Path(output_path).with_name("metro_wage_index.csv"))
         index_df.to_csv(index_path, index=False)
+        # THE SECOND INDEX, FROM THE SAME PARSE. Two files out of one run
+        # cannot disagree about vintage, which is the reason the community
+        # college cost builder writes its two together. Requires the education
+        # release as well, so it is skipped with a LOUD note rather than
+        # silently when that file is absent: a missing no-degree index means
+        # every baseline falls back to the national figure, which is honest
+        # but is not what the operator asked for.
+        if args.education and Path(args.education).exists():
+            nodeg_df = build_metro_nodegree_index(clean_df, args.national,
+                                                  args.education)
+            nodeg_path = str(Path(output_path).with_name("metro_nodegree_index.csv"))
+            nodeg_df.to_csv(nodeg_path, index=False)
+            print(f"\nWrote {len(nodeg_df)} rows to {nodeg_path} "
+                  f"(wage level for work needing NO degree, the baseline's index):")
+            print(nodeg_df.head(3).to_string(index=False))
+            print(nodeg_df.tail(2).to_string(index=False))
+            merged = index_df.merge(nodeg_df, on="city")
+            gap = (merged.wage_index / merged.baseline_index - 1)
+            print(f"  all-occupations index runs {gap.mean():+.0%} above the "
+                  f"no-degree one on average, {gap.max():+.0%} at "
+                  f"{merged.loc[gap.idxmax(), 'city']}.")
+        else:
+            print("\nNOTE: no --education occupation.xlsx, so "
+                  "metro_nodegree_index.csv was NOT rebuilt. The app's high "
+                  "school baseline reads that file; leaving it stale pairs "
+                  "this release's metro wages with the last one's baseline.")
         print(f"\nWrote {len(index_df)} rows to {index_path} "
               f"(all-occupations wage level vs the national ${NATIONAL_ALL_OCCUPATIONS_MEDIAN:,} median):")
         print(index_df.head(4).to_string(index=False))
