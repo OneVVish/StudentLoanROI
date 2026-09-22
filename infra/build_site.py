@@ -373,14 +373,21 @@ SITE_CSS = """  :root {
     padding: 7px 14px; }
   .chart-card .reactions .thread:hover { border-color: var(--blue); color: var(--blue); }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  /* The header's book link: the cover at 20px beside two words. */
+  .booklink { display: inline-flex; align-items: center; gap: 8px;
+              color: var(--deep); font-weight: 600; font-size: 15px;
+              text-decoration: none; margin-right: 18px; }
+  .booklink:hover { color: var(--blue); }
+  .booklink img { border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,.22); }
   /* The book band: cover beside copy, stacking under 720px with the rest. */
   .book { display: grid; grid-template-columns: 180px 1fr; gap: 22px;
           align-items: start; background: var(--tint); border-radius: 12px;
           border-left: 4px solid var(--orange); padding: 20px; }
   .book-cover img { width: 100%; height: auto; border-radius: 6px;
                     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18); display: block; }
-  .book-copy b { display: block; color: var(--deep); font-size: 22px;
-                 line-height: 1.2; }
+  .book-copy b { display: block; font-size: 22px; line-height: 1.2; }
+  .book-copy b a { color: var(--deep); text-decoration: none; }
+  .book-copy b a:hover { color: var(--blue); }
   .book-copy span { display: block; color: var(--muted); font-size: 16px;
                     margin-top: 2px; }
   .book-copy .byline { color: var(--deep); font-size: 15px; margin-top: 8px; }
@@ -835,21 +842,24 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     # the infographics band does and for the same reason: a text-only card
     # would advertise the one thing it cannot show.
     book_section = f'''<section>
-  <h2>The book</h2>
+  <h2 id="the-book">The book</h2>
+  <p class="deck">Everything this calculator does, worked out at length.</p>
   <div class="book">
     <a class="book-cover" href="{BOOK_URL}" rel="noopener">
       <img src="/app/static/{book_cover}" width="360" height="576"
            alt="{_attr(BOOK_TITLE + " " + BOOK_SUBTITLE)}, the cover"
            loading="lazy"></a>
     <div class="book-copy">
-      <b>{BOOK_TITLE}</b>
+      <b><a href="{BOOK_URL}" rel="noopener">{BOOK_TITLE}</a></b>
       <span>{BOOK_SUBTITLE}</span>
       <span class="byline">By {BOOK_AUTHOR}, founder of worthmydegree.com</span>
-      <p class="deck">The same arithmetic this calculator runs, worked out at
-      length: what a degree costs a particular family, what the loan costs
-      after it, and what the degree pays back against never going to college. Nineteen
-      chapters, {BOOK_PAGES} pages, four families followed through the
-      numbers. Every figure is computed from a federal source.</p>
+      <p class="deck">The federal government will lend a family $92,000 for
+      one bachelor's degree. At 1,644 of the 2,235 colleges that grant one,
+      four years of the in-state sticker price costs more than that. This book
+      prices the gap: what a degree costs your family, what the loan costs
+      after it, and what the degree pays back against never going to college.
+      Nineteen chapters, {BOOK_PAGES} pages, four families followed all the
+      way through. Every figure computed from a federal source.</p>
       <p class="deck"><a href="{BOOK_URL}" rel="noopener"
         style="color:var(--blue);font-weight:600;text-decoration:none">Paperback
         and Kindle on Amazon&nbsp;→</a></p>
@@ -906,6 +916,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(True)}
   <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
@@ -1320,6 +1331,7 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(False)}
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 
@@ -1582,6 +1594,21 @@ def _resized_jpeg(source: str, width: int, prefix: str) -> str:
     print(f"  {prefix} image {out}  ({dst.stat().st_size:,} bytes"
           f" from {src.stat().st_size:,})")
     return out
+
+
+def book_header_link(on_landing: bool) -> str:
+    """The header's link to the book: the cover at thumbnail size and two
+    words. It points at the LANDING BAND, not at Amazon, so the header never
+    throws a reader off the site: the band is where the book is described and
+    the Amazon link lives. On the landing itself that is a fragment jump; on
+    a guide or the gallery it is /welcome#the-book, which CARRY_QS_JS carries
+    the visitor's query onto like any other internal link (query before
+    fragment, the rule it already records).
+    """
+    href = "#the-book" if on_landing else "/welcome#the-book"
+    return (f'<a class="booklink hide-m" href="{href}">'
+            f'<img src="/app/static/{_resized_jpeg(BOOK_COVER, 64, "nav")}" '
+            f'width="20" height="32" alt="" loading="lazy">Read the book</a>')
 
 
 def card_thumb(source: str) -> str:
@@ -1931,6 +1958,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(False)}
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">
@@ -2185,6 +2213,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {book_header_link(False)}
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 <section class="guides-band">
