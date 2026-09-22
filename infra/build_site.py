@@ -280,6 +280,10 @@ SITE_CSS = """  :root {
      needs the extra specificity of `.tools .grid`, so the 720px breakpoint
      below has to restate it or the cards stay 2-up on a phone. */
   .tools .grid { grid-template-columns: repeat(2, 1fr); }
+  /* Two-up OUTSIDE the tools band, for /book's four parts. `.tools .grid` is
+     scoped to the tinted band and cannot reach a grid on an ordinary
+     section, which is what left four cards stacked full width. */
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
   /* The pathways band has four cards too, and the same stranded-card problem
      the comment above describes. Same fix, same specificity requirement, so
      the 720px breakpoint restates this one as well. */
@@ -426,6 +430,17 @@ SITE_CSS = """  :root {
     padding: 7px 14px; }
   .chart-card .reactions .thread:hover { border-color: var(--blue); color: var(--blue); }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  /* /book: the hero, and the two buy buttons that repeat at the foot. */
+  .book-hero { display: grid; grid-template-columns: 260px 1fr; gap: 30px;
+               align-items: center; padding: 28px 0 8px; }
+  .book-hero-art img { width: 100%; height: auto; display: block; }
+  .book-hero-copy h1 { font-size: clamp(34px, 6vw, 54px); line-height: 1.05;
+                       color: var(--deep); margin: 0; }
+  .book-hero-copy .sub { font-size: 20px; color: var(--muted); margin: 6px 0 0; }
+  .book-hero-copy .byline { font-size: 15px; color: var(--deep); margin: 14px 0 0; }
+  .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+  .btn.ghost { background: #fff; color: var(--deep);
+               box-shadow: inset 0 0 0 2px var(--deep); }
   /* The header's book link: the cover at 20px beside two words. */
   .booklink { display: inline-flex; align-items: center; gap: 8px;
               color: var(--deep); font-weight: 600; font-size: 15px;
@@ -494,6 +509,9 @@ SITE_CSS = """  :root {
     .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .book { grid-template-columns: 1fr; gap: 16px; }
+    .grid.two { grid-template-columns: 1fr; }
+    .book-hero { grid-template-columns: 1fr; gap: 18px; padding-top: 14px; }
+    .book-hero-art { max-width: 200px; }
     .book-cover { max-width: 200px; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
@@ -889,44 +907,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     infographics&nbsp;→</a></p>
 </section>'''
 
-    # THE BOOK AS STRUCTURED DATA. Without it the page MENTIONS a book;
-    # with it the page is ABOUT one, which is the difference between a link
-    # a crawler follows to Amazon and a result this site can rank for. Two
-    # workExample entries because the paperback and the Kindle edition are
-    # two editions of one work with two ASINs and two prices, which is
-    # exactly what schema.org's Book/workExample pair is for. json.dumps
-    # does the escaping, the rule article_jsonld already records: a hand
-    # written quote in a title produces invalid JSON-LD, which search
-    # engines drop SILENTLY rather than reporting.
-    book_jsonld = json.dumps({
-        "@type": "Book",
-        "@id": "https://worthmydegree.com/#book",
-        "name": f"{BOOK_TITLE} {BOOK_SUBTITLE}",
-        "author": {"@type": "Person", "name": BOOK_AUTHOR},
-        "isbn": BOOK_ISBN,
-        "numberOfPages": BOOK_PAGES,
-        "inLanguage": "en",
-        "datePublished": BOOK_PUBLISHED.isoformat(),
-        "bookEdition": "1st",
-        "publisher": {"@id": "https://worthmydegree.com/#org"},
-        "url": BOOK_URL,
-        "about": ["College costs", "Student loans", "Financial aid",
-                  "Return on investment"],
-        "description": BOOK_BLURB,
-        "workExample": [
-            {"@type": "Book", "isbn": BOOK_ISBN, "bookFormat":
-             "https://schema.org/Paperback", "inLanguage": "en",
-             "potentialAction": {"@type": "ReadAction", "target": BOOK_URL},
-             "offers": {"@type": "Offer", "price": "19.95",
-                        "priceCurrency": "USD", "url": BOOK_URL,
-                        "availability": "https://schema.org/InStock"}},
-            {"@type": "Book", "bookFormat": "https://schema.org/EBook",
-             "inLanguage": "en", "url": BOOK_KINDLE_URL,
-             "offers": {"@type": "Offer", "price": "9.99",
-                        "priceCurrency": "USD", "url": BOOK_KINDLE_URL,
-                        "availability": "https://schema.org/InStock"}},
-        ],
-    })
+    book_jsonld = book_schema()
 
     # 360px wide, which is 2x the ~180px the card draws it at. The source is
     # the 1600x2560 Kindle cover, which is 120 KB and absurd for a card.
@@ -1696,6 +1677,56 @@ def _resized_jpeg(source: str, width: int, prefix: str) -> str:
     return out
 
 
+def book_schema(page: str = "#book") -> str:
+    """The book as schema.org, for whichever page is describing it.
+
+    Without it a page MENTIONS a book; with it the page is ABOUT one, which is
+    the difference between a link a crawler follows to Amazon and a result
+    this site can rank for.
+
+    TWO workExample ENTRIES, because the paperback and the Kindle edition are
+    two editions of one work with two ASINs and two prices, which is exactly
+    the pair schema.org's Book/workExample models. json.dumps does the
+    escaping, the rule article_jsonld already records: a hand-written quote in
+    a title produces invalid JSON-LD, which search engines drop SILENTLY
+    rather than reporting.
+
+    ONE OBJECT, TWO PAGES. The landing band and /book both describe the same
+    book, and two hand-written copies would drift the first time a price
+    moved. `page` only varies the @id, so a crawler seeing both knows they are
+    one work rather than two.
+    """
+    return json.dumps({
+        "@type": "Book",
+        "@id": f"https://worthmydegree.com/{page.lstrip('/')}",
+        "name": f"{BOOK_TITLE} {BOOK_SUBTITLE}",
+        "author": {"@type": "Person", "name": BOOK_AUTHOR},
+        "isbn": BOOK_ISBN,
+        "numberOfPages": BOOK_PAGES,
+        "inLanguage": "en",
+        "datePublished": BOOK_PUBLISHED.isoformat(),
+        "bookEdition": "1st",
+        "publisher": {"@id": "https://worthmydegree.com/#org"},
+        "url": BOOK_URL,
+        "about": ["College costs", "Student loans", "Financial aid",
+                  "Return on investment"],
+        "description": BOOK_BLURB,
+        "workExample": [
+            {"@type": "Book", "isbn": BOOK_ISBN, "bookFormat":
+             "https://schema.org/Paperback", "inLanguage": "en",
+             "potentialAction": {"@type": "ReadAction", "target": BOOK_URL},
+             "offers": {"@type": "Offer", "price": "19.95",
+                        "priceCurrency": "USD", "url": BOOK_URL,
+                        "availability": "https://schema.org/InStock"}},
+            {"@type": "Book", "bookFormat": "https://schema.org/EBook",
+             "inLanguage": "en", "url": BOOK_KINDLE_URL,
+             "offers": {"@type": "Offer", "price": "9.99",
+                        "priceCurrency": "USD", "url": BOOK_KINDLE_URL,
+                        "availability": "https://schema.org/InStock"}},
+        ],
+    })
+
+
 def book_header_link(on_landing: bool) -> str:
     """The header's link to the book: the cover at thumbnail size and two
     words. It points at the LANDING BAND, not at Amazon, so the header never
@@ -1705,7 +1736,7 @@ def book_header_link(on_landing: bool) -> str:
     the visitor's query onto like any other internal link (query before
     fragment, the rule it already records).
     """
-    href = "#the-book" if on_landing else "/welcome#the-book"
+    href = "/book"          # a real page, so it can rank and be pasted
     new = ((datetime.date.today() - BOOK_PUBLISHED).days <= BOOK_NEW_DAYS)
     pill = '<span class="pill">New</span>' if new else ""
     return (f'<a class="booklink hide-m" data-book="header" href="{href}">'
@@ -2280,6 +2311,140 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 '''
 
 
+def build_book_html(logo_svg, favicon) -> str:
+    """/book: the page the book gets to itself.
+
+    THE BAND ON THE LANDING IS NOT A PAGE, which is the whole reason this
+    exists. A fragment has no title, no meta description and no canonical
+    URL, so it cannot rank for anyone searching the book, and it is not a
+    thing you can paste into a counselor's email. This page has all three,
+    plus the Book schema the band already carried.
+
+    IT SELLS BY SHOWING THE ARITHMETIC, not by adjectives. Everything on it
+    is a figure the book computes and the calculator can reproduce, which is
+    the same rule the guides follow: a reader who doubts a claim here can go
+    and check it, and the checking is the product.
+    """
+    buy = (f'<a class="btn big" data-book="cta" href="{BOOK_URL}" '
+           f'rel="noopener">Paperback, $19.95 on Amazon</a>'
+           f'<a class="btn ghost" data-book="kindle" href="{BOOK_KINDLE_URL}" '
+           f'rel="noopener">Kindle, $9.99</a>')
+    return f'''<!doctype html>
+<html lang="en">
+<head>
+{_page_head(f"{BOOK_TITLE} {BOOK_SUBTITLE} — a book by {BOOK_AUTHOR}",
+            "Nineteen chapters on what a degree costs, what the loan costs "
+            "after it, and what it pays back against never going to college. "
+            "Every figure computed from federal data.",
+            "https://worthmydegree.com/book", "feature-og-1200x630.png",
+            favicon,
+            '<script type="application/ld+json">{"@context": '
+            '"https://schema.org", "@graph": [' + book_schema("book#book")
+            + ']}</script>')}
+</head>
+<body>
+<div class="wrap">
+<header>
+  <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
+</header>
+
+<section class="book-hero">
+  <div class="book-hero-art">
+    <img src="/app/static/{BOOK_MOCKUP}" width="257" height="394"
+         alt="{_attr(BOOK_TITLE + " " + BOOK_SUBTITLE)}, the cover" >
+  </div>
+  <div class="book-hero-copy">
+    <h1>{BOOK_TITLE}</h1>
+    <p class="sub">{BOOK_SUBTITLE}</p>
+    <p class="byline">By {BOOK_AUTHOR}, founder of worthmydegree.com ·
+    Published September 2026 · {BOOK_PAGES} pages</p>
+    <p class="deck">The federal government will lend a family $92,000 for one
+    bachelor's degree. At 1,644 of the 2,235 colleges that grant one, four
+    years of the in-state sticker price costs more than that. This book
+    prices the gap.</p>
+    <div class="buy">{buy}</div>
+  </div>
+</section>
+
+<section>
+  <h2>What is in it</h2>
+  <p class="deck">Nineteen chapters following four families through the
+  arithmetic, under the rules that took effect on July 1, 2026: the new
+  borrowing caps, the Repayment Assistance Plan, the Tiered Standard Plan and
+  the end of Grad PLUS.</p>
+  <div class="grid two">
+    <div class="tile"><b>Part I · The price</b>
+      <p>What a college costs a particular family, which is never the number
+      on the letter: the aid formula, the net price at each school, and the
+      two-year route.</p></div>
+    <div class="tile"><b>Part II · The loan</b>
+      <p>The student's loan, the parents' loan and private money, in separate
+      chapters because they run under different laws. Plus the calendar the
+      money actually follows.</p></div>
+    <div class="tile"><b>Part III · Is it worth it</b>
+      <p>The break-even loan, the age a path gets ahead, major against career,
+      the wage you will really see, and the long and short roads.</p></div>
+    <div class="tile"><b>Part IV · After the loan exists</b>
+      <p>For the family that already signed: riding an income-driven plan to
+      forgiveness against paying it off, and every lever that moves the
+      interest, priced.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>Some of what the arithmetic says</h2>
+  <div class="grid">
+    <div class="tile"><b>1,644 of 2,235</b>
+      <p>Colleges granting a bachelor's degree where four years at the in-state
+      sticker price costs more than the $92,000 a family may borrow.</p></div>
+    <div class="tile"><b>30 of 177</b>
+      <p>Careers needing a bachelor's degree that finish ten years behind a
+      debt-free high school graduate even when the degree is free.</p></div>
+    <div class="tile"><b>~$177,800</b>
+      <p>What the median bachelor's-level career finishes ahead over the same
+      ten years. The answer is per degree, per school and per family.</p></div>
+  </div>
+  <p class="deck" style="margin-top:14px">Every figure is computed from public
+  federal data by the calculator on this site, and a sources chapter names
+  each source with the date it was read. Any number in the book can be
+  reproduced, or shown to be wrong.</p>
+</section>
+
+<section>
+  <h2>What it will not do</h2>
+  <p class="deck">It ranks no college, recommends no school, major or lender,
+  and gives no advice. It prices the trade and stops, which is the same rule
+  the calculator follows. Nothing in it is a promise about what any reader
+  will earn, pay or owe.</p>
+</section>
+
+<div class="cta">
+  <h2>Read the book, or run your own numbers</h2>
+  <p class="deck" style="margin:8px auto 22px">The calculator does the
+  arithmetic for one family in two minutes. The book explains where every
+  figure comes from, and what it means when it is yours.</p>
+  <div class="buy" style="justify-content:center">{buy}</div>
+  <p class="deck" style="margin-top:18px"><a href="/?go=1&amp;from=guide"
+    style="color:var(--blue);font-weight:600;text-decoration:none">Open the
+    calculator, free&nbsp;→</a></p>
+</div>
+
+<footer>
+  <a href="/" style="color:inherit">worthmydegree.com</a> · Educational
+  estimate, not financial advice.<br>
+  {ORG_STATUS_LINE}<br>
+  <a href="/guides" style="color:inherit">Guides</a> ·
+  <a href="/charts" style="color:inherit">Infographics</a>
+</footer>
+</div>
+{{BOOK_CLICK_JS}}
+{{CARRY_QS_JS}}
+</body>
+</html>
+'''.replace("{{BOOK_CLICK_JS}}", BOOK_CLICK_JS).replace("{{CARRY_QS_JS}}", CARRY_QS_JS)
+
+
 def build_guides_index_html(posts, logo_svg, favicon) -> str:
     # ALL OR NOTHING. A grid where some cards carry a photograph and others do
     # not is not a grid with a few pictures missing, it is a broken-looking
@@ -2607,7 +2772,13 @@ def inject_sitemap(text: str, posts: list, lastmod: dict = None,
     that left a valid, shorter sitemap. An explicit closing marker cannot
     over-reach, and nothing static sits between the two.
     """
-    entries = ["  <url>\n    <loc>https://worthmydegree.com/guides</loc>\n"
+    # /book is unconditional, unlike the guides and the gallery: it does not
+    # depend on content that may be absent, and it is the page a reader is
+    # sent to from a printed book, so it must always be listed.
+    entries = ["  <url>\n    <loc>https://worthmydegree.com/book</loc>\n"
+               "    <changefreq>monthly</changefreq>\n"
+               "    <priority>0.7</priority>\n  </url>",
+               "  <url>\n    <loc>https://worthmydegree.com/guides</loc>\n"
                "    <changefreq>weekly</changefreq>\n"
                "    <priority>0.7</priority>\n  </url>"]
     # The gallery sits inside the generated block rather than beside the static
@@ -2624,7 +2795,7 @@ def inject_sitemap(text: str, posts: list, lastmod: dict = None,
                 f"    <lastmod>{lastmod.get(p['slug'], p['date'])}</lastmod>\n"
                 f"    <changefreq>monthly</changefreq>\n"
                 f"    <priority>0.6</priority>\n  </url>" for p in posts]
-    inner = ("\n" + "\n".join(entries)) if (posts or charts) else ""
+    inner = "\n" + "\n".join(entries)
     block = f"{SITEMAP_START}{inner}\n  {SITEMAP_END}"
     return re.sub(re.escape(SITEMAP_START) + r".*?" + re.escape(SITEMAP_END),
                   lambda _m: block, text, count=1, flags=re.S)
@@ -2673,6 +2844,10 @@ def render_all():
     # page absent from here is not merely unlinked, it is unreachable.
     if charts:
         pages["/charts"] = build_charts_index_html(charts, logo_svg, favicon)
+    # /book rides the same map, which is what routes it: the Worker serves
+    # anything in the map and 301s everything else to "/", so a page absent
+    # from here is unreachable rather than merely unlinked.
+    pages["/book"] = build_book_html(logo_svg, favicon)
     return html, pages, posts, lastmod, manifest
 
 

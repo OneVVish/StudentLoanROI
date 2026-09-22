@@ -244,8 +244,14 @@ def main() -> int:
         built = {"/": landing}
         for path in (ROOT / "infra" / "guides").glob("*.html"):
             name = path.stem
-            built["/guides" if name == "guides" else
-                  "/charts" if name == "charts" else f"/guides/{name}"] = path.read_text()
+            # THE FILENAME IS NOT THE PATH for the three pages that are not
+            # guides. Every page is written to infra/guides/<last segment>.html
+            # whatever its route, so /charts and /book land beside the guides
+            # and would be read back as /guides/charts and /guides/book: the
+            # hash lookup then misses, and the only symptom is a browser
+            # silently blocking that page's scripts.
+            built[{"guides": "/guides", "charts": "/charts",
+                   "book": "/book"}.get(name, f"/guides/{name}")] = path.read_text()
         for path, page in sorted(built.items()):
             want = builder.script_hashes(page)
             if carried.get(path) != want:
