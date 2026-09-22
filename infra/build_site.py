@@ -91,6 +91,12 @@ BOOK_COVER = "cover-mark.jpg"
 # book rather than a picture of one. Committed like every other generated
 # asset, because a clone cannot rebuild it without the cover.
 BOOK_MOCKUP = "book-3d.png"
+BOOK_KINDLE_URL = "https://www.amazon.com/dp/B0HKH145N6"
+BOOK_ISBN = "9798174119734"
+BOOK_BLURB = ("Nineteen chapters on what a degree costs a family, what the "
+              "loan costs after it, and what the degree pays back against "
+              "never going to college, with every figure computed from "
+              "federal data by the calculator at worthmydegree.com.")
 # THE "NEW" PILL EXPIRES BY ITSELF. A badge that has to be taken down by hand
 # is a badge that goes stale, and nothing in this build would remind anyone:
 # the chapters already had two 2026 dates left in the present tense until a
@@ -847,6 +853,45 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     infographics&nbsp;→</a></p>
 </section>'''
 
+    # THE BOOK AS STRUCTURED DATA. Without it the page MENTIONS a book;
+    # with it the page is ABOUT one, which is the difference between a link
+    # a crawler follows to Amazon and a result this site can rank for. Two
+    # workExample entries because the paperback and the Kindle edition are
+    # two editions of one work with two ASINs and two prices, which is
+    # exactly what schema.org's Book/workExample pair is for. json.dumps
+    # does the escaping, the rule article_jsonld already records: a hand
+    # written quote in a title produces invalid JSON-LD, which search
+    # engines drop SILENTLY rather than reporting.
+    book_jsonld = json.dumps({
+        "@type": "Book",
+        "@id": "https://worthmydegree.com/#book",
+        "name": f"{BOOK_TITLE} {BOOK_SUBTITLE}",
+        "author": {"@type": "Person", "name": BOOK_AUTHOR},
+        "isbn": BOOK_ISBN,
+        "numberOfPages": BOOK_PAGES,
+        "inLanguage": "en",
+        "datePublished": BOOK_PUBLISHED.isoformat(),
+        "bookEdition": "1st",
+        "publisher": {"@id": "https://worthmydegree.com/#org"},
+        "url": BOOK_URL,
+        "about": ["College costs", "Student loans", "Financial aid",
+                  "Return on investment"],
+        "description": BOOK_BLURB,
+        "workExample": [
+            {"@type": "Book", "isbn": BOOK_ISBN, "bookFormat":
+             "https://schema.org/Paperback", "inLanguage": "en",
+             "potentialAction": {"@type": "ReadAction", "target": BOOK_URL},
+             "offers": {"@type": "Offer", "price": "19.95",
+                        "priceCurrency": "USD", "url": BOOK_URL,
+                        "availability": "https://schema.org/InStock"}},
+            {"@type": "Book", "bookFormat": "https://schema.org/EBook",
+             "inLanguage": "en", "url": BOOK_KINDLE_URL,
+             "offers": {"@type": "Offer", "price": "9.99",
+                        "priceCurrency": "USD", "url": BOOK_KINDLE_URL,
+                        "availability": "https://schema.org/InStock"}},
+        ],
+    })
+
     # 360px wide, which is 2x the ~180px the card draws it at. The source is
     # the 1600x2560 Kindle cover, which is 120 KB and absurd for a card.
     if not BOOK_URL.startswith("https://"):
@@ -920,7 +965,8 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
       "url": "https://worthmydegree.com/",
       "applicationCategory": "FinanceApplication", "operatingSystem": "Web",
       "offers": {{"@type": "Offer", "price": "0", "priceCurrency": "USD"}},
-      "publisher": {{"@id": "https://worthmydegree.com/#org"}}}}
+      "publisher": {{"@id": "https://worthmydegree.com/#org"}}}},
+    {book_jsonld}
   ]
 }}</script>
 <style>

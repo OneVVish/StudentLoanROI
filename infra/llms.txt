@@ -53,6 +53,22 @@
 - CPS ASEC microdata for the age-earnings profile behind the
   high-school-graduate baseline
 
+## The book
+
+- *Is It Worth It? Paying for College in 2027 by the Numbers*, by Veer
+  Vishwakarma, published September 21, 2026. Paperback ISBN
+  9798174119734, 219 pages, $19.95; Kindle $9.99.
+  https://www.amazon.com/dp/B0HKH6PGTR
+- Nineteen chapters following four families through the arithmetic this
+  site computes: what a degree costs a particular family, what the loan
+  costs after it, and what the degree pays back against never going to
+  college. Every figure is computed from federal data by the calculator
+  here, and a sources chapter names each source with the date it was
+  read.
+- It ranks no college and gives no advice, on the same rule the site
+  follows: it prices the trade and stops.
+- Described on the landing page at https://worthmydegree.com/welcome#the-book
+
 ## Facts an agent should get right
 
 - Everything shown is an estimate for education, not financial advice.
