@@ -60,6 +60,33 @@ END_MARK = "// {{LANDING_HTML_END}}"
 # EIN, until the filing that licenses each one exists.
 ORG_STATUS_LINE = "Worth My Degree Inc. is a California nonprofit corporation."
 
+# THE BOOK, published 2026-09-21. It is the same arithmetic this site runs,
+# worked out at length, so it belongs on the landing page rather than in a
+# footnote: a reader who finishes the paperback and types the URL should find
+# it here, and a visitor should learn it exists.
+#
+# NO SALES FIGURES ANYWHERE, EVER. Amazon's KDP terms make sales data
+# confidential for three years, and this project publishes its numbers by
+# habit, which is exactly why the rule is written down rather than remembered.
+# The book may be named, described and linked; what it has sold may not.
+BOOK_TITLE = "Is It Worth It?"
+BOOK_SUBTITLE = "Paying for College in 2027 by the Numbers"
+# THE ASIN IS NOT GUESSABLE AND MUST NOT BE GUESSED. A 979 ISBN has no
+# ISBN-10, so amazon.com/dp/<isbn> does not resolve; KDP assigns an ASIN and
+# the only place it exists is the listing. A plausible-looking ASIN was
+# written here once and would have 404'd for every reader; the build refuses
+# a URL that is not https, so that cannot happen quietly.
+#
+# TWO ASINs, ONE BOOK: B0HKH6PGTR is the paperback and B0HKH145N6 the Kindle
+# edition. The paperback is linked because it is the edition the price on this
+# page belongs to and its listing carries the Kindle option beside it; the
+# a.co share form is a redirector and is not used, since a link on our own
+# page should not depend on a second hop resolving. Verified on the listings
+# 2026-09-22.
+BOOK_URL = "https://www.amazon.com/dp/B0HKH6PGTR"
+BOOK_COVER = "cover-mark.jpg"
+BOOK_PAGES = 219
+
 
 # --- content ---------------------------------------------------------------
 #
@@ -345,6 +372,17 @@ SITE_CSS = """  :root {
     padding: 7px 14px; }
   .chart-card .reactions .thread:hover { border-color: var(--blue); color: var(--blue); }
   .guides { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  /* The book band: cover beside copy, stacking under 720px with the rest. */
+  .book { display: grid; grid-template-columns: 180px 1fr; gap: 22px;
+          align-items: start; background: var(--tint); border-radius: 12px;
+          border-left: 4px solid var(--orange); padding: 20px; }
+  .book-cover img { width: 100%; height: auto; border-radius: 6px;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18); display: block; }
+  .book-copy b { display: block; color: var(--deep); font-size: 22px;
+                 line-height: 1.2; }
+  .book-copy span { display: block; color: var(--muted); font-size: 16px;
+                    margin-top: 2px; }
+  .book-copy .deck { margin: 10px 0 0; }
   /* ===== ONE CARD, TWO COLOURS =====
      The landing page holds two kinds of card: a tool is something you use, a
      guide is something you read. Before this they were two neutral greys
@@ -388,6 +426,8 @@ SITE_CSS = """  :root {
     .paths .grid { grid-template-columns: 1fr; }
     .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
+    .book { grid-template-columns: 1fr; gap: 16px; }
+    .book-cover { max-width: 180px; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
@@ -782,6 +822,39 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
     infographics&nbsp;→</a></p>
 </section>'''
 
+    # 360px wide, which is 2x the ~180px the card draws it at. The source is
+    # the 1600x2560 Kindle cover, which is 120 KB and absurd for a card.
+    if not BOOK_URL.startswith("https://"):
+        sys.exit("  refusing: BOOK_URL is still the placeholder. Paste the "
+                 "Amazon listing URL into build_site.py; the ASIN cannot be "
+                 "derived from the ISBN.")
+    book_cover = _resized_jpeg(BOOK_COVER, 360, "card")
+    # The book band. The cover is a picture, so the card carries it, the way
+    # the infographics band does and for the same reason: a text-only card
+    # would advertise the one thing it cannot show.
+    book_section = f'''<section>
+  <h2>The book</h2>
+  <div class="book">
+    <a class="book-cover" href="{BOOK_URL}" rel="noopener">
+      <img src="/app/static/{book_cover}" width="360" height="576"
+           alt="{_attr(BOOK_TITLE + " " + BOOK_SUBTITLE)}, the cover"
+           loading="lazy"></a>
+    <div class="book-copy">
+      <b>{BOOK_TITLE}</b>
+      <span>{BOOK_SUBTITLE}</span>
+      <p class="deck">The same arithmetic this calculator runs, worked out at
+      length: what a degree costs a particular family, what the loan costs
+      after it, and what the degree pays back against never going. Nineteen
+      chapters, {BOOK_PAGES} pages, four families followed through the
+      numbers. Every figure is computed from a federal source and the sources
+      chapter says how to reproduce any of them.</p>
+      <p class="deck"><a href="{BOOK_URL}" rel="noopener"
+        style="color:var(--blue);font-weight:600;text-decoration:none">Paperback
+        and Kindle on Amazon&nbsp;→</a></p>
+    </div>
+  </div>
+</section>'''
+
     cap_body = "\n".join(
         f"        <tr><td>{label}</td><td>{money(d)}</td>"
         f"<td>{money(p)}{'*' if label == 'Senior' else ''}</td>"
@@ -947,6 +1020,8 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 <div class="wrap">
 
 {guides_section}
+
+{book_section}
 
 <div class="cta">
   <h2>Two minutes. Zero forms.</h2>
