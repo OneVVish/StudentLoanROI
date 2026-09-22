@@ -86,6 +86,17 @@ BOOK_SUBTITLE = "Paying for College in 2027 by the Numbers"
 BOOK_URL = "https://www.amazon.com/dp/B0HKH6PGTR"
 BOOK_AUTHOR = "Veer Vishwakarma"
 BOOK_COVER = "cover-mark.jpg"
+# brand/build_book_mockup.py draws this from the cover: the front in
+# perspective with a spine and a shadow, which is what makes a card read as a
+# book rather than a picture of one. Committed like every other generated
+# asset, because a clone cannot rebuild it without the cover.
+BOOK_MOCKUP = "book-3d.png"
+# THE "NEW" PILL EXPIRES BY ITSELF. A badge that has to be taken down by hand
+# is a badge that goes stale, and nothing in this build would remind anyone:
+# the chapters already had two 2026 dates left in the present tense until a
+# grep found them. Sixty days is about how long a release is news.
+BOOK_PUBLISHED = datetime.date(2026, 9, 21)
+BOOK_NEW_DAYS = 60
 BOOK_PAGES = 219
 
 
@@ -379,12 +390,17 @@ SITE_CSS = """  :root {
               text-decoration: none; margin-right: 18px; }
   .booklink:hover { color: var(--blue); }
   .booklink img { border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,.22); }
+  .booklink .pill { background: var(--orange); color: #fff; font-size: 11px;
+                    font-weight: 700; letter-spacing: .04em; text-transform:
+                    uppercase; border-radius: 999px; padding: 2px 7px; }
   /* The book band: cover beside copy, stacking under 720px with the rest. */
-  .book { display: grid; grid-template-columns: 180px 1fr; gap: 22px;
+  .book { display: grid; grid-template-columns: 200px 1fr; gap: 18px;
           align-items: start; background: var(--tint); border-radius: 12px;
           border-left: 4px solid var(--orange); padding: 20px; }
-  .book-cover img { width: 100%; height: auto; border-radius: 6px;
-                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18); display: block; }
+  /* The render carries its own spine and shadow, so the element gets
+     neither a radius nor a box-shadow: a second shadow under a drawn one
+     reads as two books. */
+  .book-cover img { width: 100%; height: auto; display: block; }
   .book-copy b { display: block; font-size: 22px; line-height: 1.2; }
   .book-copy b a { color: var(--deep); text-decoration: none; }
   .book-copy b a:hover { color: var(--blue); }
@@ -436,7 +452,7 @@ SITE_CSS = """  :root {
     .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .book { grid-template-columns: 1fr; gap: 16px; }
-    .book-cover { max-width: 180px; }
+    .book-cover { max-width: 200px; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
@@ -846,7 +862,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
   <p class="deck">Everything this calculator does, worked out at length.</p>
   <div class="book">
     <a class="book-cover" href="{BOOK_URL}" rel="noopener">
-      <img src="/app/static/{book_cover}" width="360" height="576"
+      <img src="/app/static/{BOOK_MOCKUP}" width="257" height="394"
            alt="{_attr(BOOK_TITLE + " " + BOOK_SUBTITLE)}, the cover"
            loading="lazy"></a>
     <div class="book-copy">
@@ -1606,9 +1622,11 @@ def book_header_link(on_landing: bool) -> str:
     fragment, the rule it already records).
     """
     href = "#the-book" if on_landing else "/welcome#the-book"
+    new = ((datetime.date.today() - BOOK_PUBLISHED).days <= BOOK_NEW_DAYS)
+    pill = '<span class="pill">New</span>' if new else ""
     return (f'<a class="booklink hide-m" href="{href}">'
             f'<img src="/app/static/{_resized_jpeg(BOOK_COVER, 64, "nav")}" '
-            f'width="20" height="32" alt="" loading="lazy">Read the book</a>')
+            f'width="20" height="32" alt="" loading="lazy">{pill}Read the book</a>')
 
 
 def card_thumb(source: str) -> str:

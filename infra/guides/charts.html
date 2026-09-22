@@ -242,12 +242,17 @@
               text-decoration: none; margin-right: 18px; }
   .booklink:hover { color: var(--blue); }
   .booklink img { border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,.22); }
+  .booklink .pill { background: var(--orange); color: #fff; font-size: 11px;
+                    font-weight: 700; letter-spacing: .04em; text-transform:
+                    uppercase; border-radius: 999px; padding: 2px 7px; }
   /* The book band: cover beside copy, stacking under 720px with the rest. */
-  .book { display: grid; grid-template-columns: 180px 1fr; gap: 22px;
+  .book { display: grid; grid-template-columns: 200px 1fr; gap: 18px;
           align-items: start; background: var(--tint); border-radius: 12px;
           border-left: 4px solid var(--orange); padding: 20px; }
-  .book-cover img { width: 100%; height: auto; border-radius: 6px;
-                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18); display: block; }
+  /* The render carries its own spine and shadow, so the element gets
+     neither a radius nor a box-shadow: a second shadow under a drawn one
+     reads as two books. */
+  .book-cover img { width: 100%; height: auto; display: block; }
   .book-copy b { display: block; font-size: 22px; line-height: 1.2; }
   .book-copy b a { color: var(--deep); text-decoration: none; }
   .book-copy b a:hover { color: var(--blue); }
@@ -299,7 +304,7 @@
     .infos { grid-template-columns: 1fr; }
     .guides { grid-template-columns: 1fr; }
     .book { grid-template-columns: 1fr; gap: 16px; }
-    .book-cover { max-width: 180px; }
+    .book-cover { max-width: 200px; }
     .hide-m { display: none; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
@@ -528,7 +533,7 @@
   </g>
 </svg>
 </a>
-  <a class="booklink hide-m" href="/welcome#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy">Read the book</a>
+  <a class="booklink hide-m" href="/welcome#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">
