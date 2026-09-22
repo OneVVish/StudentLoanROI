@@ -844,7 +844,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
       <span>{BOOK_SUBTITLE}</span>
       <p class="deck">The same arithmetic this calculator runs, worked out at
       length: what a degree costs a particular family, what the loan costs
-      after it, and what the degree pays back against never going. Nineteen
+      after it, and what the degree pays back against never going to college. Nineteen
       chapters, {BOOK_PAGES} pages, four families followed through the
       numbers. Every figure is computed from a federal source and the sources
       chapter says how to reproduce any of them.</p>
