@@ -263,9 +263,17 @@
                        color: var(--deep); margin: 0; }
   .book-hero-copy .sub { font-size: 20px; color: var(--muted); margin: 6px 0 0; }
   .book-hero-copy .byline { font-size: 15px; color: var(--deep); margin: 14px 0 0; }
-  .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
-  .btn.ghost { background: #fff; color: var(--deep);
-               box-shadow: inset 0 0 0 2px var(--deep); }
+  /* The one tinted callout on the page. It earns the emphasis by being the
+     only thing here with a date on it: everything else is true whenever it
+     is read, and this stops being true when the rules change again. */
+  .book-hero-copy .rules { background: var(--tint); border-left: 3px solid
+    var(--orange); border-radius: 0 8px 8px 0; padding: 12px 16px;
+    margin: 16px 0 0; font-size: 15px; color: var(--ink); }
+  /* .btn.ghost is defined ONCE, up with .btn. A second copy here won by
+     source order and said something slightly different, which is how two
+     rules for one class come to disagree. */
+  .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px;
+         align-items: center; }
   /* The header's book link: the cover at 20px beside two words. */
   .booklink { display: inline-flex; align-items: center; gap: 8px;
               color: var(--deep); font-weight: 600; font-size: 15px;
