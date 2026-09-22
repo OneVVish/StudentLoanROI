@@ -533,7 +533,7 @@
   </g>
 </svg>
 </a>
-  <a class="booklink hide-m" href="/welcome#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
+  <a class="booklink hide-m" data-book="header" href="/welcome#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 
@@ -782,6 +782,28 @@
       return;
     }
     copy();
+  });
+})();
+</script>
+<script>
+(function () {
+  var seen = {};
+  document.querySelectorAll("[data-book]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var where = el.getAttribute("data-book");
+      // Once per place per page view. A reader who clicks the cover, goes
+      // back and clicks it again is one person interested, not two.
+      if (seen[where]) return;
+      seen[where] = 1;
+      try {
+        fetch("/api/book" + location.search, {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({where: where}),
+          keepalive: true,
+        }).catch(function () {});
+      } catch (e) {}
+    });
   });
 })();
 </script>

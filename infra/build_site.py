@@ -147,6 +147,42 @@ SUPPORTED_MARKDOWN = """
 # the app validates against NAV_ORIGINS and logs as `nav:from=X:to=Y`. Drop
 # either and the link silently stops being counted --
 # check_internal_links.py asserts app-bound hrefs still carry them.
+# THE BOOK LINKS ARE COUNTED, and four places lead to the book: the header
+# link on every page, and the cover, the title and the Amazon line in the
+# band. They answer different questions ("did anyone notice it exists" against
+# "did the band persuade anyone"), so each posts its own `where`.
+#
+# A BEACON, NOT A PAGE LOAD, for two reasons. The header link on the landing
+# is a fragment jump, which makes no request at all; and the Amazon links
+# leave the site, where an ordinary fetch is cancelled the moment navigation
+# starts. keepalive fixes the second, exactly as the guide share button does.
+#
+# location.search rides along so the Worker sees ?test=1 and src=selftest and
+# excludes the row, the rule the like and share POSTs already follow:
+# CARRY_QS_JS rewrites <a href> and cannot touch a fetch.
+BOOK_CLICK_JS = """<script>
+(function () {
+  var seen = {};
+  document.querySelectorAll("[data-book]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var where = el.getAttribute("data-book");
+      // Once per place per page view. A reader who clicks the cover, goes
+      // back and clicks it again is one person interested, not two.
+      if (seen[where]) return;
+      seen[where] = 1;
+      try {
+        fetch("/api/book" + location.search, {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({where: where}),
+          keepalive: true,
+        }).catch(function () {});
+      } catch (e) {}
+    });
+  });
+})();
+</script>"""
+
 CARRY_QS_JS = """<script>
 (function () {
   var qs = location.search.replace(/^\\?/, "");
@@ -906,12 +942,12 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
   <h2 id="the-book">The book</h2>
   <p class="deck">Everything this calculator does, worked out at length.</p>
   <div class="book">
-    <a class="book-cover" href="{BOOK_URL}" rel="noopener">
+    <a class="book-cover" data-book="cover" href="{BOOK_URL}" rel="noopener">
       <img src="/app/static/{BOOK_MOCKUP}" width="257" height="394"
            alt="{_attr(BOOK_TITLE + " " + BOOK_SUBTITLE)}, the cover"
            loading="lazy"></a>
     <div class="book-copy">
-      <b><a href="{BOOK_URL}" rel="noopener">{BOOK_TITLE}</a></b>
+      <b><a data-book="title" href="{BOOK_URL}" rel="noopener">{BOOK_TITLE}</a></b>
       <span>{BOOK_SUBTITLE}</span>
       <span class="byline">By {BOOK_AUTHOR}, founder of worthmydegree.com</span>
       <p class="deck">The federal government will lend a family $92,000 for
@@ -921,7 +957,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
       after it, and what the degree pays back against never going to college.
       Nineteen chapters, {BOOK_PAGES} pages, four families followed all the
       way through. Every figure computed from a federal source.</p>
-      <p class="deck"><a href="{BOOK_URL}" rel="noopener"
+      <p class="deck"><a data-book="cta" href="{BOOK_URL}" rel="noopener"
         style="color:var(--blue);font-weight:600;text-decoration:none">Paperback
         and Kindle on Amazon&nbsp;→</a></p>
     </div>
@@ -1117,6 +1153,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 </footer>
 
 </div>
+{BOOK_CLICK_JS}
 {CARRY_QS_JS}
 </body>
 </html>
@@ -1580,6 +1617,7 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
   }});
 }})();
 </script>
+{BOOK_CLICK_JS}
 {CARRY_QS_JS}
 </body>
 </html>
@@ -1670,7 +1708,7 @@ def book_header_link(on_landing: bool) -> str:
     href = "#the-book" if on_landing else "/welcome#the-book"
     new = ((datetime.date.today() - BOOK_PUBLISHED).days <= BOOK_NEW_DAYS)
     pill = '<span class="pill">New</span>' if new else ""
-    return (f'<a class="booklink hide-m" href="{href}">'
+    return (f'<a class="booklink hide-m" data-book="header" href="{href}">'
             f'<img src="/app/static/{_resized_jpeg(BOOK_COVER, 64, "nav")}" '
             f'width="20" height="32" alt="" loading="lazy">{pill}Read the book</a>')
 
@@ -2061,6 +2099,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
   {ORG_STATUS_LINE}
 </footer>
 </div>
+{BOOK_CLICK_JS}
 {CARRY_QS_JS}
 <script>
 (function () {{
@@ -2302,6 +2341,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   {ORG_STATUS_LINE}
 </footer>
 </div>
+{BOOK_CLICK_JS}
 {CARRY_QS_JS}
 </body>
 </html>

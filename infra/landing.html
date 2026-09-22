@@ -446,7 +446,7 @@
   </g>
 </svg>
 </a>
-  <a class="booklink hide-m" href="#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
+  <a class="booklink hide-m" data-book="header" href="#the-book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
   <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
@@ -609,12 +609,12 @@
   <h2 id="the-book">The book</h2>
   <p class="deck">Everything this calculator does, worked out at length.</p>
   <div class="book">
-    <a class="book-cover" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">
+    <a class="book-cover" data-book="cover" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">
       <img src="/app/static/book-3d.png" width="257" height="394"
            alt="Is It Worth It? Paying for College in 2027 by the Numbers, the cover"
            loading="lazy"></a>
     <div class="book-copy">
-      <b><a href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">Is It Worth It?</a></b>
+      <b><a data-book="title" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener">Is It Worth It?</a></b>
       <span>Paying for College in 2027 by the Numbers</span>
       <span class="byline">By Veer Vishwakarma, founder of worthmydegree.com</span>
       <p class="deck">The federal government will lend a family $92,000 for
@@ -624,7 +624,7 @@
       after it, and what the degree pays back against never going to college.
       Nineteen chapters, 219 pages, four families followed all the
       way through. Every figure computed from a federal source.</p>
-      <p class="deck"><a href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener"
+      <p class="deck"><a data-book="cta" href="https://www.amazon.com/dp/B0HKH6PGTR" rel="noopener"
         style="color:var(--blue);font-weight:600;text-decoration:none">Paperback
         and Kindle on Amazon&nbsp;→</a></p>
     </div>
@@ -650,6 +650,28 @@
 </footer>
 
 </div>
+<script>
+(function () {
+  var seen = {};
+  document.querySelectorAll("[data-book]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var where = el.getAttribute("data-book");
+      // Once per place per page view. A reader who clicks the cover, goes
+      // back and clicks it again is one person interested, not two.
+      if (seen[where]) return;
+      seen[where] = 1;
+      try {
+        fetch("/api/book" + location.search, {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({where: where}),
+          keepalive: true,
+        }).catch(function () {});
+      } catch (e) {}
+    });
+  });
+})();
+</script>
 <script>
 (function () {
   var qs = location.search.replace(/^\?/, "");
