@@ -2714,3 +2714,72 @@ end $$;
 -- Rows after this date carry the length on the share params `cl` (certificate
 -- band, an IPEDS AWLEVEL code) and `scl`, but only when the visitor's session
 -- had one stored, so absence means the default of one year rather than four.
+
+
+-- ---------------------------------------------------------------------------
+-- 2026-09-22  THE HIGH SCHOOL BASELINE STOPPED CARRYING OTHER PEOPLE'S DEGREES
+-- ---------------------------------------------------------------------------
+-- NO DDL. Nothing to run; this is a read-side seam, recorded so rows either
+-- side of it are not pooled by accident.
+--
+-- Until this date `calculate_roi` scaled the national high-school median by
+-- the metro's ALL-OCCUPATIONS wage index. A metro's all-occupations median is
+-- high partly BECAUSE the metro is full of degree-holders, so scaling the
+-- NON-degree baseline by it handed the person who never enrolled a wage
+-- inflated by other people's degrees. The baseline now reads a no-degree
+-- index built from the occupations BLS says need no degree
+-- (data/metro_nodegree_index.csv, 430 occupations, 92.0M jobs).
+--
+-- DIRECTION: an overstated baseline UNDERSTATES the premium, so every row
+-- before this date on a non-national city understates its own premium, ROI
+-- and break-even, and overstates its crossover age. The app erred AGAINST the
+-- degree, which is the direction this project prefers and is not a defence:
+-- erring conservatively by accident and on purpose look identical in a table.
+--
+-- WHICH ROWS. `hs_wage_index` is not logged, but `city` is, so the affected
+-- rows are exactly those whose city is not "National Average". A row on the
+-- national default does not move at all: the index is 1.0 either way.
+--
+-- RECOVERABLE RATHER THAN DISCARDABLE. Multiply the old baseline by the
+-- factor below for that city and the comparison can be redone; the premium
+-- does not scale linearly, so the factor adjusts the BASELINE, not the
+-- premium.
+--
+--   San Francisco, CA      1.457 -> 1.153   baseline x0.791
+--   Austin, TX             1.117 -> 0.904   baseline x0.809
+--   Boston, MA             1.307 -> 1.078   baseline x0.825
+--   Seattle, WA            1.424 -> 1.178   baseline x0.827
+--   Dallas, TX             1.009 -> 0.874   baseline x0.866
+--   Denver, CO             1.222 -> 1.064   baseline x0.871
+--   New York, NY           1.205 -> 1.071   baseline x0.889
+--   Houston, TX            0.969 -> 0.862   baseline x0.889
+--   Atlanta, GA            1.004 -> 0.897   baseline x0.893
+--   Cleveland, OH          0.984 -> 0.887   baseline x0.901
+--   San Diego, CA          1.151 -> 1.054   baseline x0.915
+--   Detroit, MI            1.022 -> 0.936   baseline x0.916
+--   Miami, FL              0.954 -> 0.875   baseline x0.917
+--   San Antonio, TX        0.922 -> 0.850   baseline x0.922
+--   Chicago, IL            1.073 -> 0.990   baseline x0.923
+--   Minneapolis, MN        1.164 -> 1.074   baseline x0.923
+--   Columbus, OH           1.007 -> 0.935   baseline x0.928
+--   Philadelphia, PA       1.065 -> 0.998   baseline x0.936
+--   Los Angeles, CA        1.096 -> 1.048   baseline x0.956
+--   Charlotte, NC          0.981 -> 0.972   baseline x0.991
+--   Nashville, TN          0.988 -> 0.980   baseline x0.991
+--   Phoenix, AZ            1.008 -> 1.039   baseline x1.031
+--
+-- 21 of the 22 run the same way. Phoenix is the only one the other way, and
+-- only by 3%, which is what an education-neutral labour market looks like.
+-- Austin is the case that is not about expensive cities: its all-occupations
+-- index is ABOVE national at 1.117 while its no-degree wage is BELOW it at
+-- 0.904, so the old index raised a baseline that should fall.
+--
+-- CORROBORATED BY AN INSTRUMENT SHARING NO METHODOLOGY: Census ACS puts a San
+-- Francisco high school graduate at 1.152x the national figure against OEWS's
+-- 1.153. Two agencies, two surveys, two definitions of "high school
+-- graduate", 0.001 apart.
+--
+-- THE PUBLISHED BOOK IS ON THE OLD MODEL and cannot move. Chapter 12's city
+-- table is the one place it quotes a city-dependent break-even: Columbus
+-- $103,256 becomes $132,950 and San Francisco "never breaks even" becomes
+-- $8,102. The national figures it prints are unaffected, the index being 1.0.

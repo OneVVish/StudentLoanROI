@@ -490,6 +490,8 @@ METRO_CAREERS_CSV_PATH = "data/metro_careers_clean.csv"
 #     population, though it's a poor stand-in for a single occupation --
 #     which is why Career mode uses real per-metro wages instead.
 METRO_WAGE_INDEX_CSV_PATH = "data/metro_wage_index.csv"
+# THE BASELINE HAS ITS OWN INDEX, AND MUST. See get_baseline_wage_index.
+METRO_NODEGREE_INDEX_CSV_PATH = "data/metro_nodegree_index.csv"
 
 # How many years separate starting_salary from median_salary in each dataset.
 # BLS: the 25th-percentile-to-median reading this app has always used. NY Fed
@@ -600,6 +602,52 @@ def load_metro_wage_index(csv_path: str) -> dict:
     except (FileNotFoundError, pd.errors.EmptyDataError):
         return {}
     return {row.city: float(row.wage_index) for row in df.itertuples()}
+
+
+@st.cache_data
+def load_metro_nodegree_index(csv_path: str) -> dict:
+    """{city: baseline_index} from data_pipeline.py --metros, the wage level
+    for work that needs no degree. Missing file or unknown city means 1.0."""
+    try:
+        df = pd.read_csv(csv_path)
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return {}
+    return {row.city: float(row.baseline_index) for row in df.itertuples()}
+
+
+def get_baseline_wage_index(city: str) -> float:
+    """The index the HIGH SCHOOL BASELINE is scaled by, which is NOT the
+    all-occupations one.
+
+    THE OLD INDEX IMPORTED THE DEGREE PREMIUM INTO THE COUNTERFACTUAL. Every
+    baseline call site used to resolve get_metro_wage_index, BLS's
+    all-occupations median for the metro. A Bay Area all-occupations median is
+    high partly BECAUSE the metro is full of degree-holders, so scaling the
+    NON-degree baseline by it hands the person who never enrolled a wage
+    inflated by other people's degrees. San Francisco's all-occupations index
+    is 1.457 where its no-degree wage is 1.153: a $51,688 baseline became
+    $75,289 instead of about $59,600, and 21 of the 22 metros ran the same
+    way. Austin is the case that is not about expensive cities, its
+    all-occupations index above national at 1.117 while its no-degree wage is
+    below it at 0.904.
+
+    The intent was always right and is in build_metro_wage_index's own
+    docstring: a high school graduate in San Francisco earns more too, so the
+    metro premium has to move BOTH sides or the city flatters the degree. Only
+    the instrument was wrong.
+
+    Corroborated by an instrument sharing no methodology: Census ACS puts San
+    Francisco at 1.152 against OEWS's 1.153. Two agencies, two surveys, two
+    definitions of "high school graduate", 0.001 apart.
+
+    FALLS BACK TO 1.0, NEVER TO THE ALL-OCCUPATIONS INDEX. A metro with no
+    no-degree figure is "we do not know", and the national median is the
+    honest answer; falling back to the old index would reintroduce the bug for
+    exactly the metros the new file could not measure, silently.
+    """
+    if not city or city == "National Average":
+        return 1.0
+    return load_metro_nodegree_index(METRO_NODEGREE_INDEX_CSV_PATH).get(city, 1.0)
 
 
 def get_metro_wage_index(city: str) -> float:
@@ -17440,7 +17488,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
             # half of a chart twin -- which is exactly what it was: the report
             # drew one plan under a screen showing two.
             net_position_frame(_pdf_np_pairs, col_index,
-                                get_metro_wage_index(city),
+                                get_baseline_wage_index(city),
                                 net_position_chart_years(roi_window_years),
                                 include_debt_free=net_position_reference_on()),
             roi_window_years,
@@ -17459,7 +17507,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         major, loan_amount, interest_rate, repayment_strategy,
         roi_window_years=roi_window_years, col_index=col_index,
         career_data_source=career_data_source,
-        hs_wage_index=get_metro_wage_index(city),
+        hs_wage_index=get_baseline_wage_index(city),
         personal_contribution=scenario["personal_contribution"],
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
@@ -17467,7 +17515,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
         professional_debt=professional_debt_a,
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=dependents, include_fees=include_fees, subsidized_cap=subsidized_cap_a,
         crossover=net_position_crossover(scenario, col_index,
-                                         get_metro_wage_index(city)),
+                                         get_baseline_wage_index(city)),
         resolved_professional_debt=scenario.get("professional_debt") or 0.0,
             **breakeven_kwargs())
     story += _pdf_breakeven_block(breakeven, styles)
@@ -17475,7 +17523,7 @@ def generate_pdf_report_single(major, city, school_name_a, in_state_a, takehome_
 
     story += _pdf_module_sections(
         module_context, scenario_a=scenario, major_name_a=major, interest_rate_a=interest_rate,
-        col_index=col_index, hs_wage_index=get_metro_wage_index(city),
+        col_index=col_index, hs_wage_index=get_baseline_wage_index(city),
         key_suffix_a="single", roi_window_years=roi_window_years,
     )
     # Only cite the professional-school sources when this major actually uses
@@ -18097,9 +18145,9 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     # numbers -- and two calls that drifted apart in their arguments would put
     # two different ages in one report.
     _crossover_a = net_position_crossover(scenario_a, col_index,
-                                          get_metro_wage_index(city))
+                                          get_baseline_wage_index(city))
     _crossover_b = net_position_crossover(scenario_b, col_index,
-                                          get_metro_wage_index(city))
+                                          get_baseline_wage_index(city))
     story = [
         # Same cover treatment as the single-scenario report -- see the
         # comment there. The disclaimer isn't repeated in the body because
@@ -18146,7 +18194,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             breakeven_summary(major, loan_amount_a, interest_rate, repayment_strategy,
                               roi_window_years=roi_window_years, col_index=col_index,
                               career_data_source=career_data_source,
-                              hs_wage_index=get_metro_wage_index(city),
+                              hs_wage_index=get_baseline_wage_index(city),
                               personal_contribution=scenario_a["personal_contribution"],
                               enrollment_years=scenario_a["enrollment_years"],
                               working_years=scenario_a["working_years"],
@@ -18175,7 +18223,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             breakeven_summary(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                               roi_window_years=roi_window_years, col_index=col_index,
                               career_data_source=career_data_source,
-                              hs_wage_index=get_metro_wage_index(city),
+                              hs_wage_index=get_baseline_wage_index(city),
                               personal_contribution=scenario_b["personal_contribution"],
                               enrollment_years=scenario_b["enrollment_years"],
                               working_years=scenario_b["working_years"],
@@ -18212,7 +18260,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
             net_position_frame(
                 [(compare_series_label("A", scenario_a, (cc_info_a or {}).get('mode'), _pdf_plans_differ), scenario_a),
                  (compare_series_label("B", scenario_b, (cc_info_b or {}).get('mode'), _pdf_plans_differ), scenario_b)],
-                col_index, get_metro_wage_index(city),
+                col_index, get_baseline_wage_index(city),
                 net_position_chart_years(roi_window_years),
                 include_debt_free=net_position_reference_on()),
             roi_window_years,
@@ -18234,7 +18282,7 @@ def generate_pdf_report_compare(city, major, school_name_a, in_state_a, coa_per_
     story += _pdf_module_sections(
         module_context, scenario_a=scenario_a, major_name_a=major, interest_rate_a=interest_rate,
         scenario_b=scenario_b, major_name_b=major_b, interest_rate_b=interest_rate_b,
-        col_index=col_index, hs_wage_index=get_metro_wage_index(city),
+        col_index=col_index, hs_wage_index=get_baseline_wage_index(city),
         roi_window_years=roi_window_years,
     )
     story += _pdf_sources_section(
@@ -29705,7 +29753,7 @@ if compare_mode:
         scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                                personal_contribution, city_info["col_index"],
                                                roi_window_years=roi_horizon_years,
-                                               hs_wage_index=get_metro_wage_index(city),
+                                               hs_wage_index=get_baseline_wage_index(city),
                                                enrollment_years=enrollment_years_a,
                                                working_years=working_years_a,
                                                baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
@@ -29715,7 +29763,7 @@ if compare_mode:
         scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                                personal_contribution_b, city_info["col_index"],
                                                roi_window_years=roi_horizon_years,
-                                               hs_wage_index=get_metro_wage_index(city),
+                                               hs_wage_index=get_baseline_wage_index(city),
                                                enrollment_years=enrollment_years_b,
                                                working_years=working_years_b,
                                                baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),
@@ -29756,7 +29804,7 @@ if compare_mode:
             col_a, scenario_a, "A", roi_horizon_years,
             loan_amount, interest_rate, repayment_strategy,
             city_info["col_index"], career_data_source,
-            hs_wage_index=get_metro_wage_index(city),
+            hs_wage_index=get_baseline_wage_index(city),
             federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
             cc_mode=cc_mode_a, wage_row_slots=_wage_slots,
             loan_basis=loan_basis_a, program_years=program_years_a, cost_years=cost_years_a,
@@ -29770,7 +29818,7 @@ if compare_mode:
             col_b, scenario_b, "B", roi_horizon_years,
             loan_amount_b, interest_rate_b, repayment_strategy_b,
             city_info["col_index"], career_data_source,
-            hs_wage_index=get_metro_wage_index(city),
+            hs_wage_index=get_baseline_wage_index(city),
             federal_cap=federal_cap_b, plus_cap=plus_cap_b, gap_rate=gap_rate_b, dependents=rap_dependents, professional_debt=professional_debt_b, include_fees=True, subsidized_cap=subsidized_cap_b,
             cc_mode=cc_mode_b, wage_row_slots=_wage_slots,
             loan_basis=loan_basis_b, program_years=program_years_b, cost_years=cost_years_b,
@@ -29885,7 +29933,7 @@ if compare_mode:
     render_net_position_chart(
         [(compare_series_label("A", scenario_a, cc_mode_a, _plans_differ), scenario_a),
          (compare_series_label("B", scenario_b, cc_mode_b, _plans_differ), scenario_b)],
-        city_info["col_index"], get_metro_wage_index(city), roi_horizon_years,
+        city_info["col_index"], get_baseline_wage_index(city), roi_horizon_years,
         baseline_head_start_years=max(scenario_a["enrollment_years"],
                                        scenario_b["enrollment_years"]),
         container=compare_position_container, own_card=False,
@@ -30007,7 +30055,7 @@ if compare_mode:
             render_share_card_button(
                 [(major, scenario_a), (major_b, scenario_b)], None,
                 school_name_a, repayment_strategy, roi_horizon_years,
-                city_info["col_index"], get_metro_wage_index(city),
+                city_info["col_index"], get_baseline_wage_index(city),
                 key="share_card_compare", signature=_pdf_sig)
 else:
     # ONE dict, spread into BOTH plan computations below. The repayment-plan
@@ -30022,7 +30070,7 @@ else:
         personal_contribution=personal_contribution,
         col_index=city_info["col_index"],
         roi_window_years=roi_horizon_years,
-        hs_wage_index=get_metro_wage_index(city),
+        hs_wage_index=get_baseline_wage_index(city),
         enrollment_years=enrollment_years_a,
         working_years=working_years_a,
         baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
@@ -30268,7 +30316,7 @@ else:
         # third computation.
         render_net_position_chart(
             [(major, scenario)], city_info["col_index"],
-            get_metro_wage_index(city), roi_horizon_years,
+            get_baseline_wage_index(city), roi_horizon_years,
             baseline_head_start_years=scenario["enrollment_years"],
             alternate_pair=(f"{major} on {_alt['strategy_label']}", _alt),
             # The verdict section is already a card; a second one inside it
@@ -30286,14 +30334,14 @@ else:
         major, loan_amount, interest_rate, repayment_strategy,
         roi_window_years=roi_horizon_years, col_index=city_info["col_index"],
         career_data_source=career_data_source,
-        hs_wage_index=get_metro_wage_index(city),
+        hs_wage_index=get_baseline_wage_index(city),
         personal_contribution=personal_contribution,
         enrollment_years=scenario["enrollment_years"],
         working_years=scenario["working_years"],
         baseline_start_age=scenario["baseline_start_age"],
         federal_cap=federal_cap_a, plus_cap=plus_cap_a, gap_rate=gap_rate_a, dependents=rap_dependents, professional_debt=professional_debt_a, include_fees=True, subsidized_cap=subsidized_cap_a,
         crossover=net_position_crossover(scenario, city_info["col_index"],
-                                         get_metro_wage_index(city)),
+                                         get_baseline_wage_index(city)),
         resolved_professional_debt=scenario.get("professional_debt") or 0.0,
             **breakeven_kwargs())
     if breakeven["headline"]:
@@ -30441,7 +30489,7 @@ else:
             render_share_card_button(
                 [(major, scenario)], breakeven, school_name_a,
                 repayment_strategy, roi_horizon_years,
-                city_info["col_index"], get_metro_wage_index(city),
+                city_info["col_index"], get_baseline_wage_index(city),
                 key="share_card_single", signature=_pdf_sig)
 
 st.divider()
@@ -30679,7 +30727,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                 scenario_a = compute_scenario_results(major, loan_amount, interest_rate, repayment_strategy,
                                                        personal_contribution, city_info["col_index"],
                                                        roi_window_years=roi_horizon_years,
-                                                       hs_wage_index=get_metro_wage_index(city),
+                                                       hs_wage_index=get_baseline_wage_index(city),
                                                        enrollment_years=enrollment_years_a,
                                                        working_years=working_years_a,
                                                        baseline_start_age=baseline_start_age_for(program_years_a, enrollment_years_a, _selected_title_a),
@@ -30696,7 +30744,7 @@ Questions about the research? Contact **research@worthmydegree.com**.
                     scenario_b = compute_scenario_results(major_b, loan_amount_b, interest_rate_b, repayment_strategy_b,
                                                            personal_contribution_b, city_info["col_index"],
                                                            roi_window_years=roi_horizon_years,
-                                                           hs_wage_index=get_metro_wage_index(city),
+                                                           hs_wage_index=get_baseline_wage_index(city),
                                                            enrollment_years=enrollment_years_b,
                                                            working_years=working_years_b,
                                                            baseline_start_age=baseline_start_age_for(program_years_b, enrollment_years_b, _selected_title_b),

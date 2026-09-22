@@ -147,6 +147,78 @@ def check_age_curve_still_carries_progression(ns) -> list:
     return problems
 
 
+# San Francisco's no-degree wage level, TRANSCRIBED FROM AN INDEPENDENT
+# SOURCE, never read off the CSV under test. Census ACS via the Silicon Valley
+# Institute for Regional Studies puts a San Francisco high school graduate's
+# median earnings at 1.152x the national figure; this repo's own OEWS files,
+# a different agency measuring a different thing (the job's required education
+# rather than the person's attainment), give 1.153. The tolerance is wide
+# enough that the two instruments agreeing is what passes, and narrow enough
+# that the ALL-OCCUPATIONS index of 1.457 cannot.
+#
+# This is the check_rap_payment_table discipline: a guard that derives its
+# expectation from the file it is guarding asserts only that the file equals
+# itself.
+SF_NODEGREE_INDEX = 1.152
+SF_INDEX_TOLERANCE = 0.05
+SF_CITY = "San Francisco, CA"
+
+
+def check_baseline_uses_the_nodegree_index(ns) -> list:
+    """The baseline is scaled by the no-degree index, not the all-occupations
+    one.
+
+    A metro's all-occupations median is high partly BECAUSE the metro is full
+    of degree-holders, so scaling the NON-degree baseline by it imports the
+    degree premium into the counterfactual the degree is measured against.
+    Nothing asserted anything about either index until this existed, and the
+    wrong one was wired to all 23 baseline call sites.
+    """
+    found = []
+    baseline = ns["get_baseline_wage_index"](SF_CITY)
+    if abs(baseline - SF_NODEGREE_INDEX) > SF_INDEX_TOLERANCE:
+        found.append(
+            f"the baseline index for {SF_CITY} is {baseline:.3f}, and Census "
+            f"ACS puts a high school graduate there at {SF_NODEGREE_INDEX:.3f}. "
+            f"If this is the all-occupations index (about 1.457), every "
+            f"baseline is carrying other people's degrees.")
+    career = ns["get_metro_wage_index"](SF_CITY)
+    if abs(baseline - career) < 0.01:
+        found.append(
+            f"the baseline index and the all-occupations index are both "
+            f"{baseline:.3f} for {SF_CITY}. Either a build wrote the same "
+            f"figure into both files, or the baseline is reading the wrong "
+            f"one -- and the two measure different populations.")
+    return found
+
+
+def check_every_city_resolves(ns) -> list:
+    """Every city the app offers has a baseline index, and an unknown one
+    falls back to exactly 1.0.
+
+    FALLING BACK TO 1.0 AND NOT TO THE ALL-OCCUPATIONS INDEX is the point. A
+    metro with no no-degree figure is "we do not know", and the national
+    median is the honest answer; falling back to the old index would
+    reintroduce the bug for exactly the metros the file could not measure,
+    silently.
+    """
+    found = []
+    for city in ns["CITY_DATA"]:
+        if city == "National Average":
+            continue
+        ix = ns["get_baseline_wage_index"](city)
+        if not (0.5 < ix < 2.0):
+            found.append(f"{city} resolves to {ix}, which is not a wage index")
+    for absent in ("Nowhere, ZZ", "", None):
+        ix = ns["get_baseline_wage_index"](absent)
+        if ix != 1.0:
+            found.append(
+                f"an unknown city ({absent!r}) resolves to {ix}, not 1.0. The "
+                f"fallback must be the national figure, never the "
+                f"all-occupations index.")
+    return found
+
+
 def main() -> int:
     ns = load_app_namespace()
     problems, checks = [], 0
@@ -156,6 +228,10 @@ def main() -> int:
          lambda: check_growth_rates_are_comparable(ns)),
         ("the age curve still carries progression",
          lambda: check_age_curve_still_carries_progression(ns)),
+        ("the baseline uses the no-degree index",
+         lambda: check_baseline_uses_the_nodegree_index(ns)),
+        ("every city resolves, and an unknown one is 1.0",
+         lambda: check_every_city_resolves(ns)),
     ):
         checks += 1
         found = run()
@@ -174,8 +250,10 @@ def main() -> int:
     print(f"baseline units OK -- the baseline carries no calendar drift, its "
           f"real progression ({baseline_rate:.2%}/yr, CPS) sits beside the "
           f"median occupation's ({rates[len(rates)//2]:.2%}/yr, OEWS), and the "
-          f"age curve still does its job ({checks} checks, 3 negative "
-          f"controls).")
+          f"age curve still does its job. The baseline reads the NO-DEGREE "
+          f"metro index ({SF_CITY} {ns['get_baseline_wage_index'](SF_CITY):.3f} "
+          f"against the all-occupations {ns['get_metro_wage_index'](SF_CITY):.3f}) "
+          f"({checks} checks, 5 negative controls).")
     return 0
 
 
