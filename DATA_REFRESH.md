@@ -20,7 +20,7 @@ VERIFIED without recording where you read it.
 
 | Source | Feeds | Committed vintage | Cadence | Status |
 | --- | --- | --- | --- | --- |
-| College Scorecard | `college_coa_clean.csv`, `graduate_debt_clean.csv`, `discipline_outcomes_clean.csv` | release June 10, 2026; cost fields report **2024** | **2 to 5 releases a year, irregular** | VERIFIED 2026-09-15 |
+| College Scorecard | `college_coa_clean.csv`, `graduate_debt_clean.csv`, `discipline_outcomes_clean.csv` | release June 10, 2026; cost fields report **2024**; field-of-study earnings measured 2022-2023 | **2 to 5 releases a year, irregular; cost and earnings move on their own clocks** | VERIFIED 2026-09-15; earnings refresh REPORTED for July 2027 |
 | BLS OEWS | `cleaned_careers.csv`, `state_careers_clean.csv`, `metro_careers_clean.csv`, `metro_wage_index.csv` | May 2025 reference period | annual, released the following spring | ASSUMED |
 | BLS CPS usual weekly earnings | `HS_GRAD_SALARY` | **2026 Q2, $994/week** | **quarterly** | VERIFIED 2026-09-16 |
 | IPEDS IC/HD | `graduate_tuition_clean.csv`, `professional_tuition_clean.csv`, `cc_costs_clean.csv`, `public4_systems_clean.csv` | IC2023_AY / HD2023 | annual collection; the charges file LAGS the directory | ASSUMED |
@@ -49,6 +49,43 @@ was established, and it is the check to repeat: match a handful of committed
 `in_state_coa` values against the API's `<year>.cost.attendance.academic_year`
 for the same UNITID and see which year hits to the dollar. A wider sweep gets
 HTTP 429.
+
+**AND A RELEASE IS NOT AN EARNINGS REFRESH EITHER, which is a third clock in
+the same source.** Learned 2026-09-24 from U.S. News's own 2027 rankings
+methodology, which is the most detailed public account of Scorecard's earnings
+vintages anyone has written down. Scorecard carries TWO earnings series and
+they move independently of each other and of the release:
+
+- **The institutional earnings premium** (the share of a school's graduates
+  earning more than a typical high school graduate) was **still at 2020-2021**
+  when the 2027 rankings were finalized in September 2026. U.S. News says so
+  outright and reallocates around it. Nothing in this app reads that series
+  today.
+- **The field-of-study earnings**, which `discipline_outcomes_clean.csv` DOES
+  read, moved in a **March 2026** release carrying the 2017-18 and 2018-19
+  completion cohorts, measured four years out in 2022 and 2023 and inflation
+  adjusted. Our committed file is built from the dated June 10, 2026
+  field-of-study download, so it is at or past that vintage.
+
+**THE NEXT EARNINGS REFRESH HAS A DATE, AND IT IS THE FIRST ONE IN THIS FILE
+THAT IS MANDATED RATHER THAN OBSERVED.** U.S. News reports that updates to the
+earnings data are "now federally mandated and scheduled by the U.S. Department
+of Education to be publicly disclosed in **July 2027**, following a 2025
+amendment to the Higher Education Act."
+
+**Status: REPORTED, not VERIFIED.** That sentence is U.S. News describing a
+statute, read at their methodology page on 2026-09-24, not ED describing its
+own schedule and not the amendment itself. This file's own rule forbids
+promoting it without recording where it was read, so it stays REPORTED until
+someone reads it at ED or in the statute. It is worth carrying anyway, because
+a dated refresh is the one thing every other row in this table lacks.
+
+**WHAT MOVES WHEN IT LANDS.** `discipline_outcomes_clean.csv` is rebuilt from
+the field-of-study release, and the published figures drawn from it go stale in
+the same moment: the state-share and nursing-concentration numbers in
+`content/posts/college-roi-rankings.md`, and anything the decks quote from the
+same file. Re-derive rather than assume the direction; the whole point of the
+2025 amendment is that these numbers were allowed to sit.
 
 ## The two high-school-baseline sources, checked 2026-09-16
 
