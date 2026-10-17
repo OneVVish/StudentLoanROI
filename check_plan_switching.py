@@ -126,14 +126,39 @@ def check_household(ns):
             f"  filing separately counts ${separate:,.0f}, not the borrower's "
             "alone\n    that exclusion is the whole reason the control exists")
 
-    # THE ASYMMETRY, which is the finding this feature exists to surface: a
-    # spouse raises family size even when their income is excluded, so filing
-    # separately after marrying shelters MORE than being single did.
-    if not allowance(2) > allowance(1):
+    # THE SPOUSE LEAVES THE FAMILY SIZE ON A SEPARATE RETURN. 34 CFR
+    # 685.209(b)(9)(i)(B), read 2026-10-17, counts the spouse "for a married
+    # borrower filing a joint Federal income tax return" and no other. This
+    # block used to assert the opposite (a spouse raising family size even when
+    # their income is excluded), and the app understated every separately filed
+    # IBR payment by one person's shelter to match. The household question
+    # includes the spouse, so a separate filer is one fewer.
+    fam = ns["idr_family_size"]
+    sep, jnt, sgl = (ns["FILING_SEPARATE"], ns["FILING_JOINT"],
+                     ns["FILING_SINGLE"])
+    for household, status, want in ((2, sep, 1), (4, sep, 3), (1, sep, 1),
+                                    (2, jnt, 2), (3, sgl, 3), (None, sep, None)):
+        got = fam(household, status)
+        if got != want:
+            problems.append(
+                f"  idr_family_size({household}, {status!r}) is {got}, not {want}"
+                "\n    685.209(b)(9) counts the spouse on a joint return only")
+
+    # End to end, on a literal: $60,000, a separate filer in a household of two
+    # (borrower and spouse), new-borrower IBR at 10%. The spouse is out, so the
+    # shelter is 150% of the ONE-person guideline, $23,940, and the payment is
+    # 10% of $36,060 over 12 = $300.50. With the spouse wrongly counted it would
+    # be $229.50. A balance large enough that the Standard cap cannot bind.
+    rows = ns["compare_existing_loan_plans"](
+        150_000.0, 6.5, 60_000.0, 0, True, 0.0, False, 0,
+        family_size=2, spouse_income=80_000.0, filing_status=sep)
+    ibr = next(r for r in rows if r[0].startswith("IBR"))
+    pay = monthly(ibr[1])
+    if abs(pay - 300.50) > 0.01:
         problems.append(
-            "  a two-person household does not shelter more than a one-person "
-            "one\n    filing separately would then be strictly worse than "
-            "staying single, which is the opposite of the rule")
+            f"  a separate filer at $60,000 in a household of two pays "
+            f"${pay:,.2f} on IBR, not $300.50\n    the spouse is being counted "
+            "in the family size, or their income in the payment")
     return problems
 
 

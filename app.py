@@ -1721,12 +1721,17 @@ def idr_income_allowance(family_size: int = None,
 # matters to anyone getting married, and the reason this feature exists:
 #
 #   single / MFJ  the household's whole income counts
-#   MFS           only the borrower's, though the spouse still counts toward
-#                 FAMILY SIZE and so still raises the sheltered amount
+#   MFS           only the borrower's income, AND the spouse leaves the
+#                 family size (34 CFR 685.209(b)(9)(i)(B): the spouse counts
+#                 "for a married borrower filing a joint Federal income tax
+#                 return"), so the sheltered amount falls too
 #
-# That asymmetry is the actual planning lever. It is also why filing status
-# cannot be inferred from "are you married": both answers are available to the
-# same person and they give different payments.
+# Until 2026-10-17 this comment said the spouse stayed in the family size under
+# MFS and called that "the actual planning lever". The regulation says the
+# opposite, and the tool understated every separately filed IBR payment by one
+# person's worth of shelter, about $71/month at 10%. Filing status still cannot
+# be inferred from "are you married": both answers are available to the same
+# person and they give different payments.
 FILING_SINGLE = "Single or head of household"
 FILING_JOINT = "Married, filing jointly"
 FILING_SEPARATE = "Married, filing separately"
@@ -1739,6 +1744,23 @@ def idr_countable_income(borrower_income: float, spouse_income: float = 0.0,
     if filing_status == FILING_JOINT:
         return float(borrower_income or 0.0) + float(spouse_income or 0.0)
     return float(borrower_income or 0.0)
+
+
+def idr_family_size(household: int = None,
+                    filing_status: str = FILING_SINGLE):
+    """The family size IBR shelters for, from the household the visitor gave.
+
+    The household question asks for "you, your spouse if you have one, and
+    anyone you claim". 685.209(b)(9) counts the spouse only on a JOINT return,
+    so a separate filer's family size is one fewer. Never below one person,
+    and None (not answered) passes through so the flat-allowance fallback
+    still applies. RAP does not use family size at all.
+    """
+    if not household:
+        return household
+    if filing_status == FILING_SEPARATE:
+        return max(MIN_FAMILY_SIZE, int(household) - 1)
+    return int(household)
 IDR_PAYMENT_RATE = 0.10
 IDR_MAX_TERM_YEARS = 20
 # Old IBR, for borrowers whose first federal loan predates July 1, 2014: the
@@ -22613,13 +22635,13 @@ def compare_existing_loan_plans(balance: float, rate: float, annual_income: floa
     #                     counts both; filing separately counts only the
     #                     borrower's, which is the lever anyone marrying
     #                     someone with no loans is asking about.
-    #   allowance         what is sheltered first, 150% of the household's
-    #                     poverty guideline. The SPOUSE RAISES THIS EVEN WHEN
-    #                     FILING SEPARATELY, because family size counts people,
-    #                     not incomes. That asymmetry is the whole finding.
+    #   allowance         what is sheltered first, 150% of the poverty
+    #                     guideline for the FAMILY SIZE, which leaves the
+    #                     spouse out on a separate return (idr_family_size).
     countable_income = idr_countable_income(annual_income, spouse_income,
                                             filing_status)
-    allowance = idr_income_allowance(family_size, poverty_region)
+    allowance = idr_income_allowance(idr_family_size(family_size, filing_status),
+                                     poverty_region)
     # RAP reduces by $50/month per DEPENDENT, and a spouse is not one. Derived
     # rather than asked twice: everyone in the household who is neither the
     # borrower nor a spouse. An explicit `dependents` argument still wins, so
@@ -24161,8 +24183,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         filing_status = h2.selectbox(
             "Tax filing status", FILING_STATUSES, key="existing_filing_status",
             help="Filing jointly counts your spouse's income in the payment. "
-                 "Filing separately does not, though your spouse still counts "
-                 "toward household size.")
+                 "Filing separately does not, and on IBR it also leaves your "
+                 "spouse out of the household the payment shelters.")
         spouse_income = h3.number_input(
             "Spouse's annual income ($)", min_value=0, max_value=2_000_000,
             step=1_000, key="existing_spouse_income",
