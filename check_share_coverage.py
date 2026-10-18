@@ -160,6 +160,8 @@ SHARE_EXEMPT = {
                                 "see REPAYMENT_ZERO_IS_AN_ANSWER, asserted by "
                                 "check_plan_switching.py",
     "existing_old_ibr": "repayment tool; rides ?rob=",
+    "existing_spouse_no_loans": "repayment tool; rides ?rsnl=",
+    "existing_community_property": "repayment tool; rides ?rcps=",
     # The loan GRIDS. These are session keys backing st.data_editor (whose
     # widget keys, existing_federal_editor/existing_private_editor, store
     # edit-state dicts the guard's widget scan cannot see anyway). They ride
