@@ -74,6 +74,19 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "program-earnings-rankings": (
+        # The guide is about a ranked list of programs that flattens the
+        # people behind each number, so the picture is many identical things
+        # and one apart. Graduation gowns, not diplomas or a newspaper: a gown
+        # carries nothing klein4b can write on, and a rack, hangers and folds
+        # give it the hard edges it draws well. Nobody in frame.
+        "A long metal clothing rack in a plain storeroom holding a row of "
+        "identical navy graduation gowns on wooden hangers, one gown hung by "
+        "itself on a hook on the wall to the right, cool window light from the "
+        "side catching the folds, a concrete floor, nobody in frame. "
+        "Documentary photography, muted cool colour, quiet and still. No text, "
+        "no logos, no tassels with lettering, no people.",
+        20261018, 4),
     "california-dream-act-application": (
         # The guide is about a second route to the same place, so this is an
         # entrance rather than the closed gate that carries
