@@ -92,6 +92,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [What the college-by-college earnings rankings leave out](https://worthmydegree.com/guides/program-earnings-rankings):
+  The New York Times ranked 25,000 bachelor's programs by what
+  graduates earn four years out. Three things the same federal file
+  shows that the ranking does not, and what each changes.
 - [Financial aid when you cannot file a FAFSA](https://worthmydegree.com/guides/california-dream-act-application):
   One federal rule decides who can hold a federal student loan, and it
   asks about the student, not the parents. California built a separate
