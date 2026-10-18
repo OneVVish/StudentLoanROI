@@ -4611,6 +4611,52 @@ SAI_TAX_TABLES = {
 SAI_CHILD_TAX_CREDIT = 2200
 
 # ---------------------------------------------------------------------------
+# FILING JOINTLY OR SEPARATELY, PRICED. The repayment tool already computes the
+# separately filed payment; until 2026-10 it refused to state the saving
+# because the tax cost of filing separately was unmodelled. These are the
+# tables that model it. Kill switch: off removes the comparison and restores
+# the old "an amount this page does not model" sentence.
+#
+# TAX YEAR 2025, the year of the return a 2026 recertification reads. Brackets
+# are Rev. Proc. 2024-40 Tables 1 and 4; the standard deductions are the OBBBA
+# figures ($31,500 joint, $15,750 separate), which replaced that Rev. Proc.'s
+# $30,000/$15,000 and are what SAI_TAX_TABLES already uses. The joint brackets
+# are SAI_TAX_TABLES' own, read rather than retyped, so the two tools cannot
+# disagree about one return. The separate table is exactly half the joint one
+# at every bracket for 2025, and check_filing_status_cost holds both as
+# literals off the Rev. Proc.
+#
+# FEDERAL INCOME TAX ONLY, AND A FLOOR. Everything left out (state tax, the
+# earned income, education and dependent care credits, the premium tax credit,
+# the child tax credit's lower separate phaseout) makes filing separately cost
+# MORE, so the saving the tool states is an upper bound and says so.
+# ---------------------------------------------------------------------------
+FILING_COMPARISON_ENABLED = True
+FILING_TAX_YEAR = 2025
+FILING_TAX_TABLES = {
+    "joint": (SAI_TAX_TABLES["mfj"][0], SAI_TAX_TABLES["mfj"][1]),
+    "separate": (15750,
+                 ((11925, 0.10), (48475, 0.12), (103350, 0.22), (197300, 0.24),
+                  (250525, 0.32), (375800, 0.35), (float("inf"), 0.37))),
+}
+# IRC 221. Unavailable on a separate return (221(e)(2)); for a joint return it
+# phases out between these MAGI figures for 2025 (Rev. Proc. 2024-40 .30).
+STUDENT_LOAN_INTEREST_DEDUCTION_MAX = 2500
+STUDENT_LOAN_INTEREST_PHASEOUT_JOINT = (170_000, 200_000)
+# IRC 66 and IRS Pub 555: on separate returns community income is split
+# equally between the spouses.
+COMMUNITY_PROPERTY_STATES = ("Arizona", "California", "Idaho", "Louisiana",
+                             "Nevada", "New Mexico", "Texas", "Washington",
+                             "Wisconsin")
+FILING_COMPARISON_LEFT_OUT = (
+    f"Federal income tax for {FILING_TAX_YEAR} only. Left out, and each would "
+    "make filing separately cost more: state income tax, the earned income, "
+    "education and dependent care credits, the premium tax credit and the "
+    "child tax credit's lower phaseout on a separate return. It also assumes "
+    "your spouse has no federal student loans and that each income is the AGI "
+    "on that return.")
+
+# ---------------------------------------------------------------------------
 # THE CSS PROFILE, and the one thing this app must never do about it.
 #
 # About 250 to 300 mostly private colleges collect the College Board's CSS
@@ -17673,7 +17719,8 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
                                   strategy: dict = None,
                                   old_ibr: bool = False,
                                   affordability: dict = None,
-                                  private_restructure: dict = None) -> bytes:
+                                  private_restructure: dict = None,
+                                  filing_comparison: dict = None) -> bytes:
     """PDF of the repayment-plan comparison -- the standalone tool's report.
 
     Deliberately NOT routed through generate_pdf_report_single. That builder is
@@ -17849,6 +17896,14 @@ def generate_pdf_repayment_report(rows: list, balance: float, rate: float,
         # backslash would print. Same unescape the school-search report does.
         _afford_text = " ".join(_afford).replace("\\$", "$").replace("**", "")
         story.append(Paragraph(xml_escape(_afford_text), styles["caption"]))
+    # JOINT OR SEPARATE, the dict the screen computed, never recomputed here.
+    if filing_comparison:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("Filing jointly or separately", styles["section"]))
+        _fdf = filing_comparison_table(filing_comparison)
+        story.append(_pdf_table([list(_fdf.columns)] + _fdf.values.tolist()))
+        for _line in filing_status_sentences(filing_comparison, money=fmt_money):
+            story.append(Paragraph(xml_escape(_line), styles["caption"]))
     story.append(Spacer(1, 12))
 
     # One chart, for whichever plan the visitor was looking at on screen --
@@ -21987,6 +22042,8 @@ REPAYMENT_SHARE_FIELDS = (
     ("existing_private_refi_term", "rpot", int, (0, 30)),
     ("existing_private_io_months", "rpio", int, (0, 60)),
     ("existing_old_ibr", "rob", int, None),
+    ("existing_spouse_no_loans", "rsnl", int, None),
+    ("existing_community_property", "rcps", int, None),
 )
 
 # Fields whose 0 is a REAL ANSWER rather than an untouched control, so the
@@ -22142,7 +22199,8 @@ def seed_repayment_from_share() -> None:
     # The checkboxes are stored as 0/1 and must reach the widget as bools, or
     # Streamlit renders an int into a checkbox and the value is lost.
     for key in ("existing_forgivable", "existing_pslf", "existing_has_private",
-                "existing_old_ibr"):
+                "existing_old_ibr", "existing_spouse_no_loans",
+                "existing_community_property"):
         if key in st.session_state:
             st.session_state[key] = bool(st.session_state[key])
 
@@ -22873,6 +22931,176 @@ def simulate_fixed_avalanche(loans: list, term_years: int,
         # Aligned to the INPUT order, like per_loan_payoff_months.
         "per_loan_schedules": [pd.DataFrame(rows) for rows in per_note_rows],
     }
+
+
+def filing_federal_income_tax(agi: float, status: str) -> float:
+    """2025 federal income tax on one return: AGI less the standard deduction,
+    through FILING_TAX_TABLES["joint"] or ["separate"]. No credits."""
+    deduction, brackets = FILING_TAX_TABLES[status]
+    return _apply_marginal_brackets(max(0.0, float(agi) - deduction), brackets)
+
+
+def student_loan_interest_deduction(interest_paid: float, joint_magi: float) -> float:
+    """The IRC 221 deduction on a JOINT return, after the 2025 phaseout.
+
+    Zero on a separate return by statute, which is why it only ever appears on
+    the joint side of the comparison."""
+    lo, hi = STUDENT_LOAN_INTEREST_PHASEOUT_JOINT
+    full = min(float(STUDENT_LOAN_INTEREST_DEDUCTION_MAX), max(0.0, interest_paid))
+    if joint_magi <= lo:
+        return full
+    if joint_magi >= hi:
+        return 0.0
+    return full * (hi - joint_magi) / (hi - lo)
+
+
+def _first_year_payments(result: dict) -> float:
+    """What the borrower hands over in the first 12 months of a row."""
+    return float(payment_series(result)["payment"].head(12).sum())
+
+
+def _is_income_driven_label(label: str) -> bool:
+    return label == RAP_STRATEGY_LABEL or label.startswith("IBR")
+
+
+def filing_status_comparison(plan_kwargs: dict, borrower_income: float,
+                             spouse_income: float,
+                             community_property: bool = False) -> dict:
+    """Joint against separate, for each income-driven row: the first year's
+    payments under each, and the extra federal income tax separate costs.
+
+    `plan_kwargs` is everything compare_existing_loan_plans takes except the
+    income, the spouse's income and the filing status, which this varies. The
+    plan rows are re-run, never re-derived, so the payments here are the table's
+    own (the returning_kwargs rule: one dict, spread into every call).
+
+    ASSUMES THE SPOUSE HAS NO FEDERAL STUDENT LOANS. On a joint return their
+    eligible debt joins the calculation and the payment is prorated by balance
+    (685.209(e)(2), (g)), which this does not model. The caller gates on it.
+
+    COMMUNITY PROPERTY. Each separate return then carries half the couple's
+    combined income, so the separate payment is figured on that by default, and
+    `own_year1` is the payment on the borrower's own earnings, which ED said it
+    would accept as alternative documentation (Federal Register 2012-26348,
+    the only ED rulemaking ever to address it). Wages are assumed to be
+    community income.
+
+    Returns None when there is nothing to compare: no spouse income, or the
+    kill switch off.
+    """
+    if not FILING_COMPARISON_ENABLED or not spouse_income or spouse_income <= 0:
+        return None
+    b, sp = float(borrower_income or 0.0), float(spouse_income)
+    combined = b + sp
+    sep_b, sep_s = (combined / 2, combined / 2) if community_property else (b, sp)
+
+    def run(income, status):
+        return {label: res for label, res, _ in compare_existing_loan_plans(
+                    annual_income=income, spouse_income=sp,
+                    filing_status=status, **plan_kwargs)
+                if _is_income_driven_label(label)}
+
+    joint = run(b, FILING_JOINT)
+    separate = run(sep_b, FILING_SEPARATE)
+    own = run(b, FILING_SEPARATE) if community_property else {}
+    if not joint:
+        return None
+
+    loans = list(plan_kwargs.get("federal_loans") or []) \
+        + list(plan_kwargs.get("private_loans") or [])
+    accruing = sum(float(l.get("balance") or 0) * float(l.get("rate") or 0) / 100
+                   for l in loans)
+    tax_separate = (filing_federal_income_tax(sep_b, "separate")
+                    + filing_federal_income_tax(sep_s, "separate"))
+    plans = []
+    for label, jres in joint.items():
+        if label not in separate:
+            continue
+        j1 = _first_year_payments(jres)
+        s1 = _first_year_payments(separate[label])
+        # Interest actually paid: what accrued, but never more than was paid.
+        # RAP waives what a payment does not cover, and waived interest is not
+        # paid, so it is not deductible.
+        deduction = student_loan_interest_deduction(min(j1, accruing), combined)
+        tax_joint = filing_federal_income_tax(combined - deduction, "joint")
+        plans.append({
+            "label": label, "joint_year1": j1, "separate_year1": s1,
+            "own_year1": (_first_year_payments(own[label])
+                          if label in own else None),
+            "deduction": deduction, "tax_joint": tax_joint,
+            "tax_separate": tax_separate,
+            "extra_tax": tax_separate - tax_joint,
+        })
+    return {"plans": plans, "community_property": bool(community_property),
+            "borrower_income": b, "spouse_income": sp,
+            "pslf": bool(plan_kwargs.get("pslf"))}
+
+
+def filing_comparison_table(cmp: dict) -> pd.DataFrame:
+    """One row per income-driven plan, for the screen and the PDF."""
+    rows = []
+    for p in cmp["plans"]:
+        row = {"Plan": p["label"],
+               "Joint, first year": fmt_money(p["joint_year1"]),
+               "Separate, first year": fmt_money(p["separate_year1"])}
+        if cmp.get("community_property"):
+            row["Separate, own earnings"] = fmt_money(p["own_year1"] or 0)
+        row["Extra tax, at least"] = fmt_money(max(0.0, p["extra_tax"]))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def filing_status_sentences(cmp: dict, money=None) -> list:
+    """The comparison in words, shared by the screen and the PDF.
+
+    "AT MOST", ALWAYS. The tax figure is a floor (FILING_COMPARISON_LEFT_OUT),
+    so the net saving is an upper bound, and a sentence that states it as a
+    point estimate would overstate the one lever the reader is weighing.
+    """
+    if not cmp or not cmp.get("plans"):
+        return []
+    money = money or fmt_money_md
+    out = []
+    for p in cmp["plans"]:
+        # ROUND THE PARTS, THEN DERIVE: the sentence prints a cut, a tax and
+        # their difference, and three independent roundings can disagree by a
+        # dollar in front of the reader ($11,000 less $972 printed as $10,027).
+        cut = round(p["joint_year1"] - p["separate_year1"])
+        extra = round(max(0.0, p["extra_tax"]))
+        if cut < 1:
+            out.append(f"On {p['label']}, filing separately does not lower the "
+                       f"first year's payments, and it raises federal income "
+                       f"tax by at least {money(extra)}.")
+        elif extra >= cut:
+            out.append(f"On {p['label']}, filing separately cuts the first "
+                       f"year's payments by {money(cut)} and raises federal "
+                       f"income tax by at least {money(extra)}, which is more "
+                       "than it saves.")
+        else:
+            out.append(f"On {p['label']}, filing separately cuts the first "
+                       f"year's payments by {money(cut)} and raises federal "
+                       f"income tax by at least {money(extra)}, so it saves at "
+                       f"most {money(cut - extra)} a year.")
+    if cmp.get("community_property"):
+        own = [p for p in cmp["plans"] if p.get("own_year1") is not None]
+        tail = ""
+        if own:
+            tail = (" On your own earnings the first year would be "
+                    + ", ".join(f"{money(p['own_year1'])} on {p['label']}"
+                                for p in own) + ".")
+        out.append("In a community property state each separate return carries "
+                   "half of your combined income, so the figures above use "
+                   "that, and that is what your tax return alone gives your "
+                   "servicer. In 2012 the Department of Education said it would "
+                   "accept documentation of your own earnings instead (Federal "
+                   "Register 2012-26348), but you have to supply it and ask."
+                   + tail)
+    if cmp.get("pslf"):
+        out.append("On PSLF a lower payment also means less paid before the "
+                   "balance is forgiven tax-free, which is where filing "
+                   "separately is usually worth the most.")
+    out.append(FILING_COMPARISON_LEFT_OUT)
+    return out
 
 
 def repayment_affordability(row_result: dict, annual_income: float,
@@ -23693,7 +23921,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                        strategy: dict = None,
                        old_ibr: bool = False,
                        affordability: dict = None,
-                       private_restructure: dict = None) -> None:
+                       private_restructure: dict = None,
+                       filing_comparison: dict = None) -> None:
     """Download-PDF and Share buttons for the repayment tool.
 
     Only on the standalone page (`enabled`). Inside the calculator this module
@@ -23731,7 +23960,8 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                 federal_loans=federal_loans, private_loans=private_loans,
                 age=age, strategy=strategy, old_ibr=old_ibr,
                 affordability=affordability,
-                private_restructure=private_restructure)),
+                private_restructure=private_restructure,
+                filing_comparison=filing_comparison)),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
         use_container_width=True, key="repayment_pdf",
         on_click=lambda: log_usage_event(
@@ -24185,17 +24415,39 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             help="Filing jointly counts your spouse's income in the payment. "
                  "Filing separately does not, and on IBR it also leaves your "
                  "spouse out of the household the payment shelters.")
+        _married = st.session_state.get("existing_filing_status") in (
+            FILING_JOINT, FILING_SEPARATE)
         spouse_income = h3.number_input(
             "Spouse's annual income ($)", min_value=0, max_value=2_000_000,
             step=1_000, key="existing_spouse_income",
-            disabled=st.session_state.get("existing_filing_status") != FILING_JOINT,
-            help="Only used when you file jointly. Greyed out otherwise, "
-                 "because filing separately leaves it out of the payment by "
-                 "law rather than by choice.")
+            disabled=not _married,
+            help="Counted in the payment when you file jointly. Filing "
+                 "separately leaves it out of the payment by law, but it is "
+                 "still used to estimate what filing separately costs in tax.")
+        spouse_no_loans = community_property = False
+        if _married:
+            m1, m2 = st.columns(2)
+            spouse_no_loans = m1.checkbox(
+                "My spouse has no federal student loans",
+                key="existing_spouse_no_loans",
+                help="On a joint return a spouse's federal loans join the "
+                     "calculation and the payment is split between you by "
+                     "balance. This page does not model that, so the joint "
+                     "against separate comparison only appears when they "
+                     "have none.")
+            community_property = m2.checkbox(
+                "We live in a community property state",
+                key="existing_community_property",
+                help=", ".join(COMMUNITY_PROPERTY_STATES[:-1]) + " and "
+                     + COMMUNITY_PROPERTY_STATES[-1] + ". There, each "
+                     "separate return carries half of a married couple's "
+                     "combined income.")
+        # The spouse's income as TYPED, for the tax side of the comparison.
         # Disabling a widget does NOT clear what it holds, so a stored spouse
         # income would keep moving the payment from behind a greyed control --
         # the private-loan opt-in records the same trap. Read the status, not
-        # the box.
+        # the box. The PAYMENT sees it only on a joint return.
+        spouse_income_entered = float(spouse_income or 0) if _married else 0.0
         if st.session_state.get("existing_filing_status") != FILING_JOINT:
             spouse_income = 0
 
@@ -24548,9 +24800,40 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             chosen_result, income, private_monthly=_priv_monthly,
             private_payoff_years=_priv_payoff,
             filing_status=filing_status, spouse_income=spouse_income)
+        # JOINT OR SEPARATE, PRICED. Computed before the affordability note
+        # is rendered, because when the comparison exists that note's "an
+        # amount this page does not model" sentence is no longer true. Once,
+        # and passed to the PDF, like the strategy analysis.
+        filing_cmp = None
+        if spouse_income_entered > 0 and spouse_no_loans:
+            filing_cmp = filing_status_comparison(
+                dict(balance=balance, rate=rate, dependents=deps,
+                     forgivable=forgivable, starting_interest=accrued,
+                     pslf=pslf and forgivable, prior_payments=prior_payments,
+                     federal_loans=fed_loans, private_loans=priv_loans,
+                     old_ibr=old_ibr and forgivable, family_size=family_size,
+                     private_extra=private_extra),
+                income, spouse_income_entered,
+                community_property=community_property)
+        if filing_cmp and affordability:
+            affordability["joint_with_spouse"] = False
         _afford_lines = affordability_sentences(affordability)
         if _afford_lines:
             st.warning("  \n".join(_afford_lines))
+        if filing_cmp:
+            st.markdown("**Filing jointly or separately**")
+            st.dataframe(filing_comparison_table(filing_cmp),
+                         hide_index=True, use_container_width=True)
+            for _line in filing_status_sentences(filing_cmp)[:-1]:
+                st.markdown(_line)
+            st.caption(FILING_COMPARISON_LEFT_OUT)
+        elif spouse_income_entered > 0 and not spouse_no_loans \
+                and FILING_COMPARISON_ENABLED:
+            st.caption("Tick \"My spouse has no federal student loans\" above "
+                       "to compare filing jointly with filing separately. When "
+                       "both of you have federal loans, a joint return splits "
+                       "one payment between you by balance, which this page "
+                       "does not model.")
         # Read-before-render (the sidebar's established pattern): the extra-
         # payment widget renders inside the strategy panel at the bottom, but
         # the analysis has to exist HERE so the PDF button a few lines down
@@ -24615,7 +24898,8 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                            age=age, strategy=strategy_analysis,
                            old_ibr=old_ibr and forgivable,
                            affordability=affordability,
-                           private_restructure=_restr)
+                           private_restructure=_restr,
+                           filing_comparison=filing_cmp)
         # STACK THE PRIVATE NOTES INDIVIDUALLY when that row is selected. It
         # used to draw their sum as one line, on the reasoning -- written into
         # the comment below before the loan grids existed -- that "the private

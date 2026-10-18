@@ -367,6 +367,27 @@ def main() -> int:
                 problems.append(f"  [{label}] the affordability note on "
                                 f"{_label!r} does not name its basis")
 
+        # Joint against separate, for a married couple. Community property
+        # alternates by portfolio so both branches run, and the result rides
+        # into the PDF below so the report's branch that prints it runs too.
+        checked += 1
+        _filing = use("filing_status_comparison")(
+            dict(balance=0, rate=0, dependents=0,
+                 forgivable=spec.get("forgivable", True), family_size=2,
+                 pslf=spec.get("pslf", False),
+                 prior_payments=spec.get("prior_payments", 0),
+                 federal_loans=fed, private_loans=priv,
+                 old_ibr=spec.get("old_ibr", False)),
+            spec["income"], 50_000.0,
+            community_property=bool(len(label) % 2))
+        if spec.get("forgivable", True):
+            if not _filing or not _filing["plans"]:
+                problems.append(f"  [{label}] no joint-against-separate comparison")
+            else:
+                use("filing_comparison_table")(_filing)
+                if not use("filing_status_sentences")(_filing):
+                    problems.append(f"  [{label}] the filing comparison has no prose")
+
         # The refinance comparison. Exercised across the shapes that differ,
         # because each returns a different thing: no offer at all (None), a
         # real offer (a band), and PSLF (a refusal). A guard that only drove
@@ -414,7 +435,8 @@ def main() -> int:
                 # report cannot be exercised on a basis the screen never uses.
                 affordability=use("repayment_affordability")(
                     rows[0][1], spec["income"], private_monthly=_afford_priv,
-                    private_payoff_years=_afford_priv_years))
+                    private_payoff_years=_afford_priv_years),
+                filing_comparison=_filing)
             checked += 1
             if not pdf or bytes(pdf[:5]) != b"%PDF-":
                 problems.append(f"  [{label}] the PDF report is not a PDF")
