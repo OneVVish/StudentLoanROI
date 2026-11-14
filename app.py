@@ -27990,7 +27990,11 @@ def render_school_search(always_open: bool = False) -> None:
                 "publishes, a school's position shifts by a median of "
                 + (f"{_meta['rank_shift']:.0%} " if _meta["rank_shift"]
                    else "several ")
-                + "of the list. Read it as a band, not a rank."
+                + "of the list. Read it as a band, not a rank. All of this "
+                "applies as much to the published program rankings, the New "
+                "York Times' October 2026 guide among them: they sort on the "
+                "same four-year earnings figures, which match this site's to "
+                "the dollar, and adjust for none of it."
             )
 
         # One selectbox and one button, not a button per row: 25 widgets would
