@@ -40,6 +40,14 @@ So most of the careers that are behind after ten years are still on the way, not
 
 How long is too long to wait is not a question the numbers can answer. A 35-year-old who is finally ahead spent seventeen years behind, from the first day of college, and ten of those years making a loan payment every month.
 
+## What the money figures leave out on the degree's side
+
+The calculator counts wages and nothing else. The College Board's [Education Pays 2026](https://research.collegeboard.org/trends/education-pays) tracks what comes with the wages, and some of it is money too. In 2024, 66% of bachelor's degree holders aged 25 and up working full time year-round had health insurance through their employer, against 51% of high school graduates. Retirement plans run the same direction. None of that is in the premiums above, so on this point they understate the degree.
+
+The rest is not money at all. In the 2024 presidential election, 76% of citizens aged 25 to 44 with a bachelor's degree voted, against 42% of high school graduates the same age. In 2023, 38% of bachelor's holders volunteered, against 17%. Graduates are also more likely to exercise and less likely to smoke.
+
+The report calls all of these associations, and the word is chosen carefully. The people who finish college differ from the people who do not in ways that shape their health and their habits too, the same problem [the rankings guide](/guides/college-roi-rankings) runs into with schools. A degree comes with these on average. Whether it causes them is a question the figures do not answer.
+
 ## What this does not count
 
 Each of these figures assumes the student finishes the degree, finds work in the career, and earns that career's median. None of that is guaranteed, and the calculator says so rather than pricing it:
