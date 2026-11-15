@@ -4,6 +4,8 @@ description: What the aid formula actually expects a $150,000 to $300,000 family
 summary: The formula expects $42,000 a year from a $200,000 family, per child in college. Here is the whole ladder, and what to do about your rung of it.
 date: 2026-08-31
 hero: guide-hero-upper-middle-class-financial-aid-klein4b.png
+updated: 2026-11-14
+updated_note: Vanderbilt added to the table of schools that publish a tuition-free income line.
 ---
 
 There is a sentence that shows up under every article about college costs: too rich for financial aid, too poor to afford college. It describes a real place on the income ladder, and if your household earns somewhere between $150,000 and $300,000, you probably live there. This guide puts numbers on that place, because the arguments about it almost never contain any.

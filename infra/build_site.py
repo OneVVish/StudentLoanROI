@@ -382,6 +382,20 @@ SITE_CSS = """  :root {
      so a row of cards lines up along it rather than along the text. */
   .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
     font-weight: 700; font-size: 15px; }
+  .whats-new { margin-bottom: 36px; }
+  .whats-new h2 { font-size: 24px; color: var(--deep); margin-bottom: 12px; }
+  .whats-new ul { list-style: none; margin: 0; padding: 0;
+    border-top: 1px solid var(--rule); }
+  .whats-new li { display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--rule);
+    font-size: 16px; }
+  .whats-new time { color: var(--muted); font-size: 14px; min-width: 7.5em; }
+  .whats-new .wn-kind { font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--muted); min-width: 5.5em; }
+  .whats-new .wn-new { color: var(--orange); }
+  .whats-new a { color: var(--deep); font-weight: 600; text-decoration: none; }
+  .whats-new a:hover { text-decoration: underline; }
+  .whats-new .wn-note { flex-basis: 100%; color: var(--muted); font-size: 15px; }
   @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
     .guides-band { padding: 32px 24px 28px; } }
   @media (prefers-reduced-motion: reduce) {
@@ -650,6 +664,19 @@ def parse_post(path: Path) -> dict:
     missing = [k for k in REQUIRED_FRONT_MATTER if not meta.get(k)]
     if missing:
         raise ValueError(f"{path.name}: front matter missing {', '.join(missing)}")
+    # `updated:` and `updated_note:` announce a revision in the What's new
+    # band. BOTH OR NEITHER: a date without a note would announce a change
+    # without saying what it was, and a note without a date cannot be placed.
+    # Either half alone is an error rather than a silent no-show.
+    has_date, has_note = bool(meta.get("updated")), bool(meta.get("updated_note"))
+    if has_date != has_note:
+        raise ValueError(f"{path.name}: `updated:` and `updated_note:` go "
+                         f"together; set both or neither")
+    if has_date:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", meta["updated"]):
+            raise ValueError(f"{path.name}: `updated:` must be YYYY-MM-DD")
+        if meta["updated"] < meta["date"]:
+            raise ValueError(f"{path.name}: `updated:` is before the publish date")
     meta["slug"] = path.stem
     meta["body"] = body.strip()
     return meta
@@ -2459,6 +2486,45 @@ def build_book_html(logo_svg, favicon) -> str:
 '''
 
 
+WHATS_NEW_COUNT = 5
+
+
+def whats_new(posts, n: int = WHATS_NEW_COUNT) -> list:
+    """The newest `n` events: every guide's publish date, plus a revision
+    only where the guide announces one with `updated:` + `updated_note:`.
+
+    NOT content/lastmod.json. That moves on ANY body edit, a typo fix
+    included, so an Updated label driven by it would advertise changes nobody
+    meant to announce. A revision is listed because an author said so.
+
+    Derived at build time, so the band cannot go stale the way a hand-kept
+    changelog does. Ties on a date put an update ahead of a publish.
+    """
+    events = [{"kind": "New", "date": p["date"], "post": p, "note": ""}
+              for p in posts]
+    events += [{"kind": "Updated", "date": p["updated"], "post": p,
+                "note": p["updated_note"]}
+               for p in posts if p.get("updated") and p.get("updated_note")]
+    events.sort(key=lambda e: (e["date"], e["kind"] == "Updated"), reverse=True)
+    return events[:n]
+
+
+def whats_new_html(posts) -> str:
+    items = []
+    for e in whats_new(posts):
+        p = e["post"]
+        note = f' <span class="wn-note">{_attr(e["note"])}</span>' if e["note"] else ""
+        items.append(
+            f'    <li><time datetime="{e["date"]}">{card_date(e["date"])}</time>'
+            f'<span class="wn-kind wn-{e["kind"].lower()}">{e["kind"]}</span>'
+            f'<a href="/guides/{p["slug"]}">{_attr(p["title"])}</a>{note}</li>')
+    if not items:
+        return ""
+    return ('<section class="whats-new" aria-labelledby="whats-new-h">\n'
+            '  <h2 id="whats-new-h">What\'s new</h2>\n  <ul>\n'
+            + "\n".join(items) + "\n  </ul>\n</section>\n")
+
+
 def build_guides_index_html(posts, logo_svg, favicon) -> str:
     # ALL OR NOTHING. A grid where some cards carry a photograph and others do
     # not is not a grid with a few pictures missing, it is a broken-looking
@@ -2505,7 +2571,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
   the One Big Beautiful Bill Act (OBBBA), which changed federal borrowing in
   2026.</p>
 </section>
-<section>
+{whats_new_html(posts)}<section>
   <div class="post-head">
     <h2>Latest guides</h2>
     <span>{len(posts)} guide{"" if len(posts) == 1 else "s"}</span>
