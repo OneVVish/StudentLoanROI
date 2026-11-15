@@ -79,7 +79,4 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
       - name: Audit the resolved dependency tree
-        # .github/pip-audit-ignore.txt says why each skipped ID is unreachable.
-        run: |
-          ignores=$(grep -v '^#' .github/pip-audit-ignore.txt | grep . | sed 's/^/--ignore-vuln /')
-          pip-audit -r requirements.txt --progress-spinner off $ignores
+        run: pip-audit -r requirements.txt --progress-spinner off

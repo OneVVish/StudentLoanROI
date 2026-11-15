@@ -6,7 +6,7 @@
 # versions are the ones every feature in this app has actually been
 # verified against locally. If you deliberately want to move to newer
 # versions later, bump one at a time and re-verify, don't drop the pins.
-streamlit==1.58.0
+streamlit==1.66.1
 pandas==3.0.3
 numpy==2.5.0
 pyarrow==24.0.0
@@ -24,6 +24,11 @@ reportlab==5.0.0
 # comment), Agg is pure Python/C rasterization with no headless-browser
 # subprocess dependency, so it doesn't carry kaleido's segfault risk.
 matplotlib==3.11.0
+# Pinned since 2026-11-14. It used to arrive unpinned through Streamlit, which
+# bounded it below 13 until 1.66.1; Pillow 12.3.0 then carried 42 advisories
+# (parser bugs on untrusted images, unreachable here: app.py opens no outside
+# image) that 13.0.0 fixes. Pinned so the next one is a deliberate bump too.
+pillow==13.0.0
 # Streamlit's own web server, pinned because Streamlit only bounds it from
 # below (starlette>=0.40.0, uvicorn>=0.30.0). Unpinned, a rebuild for an
 # unrelated commit on 2026-10-17 pulled Starlette 1.8.0 (released 2026-10-13)
