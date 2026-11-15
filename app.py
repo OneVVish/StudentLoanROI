@@ -1634,7 +1634,7 @@ def render_wage_distribution(occupation_name: str, compact: bool = False,
                           2 if context.get("national_percentiles") else 1)
         figure.update_layout(title_text="", height=180 + 110 * rows_drawn,
                               margin=dict(t=40, b=110, l=120, r=60))
-    st.plotly_chart(figure, use_container_width=True, config=PLOTLY_CHART_CONFIG)
+    st.plotly_chart(figure, width="stretch", config=PLOTLY_CHART_CONFIG)
     if caption:
         st.caption(WAGE_DISTRIBUTION_CAPTION)
 
@@ -6221,7 +6221,7 @@ def render_presurvey() -> None:
         # Primary on Save, default on Skip. Both stay one click -- the weighting
         # says which is more useful to the research, not which is permitted.
         if save_col.button("Save answers", disabled=not answered_required,
-                            type="primary", use_container_width=True):
+                            type="primary", width="stretch"):
             st.session_state["presurvey_answered"] = True
             log_presurvey(answered=True)
             st.rerun()
@@ -14298,7 +14298,7 @@ def render_payment_chart(result: dict, label: str, container=None) -> bool:
         build_payment_chart(result, label, federal_result=_tr[0],
                             private_result=_tr[1],
                             events=result.get("tranche_events")),
-        use_container_width=True, config=PLOTLY_CHART_CONFIG)
+        width="stretch", config=PLOTLY_CHART_CONFIG)
     target.caption(PAYMENT_CHART_CAPTION)
     return True
 
@@ -14779,7 +14779,7 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
     # The whole block sits in a tinted card so the page's headline picture
     # reads as one object rather than as a checkbox, a chart and two captions
     # that happen to be adjacent. Keyed so the CSS in section 3 can reach it;
-    # `.st-key-` is Streamlit 1.58's container class and is re-verified there.
+    # `.st-key-` is Streamlit's container class (present through 1.66.1) and is re-verified there.
     #
     # The tint is deliberately a near-neutral surface, not a saturated colour.
     # Four series already carry meaning on this chart (SERIES_BLUE, ORANGE,
@@ -14837,7 +14837,7 @@ def render_net_position_chart(scenario_pairs: list, col_index: float,
             frame, roi_window_years, net_position_axis_title(scenario_pairs),
             baseline_head_start_years=baseline_head_start_years,
             color_map=_plan_overlay_colors),
-        use_container_width=True, config=PLOTLY_CHART_CONFIG,
+        width="stretch", config=PLOTLY_CHART_CONFIG,
     )
     # Computed here rather than passed in. This function already holds the exact
     # arguments net_position_crossover takes, so the caption cannot disagree
@@ -18898,9 +18898,9 @@ st.logo("brand/logo-horizontal-auto.svg", size="large",
 # three-across metric row got ~120px per metric and Compare Mode's A/B
 # panels ~190px each, unreadable. Wrapping to full-width rows is what every
 # responsive grid does at this width; charts inside follow automatically
-# (every plotly_chart in this file is use_container_width=True). 640px
+# (every plotly_chart in this file is width="stretch"). 640px
 # matches Streamlit's own mobile breakpoint (where the sidebar becomes an
-# overlay). The selectors are version-specific (Streamlit 1.58, pinned) --
+# overlay). The selectors are version-specific (pinned Streamlit; re-verified on 1.66.1) --
 # re-verify on any bump, like the sidebar-pill CSS in section 5.
 st.markdown(
     """<style>
@@ -18925,7 +18925,7 @@ st.markdown(
 # Scoped by `.st-key-<key>` -- the container class Streamlit stamps on any
 # widget given a key. That is what makes this targeted rather than a blanket
 # `.stButton button` rule, and like the column-wrapping CSS above it is
-# VERSION-SPECIFIC (Streamlit 1.58, pinned): re-verify the class prefix on any
+# VERSION-SPECIFIC (pinned Streamlit; re-verified on 1.66.1): re-verify the class prefix on any
 # bump, because a rename fails silently, leaving the buttons merely unstyled.
 #
 # BOTH arms are listed. The single-scenario and Compare Mode branches render
@@ -18995,7 +18995,7 @@ st.markdown(
 
 # The results cards. Same `.st-key-` scoping and the same prefers-color-scheme
 # pairing as the action buttons above, and the same version caveat: this is
-# Streamlit 1.58's container class, so re-verify it on a bump. A rename fails
+# Streamlit's container class (present through 1.66.1), so re-verify it on a bump. A rename fails
 # silently and simply leaves the cards untinted.
 #
 # ALL FOUR ARE NEAR-NEUTRAL, and that is the constraint rather than a
@@ -19057,7 +19057,7 @@ st.markdown(
     # good nor bad news, so the cost orange would editorialise a number that
     # only describes.
     #
-    # VERSION-SPECIFIC (Streamlit 1.58, pinned). stMetricValue is an internal
+    # VERSION-SPECIFIC (pinned Streamlit; re-verified on 1.66.1). stMetricValue is an internal
     # testid: a bump that renames it loses the emphasis and keeps the number,
     # which is the right way round to fail, but re-verify it like the other
     # pinned selectors in this file.
@@ -23963,7 +23963,7 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
                 private_restructure=private_restructure,
                 filing_comparison=filing_comparison)),
         file_name="repayment_plan_comparison.pdf", mime="application/pdf",
-        use_container_width=True, key="repayment_pdf",
+        width="stretch", key="repayment_pdf",
         on_click=lambda: log_usage_event(
             f"repayment_pdf:balance={int(balance)}:rate={rate}"
             f":income={int(income)}:deps={int(deps)}:prior={int(prior_payments)}"
@@ -23979,7 +23979,7 @@ def _repayment_actions(rows, balance, rate, income, deps, accrued,
             f":privn={len(private_loans or [])}"),
     )
 
-    if share_col.button("🔗 Share This Comparison", use_container_width=True,
+    if share_col.button("🔗 Share This Comparison", width="stretch",
                         key="repayment_share"):
         # session_query_params carries test, exactly as the calculator's share
         # does. src stays out for the same reason it does there: the recipient
@@ -24138,7 +24138,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         _fed_edited = st.data_editor(
             pd.DataFrame(st.session_state["existing_federal_loans"],
                          columns=["balance", "rate", "disbursed", "entry", "subsidized"]),
-            num_rows="dynamic", hide_index=True, use_container_width=True,
+            num_rows="dynamic", hide_index=True, width="stretch",
             key="existing_federal_editor", column_order=_fed_order,
             column_config={
                 "balance": st.column_config.NumberColumn(
@@ -24292,7 +24292,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             _priv_edited = st.data_editor(
                 pd.DataFrame(st.session_state["existing_private_loans"],
                              columns=["balance", "rate", "term", "actual"]),
-                num_rows="dynamic", hide_index=True, use_container_width=True,
+                num_rows="dynamic", hide_index=True, width="stretch",
                 key="existing_private_editor",
                 column_config={
                     "balance": st.column_config.NumberColumn(
@@ -24470,7 +24470,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                         + ("s" if len(priv_loans) > 1 else "")
                         + "**, on its own terms")
             st.dataframe(_repayment_table([_prow]),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
             st.caption(repayment_section_guide("private_loans"))
             _pace_text = private_pace_sentence(_pr)
             if _pace_text:
@@ -24484,7 +24484,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     tranches=_stack, labels=_stack_labels or TRANCHE_LABELS,
                     colors=_stack_colors, stack_by=_stack_by,
                     marker=private_payoff_marker(_pr)),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                width="stretch", config=PLOTLY_CHART_CONFIG,
                 key="existing_balance_chart")
             st.caption("No federal plan applies to a private loan, so there is "
                        "nothing to compare it against. Add a federal loan above "
@@ -24535,7 +24535,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # No private tranche: one table, and no headings to imply a split
             # that does not exist.
             st.dataframe(_repayment_table(plan_rows),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
         else:
             # Three views of the same numbers. Federal first because it is what
             # the page is actually comparing; private second because it is one
@@ -24544,14 +24544,14 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
             # a decision rather than the decision itself.
             st.markdown("**Federal plans**, the choice you're making")
             st.dataframe(_repayment_table(plan_rows, federal_only=True),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
             st.caption(repayment_section_guide("federal_plans"))
 
             st.markdown("**Private / non-federal loan"
                         + ("s" if len(priv_loans) > 1 else "")
                         + "**, the same under every plan above")
             st.dataframe(_repayment_table([private_row]),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
             st.caption(repayment_section_guide("private_loans"))
             # What the aggressive pace is worth, from the required_pace pair
             # compare_existing_loan_plans precomputed -- read, never recompute,
@@ -24571,7 +24571,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
 
             st.markdown("**Combined**, what you actually pay")
             st.dataframe(_repayment_table(plan_rows),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
 
         # The one-way door, given its own block because it is the single most
         # decision-relevant fact on this page and it inverts against intuition:
@@ -24823,7 +24823,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
         if filing_cmp:
             st.markdown("**Filing jointly or separately**")
             st.dataframe(filing_comparison_table(filing_cmp),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
             for _line in filing_status_sentences(filing_cmp)[:-1]:
                 st.markdown(_line)
             st.caption(FILING_COMPARISON_LEFT_OUT)
@@ -24919,7 +24919,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                 chosen_result["schedule"], chosen,
                 tranches=_stack, labels=_stack_labels or TRANCHE_LABELS,
                 colors=_stack_colors, stack_by=_stack_by, marker=_marker),
-            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+            width="stretch", config=PLOTLY_CHART_CONFIG,
             key="existing_balance_chart")
         if chosen != PRIVATE_ROW_LABEL and _stack:
             st.caption(
@@ -24968,7 +24968,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                                     stack_by=(_stack_by
                                               if chosen == PRIVATE_ROW_LABEL
                                               else None)),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                width="stretch", config=PLOTLY_CHART_CONFIG,
                 key="existing_payment_chart")
         if not _payment_worth_drawing and _stack:
             # A CHART THAT VANISHES WITH NO EXPLANATION READS AS A FAULT, which
@@ -25012,7 +25012,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     _commit_axis, chosen, tranches=_commit,
                     labels=_commit_labels, colors=STACK_COLORS,
                     stack_by="loan type, committing instead of riding"),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                width="stretch", config=PLOTLY_CHART_CONFIG,
                 key="existing_commit_chart")
             # THE PAYMENT VIEW OF COMMITTING, and it is the one that shows the
             # redirect happening: the federal band STEPS UP the month the
@@ -25024,7 +25024,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     {"schedule": _commit_axis}, chosen, tranches=_commit,
                     labels=_commit_labels, colors=STACK_COLORS,
                     stack_by="loan type, committing instead of riding"),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                width="stretch", config=PLOTLY_CHART_CONFIG,
                 key="existing_commit_payment_chart")
             _cs, _cr = strategy_analysis["strategy"], strategy_analysis["ride"]
             st.caption(
@@ -25057,7 +25057,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     _roll_sched, chosen, tranches=_roll, labels=_roll_labels,
                     colors=PRIVATE_STACK_COLORS,
                     stack_by="loan, rolling each payment onto the next"),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                width="stretch", config=PLOTLY_CHART_CONFIG,
                 key="existing_rolldown_chart")
             # THE PAYMENT VIEW OF THE SAME THING, and it is the clearer of
             # the two: the total stays flat at what the borrower hands over
@@ -25070,7 +25070,7 @@ def render_existing_loan_comparison(always_open: bool = False) -> None:
                     chosen, tranches=_roll, labels=_roll_labels,
                     colors=PRIVATE_STACK_COLORS,
                     stack_by="loan, rolling each payment onto the next"),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                width="stretch", config=PLOTLY_CHART_CONFIG,
                 key="existing_rolldown_payment_chart")
             _av = _priv_row_selected["avalanche"]
             st.caption(
@@ -25823,7 +25823,7 @@ def render_admin_dashboard() -> None:
     _search_runs = _admin_search_runs(usage_df)
     if not _search_runs.empty:
         st.markdown("#### Searches by level")
-        st.dataframe(_search_runs, use_container_width=True, hide_index=True)
+        st.dataframe(_search_runs, width="stretch", hide_index=True)
         st.caption(
             "One row per level searched, from the `school_search_run` events. "
             "**Searches** counts events and **Sessions** counts distinct "
@@ -26017,7 +26017,7 @@ def render_admin_dashboard() -> None:
         _excluded = _landing.attrs.get("excluded", "")
         if _excluded:
             st.caption(f"⚠️ {_excluded}")
-        st.dataframe(_landing, use_container_width=True)
+        st.dataframe(_landing, width="stretch")
 
         _dests = _admin_welcome_destinations(usage_df)
         if not _dests.empty:
@@ -26031,7 +26031,7 @@ def render_admin_dashboard() -> None:
                 "Two known leaks make it an estimate: clicking two CTAs counts "
                 "twice against one landing, and returning later lands twice."
             )
-            st.dataframe(_dests, use_container_width=True, hide_index=True)
+            st.dataframe(_dests, width="stretch", hide_index=True)
 
     _reactions = _admin_guide_reactions(usage_df)
     if not _reactions.empty:
@@ -26050,7 +26050,7 @@ def render_admin_dashboard() -> None:
             "are not de-duplicated. Treat it as an upper bound on how often a "
             "guide was worth passing on, and never as a share *rate*."
         )
-        st.dataframe(_reactions, use_container_width=True, hide_index=True)
+        st.dataframe(_reactions, width="stretch", hide_index=True)
 
     _charts = _admin_chart_reactions(usage_df)
     _chart_dests = _admin_chart_destinations(usage_df)
@@ -26091,7 +26091,7 @@ def render_admin_dashboard() -> None:
             "worth a tap, never as a count of people."
         )
         if not _charts.empty:
-            st.dataframe(_charts, use_container_width=True, hide_index=True)
+            st.dataframe(_charts, width="stretch", hide_index=True)
         else:
             st.caption("No likes or shares yet.")
         if not _chart_dests.empty:
@@ -26106,7 +26106,7 @@ def render_admin_dashboard() -> None:
                 "the read and the click being logged by different systems, so "
                 "a click can survive a read the edge excluded as a bot."
             )
-            st.dataframe(_chart_dests, use_container_width=True, hide_index=True)
+            st.dataframe(_chart_dests, width="stretch", hide_index=True)
 
     st.markdown("#### 🔗 Traffic by source")
     st.caption(
@@ -26302,8 +26302,8 @@ if active_tool:
     # text colour, correct on both themes with nothing to detect.
     # Streamlit pads the page 6rem from the top, which on a phone is a blank
     # band the height of two questions before the lockup. Every tool page
-    # gives most of it back. Version-specific selector (Streamlit 1.58,
-    # pinned), like the sidebar-pill CSS.
+    # gives most of it back. Version-specific selector (pinned Streamlit;
+    # re-verified on 1.66.1), like the sidebar-pill CSS.
     st.markdown("<style>.block-container{padding-top:2.5rem}</style>",
                 unsafe_allow_html=True)
     st.markdown(inline_lockup_svg(250), unsafe_allow_html=True)
@@ -26332,8 +26332,8 @@ else:
     # control up as a labeled pill so it reads as "here are the inputs" instead
     # of an anonymous chevron. Renders only while the sidebar is collapsed
     # (Streamlit removes the button otherwise), so on desktop with the sidebar
-    # open nothing changes. Selector is version-specific (Streamlit 1.58,
-    # pinned in requirements.txt) -- re-verify it if the pin ever moves.
+    # open nothing changes. Selector is version-specific (pinned in
+    # requirements.txt; re-verified on 1.66.1) -- re-verify it if the pin ever moves.
     st.markdown(
         """<style>
         button[data-testid='stExpandSidebarButton']{
@@ -26729,7 +26729,7 @@ def render_search_controls(coa_df: pd.DataFrame, is_graduate: bool) -> dict:
     region_cols = st.columns(len(SEARCH_REGIONS))
     for _col, (_region, _codes) in zip(region_cols, SEARCH_REGIONS.items()):
         if _col.button(_region, key=tool_button_key(f"search_region_{_region.lower()}"),
-                       use_container_width=True,
+                       width="stretch",
                        help=f"Select every {_region} state in the filter below. "
                             "Adds to the list rather than replacing it, so you "
                             "can combine regions."):
@@ -27033,7 +27033,7 @@ def render_graduate_results(results: pd.DataFrame, credential: str,
             lambda debt: fmt_money(debt) if pd.notna(debt) and debt > 0 else "—"),
     })
     st.dataframe(
-        table, use_container_width=True, hide_index=True,
+        table, width="stretch", hide_index=True,
         column_config={"School": st.column_config.Column(
             "School", width="large", pinned=True)})
 
@@ -27476,11 +27476,11 @@ def _search_actions(results, table, captions, is_graduate: bool,
                 filters=(_search_filter_summary(controls, is_graduate)
                          if controls else None))),
         file_name=f"{tool}_shortlist.pdf", mime="application/pdf",
-        use_container_width=True, key=f"{tool}_pdf",
+        width="stretch", key=f"{tool}_pdf",
         on_click=lambda: log_usage_event(f"search_pdf:{tool}:{stamp}"),
     )
 
-    if share_col.button("🔗 Share this search", use_container_width=True,
+    if share_col.button("🔗 Share this search", width="stretch",
                         key=f"{tool}_share"):
         # session_query_params carries test, exactly as the other two shares
         # do; src stays out because the recipient did not arrive through the
@@ -27809,7 +27809,7 @@ def render_school_search(always_open: bool = False) -> None:
             "Net price": results["NPCURL"].map(normalize_npc_url),
         })
         st.dataframe(
-            table, use_container_width=True, hide_index=True,
+            table, width="stretch", hide_index=True,
             column_config={
                 # School names are the one genuinely long field and the one
                 # nothing else identifies a row by -- "California Polytechnic
@@ -28539,7 +28539,7 @@ def render_sai_worksheet(always_open: bool = False) -> None:
     )
 
     if always_open:
-        if st.button("🔗 Share This Estimate", use_container_width=True,
+        if st.button("🔗 Share This Estimate", width="stretch",
                      key="sai_share"):
             st.query_params.from_dict({**session_query_params(),
                                        **build_sai_share_params()})
@@ -29100,7 +29100,7 @@ def render_share_card_button(scenario_pairs: list, verdict: dict,
     st.download_button(
         "🖼️ Download image", data=png,
         file_name="worth-my-degree.png", mime="image/png",
-        use_container_width=True, key=key,
+        width="stretch", key=key,
         help="A single image of this verdict, with headline, chart and sources, "
               "sized for a message or a post.",
         on_click=lambda: log_usage_event(
@@ -29435,7 +29435,7 @@ def render_salary_flow_charts(rows, key_prefix: str, columns: bool = True) -> No
                                                     figs["monthly_payment"]))
                     continue
                 st.plotly_chart(
-                    fig, use_container_width=True,
+                    fig, width="stretch",
                     config=PLOTLY_CHART_CONFIG,
                     key=f"salary_flow_{key_prefix}_{heading or ''}_{label}")
 
@@ -30218,7 +30218,7 @@ if compare_mode:
                 scenario_b["repayment_result"]["schedule"],
                 compare_series_label("B", scenario_b, cc_mode_b, _plans_differ),
             ),
-            use_container_width=True, config=PLOTLY_CHART_CONFIG,
+            width="stretch", config=PLOTLY_CHART_CONFIG,
         )
         # ONE overlaid chart, like the balance chart above it -- comparing the two
         # payment paths is the whole point of this arm, and two separate charts
@@ -30233,7 +30233,7 @@ if compare_mode:
                 _pay_a, compare_series_label("A", scenario_a, cc_mode_a, _plans_differ),
                 _pay_b, compare_series_label("B", scenario_b, cc_mode_b, _plans_differ))
             if _pay_fig is not None:
-                st.plotly_chart(_pay_fig, use_container_width=True,
+                st.plotly_chart(_pay_fig, width="stretch",
                                 config=PLOTLY_CHART_CONFIG)
                 st.caption(PAYMENT_CHART_CAPTION)
     # Executes here (both scenarios exist by now) and RENDERS into the
@@ -30312,7 +30312,7 @@ if compare_mode:
         compare_pdf_col.download_button(
             "📄 Download PDF Report", data=compare_pdf_bytes,
             file_name=f"{major.replace(' ', '_')}_vs_{major_b.replace(' ', '_')}_comparison_report.pdf",
-            mime="application/pdf", use_container_width=True, key="download_pdf_compare",
+            mime="application/pdf", width="stretch", key="download_pdf_compare",
             on_click=lambda: save_pdf_download({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario_a,
@@ -30324,7 +30324,7 @@ if compare_mode:
                 scenario_b=scenario_b, start_year_a=start_year_a, start_year_b=start_year_b,
             ), **module_context}),
         )
-        if compare_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_compare"):
+        if compare_share_col.button("🔗 Share Scenario", width="stretch", key="share_scenario_compare"):
             st.query_params.from_dict({**session_query_params(), **build_share_params(
                 career_data_source, major, city, school_name_a, in_state_a,
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
@@ -30557,13 +30557,13 @@ else:
                     repayment_result["schedule"], strategy_label,
                     _alt_repayment["schedule"], _alt["strategy_label"],
                     color_map=_plan_colors),
-                use_container_width=True, config=PLOTLY_CHART_CONFIG,
+                width="stretch", config=PLOTLY_CHART_CONFIG,
             )
             _alt_pay = build_comparison_payment_chart(
                 _shown, strategy_label, _alt_shown, _alt["strategy_label"],
                 color_map=_plan_colors)
             if _alt_pay is not None:
-                st.plotly_chart(_alt_pay, use_container_width=True,
+                st.plotly_chart(_alt_pay, width="stretch",
                                 config=PLOTLY_CHART_CONFIG)
             st.caption(
                 f"Both 2026 plans on one axis. Every figure elsewhere on this page "
@@ -30770,7 +30770,7 @@ else:
         single_pdf_col.download_button(
             "📄 Download PDF Report", data=single_pdf_bytes,
             file_name=f"{major.replace(' ', '_')}_payoff_report.pdf", mime="application/pdf",
-            use_container_width=True, key="download_pdf_single",
+            width="stretch", key="download_pdf_single",
             on_click=lambda: save_pdf_download({**build_scenario_context(
                 major, loan_amount, interest_rate, repayment_strategy, personal_contribution,
                 school_name_a, inflation_rate_a, grants_per_year_a, scenario,
@@ -30778,7 +30778,7 @@ else:
                 start_year_a=start_year_a,
             ), **module_context}),
         )
-        if single_share_col.button("🔗 Share Scenario", use_container_width=True, key="share_scenario_single"):
+        if single_share_col.button("🔗 Share Scenario", width="stretch", key="share_scenario_single"):
             st.query_params.from_dict({**session_query_params(), **build_share_params(
                 career_data_source, major, city, school_name_a, in_state_a,
                 coa_per_year_a, personal_contribution_per_year_a, grants_per_year_a,
