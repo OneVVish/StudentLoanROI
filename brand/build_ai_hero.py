@@ -74,6 +74,20 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "professional-school-debt": (
+        # The guide is about a long training road with a limit partway along
+        # it, so the picture is a long corridor with one coat waiting by a
+        # door. Doors, floor seams and ceiling lights are the hard edges
+        # klein4b draws well. A coat is the one prop at risk of carrying
+        # writing (an embroidered name), so the prompt rules it out by name.
+        "A long empty hospital corridor at early morning, polished pale floor "
+        "reflecting a line of ceiling lights, a row of identical closed wooden "
+        "doors receding along one wall, a single plain white coat hanging on a "
+        "hook beside the nearest door, cool soft light from a window at the far "
+        "end, nobody in frame. Documentary photography, muted cool colour, "
+        "quiet and still. No text, no signs, no name badge, no embroidery, no "
+        "people.",
+        20261115, 4),
     "is-college-worth-it": (
         # The guide's answer is a spread rather than a yes: most rows come
         # out ahead, some take longer, a few never do. So the picture is one
