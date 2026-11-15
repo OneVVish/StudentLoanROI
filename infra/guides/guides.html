@@ -192,6 +192,20 @@
      so a row of cards lines up along it rather than along the text. */
   .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
     font-weight: 700; font-size: 15px; }
+  .whats-new { margin-bottom: 36px; }
+  .whats-new h2 { font-size: 24px; color: var(--deep); margin-bottom: 12px; }
+  .whats-new ul { list-style: none; margin: 0; padding: 0;
+    border-top: 1px solid var(--rule); }
+  .whats-new li { display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--rule);
+    font-size: 16px; }
+  .whats-new time { color: var(--muted); font-size: 14px; min-width: 7.5em; }
+  .whats-new .wn-kind { font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--muted); min-width: 5.5em; }
+  .whats-new .wn-new { color: var(--orange); }
+  .whats-new a { color: var(--deep); font-weight: 600; text-decoration: none; }
+  .whats-new a:hover { text-decoration: underline; }
+  .whats-new .wn-note { flex-basis: 100%; color: var(--muted); font-size: 15px; }
   @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
     .guides-band { padding: 32px 24px 28px; } }
   @media (prefers-reduced-motion: reduce) {
@@ -568,6 +582,16 @@
   <p>What a degree costs, what you can borrow, and what you pay back. Including
   the One Big Beautiful Bill Act (OBBBA), which changed federal borrowing in
   2026.</p>
+</section>
+<section class="whats-new" aria-labelledby="whats-new-h">
+  <h2 id="whats-new-h">What's new</h2>
+  <ul>
+    <li><time datetime="2026-11-14">Nov 14, 2026</time><span class="wn-kind wn-updated">Updated</span><a href="/guides/upper-middle-class-financial-aid">Too rich for aid, too poor for sticker</a> <span class="wn-note">Vanderbilt added to the table of schools that publish a tuition-free income line.</span></li>
+    <li><time datetime="2026-11-14">Nov 14, 2026</time><span class="wn-kind wn-updated">Updated</span><a href="/guides/college-roi-rankings">What a college ROI ranking cannot tell you</a> <span class="wn-note">Added what Dale and Krueger found when they compared students admitted to similar colleges.</span></li>
+    <li><time datetime="2026-11-14">Nov 14, 2026</time><span class="wn-kind wn-new">New</span><a href="/guides/is-college-worth-it">Is college worth it? Which degree, at what price, by what age</a></li>
+    <li><time datetime="2026-10-18">Oct 18, 2026</time><span class="wn-kind wn-new">New</span><a href="/guides/program-earnings-rankings">What the college-by-college earnings rankings leave out</a></li>
+    <li><time datetime="2026-09-13">Sep 13, 2026</time><span class="wn-kind wn-new">New</span><a href="/guides/california-dream-act-application">Financial aid when you cannot file a FAFSA</a></li>
+  </ul>
 </section>
 <section>
   <div class="post-head">

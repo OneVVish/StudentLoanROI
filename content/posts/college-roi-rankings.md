@@ -4,6 +4,8 @@ description: From U.S. News to the WSJ to the ROI lists, college rankings pool e
 summary: The famous rankings answer which schools' students earned the most. They cannot answer whether your degree, at your school, on your loan, is worth it.
 date: 2026-08-31
 hero: guide-hero-college-roi-rankings-klein4b.png
+updated: 2026-11-14
+updated_note: Added what Dale and Krueger found when they compared students admitted to similar colleges.
 ---
 
 Every year a new ranking says which colleges are the best investment. The [San Francisco Chronicle's interactive](https://www.sfchronicle.com/projects/2025/best-california-colleges-return-on-investment/) is a good one, built on [Georgetown University's ROI analysis](https://cew.georgetown.edu/cew-reports/roi2025/) of the federal College Scorecard: it reports, for each school, the median earnings of students ten years after they enrolled, minus the average net price they paid. By that measure Caltech leads California at $627,000 and a typical UC or CSU returns about $247,000 over ten years.

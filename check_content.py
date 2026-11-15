@@ -333,6 +333,40 @@ def main() -> int:
         if must_not in rendered or must not in rendered:
             fail(f"build_site.py escaping: {label} rendered as markup: {rendered[:120]!r}")
 
+    # The What's new band. Fixtures, not the live posts, so each rule is
+    # tested against a case built to break it.
+    def _p(slug, date, updated=None, note=None):
+        d = {"slug": slug, "title": slug, "date": date}
+        if updated: d["updated"] = updated
+        if note: d["updated_note"] = note
+        return d
+    wn = builder.whats_new([
+        _p("a", "2026-01-01"), _p("b", "2026-02-01"),
+        _p("c", "2026-01-15", "2026-03-01", "fixed a figure"),
+        _p("d", "2026-01-20", "2026-03-05"),          # date, no note: no event
+        _p("e", "2026-03-01")], n=4)
+    got = [(e["kind"], e["post"]["slug"]) for e in wn]
+    # 2026-03-05 for d must NOT appear: a revision is announced only with a note.
+    # On 2026-03-01 the update of c and the publish of e tie; the update ranks
+    # first. Cap at n=4 drops a's 2026-01-01.
+    want = [("Updated", "c"), ("New", "e"), ("New", "b"), ("New", "d")]
+    if got != want:
+        fail(f"build_site.whats_new: expected {want}, got {got}")
+    import tempfile
+    for label, fm in (("updated without a note", "updated: 2026-03-01\n"),
+                      ("note without updated", "updated_note: x\n"),
+                      ("updated before date", "updated: 2025-01-01\nupdated_note: x\n"),
+                      ("updated not ISO", "updated: March 1\nupdated_note: x\n")):
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "x.md"
+            f.write_text("---\ntitle: t\ndescription: d\nsummary: s\n"
+                         f"date: 2026-02-01\n{fm}---\nbody\n")
+            try:
+                builder.parse_post(f)
+                fail(f"build_site.parse_post accepted {label}")
+            except ValueError:
+                pass
+
     if problems:
         print(f"content: {len(problems)} problem(s) across {len(posts)} "
               f"guide(s)\n")

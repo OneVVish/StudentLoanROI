@@ -192,6 +192,20 @@
      so a row of cards lines up along it rather than along the text. */
   .post-card .more { margin-top: auto; padding: 16px 18px; color: var(--blue);
     font-weight: 700; font-size: 15px; }
+  .whats-new { margin-bottom: 36px; }
+  .whats-new h2 { font-size: 24px; color: var(--deep); margin-bottom: 12px; }
+  .whats-new ul { list-style: none; margin: 0; padding: 0;
+    border-top: 1px solid var(--rule); }
+  .whats-new li { display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--rule);
+    font-size: 16px; }
+  .whats-new time { color: var(--muted); font-size: 14px; min-width: 7.5em; }
+  .whats-new .wn-kind { font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--muted); min-width: 5.5em; }
+  .whats-new .wn-new { color: var(--orange); }
+  .whats-new a { color: var(--deep); font-weight: 600; text-decoration: none; }
+  .whats-new a:hover { text-decoration: underline; }
+  .whats-new .wn-note { flex-basis: 100%; color: var(--muted); font-size: 15px; }
   @media (max-width: 640px) { .post-grid { grid-template-columns: 1fr; }
     .guides-band { padding: 32px 24px 28px; } }
   @media (prefers-reduced-motion: reduce) {
