@@ -92,6 +92,10 @@ Plain-English explainers on the 2026 federal loan rules and what a
 degree costs, indexed at https://worthmydegree.com/guides. Each one
 ends at the calculator.
 
+- [Is college worth it? Which degree, at what price, by what age](https://worthmydegree.com/guides/is-college-worth-it):
+  Fewer Americans than ever call college very important. Across 177
+  careers that need a bachelor's, here is how many come out ahead, at
+  which loan, and how long it takes.
 - [What the college-by-college earnings rankings leave out](https://worthmydegree.com/guides/program-earnings-rankings):
   The New York Times ranked 25,000 bachelor's programs by what
   graduates earn four years out. Three things the same federal file
