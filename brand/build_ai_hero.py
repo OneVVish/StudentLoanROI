@@ -74,6 +74,19 @@ MODEL = MODELS["klein4b"]
 
 # (prompt, seed, steps). Seed and steps are part of the record, not defaults.
 PROMPTS = {
+    "is-college-worth-it": (
+        # The guide's answer is a spread rather than a yes: most rows come
+        # out ahead, some take longer, a few never do. So the picture is one
+        # room of identical seats with the light reaching some rows and not
+        # others. Seats, windows and steps give klein4b the hard edges it
+        # draws well, and nothing in frame can carry writing. Nobody in it.
+        "A large empty university lecture hall seen from the back row, tiers "
+        "of identical wooden folding seats stepping down toward a plain front "
+        "wall, low late afternoon sun through tall side windows falling across "
+        "some rows and leaving others in shadow, nobody in frame. Documentary "
+        "photography, muted warm colour, quiet and still. No text, no legible "
+        "signs, no screens, no people.",
+        20261114, 4),
     "program-earnings-rankings": (
         # The guide is about a ranked list of programs that flattens the
         # people behind each number, so the picture is many identical things
