@@ -30,7 +30,9 @@ Here is how many of the 177 finish the ten years ahead of the high school gradua
 
 The first row deserves a word. It counts a degree that cost nothing in money, the way a full scholarship would, so the only price is the four years spent not earning. Thirty careers lose on that alone: the pay they lead to does not make up for starting four years late. Every row below it adds a real price, and the count falls as the price rises. At the federal maximum, close to three in five still come out ahead within the ten years.
 
-The spread underneath those counts is wide. At no loan, the career in the middle of the 177 finishes a bit under $178,000 ahead, and the middle half runs from about $56,000 to about $387,000. At the ends, financial managers finish a bit under $870,000 ahead and short-term substitute teachers nearly $188,000 behind. "College" in the Gallup question is all of those at once.
+For a sense of which row is typical: the College Board's [Trends in Student Aid 2026](https://research.collegeboard.org/trends/student-aid) finds that 47% of 2024-25 bachelor's graduates from public and private nonprofit colleges borrowed, and those who did left owing about $30,000 on average. That leaves out any Parent PLUS loan, which is in a parent's name. The $27,000 row is close to that typical borrower.
+
+The spread underneath the table's counts is wide. At no loan, the career in the middle of the 177 finishes a bit under $178,000 ahead, and the middle half runs from about $56,000 to about $387,000. At the ends, financial managers finish a bit under $870,000 ahead and short-term substitute teachers nearly $188,000 behind. "College" in the Gallup question is all of those at once.
 
 ## Behind at ten years is usually not behind for good
 
