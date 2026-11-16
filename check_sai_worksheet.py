@@ -350,6 +350,19 @@ def check_no_state_in_formula(ns, src):
                     if kw.arg and kw.arg.lower() in STATE_PARAMS:
                         out.append(f"  STATE   the renderer passes {kw.arg} into the "
                                    f"formula.")
+    # The business box must say what the FAFSA no longer counts. HEA
+    # 480(f)(2)(B)-(D), added by Public Law 119-21 sec. 80001 for award year
+    # 2026-27 on, excludes the farm the family lives on, a family-owned and
+    # controlled business of 100 or fewer full-time-equivalent employees, and a
+    # family commercial fishing business. The box shipped with no such note,
+    # so a family typing in its 20-person firm got Table A3 applied to an asset
+    # the law excludes, and an SAI too high by up to the whole adjustment.
+    for phrase in ("farm your family lives on", "100 or fewer",
+                   "commercial fishing"):
+        if phrase not in src:
+            out.append(f"  ASSETS  the business input no longer says {phrase!r}. "
+                       f"HEA 480(f)(2) excludes it from 2026-27 on, and without "
+                       f"the note a family enters it and the SAI is overstated.")
     # And the tool has to SAY so, because the absence is the surprising part.
     if "state income tax gets no allowance" not in src.lower():
         out.append("  STATE   the tool no longer tells anyone that state income tax "

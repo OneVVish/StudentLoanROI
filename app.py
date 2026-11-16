@@ -18760,8 +18760,9 @@ def css_profile_divergences(*, home_equity: float = 0.0,
             "Your business or farm",
             "The federal formula discounts a business steeply before counting "
             "it, on the published sliding scale in the worksheet above. A "
-            "Profile school may count more of it, and may also count assets "
-            "the federal form leaves out."))
+            "Profile school may count more of it, and may also count a "
+            "small family business or the farm you live on, which the federal "
+            "form leaves out entirely."))
     if student_assets > 0:
         out.append((
             "The student's own savings",
@@ -28353,6 +28354,11 @@ def render_sai_worksheet(always_open: bool = False) -> None:
         business = c2.number_input(
             "Net worth of a business or farm", min_value=0, max_value=20000000,
             step=5000, key="sai_business",
+            help="Leave out the farm your family lives on, a business your "
+                 "family owns and controls with 100 or fewer full-time "
+                 "employees, and a family commercial fishing business. The "
+                 "2025 budget law removed all three from the FAFSA starting "
+                 "with 2026-27. Many CSS Profile schools still ask about them.",
         )
         st.session_state.setdefault("sai_child_support", 0)
         child_support = c1.number_input(
