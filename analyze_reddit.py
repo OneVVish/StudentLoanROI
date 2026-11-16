@@ -1461,21 +1461,35 @@ def build_clusters(posts: list, asof_ts: float, own_signal: dict = None,
         subs = sorted({p.get("subreddit") or "?" for p in group})
         entry = (TOPIC_VOCAB.get(key) or CANNOT_ANSWER.get(key) or {}) if key else {}
         centroid = post_matrix[members].mean(axis=0) if len(vocab) else None
-        best_guide, best_sim = None, 0.0
+        best_guide, best_sim, covered_via = None, 0.0, None
+        geo = {}
         if centroid is not None and len(guides):
             norm = np.linalg.norm(centroid)
             if norm > 0:
                 sims = guide_matrix @ (centroid / norm)
+                geo = {g[0]: float(s) for g, s in zip(guides, sims)}
                 pos = int(np.argmax(sims))
                 best_guide, best_sim = guides[pos][0], float(sims[pos])
+                if best_sim >= NEAR_DUPLICATE_SIM:
+                    covered_via = "geometry"
         # The front matter overrules the geometry, in one direction only: it
-        # can say "this IS covered", never "this is not".
+        # can say "this IS covered", never "this is not". When it is the front
+        # matter that makes the cluster covered, the guide NAMED must be one
+        # whose front matter matched. It used to keep the geometric nearest
+        # (`best_guide or slug`, and best_guide is almost always set), so the
+        # digest read "community college COVERED BY california-dream-act-
+        # application" while community-college-first sat unnamed.
+        # Only the NAME is the fix; the score is unchanged, so a front-matter
+        # match still raises the similarity whether or not geometry had it.
         if key and front_matter:
-            for slug, text in front_matter.items():
-                if any(phrase_pattern(p).search(text)
-                       for p in entry.get("phrases", ())):
-                    best_guide = best_guide or slug
-                    best_sim = max(best_sim, 1.0 - 0.20)
+            matched = [slug for slug, text in front_matter.items()
+                       if any(phrase_pattern(p).search(text)
+                              for p in entry.get("phrases", ()))]
+            if matched:
+                best_sim = max(best_sim, 1.0 - 0.20)
+                if covered_via is None:
+                    best_guide = max(matched, key=lambda s: (geo.get(s, 0.0), s))
+                    covered_via = "front_matter"
         return {
             "kind": kind,
             "topic_key": key,
@@ -1496,6 +1510,7 @@ def build_clusters(posts: list, asof_ts: float, own_signal: dict = None,
             "backing": entry.get("backing", ""),
             "why_excluded": entry.get("why", ""),
             "nearest_guide": best_guide,
+            "covered_via": covered_via,
             "max_guide_sim": best_sim,
             "numeric_share": (sum(has_number(p) for p in group) / len(group)),
             "question_share": (sum(is_question(p) for p in group) / len(group)),
@@ -1528,7 +1543,7 @@ def build_clusters(posts: list, asof_ts: float, own_signal: dict = None,
             "median_age_days": 0.0, "seasonal": "",
             "answerable": entry.get("answerable", UNCHECKED_ANSWERABLE),
             "backing": entry.get("backing", ""), "why_excluded": "",
-            "nearest_guide": None, "max_guide_sim": 0.0,
+            "nearest_guide": None, "max_guide_sim": 0.0, "covered_via": None,
             "numeric_share": 0.0, "question_share": 0.0,
             "own_demand_raw": float(signal.get("weight", 0.0)),
             "own_demand_note": signal.get("note", ""),
@@ -2105,6 +2120,21 @@ def self_test() -> int:
               f"novelty comparison is not seeing content/posts/")
         check(plus["novelty"] <= 1.0 - NEAR_DUPLICATE_SIM,
               "a near-duplicate of a published guide was not demoted")
+
+    # 6b. When the FRONT MATTER is what marks a cluster covered, the guide it
+    #     names must be one whose front matter matched. Before 2026-11-16 the
+    #     geometric nearest kept the name, so a topic was reported as covered
+    #     by an unrelated guide.
+    fm = guide_front_matter_terms()
+    fm_named = [c for c in ranked if c.get("covered_via") == "front_matter"]
+    check(fm_named, "no fixture cluster was marked covered through front "
+                    "matter, so check 6b tests nothing")
+    for c in fm_named:
+        phrases = (TOPIC_VOCAB.get(c["topic_key"]) or {}).get("phrases", ())
+        text = fm.get(c["nearest_guide"], "")
+        check(any(phrase_pattern(p).search(text) for p in phrases),
+              f"{c['topic_key']} is reported COVERED BY {c['nearest_guide']}, "
+              f"whose front matter matches none of the topic's phrases")
 
     # 7. Determinism. Everything --cache-only and --asof promise rests on this.
     meta = {"run_at": "fixed", "asof": "fixed", "source": "fixture",
