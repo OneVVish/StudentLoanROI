@@ -101,6 +101,20 @@ PROMPTS = {
         "photography, muted warm colour, quiet and still. No text, no legible "
         "signs, no screens, no people.",
         20261114, 4),
+    "fafsa-family-business-and-farm": (
+        # The guide is about a family business and the farm a family lives on
+        # leaving the aid formula. A workshop by a window onto fields carries
+        # both without a storefront, whose sign would carry writing. Bench,
+        # pegboard and window frame are the hard edges klein4b draws well;
+        # tools are ruled out of carrying labels by name.
+        "A small family workshop in a farmhouse outbuilding, a worn wooden "
+        "workbench under a wide multi-pane window, hand tools hanging neatly "
+        "on a pegboard wall, a coffee mug and a pair of work gloves on the "
+        "bench, plowed fields and a distant barn through the window in soft "
+        "early morning light, nobody in frame. Documentary photography, warm "
+        "muted colour, quiet and still. No text, no labels, no signs, no "
+        "logos, no people.",
+        20261116, 4),
     "program-earnings-rankings": (
         # The guide is about a ranked list of programs that flattens the
         # people behind each number, so the picture is many identical things
