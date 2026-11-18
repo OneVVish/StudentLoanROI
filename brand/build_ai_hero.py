@@ -115,6 +115,19 @@ PROMPTS = {
         "muted colour, quiet and still. No text, no labels, no signs, no "
         "logos, no people.",
         20261116, 4),
+    "satisfactory-academic-progress": (
+        # The guide is about aid that stops partway through a degree, so the
+        # picture is a pause on the way up: a backpack set down on a campus
+        # stairwell landing. Not exams or a transcript, which carry writing.
+        # Steps, a handrail and a tall window are the hard edges klein4b
+        # draws well. Nobody in frame.
+        "A wide concrete stairwell in a college building, a canvas backpack "
+        "and a folded jacket set down on a landing halfway up, a steel "
+        "handrail climbing past a tall window, late afternoon light falling "
+        "across the steps, nobody in frame. Documentary photography, muted "
+        "warm colour, quiet and still. No text, no labels, no signs, no "
+        "logos, no people.",
+        20261118, 4),
     "program-earnings-rankings": (
         # The guide is about a ranked list of programs that flattens the
         # people behind each number, so the picture is many identical things
