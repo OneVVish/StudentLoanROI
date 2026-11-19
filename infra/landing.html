@@ -289,6 +289,14 @@
   .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px;
          align-items: center; }
   /* The header's book link: the cover at 20px beside two words. */
+  .site-nav { display: flex; gap: 22px; align-items: center; }
+  .site-nav a { color: var(--deep); font-weight: 600; font-size: 16px;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  .site-nav a:hover { color: var(--blue); }
+  .site-nav a[aria-current="page"] { color: var(--orange);
+    box-shadow: inset 0 -2px 0 var(--orange); }
+  .site-nav .pill { background: var(--orange); color: #fff; font-size: 11px;
+    font-weight: 700; border-radius: 999px; padding: 1px 7px; }
   .booklink { display: inline-flex; align-items: center; gap: 8px;
               color: var(--deep); font-weight: 600; font-size: 15px;
               text-decoration: none; margin-right: 18px; }
@@ -361,6 +369,10 @@
     .book-hero-art { max-width: 200px; }
     .book-cover { max-width: 200px; }
     .hide-m { display: none; }
+    header { flex-wrap: wrap; row-gap: 10px; }
+    .site-nav { order: 3; width: 100%; justify-content: space-between;
+      gap: 8px; }
+    .site-nav a { font-size: 15px; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
        Twenty-five dense pictures in a one-column grid is a long scroll of
@@ -486,7 +498,7 @@
   </g>
 </svg>
 </a>
-  <a class="booklink hide-m" data-book="header" href="/book"><img src="/app/static/nav-cover-mark.jpg" width="20" height="32" alt="" loading="lazy"><span class="pill">New</span>Read the book</a>
+  <nav class="site-nav" aria-label="Site"><a href="/guides">Guides</a><a href="/charts">Infographics</a><a href="/welcome#tools">Calculators</a><a href="/book" data-book="header">Book<span class="pill">New</span></a></nav>
   <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
@@ -507,6 +519,16 @@
   <div class="stat"><b>23</b><span>US Metro Areas</span></div>
 </div>
 
+<section class="whats-new" aria-labelledby="whats-new-h">
+  <h2 id="whats-new-h">What's new</h2>
+  <ul>
+    <li><time datetime="2026-11-18">Nov 18, 2026</time><span class="wn-kind wn-new">New</span><a href="/guides/masters-and-doctorate-after-grad-plus">What a master's or doctorate costs after Grad PLUS, and when it pays</a></li>
+    <li><time datetime="2026-11-18">Nov 18, 2026</time><span class="wn-kind wn-new">New</span><a href="/guides/satisfactory-academic-progress">The rule that ends financial aid in the middle of a degree</a></li>
+    <li><time datetime="2026-11-16">Nov 16, 2026</time><span class="wn-kind wn-new">New</span><a href="/guides/fafsa-family-business-and-farm">The family business and the farm on the 2027-28 FAFSA</a></li>
+    <li><time datetime="2026-11-15">Nov 15, 2026</time><span class="wn-kind wn-new">New</span><a href="/guides/professional-school-debt">Medical, dental and law school debt after Grad PLUS</a></li>
+    <li><time datetime="2026-11-14">Nov 14, 2026</time><span class="wn-kind wn-updated">Updated</span><a href="/guides/upper-middle-class-financial-aid">Too rich for aid, too poor for sticker</a> <span class="wn-note">Vanderbilt added to the table of schools that publish a tuition-free income line.</span></li>
+  </ul>
+</section>
 <section>
   <h2>Infographics</h2>
   <p class="deck">One picture, one finding, sourced. 33 of them, free
@@ -591,7 +613,7 @@
 <!-- The tools band breaks out of .wrap so its background can run edge to
      edge; it carries its own .wrap so the content stays on the same grid as
      every section above and below it. See the tools-band note in SITE_CSS. -->
-<section class="tools">
+<section class="tools" id="tools">
   <div class="wrap">
   <h2>Five tools, one dataset</h2>
   <div class="grid">
@@ -622,6 +644,9 @@
 <section>
   <h2>Guides</h2>
   <div class="guides">
+    <a class="guide-card" href="/guides/masters-and-doctorate-after-grad-plus">
+      <b>What a master's or doctorate costs after Grad PLUS, and when it pays</b><span>A master's student can now borrow $20,500 a year from the government. At 85 percent of schools a year of tuition and living costs runs past that.</span>
+      <time datetime="2026-11-18">2026-11-18</time></a>
     <a class="guide-card" href="/guides/satisfactory-academic-progress">
       <b>The rule that ends financial aid in the middle of a degree</b><span>Federal aid has a condition most students never read. About one in eight failed it last spring, and three in four who appealed kept their aid.</span>
       <time datetime="2026-11-18">2026-11-18</time></a>
@@ -631,9 +656,6 @@
     <a class="guide-card" href="/guides/professional-school-debt">
       <b>Medical, dental and law school debt after Grad PLUS</b><span>The federal limit for medical, dental and law school is now $200,000. At most dental schools the typical graduate borrowed more than that.</span>
       <time datetime="2026-11-15">2026-11-15</time></a>
-    <a class="guide-card" href="/guides/is-college-worth-it">
-      <b>Is college worth it? Which degree, at what price, by what age</b><span>Most four-year careers come out ahead of a debt-free high school graduate. How many, and how soon, depends on the loan more than the degree.</span>
-      <time datetime="2026-11-14">2026-11-14</time></a>
   </div>
   <p class="deck" style="margin-top:14px"><a href="/guides"
     style="color:var(--blue);font-weight:600;text-decoration:none">All
