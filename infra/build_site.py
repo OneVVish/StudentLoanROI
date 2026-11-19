@@ -464,6 +464,14 @@ SITE_CSS = """  :root {
   .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px;
          align-items: center; }
   /* The header's book link: the cover at 20px beside two words. */
+  .site-nav { display: flex; gap: 22px; align-items: center; }
+  .site-nav a { color: var(--deep); font-weight: 600; font-size: 16px;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  .site-nav a:hover { color: var(--blue); }
+  .site-nav a[aria-current="page"] { color: var(--orange);
+    box-shadow: inset 0 -2px 0 var(--orange); }
+  .site-nav .pill { background: var(--orange); color: #fff; font-size: 11px;
+    font-weight: 700; border-radius: 999px; padding: 1px 7px; }
   .booklink { display: inline-flex; align-items: center; gap: 8px;
               color: var(--deep); font-weight: 600; font-size: 15px;
               text-decoration: none; margin-right: 18px; }
@@ -536,6 +544,10 @@ SITE_CSS = """  :root {
     .book-hero-art { max-width: 200px; }
     .book-cover { max-width: 200px; }
     .hide-m { display: none; }
+    header { flex-wrap: wrap; row-gap: 10px; }
+    .site-nav { order: 3; width: 100%; justify-content: space-between;
+      gap: 8px; }
+    .site-nav a { font-size: 15px; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
        Twenty-five dense pictures in a one-column grid is a long scroll of
@@ -1030,7 +1042,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
-  {book_header_link(True)}
+  {site_nav()}
   <a class="btn hide-m" href="/?go=1&amp;from=welcome">Open the calculator</a>
 </header>
 
@@ -1051,7 +1063,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
   <div class="stat"><b>{f['cities']}</b><span>US Metro Areas</span></div>
 </div>
 
-{charts_section}
+{whats_new_html(posts)}{charts_section}
 
 <section>
   <h2>The numbers colleges don't put on the brochure</h2>
@@ -1118,7 +1130,7 @@ def build_html(f: dict, posts: list = (), charts: list = ()) -> str:
 <!-- The tools band breaks out of .wrap so its background can run edge to
      edge; it carries its own .wrap so the content stays on the same grid as
      every section above and below it. See the tools-band note in SITE_CSS. -->
-<section class="tools">
+<section class="tools" id="tools">
   <div class="wrap">
   <h2>Five tools, one dataset</h2>
   <div class="grid">
@@ -1446,7 +1458,7 @@ def build_guide_html(post, logo_svg, favicon, lastmod: str = None) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
-  {book_header_link(False)}
+  {site_nav("guides")}
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 
@@ -1762,21 +1774,28 @@ def book_schema(page: str = "#book") -> str:
     })
 
 
-def book_header_link(on_landing: bool) -> str:
-    """The header's link to the book: the cover at thumbnail size and two
-    words. It points at the LANDING BAND, not at Amazon, so the header never
-    throws a reader off the site: the band is where the book is described and
-    the Amazon link lives. On the landing itself that is a fragment jump; on
-    a guide or the gallery it is /welcome#the-book, which CARRY_QS_JS carries
-    the visitor's query onto like any other internal link (query before
-    fragment, the rule it already records).
+NAV_ITEMS = (("guides", "Guides", "/guides"),
+             ("charts", "Infographics", "/charts"),
+             ("tools", "Calculators", "/welcome#tools"),
+             ("book", "Book", "/book"))
+
+
+def site_nav(active: str = "") -> str:
+    """The one top nav, on every edge page. `active` names the current
+    section so it reads as "you are here". Book keeps data-book="header" so
+    BOOK_CLICK_JS still counts header clicks under the same name as before.
+    Calculators goes to the landing's tools band rather than into the app:
+    five tools live there, and the orange button beside the nav already
+    opens the calculator itself.
     """
-    href = "/book"          # a real page, so it can rank and be pasted
     new = ((datetime.date.today() - BOOK_PUBLISHED).days <= BOOK_NEW_DAYS)
-    pill = '<span class="pill">New</span>' if new else ""
-    return (f'<a class="booklink hide-m" data-book="header" href="{href}">'
-            f'<img src="/app/static/{_resized_jpeg(BOOK_COVER, 64, "nav")}" '
-            f'width="20" height="32" alt="" loading="lazy">{pill}Read the book</a>')
+    links = []
+    for key, label, href in NAV_ITEMS:
+        cur = ' aria-current="page"' if key == active else ""
+        extra = ' data-book="header"' if key == "book" else ""
+        pill = '<span class="pill">New</span>' if key == "book" and new else ""
+        links.append(f'<a href="{href}"{cur}{extra}>{label}{pill}</a>')
+    return '<nav class="site-nav" aria-label="Site">' + "".join(links) + "</nav>"
 
 
 def card_thumb(source: str) -> str:
@@ -2126,7 +2145,7 @@ def build_charts_index_html(charts, logo_svg, favicon) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
-  {book_header_link(False)}
+  {site_nav("charts")}
   <a class="btn hide-m" href="/?go=1&amp;from=charts">Open the calculator</a>
 </header>
 <section class="guides-band">
@@ -2385,6 +2404,7 @@ def build_book_html(logo_svg, favicon) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
+  {site_nav("book")}
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 
@@ -2561,7 +2581,7 @@ def build_guides_index_html(posts, logo_svg, favicon) -> str:
 <div class="wrap">
 <header>
   <a class="logo" href="/welcome" aria-label="worthmydegree.com">{logo_svg}</a>
-  {book_header_link(False)}
+  {site_nav("guides")}
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 <section class="guides-band">

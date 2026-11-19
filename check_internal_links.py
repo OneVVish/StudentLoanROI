@@ -103,9 +103,10 @@ def check_landing_ctas_tagged(ns, fail):
         #     header's on every page and a from= tag would claim a nav the
         #     app never sees.
         #   * llms.txt leaves the site entirely.
-        #   * /welcome is this page by its other name, and the only name that
+        #   * /welcome (and /welcome#tools, the nav's Calculators link) is
+        #     this page by its other name, and the only name that
         #     survives a carried query string (see check_logo_goes_to_welcome).
-        if (href == "/" or href == "/welcome" or href.startswith("/guides")
+        if (href == "/" or href.startswith("/welcome") or href.startswith("/guides")
                 or href.startswith("/charts") or href.startswith("/book")
                 or "llms.txt" in href):
             continue

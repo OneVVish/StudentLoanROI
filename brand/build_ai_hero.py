@@ -128,6 +128,20 @@ PROMPTS = {
         "warm colour, quiet and still. No text, no labels, no signs, no "
         "logos, no people.",
         20261118, 4),
+    "masters-and-doctorate-after-grad-plus": (
+        # The guide is about graduate school priced against a fixed federal
+        # limit, so the picture is a seminar room after class: chairs pushed
+        # back from a long table, a glass of water left behind (a cup drew a
+        # coffee-chain logo at seed 20261119). Books and
+        # whiteboards carry writing, so neither is named. Table edges, chair
+        # backs and window mullions are the hard edges klein4b draws well.
+        "An empty university seminar room in the evening, a long wooden "
+        "table with plain wooden chairs pushed back at angles, one clear "
+        "drinking glass of water left near the end of the table, tall paned windows "
+        "showing a dusk sky, warm lamp light, nobody in frame. Documentary "
+        "photography, muted warm colour, quiet and still. No text, no "
+        "writing, no whiteboard, no books, no labels, no logos, no people.",
+        20261120, 4),
     "program-earnings-rankings": (
         # The guide is about a ranked list of programs that flattens the
         # people behind each number, so the picture is many identical things

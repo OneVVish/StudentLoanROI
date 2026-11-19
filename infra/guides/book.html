@@ -274,6 +274,14 @@
   .buy { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px;
          align-items: center; }
   /* The header's book link: the cover at 20px beside two words. */
+  .site-nav { display: flex; gap: 22px; align-items: center; }
+  .site-nav a { color: var(--deep); font-weight: 600; font-size: 16px;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  .site-nav a:hover { color: var(--blue); }
+  .site-nav a[aria-current="page"] { color: var(--orange);
+    box-shadow: inset 0 -2px 0 var(--orange); }
+  .site-nav .pill { background: var(--orange); color: #fff; font-size: 11px;
+    font-weight: 700; border-radius: 999px; padding: 1px 7px; }
   .booklink { display: inline-flex; align-items: center; gap: 8px;
               color: var(--deep); font-weight: 600; font-size: 15px;
               text-decoration: none; margin-right: 18px; }
@@ -346,6 +354,10 @@
     .book-hero-art { max-width: 200px; }
     .book-cover { max-width: 200px; }
     .hide-m { display: none; }
+    header { flex-wrap: wrap; row-gap: 10px; }
+    .site-nav { order: 3; width: 100%; justify-content: space-between;
+      gap: 8px; }
+    .site-nav a { font-size: 15px; }
     .table-scroll { overflow-x: auto; }
     /* ===== THE GALLERY IS A FEED ON A PHONE =====
        Twenty-five dense pictures in a one-column grid is a long scroll of
@@ -573,6 +585,7 @@
   </g>
 </svg>
 </a>
+  <nav class="site-nav" aria-label="Site"><a href="/guides">Guides</a><a href="/charts">Infographics</a><a href="/welcome#tools">Calculators</a><a href="/book" aria-current="page" data-book="header">Book<span class="pill">New</span></a></nav>
   <a class="btn hide-m" href="/?go=1&amp;from=guide">Open the calculator</a>
 </header>
 
